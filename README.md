@@ -1,12 +1,13 @@
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/octaviospain/lirp)
 ![Maven Central Version](https://img.shields.io/maven-central/v/net.transgressoft/lirp-api)
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/octaviospain/lirp/.github%2Fworkflows%2Fmaster.yml?logo=github)
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=net.transgressoft%3Alirp&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=net.transgressoft%3Alirp)
-[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=net.transgressoft%3Alirp&metric=bugs)](https://sonarcloud.io/summary/new_code?id=net.transgressoft%3Alirp)
-[![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=net.transgressoft%3Alirp&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=net.transgressoft%3Alirp)
-[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=net.transgressoft%3Alirp&metric=coverage)](https://sonarcloud.io/summary/new_code?id=net.transgressoft%3Alirp)
-[![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=net.transgressoft%3Alirp&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=net.transgressoft%3Alirp)
-[![Duplicated Lines (%)](https://sonarcloud.io/api/project_badges/measure?project=net.transgressoft%3Alirp&metric=duplicated_lines_density)](https://sonarcloud.io/summary/new_code?id=net.transgressoft%3Alirp)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=octaviospain_lirp&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=octaviospain_lirp)
+[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=octaviospain_lirp&metric=bugs)](https://sonarcloud.io/summary/new_code?id=octaviospain_lirp)
+[![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=octaviospain_lirp&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=octaviospain_lirp)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=octaviospain_lirp&metric=coverage)](https://sonarcloud.io/summary/new_code?id=octaviospain_lirp)
+[![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=octaviospain_lirp&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=octaviospain_lirp)
+[![Duplicated Lines (%)](https://sonarcloud.io/api/project_badges/measure?project=octaviospain_lirp&metric=duplicated_lines_density)](https://sonarcloud.io/summary/new_code?id=octaviospain_lirp)
+[![Technical Debt](https://sonarcloud.io/api/project_badges/measure?project=octaviospain_lirp&metric=sqale_index)](https://sonarcloud.io/summary/new_code?id=octaviospain_lirp)
 # LIRP - Lightweight Reactive Persistence
 
 A reactive library for Kotlin & Java projects that implements the Publisher-Subscriber pattern, enabling more maintainable and decoupled systems through reactive programming principles.
