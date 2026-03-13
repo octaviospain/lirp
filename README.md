@@ -1,32 +1,33 @@
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/octaviospain/transgressoft-commons)
-![Maven Central Version](https://img.shields.io/maven-central/v/net.transgressoft/transgressoft-commons-api)
-![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/octaviospain/transgressoft-commons/.github%2Fworkflows%2Fmaster.yml?logo=github)
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=net.transgressoft%3Atransgressoft-commons&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=net.transgressoft%3Atransgressoft-commons)
-[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=net.transgressoft%3Atransgressoft-commons&metric=bugs)](https://sonarcloud.io/summary/new_code?id=net.transgressoft%3Atransgressoft-commons)
-[![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=net.transgressoft%3Atransgressoft-commons&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=net.transgressoft%3Atransgressoft-commons)
-[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=net.transgressoft%3Atransgressoft-commons&metric=coverage)](https://sonarcloud.io/summary/new_code?id=net.transgressoft%3Atransgressoft-commons)
-[![Duplicated Lines (%)](https://sonarcloud.io/api/project_badges/measure?project=net.transgressoft%3Atransgressoft-commons&metric=duplicated_lines_density)](https://sonarcloud.io/summary/new_code?id=net.transgressoft%3Atransgressoft-commons)
-# Transgressoft Commons
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/octaviospain/lirp)
+![Maven Central Version](https://img.shields.io/maven-central/v/net.transgressoft/lirp-api)
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/octaviospain/lirp/.github%2Fworkflows%2Fmaster.yml?logo=github)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=net.transgressoft%3Alirp&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=net.transgressoft%3Alirp)
+[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=net.transgressoft%3Alirp&metric=bugs)](https://sonarcloud.io/summary/new_code?id=net.transgressoft%3Alirp)
+[![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=net.transgressoft%3Alirp&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=net.transgressoft%3Alirp)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=net.transgressoft%3Alirp&metric=coverage)](https://sonarcloud.io/summary/new_code?id=net.transgressoft%3Alirp)
+[![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=net.transgressoft%3Alirp&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=net.transgressoft%3Alirp)
+[![Duplicated Lines (%)](https://sonarcloud.io/api/project_badges/measure?project=net.transgressoft%3Alirp&metric=duplicated_lines_density)](https://sonarcloud.io/summary/new_code?id=net.transgressoft%3Alirp)
+# LIRP - Lightweight Reactive Persistence
 
 A reactive library for Kotlin & Java projects that implements the Publisher-Subscriber pattern, enabling more maintainable and decoupled systems through reactive programming principles.
 
 ## 📖 Overview
 
-Transgressoft Commons provides a framework for entities that follow a 'reactive' approach based on the Publisher-Subscriber pattern. This allows objects to subscribe to changes in others while maintaining clean boundaries and separation of concerns.
+lirp provides a framework for entities that follow a 'reactive' approach based on the Publisher-Subscriber pattern. This allows objects to subscribe to changes in others while maintaining clean boundaries and separation of concerns.
 
 The approach is inspired by object-oriented design principles where entities aren't merely passive data structures, but active objects with their own behaviors and responsibilities. Instead of other objects directly manipulating an entity's state, they subscribe to its changes, creating a more decoupled and maintainable system.
 
-### What Makes Transgressoft Commons Different?
+### What Makes lirp Different?
 
-While libraries like [Kotlin Flow](https://github.com/Kotlin/kotlinx.coroutines), [RxJava](https://github.com/ReactiveX/RxJava), and [Guava EventBus](https://github.com/google/guava/wiki/EventBusExplained) offer powerful tools for reactive programming and event handling, Transgressoft Commons provides a higher-level, opinionated framework designed to accelerate development with out-of-the-box features.
+While libraries like [Kotlin Flow](https://github.com/Kotlin/kotlinx.coroutines), [RxJava](https://github.com/ReactiveX/RxJava), and [Guava EventBus](https://github.com/google/guava/wiki/EventBusExplained) offer powerful tools for reactive programming and event handling, lirp provides a higher-level, opinionated framework designed to accelerate development with out-of-the-box features.
 
 Instead of being a general-purpose toolkit, it offers a specific, entity-centric approach to reactivity:
 
 *   **Entity-First Reactivity:** At its core, the library is built around the concept of "Reactive Entities." This encourages a more object-oriented design where your domain objects are inherently reactive, automatically publishing events when their state changes.
 *   **Automated Persistence:** A key innovation is the `JsonRepository`, which provides automatic, thread-safe, and debounced JSON serialization. This means you can have a persistent, reactive collection of objects with minimal boilerplate code.
-*   **Simplified API:** By providing a more focused API, Transgressoft Commons simplifies the development of reactive systems. It offers a clear path for building event-driven applications without the steep learning curve of more complex reactive libraries.
+*   **Simplified API:** By providing a more focused API, lirp simplifies the development of reactive systems. It offers a clear path for building event-driven applications without the steep learning curve of more complex reactive libraries.
 
-In essence, Transgressoft Commons is a lightweight framework that builds upon the power of libraries like [Kotlin Coroutines](https://github.com/Kotlin/kotlinx.coroutines) and [Kotlin Serialization](https://github.com/Kotlin/kotlinx.serialization) to provide a ready-to-use solution for building reactive, persistent applications in a clean, decoupled, and object-oriented way.
+In essence, lirp is a lightweight framework that builds upon the power of libraries like [Kotlin Coroutines](https://github.com/Kotlin/kotlinx.coroutines) and [Kotlin Serialization](https://github.com/Kotlin/kotlinx.serialization) to provide a ready-to-use solution for building reactive, persistent applications in a clean, decoupled, and object-oriented way.
 
 **Requirements:**
 * Java 17+
@@ -53,7 +54,7 @@ In essence, Transgressoft Commons is a lightweight framework that builds upon th
 
 ## 🔄 Core Concepts: Reactive Event System
 
-The heart of Transgressoft Commons is its reactive event system, where objects communicate through events rather than direct manipulation.
+The heart of lirp is its reactive event system, where objects communicate through events rather than direct manipulation.
 
 ### Reactive Primitives
 
@@ -206,7 +207,7 @@ The core API classes that library consumers will typically use:
 
 ## 💾 Core Concepts: JSON Serialization
 
-Transgressoft Commons provides automatic JSON serialization for repository operations, making persistence seamless. The library uses [kotlinx.serialization](https://github.com/Kotlin/kotlinx.serialization) for JSON processing, so users should familiarize themselves with this library to effectively create serializers for their entity types.
+lirp provides automatic JSON serialization for repository operations, making persistence seamless. The library uses [kotlinx.serialization](https://github.com/Kotlin/kotlinx.serialization) for JSON processing, so users should familiarize themselves with this library to effectively create serializers for their entity types.
 
 ### JSON File Repositories
 
@@ -273,7 +274,7 @@ debugMode.value = true
 
 ### Java Interoperability
 
-Transgressoft Commons is designed to work seamlessly from both Kotlin and Java code. Below are examples demonstrating how to use the library from Java:
+lirp is designed to work seamlessly from both Kotlin and Java code. Below are examples demonstrating how to use the library from Java:
 
 #### 1. Working with Reactive Primitives in Java
 
@@ -363,7 +364,7 @@ var reloadedRepo = new FlexibleJsonFileRepository(configFile);
 // Values remain: serverName="BackupServer", maxConnections=150, debugMode=true
 ```
 
-For complete working examples, see [JavaInteroperabilityTest.java](https://github.com/octaviospain/transgressoft-commons/blob/master/transgressoft-commons-core/src/test/java/net/transgressoft/commons/JavaInteroperabilityTest.java) in the repository.
+For complete working examples, see [JavaInteroperabilityTest.java](https://github.com/octaviospain/lirp/blob/master/lirp-core/src/test/java/net/transgressoft/lirp/JavaInteroperabilityTest.java) in the repository.
 
 ## 🤝 Contributing
 
@@ -373,7 +374,7 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for det
 
 Copyright (c) 2025 Octavio Calleya García.
 
-Transgressoft Commons is free software under GNU GPL version 3 license and is available [here](https://www.gnu.org/licenses/gpl-3.0.en.html#license-text).
+lirp is free software under GNU GPL version 3 license and is available [here](https://www.gnu.org/licenses/gpl-3.0.en.html#license-text).
 
 This project uses:
 - [Kotlin Coroutines](https://github.com/Kotlin/kotlinx.coroutines) for asynchronous programming

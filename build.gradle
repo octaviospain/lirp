@@ -24,8 +24,8 @@ ext {
 }
 
 dependencies {
-    implementation project(':transgressoft-commons-api')
-    implementation project(':transgressoft-commons-core')
+    implementation project(':lirp-api')
+    implementation project(':lirp-core')
     api "org.jetbrains.kotlin:kotlin-stdlib:$kotlinVersion"
 }
 
@@ -52,14 +52,14 @@ tasks.withType(PublishToMavenLocal).configureEach {
 }
 
 version = scmVersion.version
-description = 'A reactive library for Kotlin & Java projects that implements the Publisher-Subscriber pattern.'
+description = 'LIRP - Lightweight Reactive Persistence. An asynchronous, non-blocking, reactive persistence library for Java and Kotlin.'
 
 sonar {
     properties {
         property 'sonar.host.url', 'https://sonarcloud.io'
         property 'sonar.organization', 'transgressoft'
-        property 'sonar.projectKey', 'net.transgressoft:transgressoft-commons'
-        property 'sonar.projectName', 'transgressoft-commons'
+        property 'sonar.projectKey', 'net.transgressoft:lirp'
+        property 'sonar.projectName', 'lirp'
         property 'sonar.projectVersion', version
         property 'sonar.junit.reportPaths', 'build/test-results/test'
         def buildDir = project.layout.buildDirectory.get().asFile.absolutePath
@@ -146,7 +146,7 @@ subprojects {
         pom {
             name = "${project.name}"
             description = project.description
-            url = 'https://github.com/octaviospain/transgressoft-commons'
+            url = 'https://github.com/octaviospain/lirp'
             inceptionYear = '2025'
 
             licenses {
@@ -167,9 +167,9 @@ subprojects {
             }
 
             scm {
-                connection = 'scm:git:git://github.com/octaviospain/transgressoft-commons.git'
-                developerConnection = 'scm:git:ssh://github.com:octaviospain/transgressoft-commons.git'
-                url = 'https://github.com/octaviospain/transgressoft-commons/tree/master'
+                connection = 'scm:git:git://github.com/octaviospain/lirp.git'
+                developerConnection = 'scm:git:ssh://github.com:octaviospain/lirp.git'
+                url = 'https://github.com/octaviospain/lirp/tree/master'
             }
         }
         signAllPublications()
