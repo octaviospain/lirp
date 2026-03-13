@@ -1,6 +1,6 @@
-# Contributing to Transgressoft Commons
+# Contributing to lirp
 
-Thank you for your interest in contributing to Transgressoft Commons! This document provides guidelines and instructions for contributing to this project.
+Thank you for your interest in contributing to lirp! This document provides guidelines and instructions for contributing to this project.
 
 ## 📋 Table of Contents
 
@@ -116,4 +116,4 @@ To automatically fix formatting issues:
 
 If you have any questions or need help with the contribution process, please don't hesitate to open an issue asking for guidance.
 
-Thank you for contributing to Transgressoft Commons!
+Thank you for contributing to lirp!
