@@ -20,7 +20,7 @@ repositories {
 ext {
     kotlinVersion = '2.3.10'
     coroutinesVersion = '1.10.2'
-    kotestVersion = '6.0.7'
+    kotestVersion = '6.1.7'
 }
 
 dependencies {
