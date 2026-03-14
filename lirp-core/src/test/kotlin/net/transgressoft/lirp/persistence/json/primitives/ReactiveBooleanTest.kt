@@ -36,7 +36,7 @@ private class ReactiveBooleanSubscriber :
 class ReactiveBooleanTest : StringSpec({
 
     "Changes on reactive boolean propagate to subscribers" {
-        val reactiveBoolean = ReactiveBoolean("1", true)
+        val reactiveBoolean = ReactiveBoolean("Boolean-1", true)
         val subscriber = ReactiveBooleanSubscriber()
 
         reactiveBoolean.subscribe(subscriber)
@@ -61,13 +61,13 @@ class ReactiveBooleanTest : StringSpec({
         }
 
         reactiveBoolean.value = null
-        val otherReactiveBoolean = ReactiveBoolean("1", null)
+        val otherReactiveBoolean = ReactiveBoolean("Boolean-1", null)
         reactiveBoolean shouldBe otherReactiveBoolean
         reactiveBoolean.hashCode() shouldBeEqual otherReactiveBoolean.hashCode()
 
         reactiveBoolean.value shouldBe null
-        reactiveBoolean.uniqueId shouldBe "1-null"
-        reactiveBoolean.toString() shouldBe "ReactiveBoolean(id=1, value=null)"
+        reactiveBoolean.uniqueId shouldBe "Boolean-1-null"
+        reactiveBoolean.toString() shouldBe "ReactiveBoolean(id=Boolean-1, value=null)"
 
         val reactiveBooleanWithRandomULID = ReactiveBoolean(true)
         reactiveBooleanWithRandomULID.id.shouldNotBeNull()

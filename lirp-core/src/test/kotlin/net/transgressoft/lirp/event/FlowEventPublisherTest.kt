@@ -645,9 +645,197 @@ class FlowEventPublisherTest : StringSpec({
 
         lateSubscription.cancel()
     }
+
+    // -------------------------------------------------------------------------
+    // Closed-state lifecycle and guard tests (LIFE-02, LIFE-03, LIFE-05, GUARD-03, GUARD-04)
+    // -------------------------------------------------------------------------
+
+    "FlowEventPublisher isClosed returns false on new publisher" {
+        val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("test-publisher")
+
+        publisher.isClosed shouldBe false
+    }
+
+    "FlowEventPublisher close marks publisher as closed" {
+        val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("test-publisher")
+
+        publisher.close()
+
+        publisher.isClosed shouldBe true
+    }
+
+    "FlowEventPublisher close is idempotent" {
+        val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("test-publisher")
+
+        publisher.close()
+        publisher.close() // second call must not throw
+    }
+
+    "FlowEventPublisher emitAsync throws IllegalStateException on closed publisher" {
+        val publisher =
+            FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("test-publisher").apply {
+                activateEvents(CREATE)
+            }
+        publisher.close()
+
+        val exception =
+            shouldThrow<IllegalStateException> {
+                publisher.emitAsync(Create(TestEntity("entity-1")))
+            }
+        exception.message shouldContain "test-publisher"
+    }
+
+    "FlowEventPublisher subscribe with action throws IllegalStateException on closed publisher" {
+        val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("test-publisher")
+        publisher.close()
+
+        val exception =
+            shouldThrow<IllegalStateException> {
+                publisher.subscribe { }
+            }
+        exception.message shouldContain "test-publisher"
+    }
+
+    "FlowEventPublisher subscribe with Consumer throws IllegalStateException on closed publisher" {
+        val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("test-publisher")
+        publisher.close()
+
+        val exception =
+            shouldThrow<IllegalStateException> {
+                publisher.subscribe(Consumer { })
+            }
+        exception.message shouldContain "test-publisher"
+    }
+
+    "FlowEventPublisher subscribe with event types throws IllegalStateException on closed publisher" {
+        val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("test-publisher")
+        publisher.close()
+
+        val exception =
+            shouldThrow<IllegalStateException> {
+                publisher.subscribe(CREATE) { }
+            }
+        exception.message shouldContain "test-publisher"
+    }
+
+    "FlowEventPublisher subscribe with Flow.Subscriber throws IllegalStateException on closed publisher" {
+        val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("test-publisher")
+        publisher.close()
+
+        val subscriber =
+            object : Flow.Subscriber<CrudEvent<String, TestEntity>> {
+                override fun onSubscribe(subscription: Flow.Subscription) {}
+
+                override fun onNext(item: CrudEvent<String, TestEntity>) {}
+
+                override fun onError(throwable: Throwable) {}
+
+                override fun onComplete() {}
+            }
+
+        val exception =
+            shouldThrow<IllegalStateException> {
+                publisher.subscribe(subscriber)
+            }
+        exception.message shouldContain "test-publisher"
+    }
+
+    "FlowEventPublisher existing subscribers stop receiving events after close" {
+        val publisher =
+            FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("test-publisher").apply {
+                activateEvents(CREATE)
+            }
+        val receivedEvents = mutableListOf<CrudEvent<String, TestEntity>>()
+        publisher.subscribe { receivedEvents.add(it) }
+
+        publisher.emitAsync(Create(TestEntity("before-close")))
+        testDispatcher.scheduler.advanceUntilIdle()
+        receivedEvents.size shouldBe 1
+
+        publisher.close()
+
+        // Emitting after close throws — no new event reaches the subscriber
+        shouldThrow<IllegalStateException> {
+            publisher.emitAsync(Create(TestEntity("after-close")))
+        }
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        receivedEvents.size shouldBe 1
+    }
+
+    // -------------------------------------------------------------------------
+    // Subscriber count tracking and callback tests (AUTO-01, AUTO-02, AUTO-03)
+    // -------------------------------------------------------------------------
+
+    "FlowEventPublisher subscriberCount is 0 on new publisher" {
+        val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("test-publisher")
+
+        publisher.subscriberCount shouldBe 0
+    }
+
+    "FlowEventPublisher subscriberCount increments on subscribe" {
+        val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("test-publisher")
+
+        val subscription = publisher.subscribe { }
+
+        publisher.subscriberCount shouldBe 1
+
+        subscription.cancel()
+    }
+
+    "FlowEventPublisher subscriberCount decrements on cancel" {
+        val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("test-publisher")
+
+        val subscription = publisher.subscribe { }
+        publisher.subscriberCount shouldBe 1
+
+        subscription.cancel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        publisher.subscriberCount shouldBe 0
+    }
+
+    "FlowEventPublisher subscriberCount tracks multiple subscribers correctly" {
+        val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("test-publisher")
+
+        val sub1 = publisher.subscribe { }
+        publisher.subscriberCount shouldBe 1
+
+        val sub2 = publisher.subscribe { }
+        publisher.subscriberCount shouldBe 2
+
+        sub1.cancel()
+        testDispatcher.scheduler.advanceUntilIdle()
+        publisher.subscriberCount shouldBe 1
+
+        sub2.cancel()
+        testDispatcher.scheduler.advanceUntilIdle()
+        publisher.subscriberCount shouldBe 0
+    }
+
+    "FlowEventPublisher subscriberCount tracks Flow.Subscriber subscribe" {
+        val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("test-publisher")
+
+        val subscriber =
+            object : Flow.Subscriber<CrudEvent<String, TestEntity>> {
+                override fun onSubscribe(subscription: Flow.Subscription) {}
+
+                override fun onNext(item: CrudEvent<String, TestEntity>) {}
+
+                override fun onError(throwable: Throwable) {}
+
+                override fun onComplete() {}
+            }
+
+        publisher.subscribe(subscriber)
+
+        publisher.subscriberCount shouldBe 1
+    }
 })
 
-class TestEntity(override val id: String) : ReactiveEntityBase<String, TestEntity>(id) {
+class TestEntity(override val id: String) : ReactiveEntityBase<String, TestEntity>({ _ ->
+    FlowEventPublisher(id, closeOnEmpty = true)
+}) {
 
     private val addressBook = mutableMapOf<String, String>()
 

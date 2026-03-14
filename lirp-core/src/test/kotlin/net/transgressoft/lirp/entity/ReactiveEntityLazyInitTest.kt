@@ -161,9 +161,9 @@ class ReactiveEntityLazyInitTest : StringSpec({
         val customFactoryCalled = AtomicInteger(0)
 
         val entity =
-            CustomPublisherEntity("custom-entity") {
+            CustomPublisherEntity("custom-entity") { _ ->
                 customFactoryCalled.incrementAndGet()
-                FlowEventPublisher("custom-publisher")
+                FlowEventPublisher("custom-publisher", closeOnEmpty = true)
             }
 
         // Factory isn't called yet
@@ -203,9 +203,9 @@ class ReactiveEntityLazyInitTest : StringSpec({
 class LazyTestEntity(
     override val id: String,
     private val creationCounter: AtomicInteger = AtomicInteger(0)
-) : ReactiveEntityBase<String, LazyTestEntity>({
+) : ReactiveEntityBase<String, LazyTestEntity>({ _ ->
         creationCounter.incrementAndGet()
-        FlowEventPublisher<MutationEvent.Type, MutationEvent<String, LazyTestEntity>>(id)
+        FlowEventPublisher<MutationEvent.Type, MutationEvent<String, LazyTestEntity>>(id, closeOnEmpty = true)
     }) {
 
     override val uniqueId: String
@@ -243,7 +243,7 @@ class LazyTestEntity(
  */
 class CustomPublisherEntity(
     override val id: String,
-    publisherFactory: () -> TransEventPublisher<MutationEvent.Type, MutationEvent<String, CustomPublisherEntity>>
+    publisherFactory: (String) -> TransEventPublisher<MutationEvent.Type, MutationEvent<String, CustomPublisherEntity>>
 ) : ReactiveEntityBase<String, CustomPublisherEntity>(publisherFactory) {
 
     override val uniqueId: String
@@ -255,7 +255,7 @@ class CustomPublisherEntity(
         }
 
     override fun clone(): CustomPublisherEntity {
-        val clone = CustomPublisherEntity(id) { FlowEventPublisher(id) }
+        val clone = CustomPublisherEntity(id) { _ -> FlowEventPublisher(id, closeOnEmpty = true) }
         clone.value = this.value
         return clone
     }

@@ -28,14 +28,29 @@ import kotlinx.coroutines.flow.SharedFlow
  * Represents an entity that can be reactive to changes in its properties. Reactive in the way that
  * regarding its internal logic, it can create a logic reaction on the subscribed entities.
  *
+ * An entity transitions through well-defined lifecycle states:
+ * - **Created**: Initial state. No publisher allocated; zero overhead.
+ * - **Active**: At least one subscriber registered; publisher exists and emits events.
+ * - **Dormant**: All subscribers cancelled; publisher shut down and nullified. Reactivates lazily on next subscription.
+ * - **Closed**: Terminal state. All operations that mutate or subscribe throw [IllegalStateException].
+ *
  * @param K the type of the entity's id.
  * @param R the type of the entity.
  */
 interface ReactiveEntity<K, R : ReactiveEntity<K, R>> :
     IdentifiableEntity<K>,
-    Flow.Publisher<MutationEvent<K, R>> where K : Comparable<K> {
+    Flow.Publisher<MutationEvent<K, R>>,
+    AutoCloseable where K : Comparable<K> {
 
     val lastDateModified: LocalDateTime
+
+    /**
+     * Whether this entity has been permanently closed.
+     *
+     * A closed entity rejects mutations via [mutateAndPublish][net.transgressoft.lirp.entity.ReactiveEntityBase.mutateAndPublish]
+     * and new subscriptions with [IllegalStateException].
+     */
+    val isClosed: Boolean
 
     /**
      * A flow of entity change events that can be observed by collectors.
@@ -58,6 +73,13 @@ interface ReactiveEntity<K, R : ReactiveEntity<K, R>> :
 
     fun subscribe(vararg eventTypes: MutationEvent.Type, action: Consumer<in MutationEvent<K, R>>):
         TransEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>
+
+    /**
+     * Permanently closes this entity and releases its publisher resources.
+     *
+     * After closing [subscribe] throw [IllegalStateException]. Idempotent: subsequent calls are safe no-ops.
+     */
+    override fun close()
 
     override fun clone(): ReactiveEntity<K, R>
 }

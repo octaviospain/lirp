@@ -112,12 +112,7 @@ class PersonJsonFileRepository(file: File): HumanGenericJsonFileRepositoryBase<P
             }
         }
     )
-) {
-
-    override fun hashCode(): Int = super.hashCode()
-
-    override fun equals(other: Any?): Boolean = super.equals(other)
-}
+)
 
 class PersonlySerializer: HumanSerializer<Personly>() {
 
@@ -129,11 +124,8 @@ class PersonlySerializer: HumanSerializer<Personly>() {
         compositeEncoder.encodeBooleanElement(descriptor, 4, value.morals)
     }
 
-    override fun additionalDeserialize(compositeDecoder: CompositeDecoder, propertiesList: MutableList<Any?>, index: Int) {
-        if (index == 4) {
-            propertiesList.add(compositeDecoder.decodeBooleanElement(descriptor, 4))
-        }
-    }
+    override fun additionalDeserialize(compositeDecoder: CompositeDecoder, index: Int): Any? =
+        if (index == 4) compositeDecoder.decodeBooleanElement(descriptor, 4) else null
 
     override fun createInstance(propertiesList: List<Any?>): Personly =
         Person(propertiesList[0] as Int, propertiesList[1] as String?, propertiesList[2] as Long?, propertiesList[3] as Boolean)
@@ -172,8 +164,7 @@ abstract class HumanSerializer<H : Human<H>> : TransEntityPolymorphicSerializer<
                 1 -> propertiesList.add(compositeDecoder.decodeIntElement(descriptor, index))
                 2 -> propertiesList.add(compositeDecoder.decodeNullableSerializableElement(descriptor, index, String.serializer().nullable))
                 3 -> propertiesList.add(compositeDecoder.decodeNullableSerializableElement(descriptor, index, Long.serializer().nullable))
-                4 -> propertiesList.add(compositeDecoder.decodeBooleanElement(descriptor, index))
-                else -> propertiesList.add(additionalDeserialize(compositeDecoder, propertiesList, index))
+                else -> additionalDeserialize(compositeDecoder, index)?.let { propertiesList.add(it) }
             }
         }
         compositeDecoder.endStructure(descriptor)

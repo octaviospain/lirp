@@ -19,8 +19,6 @@ package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.event.FlowEventPublisher
-import net.transgressoft.lirp.event.MutationEvent
-import net.transgressoft.lirp.event.TransEventPublisher
 
 /**
  * Abstract base class for reactive primitive wrappers that implements common functionality.
@@ -36,9 +34,8 @@ import net.transgressoft.lirp.event.TransEventPublisher
  */
 abstract class ReactivePrimitiveWrapper<R : ReactivePrimitiveWrapper<R, V>, V : Comparable<V>>(
     override val id: String,
-    initialValue: V?,
-    publisherFactory: () -> TransEventPublisher<MutationEvent.Type, MutationEvent<String, ReactivePrimitive<V>>> = { FlowEventPublisher(id) }
-) : ReactiveEntityBase<String, ReactivePrimitive<V>>(publisherFactory), ReactivePrimitive<V> {
+    initialValue: V?
+) : ReactiveEntityBase<String, ReactivePrimitive<V>>({ _ -> FlowEventPublisher(id, closeOnEmpty = true) }), ReactivePrimitive<V> {
     /**
      * The current value of this reactive primitive.
      *

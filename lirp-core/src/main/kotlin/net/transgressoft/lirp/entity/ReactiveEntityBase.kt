@@ -42,6 +42,12 @@ import kotlinx.coroutines.flow.SharedFlow
  * reduces memory overhead for entities that are never observed, which is especially beneficial in applications
  * with thousands of reactive entities.
  *
+ * Lifecycle states:
+ * - **Created**: No publisher allocated; zero overhead.
+ * - **Active**: Publisher exists and has at least one subscriber emitting events.
+ * - **Dormant**: All subscribers cancelled; publisher is shut down and nullified. Lazily reactivates on next [subscribe] call.
+ * - **Closed**: Terminal state entered via [close]. All mutating operations throw [IllegalStateException].
+ *
  * @param K The type of the entity's unique identifier, which must implement [Comparable]
  * @param R The concrete type of the reactive entity that extends this class
  *
@@ -49,21 +55,20 @@ import kotlinx.coroutines.flow.SharedFlow
  * @see MutationEvent
  */
 abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
-    private val publisherFactory: () -> TransEventPublisher<MutationEvent.Type, MutationEvent<K, R>>
+    private val publisherFactory: (String) -> TransEventPublisher<MutationEvent.Type, MutationEvent<K, R>> =
+        { id -> FlowEventPublisher(id, closeOnEmpty = true) }
 ) : ReactiveEntity<K, R> where K : Comparable<K> {
     private val log = KotlinLogging.logger {}
 
     /**
      * Convenience constructor that creates a default FlowEventPublisher with the entity's class name.
      */
-    protected constructor() : this({ FlowEventPublisher("ReactiveEntity") })
+    protected constructor() : this({ id -> FlowEventPublisher(id, closeOnEmpty = true) })
 
-    /**
-     * Convenience constructor that creates a default FlowEventPublisher with a custom name.
-     *
-     * @param entityName The name to use for the publisher (useful for debugging and logging)
-     */
-    protected constructor(entityName: String) : this({ FlowEventPublisher(entityName) })
+    @Volatile
+    private var closed = false
+
+    override val isClosed: Boolean get() = closed
 
     /**
      * The lazily initialized publisher. Only created when the first subscriber registers.
@@ -73,17 +78,23 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
 
     /**
      * Gets the publisher, creating it lazily if needed. Thread-safe using double-checked locking.
+     * Detects a closed (dormant) publisher and recreates it transparently.
+     * Throws [IllegalStateException] if the entity is permanently closed.
      */
     private val publisher: TransEventPublisher<MutationEvent.Type, MutationEvent<K, R>>
-        get() =
-            _publisher ?: synchronized(this) {
-                _publisher ?: publisherFactory().also { newPublisher ->
-                    // A reactive entity only emits MUTATE events because it
-                    // cannot create, delete, or read itself
-                    newPublisher.activateEvents(MUTATE)
-                    _publisher = newPublisher
+        get() {
+            val p = _publisher
+            if (p != null && !p.isClosed) return p
+            return synchronized(this) {
+                val p2 = _publisher
+                if (p2 != null && !p2.isClosed) return@synchronized p2
+                check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
+                publisherFactory(this::class.java.simpleName).also {
+                    it.activateEvents(MUTATE)
+                    _publisher = it
                 }
             }
+        }
 
     /**
      * Determines whether events should be emitted. Returns true only if the publisher has been initialized,
@@ -96,7 +107,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
      * we cannot determine if remote consumers exist.
      */
     private val shouldEmit: Boolean
-        get() = _publisher != null
+        get() = _publisher?.let { !it.isClosed } ?: false
 
     /**
      * The timestamp when this entity was last modified.
@@ -108,19 +119,45 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     /**
      * A flow of entity change events that collectors can observe.
      * Accessing this property will trigger lazy initialization of the publisher.
+     * Throws [IllegalStateException] if the entity is permanently closed.
      */
     override val changes: SharedFlow<MutationEvent<K, R>>
-        get() = publisher.changes
+        get() {
+            check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
+            return publisher.changes
+        }
 
-    override fun emitAsync(event: MutationEvent<K, R>) = publisher.emitAsync(event)
+    /**
+     * Permanently closes this entity and releases its publisher resources.
+     *
+     * Sets the closed flag, closes the publisher if initialized, and nullifies it.
+     * Idempotent: subsequent calls are safe no-ops.
+     */
+    override fun close() {
+        if (closed) return
+        closed = true
+        _publisher?.close()
+        _publisher = null
+    }
 
-    override fun subscribe(action: suspend (MutationEvent<K, R>) -> Unit):
-        TransEventSubscription<in TransEntity, MutationEvent.Type, MutationEvent<K, R>> = publisher.subscribe(action)
+    override fun emitAsync(event: MutationEvent<K, R>) {
+        check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
+        publisher.emitAsync(event)
+    }
 
-    override fun subscribe(subscriber: Flow.Subscriber<in MutationEvent<K, R>>?) = publisher.subscribe(subscriber)
+    override fun subscribe(action: suspend (MutationEvent<K, R>) -> Unit): TransEventSubscription<in TransEntity, MutationEvent.Type, MutationEvent<K, R>> {
+        check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
+        return publisher.subscribe(action)
+    }
+
+    override fun subscribe(subscriber: Flow.Subscriber<in MutationEvent<K, R>>?) {
+        check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
+        publisher.subscribe(subscriber)
+    }
 
     override fun subscribe(vararg eventTypes: MutationEvent.Type, action: Consumer<in MutationEvent<K, R>>):
         TransEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>> {
+        check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
         require(MUTATE in eventTypes) {
             throw IllegalArgumentException("Only UPDATE event is supported for reactive entities")
         }
@@ -145,6 +182,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     @Suppress("UNCHECKED_CAST")
     @JvmOverloads
     protected fun <T> mutateAndPublish(newValue: T, oldValue: T, propertySetAction: (T) -> Unit = {}) {
+        check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
         if (newValue != oldValue) {
             val entityBeforeChange = clone()
             propertySetAction(newValue)
@@ -158,6 +196,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
 
     @Suppress("UNCHECKED_CAST")
     protected fun <T> mutateAndPublish(mutationAction: () -> T): T {
+        check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
         val entityBeforeChange = clone()
         val result = mutationAction()
         if (entityBeforeChange == this) {

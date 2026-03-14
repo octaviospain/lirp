@@ -1,6 +1,7 @@
 package net.transgressoft.lirp
 
 import net.transgressoft.lirp.entity.ReactiveEntityBase
+import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.persistence.json.JsonFileRepository
 import java.io.File
 import kotlinx.serialization.SerialName
@@ -25,7 +26,7 @@ data class Man(
     override var name: String?,
     override val money: Long?,
     override val beard: Boolean = false
-) : Manly, ReactiveEntityBase<Int, Manly>("$id") {
+) : Manly, ReactiveEntityBase<Int, Manly>({ _ -> FlowEventPublisher("$id", closeOnEmpty = true) }) {
     override val uniqueId: String = "$id-$name-$money"
 
     override fun clone(): Man = copy()
@@ -35,7 +36,7 @@ open class ManJsonFileRepository(file: File) :
     HumanGenericJsonFileRepositoryBase<Manly>(
         JsonFileRepository(
             file,
-            MapSerializer(Int.Companion.serializer(), ManlySerializer()),
+            MapSerializer(Int.serializer(), ManlySerializer()),
             SerializersModule {
                 polymorphic(Human::class) {
                     subclass(Person::class, Person.serializer())
@@ -53,11 +54,8 @@ class ManlySerializer : HumanSerializer<Manly>() {
         compositeEncoder.encodeBooleanElement(descriptor, 4, value.beard)
     }
 
-    override fun additionalDeserialize(compositeDecoder: CompositeDecoder, propertiesList: MutableList<Any?>, index: Int) {
-        if (index == 4) {
-            propertiesList.add(compositeDecoder.decodeBooleanElement(descriptor, 4))
-        }
-    }
+    override fun additionalDeserialize(compositeDecoder: CompositeDecoder, index: Int): Any? =
+        if (index == 4) compositeDecoder.decodeBooleanElement(descriptor, 4) else null
 
     override fun createInstance(propertiesList: List<Any?>): Manly =
         Man(propertiesList[0] as Int, propertiesList[1] as String?, propertiesList[2] as Long?, propertiesList[3] as Boolean)
