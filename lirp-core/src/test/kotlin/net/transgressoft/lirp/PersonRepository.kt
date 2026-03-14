@@ -14,6 +14,8 @@ import io.kotest.property.arbitrary.long
 import io.kotest.property.arbitrary.positiveInt
 import io.kotest.property.arbitrary.stringPattern
 import java.io.File
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -102,7 +104,7 @@ abstract class HumanGenericJsonFileRepositoryBase<H: Human<H>>(private val repos
         else false
 }
 
-class PersonJsonFileRepository(file: File): HumanGenericJsonFileRepositoryBase<Personly>(
+class PersonJsonFileRepository(file: File, serializationDelay: Duration = 300.milliseconds): HumanGenericJsonFileRepositoryBase<Personly>(
     JsonFileRepository(
         file,
         MapSerializer(Int.serializer(), PersonlySerializer()),
@@ -110,7 +112,8 @@ class PersonJsonFileRepository(file: File): HumanGenericJsonFileRepositoryBase<P
             polymorphic(Human::class) {
                 subclass(Person::class, Person.serializer())
             }
-        }
+        },
+        serializationDelay
     )
 )
 
