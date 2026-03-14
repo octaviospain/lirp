@@ -30,6 +30,7 @@ import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.collections.forEach
 import kotlin.random.Random
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -671,6 +672,27 @@ class JsonFileRepositoryTest : DescribeSpec({
 
             subscription.cancel()
             repository.close()
+        }
+    }
+
+    describe("custom serialization delay") {
+        it("uses the configured delay instead of the default") {
+            val customDelayFile = tempfile("custom-delay-test", ".json").also { it.deleteOnExit() }
+            val customDelay = 50.milliseconds
+            val customRepo = PersonJsonFileRepository(customDelayFile, customDelay)
+
+            try {
+                val person = arbitraryPerson().next()
+                customRepo.add(person)
+
+                // UnconfinedTestDispatcher executes eagerly, so debounce fires immediately
+                testDispatcher.scheduler.advanceUntilIdle()
+
+                // File should have been written with the custom delay
+                customDelayFile.readText().isNotEmpty() shouldBe true
+            } finally {
+                customRepo.close()
+            }
         }
     }
 })

@@ -28,6 +28,7 @@ import mu.KotlinLogging
 import java.io.File
 import java.util.Objects
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
@@ -61,13 +62,17 @@ import kotlinx.serialization.modules.SerializersModule
  * @param file The JSON file to store entities in
  * @param mapSerializer The serializer used to convert entities to/from JSON
  * @param repositorySerializersModule Optional module for configuring JSON serialization
+ * @param serializationDelay The delay between the last repository change and the JSON file write.
+ *        Defaults to 300 milliseconds. Lower values increase responsiveness but may cause more I/O;
+ *        higher values batch more changes into fewer writes.
  */
 open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
     @JvmOverloads
     constructor(
         file: File,
         private val mapSerializer: KSerializer<Map<K, R>>,
-        private val repositorySerializersModule: SerializersModule = SerializersModule {}
+        private val repositorySerializersModule: SerializersModule = SerializersModule {},
+        private val serializationDelay: Duration = 300.milliseconds
     ) : VolatileRepository<K, R>("JsonFileRepository-${file.name}"), JsonRepository<K, R> {
         private val log = KotlinLogging.logger(javaClass.name)
 
@@ -110,8 +115,6 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
          * excessive serialization operations when multiple changes occur in a short period.
          */
         private val serializationTrigger = MutableSharedFlow<Unit>(replay = 1, extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
-
-        private val serializationDelay = 300.milliseconds
 
         /**
          * Subscriptions map for each entity in the repository are needed to unsubscribe
