@@ -14,25 +14,54 @@ A reactive library for Kotlin & Java projects that implements the Publisher-Subs
 
 ## 📖 Overview
 
-lirp provides a framework for entities that follow a 'reactive' approach based on the Publisher-Subscriber pattern. This allows objects to subscribe to changes in others while maintaining clean boundaries and separation of concerns.
+lirp embraces the core principle of [Domain-Driven Design](https://en.wikipedia.org/wiki/Domain-driven_design): **domain entities are not passive data containers — they are the central building blocks of your system**, carrying identity, behavior, and the responsibility to communicate their own state changes.
 
-The approach is inspired by object-oriented design principles where entities aren't merely passive data structures, but active objects with their own behaviors and responsibilities. Instead of other objects directly manipulating an entity's state, they subscribe to its changes, creating a more decoupled and maintainable system.
+In many codebases, domain objects end up as anemic structures shuffled between services that externally query and mutate them. lirp takes the opposite approach. Inspired by DDD's concept of _rich domain models_, entities in lirp **own their reactivity**. When a property changes, the entity itself publishes the event — no external event bus wiring, no service-layer glue. Subscribers observe the entity directly, preserving the [Bounded Context](https://martinfowler.com/bliki/BoundedContext.html) boundary and keeping coupling low.
+
+This maps naturally to DDD building blocks:
+- **Entities** (`ReactiveEntity`) carry identity and emit mutation events when their state changes
+- **Repositories** (`Repository`, `JsonRepository`) manage entity lifecycle and publish collection-level CRUD events
+- **Domain Events** (`CrudEvent`, `MutationEvent`) are first-class citizens, not an afterthought bolted onto a service layer
+
+The result is a system where the domain model is inherently observable and self-describing — exactly what DDD prescribes.
 
 ### What Makes lirp Different?
 
-While libraries like [Kotlin Flow](https://github.com/Kotlin/kotlinx.coroutines), [RxJava](https://github.com/ReactiveX/RxJava), and [Guava EventBus](https://github.com/google/guava/wiki/EventBusExplained) offer powerful tools for reactive programming and event handling, lirp provides a higher-level, opinionated framework designed to accelerate development with out-of-the-box features.
+Libraries like [Kotlin Flow](https://github.com/Kotlin/kotlinx.coroutines), [RxJava](https://github.com/ReactiveX/RxJava), and [Guava EventBus](https://github.com/google/guava/wiki/EventBusExplained) are powerful general-purpose reactive toolkits. You wire streams, define operators, and connect publishers to subscribers yourself. lirp operates at a higher level of abstraction: **your domain objects _are_ the reactive infrastructure**.
 
-Instead of being a general-purpose toolkit, it offers a specific, entity-centric approach to reactivity:
+```kotlin
+data class Product(override val id: Int, var name: String) : ReactiveEntityBase<Int, Product>() {
+    var price: Double = 0.0
+        set(value) { mutateAndPublish(value, field) { field = it } }
 
-*   **Entity-First Reactivity:** At its core, the library is built around the concept of "Reactive Entities." This encourages a more object-oriented design where your domain objects are inherently reactive, automatically publishing events when their state changes.
-*   **Automated Persistence:** A key innovation is the `JsonRepository`, which provides automatic, thread-safe, and debounced JSON serialization. This means you can have a persistent, reactive collection of objects with minimal boilerplate code.
-*   **Simplified API:** By providing a more focused API, lirp simplifies the development of reactive systems. It offers a clear path for building event-driven applications without the steep learning curve of more complex reactive libraries.
+    override val uniqueId = "product-$id"
+    override fun clone() = copy()
+}
 
-In essence, lirp is a lightweight framework that builds upon the power of libraries like [Kotlin Coroutines](https://github.com/Kotlin/kotlinx.coroutines) and [Kotlin Serialization](https://github.com/Kotlin/kotlinx.serialization) to provide a ready-to-use solution for building reactive, persistent applications in a clean, decoupled, and object-oriented way.
+val product = Product(1, "Widget")
+
+// Subscribe directly to the entity — no bus, no stream setup
+product.subscribe { event ->
+    println("${event.oldEntity.price} → ${event.newEntity.price}")
+}
+
+product.price = 29.99  // prints: 0.0 → 29.99
+```
+
+No event bus registration. No manual Flow collection. The entity publishes its own changes, and subscribers react — that's it.
+
+**Where lirp stands apart:**
+
+*   **Entity-First Reactivity:** Domain objects are inherently reactive. A simple `mutateAndPublish` in a property setter is all it takes — the entity notifies its subscribers automatically, with zero-overhead lazy publisher initialization for unobserved entities.
+*   **Automated Persistence:** `JsonRepository` provides automatic, thread-safe, debounced JSON serialization. Add an entity to a repository and it persists to disk. Change a property and the file updates. No manual save calls.
+*   **Two Granularities, One Pattern:** Observe an entire collection (repository-level CRUD events) or a single entity instance (property mutation events) using the same `subscribe` API.
+*   **DDD-Aligned Design:** Entities carry identity and behavior. Repositories manage lifecycle. Events are domain concepts. The API naturally guides you toward a rich domain model rather than an anemic one.
+
+Built on [Kotlin Coroutines](https://github.com/Kotlin/kotlinx.coroutines) and [Kotlin Serialization](https://github.com/Kotlin/kotlinx.serialization), lirp provides a ready-to-use foundation for reactive, persistent applications with clean domain boundaries.
 
 **Requirements:**
-* Java 17+
-* Kotlin 2.1.10+
+* Java 21+
+* Kotlin 2.2.10
 
 **Key Features:**
 
@@ -382,4 +411,4 @@ This project uses:
 - [Kotlin Serialization](https://github.com/Kotlin/kotlinx.serialization) for JSON processing
 - [Kotest](https://kotest.io/) for testing
 
-The approach is inspired by books including [Object Thinking by David West](https://www.goodreads.com/book/show/43940.Object_Thinking) and [Elegant Objects by Yegor Bugayenko](https://www.yegor256.com/elegant-objects.html).
+The approach is inspired by books including  [Object Thinking by David West](https://www.goodreads.com/book/show/43940.Object_Thinking), [Domain-Driven Design: Aligning Software Architecture and Business Strategy by Vladik Khonon](https://www.goodreads.com/book/show/57573212-learning-domain-driven-design) and [Elegant Objects by Yegor Bugayenko](https://www.yegor256.com/elegant-objects.html).
