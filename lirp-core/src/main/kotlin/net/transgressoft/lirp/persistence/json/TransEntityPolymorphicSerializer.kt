@@ -84,13 +84,10 @@ interface TransEntityPolymorphicSerializer<T : TransEntity> : KSerializer<T> {
      * Override this method to decode custom properties specific to your entity type.
      *
      * @param compositeDecoder The decoder to read data from
-     * @param propertiesList The list of properties already decoded, which may be modified by this method
      * @param index The index of the current property being decoded
-     * @return The decoded value, or null if no value was decoded
+     * @return The decoded value, or null if no value was decoded for this index
      */
-    fun additionalDeserialize(compositeDecoder: CompositeDecoder, propertiesList: MutableList<Any?>, index: Int) {
-        // Do nothing by default
-    }
+    fun additionalDeserialize(compositeDecoder: CompositeDecoder, index: Int): Any? = null
 
     /**
      * Extracts the list of property values from the decoder.

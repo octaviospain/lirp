@@ -23,21 +23,40 @@ import java.util.function.Consumer
 import kotlinx.coroutines.flow.SharedFlow
 
 /**
- * A publisher of [TransEvent]s that implements the reactive streams [Flow.Publisher] interface.
+ * A publisher of [TransEvent]s that implements the reactive streams [Flow.Publisher] interface
+ * and [AutoCloseable] for deterministic resource cleanup.
  *
  * This interface represents the source of events in the reactive stream, publishing
  * events to interested subscribers. It serves as a bridge between the standard
  * Java Flow API and lirp event system.
  *
+ * A publisher can be permanently closed via [close]. Once closed, it rejects new subscriptions
+ * and event emissions. The [subscriberCount] property allows observing the number of active subscribers.
+ *
  * @param ET The specific type of [EventType] associated with this publisher
  * @param E The specific type of [TransEvent] published by this publisher
  */
-interface TransEventPublisher<ET : EventType, out E : TransEvent<ET>> : Flow.Publisher<@UnsafeVariance E> {
+interface TransEventPublisher<ET : EventType, out E : TransEvent<ET>> : Flow.Publisher<@UnsafeVariance E>, AutoCloseable {
 
     /**
      * A flow of entity change events that collectors can observe.
      */
     val changes: SharedFlow<E>
+
+    /**
+     * Whether this publisher has been permanently closed.
+     *
+     * A closed publisher rejects new subscriptions and event emissions with [IllegalStateException].
+     */
+    val isClosed: Boolean
+
+    /**
+     * The current number of active subscribers.
+     *
+     * Tracked via atomic operations for thread safety. Incremented when a subscriber registers
+     * and decremented when the subscriber's coroutine job completes (cancellation or normal completion).
+     */
+    val subscriberCount: Int
 
     /**
      * Publishes an event to all subscribers, asynchronously.
@@ -57,4 +76,12 @@ interface TransEventPublisher<ET : EventType, out E : TransEvent<ET>> : Flow.Pub
     fun activateEvents(vararg types: @UnsafeVariance ET)
 
     fun disableEvents(vararg types: @UnsafeVariance ET)
+
+    /**
+     * Permanently closes this publisher.
+     *
+     * After closing, [emitAsync] and all [subscribe] overloads throw [IllegalStateException].
+     * Idempotent: subsequent calls are safe no-ops.
+     */
+    override fun close()
 }

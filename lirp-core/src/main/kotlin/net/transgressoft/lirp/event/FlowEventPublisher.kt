@@ -21,6 +21,7 @@ import net.transgressoft.lirp.entity.TransEntity
 import mu.KotlinLogging
 import java.util.concurrent.ConcurrentSkipListSet
 import java.util.concurrent.Flow
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
@@ -101,6 +102,8 @@ data class PublisherConfig(
  * 1. Managing a [MutableSharedFlow] to broadcast events to multiple subscribers
  * 2. Providing compatibility with both Java's [Flow.Subscriber] API and Kotlin's flow-based approach
  * 3. Supporting suspending functions for asynchronous event handling
+ * 4. Implementing [AutoCloseable] for deterministic resource cleanup
+ * 5. Tracking the number of active subscribers via atomic operations
  *
  * This class serves as a foundational layer for both entity-level reactivity (property changes)
  * and collection-level reactivity (CRUD operations) within the reactive architecture.
@@ -110,6 +113,9 @@ data class PublisherConfig(
  * - Support for both traditional subscribers and modern flow collectors
  * - Coroutine-based asynchronous event processing
  * - Selective event publishing based on event type activation
+ * - Lifecycle management via [close]/[isClosed] — a closed publisher rejects new operations
+ * - Subscriber count visibility via [subscriberCount]
+ * - Optional self-close when all subscribers cancel via [closeOnEmpty]
  *
  * @param E The specific type of [TransEvent] this publisher will emit
  *
@@ -119,14 +125,13 @@ data class PublisherConfig(
 class FlowEventPublisher<ET : EventType, E: TransEvent<ET>>
     @JvmOverloads
     constructor(
-        id: String,
+        private val id: String,
         // SharedFlow for entity change events with sufficient buffer and SUSPEND policy to ensure no events are lost
-        config: PublisherConfig = PublisherConfig.DEFAULT
+        config: PublisherConfig = PublisherConfig.DEFAULT,
+        private val closeOnEmpty: Boolean = false
     ): TransEventPublisher<ET, E> {
 
         private val log = KotlinLogging.logger {}
-
-        private val name: String = "FlowEventPublisher-$id"
 
         /**
          * Channel for processing events with unlimited buffer capacity.
@@ -150,8 +155,17 @@ class FlowEventPublisher<ET : EventType, E: TransEvent<ET>>
 
         private var activatedEventTypes: MutableSet<EventType> = ConcurrentSkipListSet()
 
+        @Volatile
+        private var closed = false
+
+        override val isClosed: Boolean get() = closed
+
+        private val _subscriberCount = AtomicInteger(0)
+
+        override val subscriberCount: Int get() = _subscriberCount.get()
+
         init {
-            log.trace { "FlowEventPublisher created: $name" }
+            log.trace { "FlowEventPublisher created: $id" }
 
             // Create a single persistent coroutine to handle all emissions for a fire and forget approach
             flowScope.launch {
@@ -165,7 +179,15 @@ class FlowEventPublisher<ET : EventType, E: TransEvent<ET>>
             }
         }
 
+        override fun close() {
+            if (closed) return
+            closed = true
+            eventChannel.close()
+            log.trace { "$this closed" }
+        }
+
         override fun emitAsync(event: E) {
+            check(!isClosed) { "Publisher '$id' is closed" }
             if (event.type in activatedEventTypes) {
                 // Use trySend so we don't block the caller
                 // If the channel is full, this will return the closed/failed result
@@ -181,7 +203,10 @@ class FlowEventPublisher<ET : EventType, E: TransEvent<ET>>
          * Consider migrating to the Kotlin Flow-based subscription method instead.
          */
         override fun subscribe(subscriber: Flow.Subscriber<in E>) {
+            check(!isClosed) { "Publisher '$id' is closed" }
             log.trace { "Subscription registered to $subscriber" }
+
+            _subscriberCount.incrementAndGet()
 
             val job =
                 flowScope.launch {
@@ -189,6 +214,11 @@ class FlowEventPublisher<ET : EventType, E: TransEvent<ET>>
                         subscriber.onNext(event)
                     }
                 }
+
+            job.invokeOnCompletion {
+                _subscriberCount.decrementAndGet()
+                if (_subscriberCount.get() == 0 && closeOnEmpty) close()
+            }
 
             subscriber.onSubscribe(ReactiveSubscription<TransEntity>(this, job))
         }
@@ -200,7 +230,10 @@ class FlowEventPublisher<ET : EventType, E: TransEvent<ET>>
          * @return A subscription that can be used to unsubscribe
          */
         override fun subscribe(action: suspend (E) -> Unit): TransEventSubscription<in TransEntity, ET, E> {
-            log.trace { "Anonymous subscription registered to $name" }
+            check(!isClosed) { "Publisher '$id' is closed" }
+            log.trace { "Anonymous subscription registered to $id" }
+
+            _subscriberCount.incrementAndGet()
 
             // Each subscription requires its own collection coroutine to handle events independently
             // This is a deliberate design pattern for reactive subscriptions
@@ -211,11 +244,20 @@ class FlowEventPublisher<ET : EventType, E: TransEvent<ET>>
                         action(event)
                     }
                 }
+
+            job.invokeOnCompletion {
+                _subscriberCount.decrementAndGet()
+                if (_subscriberCount.get() == 0 && closeOnEmpty) close()
+            }
+
             return ReactiveSubscription(this, job)
         }
 
         override fun subscribe(vararg eventTypes: ET, action: suspend (E) -> Unit): TransEventSubscription<in TransEntity, ET, E> {
-            log.trace { "Subscription registered to $name for event types: ${eventTypes.joinToString()}" }
+            check(!isClosed) { "Publisher '$id' is closed" }
+            log.trace { "Subscription registered to $id for event types: ${eventTypes.joinToString()}" }
+
+            _subscriberCount.incrementAndGet()
 
             // Each subscription requires its own collection coroutine to handle events independently
             // This is a deliberate design pattern for reactive subscriptions
@@ -228,24 +270,30 @@ class FlowEventPublisher<ET : EventType, E: TransEvent<ET>>
                         }
                     }
                 }
+
+            job.invokeOnCompletion {
+                _subscriberCount.decrementAndGet()
+                if (_subscriberCount.get() == 0 && closeOnEmpty) close()
+            }
+
             return ReactiveSubscription(this, job)
         }
 
         override fun disableEvents(vararg types: ET) {
             types.toSet().let {
                 activatedEventTypes.removeAll(it)
-                log.trace { "Enabled event types from $name: $activatedEventTypes" }
+                log.trace { "Enabled event types from $id: $activatedEventTypes" }
             }
         }
 
         override fun activateEvents(vararg types: ET) {
             types.toSet().let {
                 activatedEventTypes.addAll(it)
-                log.trace { "Enabled event types from $name: $activatedEventTypes" }
+                log.trace { "Enabled event types from $id: $activatedEventTypes" }
             }
         }
 
-        override fun toString() = "FlowEventPublisher(id=$name, activatedEventTypes=$activatedEventTypes)"
+        override fun toString() = "FlowEventPublisher(id=$id, activatedEventTypes=$activatedEventTypes)"
 
         inner class ReactiveSubscription<T: TransEntity>(override val source: TransEventPublisher<ET, E>, private val job: Job)
         : TransEventSubscription<T, ET, E> {
