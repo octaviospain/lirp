@@ -229,8 +229,10 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
             super.remove(entity).also { removed ->
                 if (removed) {
                     serializationEventChannel.trySend(Unit)
-                    subscriptionsMap[entity.id]?.cancel() ?: error("Repository should contain a subscription for $entity")
-                    subscriptionsMap.remove(entity.id)
+                    val subscription =
+                        subscriptionsMap.remove(entity.id)
+                            ?: error("Repository should contain a subscription for $entity")
+                    subscription.cancel()
                 }
             }
 
@@ -239,8 +241,10 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
                 if (removed) {
                     serializationEventChannel.trySend(Unit)
                     entities.forEach {
-                        subscriptionsMap[it.id]?.cancel() ?: error("Repository should contain a subscription for $it")
-                        subscriptionsMap.remove(it.id)
+                        val subscription =
+                            subscriptionsMap.remove(it.id)
+                                ?: error("Repository should contain a subscription for $it")
+                        subscription.cancel()
                     }
                 }
             }
