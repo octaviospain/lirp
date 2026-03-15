@@ -37,6 +37,7 @@ import java.util.function.Consumer
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -653,6 +654,48 @@ class FlowEventPublisherTest : DescribeSpec({
             lateSubscriberEvents.last().entities.values.first().id shouldBe newEntity.id
 
             lateSubscription.cancel()
+        }
+    }
+
+    describe("PublisherConfig channelCapacity") {
+        it("DEFAULT config uses Channel.UNLIMITED for channelCapacity") {
+            PublisherConfig.DEFAULT.channelCapacity shouldBe Channel.UNLIMITED
+        }
+
+        it("REAL_TIME config uses bounded channelCapacity of 64") {
+            PublisherConfig.REAL_TIME.channelCapacity shouldBe 64
+        }
+
+        it("LOW_MEMORY config uses bounded channelCapacity of 128") {
+            PublisherConfig.LOW_MEMORY.channelCapacity shouldBe 128
+        }
+
+        it("custom channelCapacity is applied to PublisherConfig") {
+            val config = PublisherConfig(channelCapacity = 32)
+            config.channelCapacity shouldBe 32
+        }
+
+        it("FlowEventPublisher with bounded channel accepts events up to capacity") {
+            val publisher =
+                FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>(
+                    "BoundedPublisher",
+                    PublisherConfig(channelCapacity = 4)
+                ).apply {
+                    activateEvents(CREATE)
+                }
+
+            val receivedEvents = mutableListOf<CrudEvent<String, TestEntity>>()
+            val subscription = publisher.subscribe { receivedEvents.add(it) }
+
+            repeat(4) { i ->
+                publisher.emitAsync(Create(TestEntity("entity-$i")))
+            }
+
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            receivedEvents.size shouldBe 4
+
+            subscription.cancel()
         }
     }
 
