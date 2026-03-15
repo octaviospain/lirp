@@ -32,7 +32,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
- * Configuration for FlowEventPublisher behavior.
+ * Configuration for [FlowEventPublisher] behavior.
  *
  * The defaults are suitable for most use cases. Only modify these if you
  * understand the implications.
@@ -45,11 +45,16 @@ import kotlinx.coroutines.launch
  *   - SUSPEND (default): Emitter waits - guarantees delivery but can slow producers
  *   - DROP_OLDEST: Drops old events - never blocks but may lose events
  *   - DROP_LATEST: Drops new events - never blocks but may lose events
+ * @property channelCapacity Capacity of the internal event channel that buffers events before they
+ *   reach the SharedFlow. Defaults to [Channel.UNLIMITED].
+ *   Use a bounded value (e.g., 64 or 128) to cap memory usage under sustained high-frequency
+ *   mutations with slow subscribers.
  */
 data class PublisherConfig(
     val replay: Int = 0,
     val extraBufferCapacity: Int = 5120,
-    val onBufferOverflow: BufferOverflow = BufferOverflow.SUSPEND
+    val onBufferOverflow: BufferOverflow = BufferOverflow.SUSPEND,
+    val channelCapacity: Int = Channel.UNLIMITED
 ) {
     init {
         require(replay >= 0) { "replay must be non-negative" }
@@ -68,7 +73,8 @@ data class PublisherConfig(
             PublisherConfig(
                 replay = 0,
                 extraBufferCapacity = 64,
-                onBufferOverflow = BufferOverflow.DROP_OLDEST
+                onBufferOverflow = BufferOverflow.DROP_OLDEST,
+                channelCapacity = 64
             )
 
         /**
@@ -79,7 +85,8 @@ data class PublisherConfig(
             PublisherConfig(
                 replay = 0,
                 extraBufferCapacity = 128,
-                onBufferOverflow = BufferOverflow.SUSPEND
+                onBufferOverflow = BufferOverflow.SUSPEND,
+                channelCapacity = 128
             )
 
         /**
@@ -127,22 +134,20 @@ class FlowEventPublisher<ET : EventType, E: TransEvent<ET>>
     constructor(
         private val id: String,
         // SharedFlow for entity change events with sufficient buffer and SUSPEND policy to ensure no events are lost
-        config: PublisherConfig = PublisherConfig.DEFAULT,
+        private val config: PublisherConfig = PublisherConfig.DEFAULT,
         private val closeOnEmpty: Boolean = false
     ): TransEventPublisher<ET, E> {
 
         private val log = KotlinLogging.logger {}
 
         /**
-         * Channel for processing events with unlimited buffer capacity.
+         * Channel for processing events with configurable buffer capacity.
          *
-         * This unlimited buffer ensures that events are never dropped during high-traffic
-         * periods or bursts of activity. When the processing rate catches up after a burst,
-         * the memory used by processed events becomes eligible for garbage collection.
-         *
-         * This approach prioritizes reliable event delivery over fixed memory constraints.
+         * The capacity is determined by [PublisherConfig.channelCapacity], defaulting to
+         * [Channel.UNLIMITED]. Use a bounded capacity to cap
+         * memory usage under sustained high-frequency mutations with slow subscribers.
          */
-        private val eventChannel = Channel<E>(Channel.UNLIMITED)
+        private val eventChannel = Channel<E>(config.channelCapacity)
 
         private val changesFlow = MutableSharedFlow<E>(config.replay, config.extraBufferCapacity, config.onBufferOverflow)
 
@@ -193,7 +198,7 @@ class FlowEventPublisher<ET : EventType, E: TransEvent<ET>>
                 // If the channel is full, this will return the closed/failed result
                 val result = eventChannel.trySend(event)
                 if (!result.isSuccess) {
-                    log.warn { "Could not send event to channel, buffer full or closed: $event" }
+                    log.warn { "Failed to send event to channel (capacity=${config.channelCapacity}): $event" }
                 }
             }
         }
