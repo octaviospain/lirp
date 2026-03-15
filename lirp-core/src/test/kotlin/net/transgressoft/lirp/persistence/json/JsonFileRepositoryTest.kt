@@ -675,6 +675,85 @@ class JsonFileRepositoryTest : DescribeSpec({
         }
     }
 
+    describe("Subscription cleanup") {
+        // Navigates through the delegation chain: PersonJsonFileRepository ->
+        // HumanGenericJsonFileRepositoryBase -> JsonFileRepository -> subscriptionsMap
+        fun getSubscriptionsMap(repo: PersonJsonFileRepository): MutableMap<Int, *> {
+            val delegateField =
+                repo.javaClass.superclass
+                    .getDeclaredField("repository")
+                    .also { it.isAccessible = true }
+            val jsonFileRepository = delegateField.get(repo)
+            val subscriptionsMapField =
+                jsonFileRepository.javaClass
+                    .getDeclaredField("subscriptionsMap")
+                    .also { it.isAccessible = true }
+            @Suppress("UNCHECKED_CAST")
+            return subscriptionsMapField.get(jsonFileRepository) as MutableMap<Int, *>
+        }
+
+        it("remove() atomically removes subscription from map before cancelling") {
+            val person = arbitraryPerson(1).next()
+            repository.add(person)
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            val subscriptionsMap = getSubscriptionsMap(repository)
+            subscriptionsMap.containsKey(person.id) shouldBe true
+
+            repository.remove(person) shouldBe true
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            repository.findById(person.id).isEmpty shouldBe true
+            subscriptionsMap.containsKey(person.id) shouldBe false
+        }
+
+        it("remove() throws IllegalStateException when subscription is missing from map") {
+            val person = arbitraryPerson(1).next()
+            repository.add(person)
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            val subscriptionsMap = getSubscriptionsMap(repository)
+            subscriptionsMap.remove(person.id)
+
+            shouldThrow<IllegalStateException> {
+                repository.remove(person)
+            }
+        }
+
+        it("removeAll() atomically removes subscriptions from map before cancelling") {
+            val person1 = arbitraryPerson(1).next()
+            val person2 = arbitraryPerson(2).next()
+            repository.add(person1)
+            repository.add(person2)
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            val subscriptionsMap = getSubscriptionsMap(repository)
+            subscriptionsMap.containsKey(person1.id) shouldBe true
+            subscriptionsMap.containsKey(person2.id) shouldBe true
+
+            repository.removeAll(listOf(person1, person2)) shouldBe true
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            repository.findById(person1.id).isEmpty shouldBe true
+            repository.findById(person2.id).isEmpty shouldBe true
+            subscriptionsMap.containsKey(person1.id) shouldBe false
+            subscriptionsMap.containsKey(person2.id) shouldBe false
+        }
+
+        it("removeAll() throws IllegalStateException when subscription is missing from map") {
+            val person = arbitraryPerson(1).next()
+            repository.add(person)
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            val subscriptionsMap = getSubscriptionsMap(repository)
+            subscriptionsMap.remove(person.id)
+
+            shouldThrow<IllegalStateException> {
+                repository.removeAll(listOf(person))
+            }
+        }
+    }
+
     describe("custom serialization delay") {
         it("uses the configured delay instead of the default") {
             val customDelayFile = tempfile("custom-delay-test", ".json").also { it.deleteOnExit() }
