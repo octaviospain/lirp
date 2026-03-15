@@ -58,7 +58,7 @@ sonar {
     properties {
         property 'sonar.host.url', 'https://sonarcloud.io'
         property 'sonar.organization', 'transgressoft'
-        property 'sonar.projectKey', 'net.transgressoft:lirp'
+        property 'sonar.projectKey', 'octaviospain_lirp'
         property 'sonar.projectName', 'lirp'
         property 'sonar.projectVersion', version
         property 'sonar.junit.reportPaths', 'build/test-results/test'
@@ -135,10 +135,12 @@ subprojects {
 
     jacocoTestReport {
         reports {
-            xml.required.set true
+            xml.required = true
             html.required = true
         }
     }
+
+    check.dependsOn jacocoTestReport
 
     mavenPublishing {
         publishToMavenCentral()
