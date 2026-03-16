@@ -2,10 +2,12 @@ package net.transgressoft.lirp.persistence.json
 
 import io.kotest.assertions.json.shouldEqualJson
 import io.kotest.assertions.nondeterministic.eventually
+import io.kotest.assertions.throwables.shouldThrowExactly
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.engine.spec.tempfile
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import java.io.File
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -105,5 +107,41 @@ class FlexibleJsonFileRepositoryTest : StringSpec({
                 }"""
             )
         }
+    }
+
+    "FlexibleJsonFileRepository getReactiveString throws IllegalStateException when existing entry is ReactiveInt" {
+        repository.getReactiveInt("myId", 42)
+
+        val exception =
+            shouldThrowExactly<IllegalStateException> {
+                repository.getReactiveString("myId")
+            }
+        exception.message shouldContain "myId"
+        exception.message shouldContain "ReactiveString"
+        exception.message shouldContain "ReactiveInt"
+    }
+
+    "FlexibleJsonFileRepository getReactiveBoolean throws IllegalStateException when existing entry is ReactiveString" {
+        repository.getReactiveString("myId", "hello")
+
+        val exception =
+            shouldThrowExactly<IllegalStateException> {
+                repository.getReactiveBoolean("myId")
+            }
+        exception.message shouldContain "myId"
+        exception.message shouldContain "ReactiveBoolean"
+        exception.message shouldContain "ReactiveString"
+    }
+
+    "FlexibleJsonFileRepository getReactiveInt throws IllegalStateException when existing entry is ReactiveBoolean" {
+        repository.getReactiveBoolean("myId", true)
+
+        val exception =
+            shouldThrowExactly<IllegalStateException> {
+                repository.getReactiveInt("myId")
+            }
+        exception.message shouldContain "myId"
+        exception.message shouldContain "ReactiveInt"
+        exception.message shouldContain "ReactiveBoolean"
     }
 })
