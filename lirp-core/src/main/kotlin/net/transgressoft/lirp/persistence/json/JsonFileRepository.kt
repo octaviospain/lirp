@@ -28,6 +28,7 @@ import mu.KotlinLogging
 import java.io.File
 import java.util.Objects
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineScope
@@ -82,7 +83,7 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
                     "Provided jsonFile does not exist, is not writable, is not a json file, or is not empty"
                 }
                 field = value
-                serializationEventChannel.trySend(Unit)
+                markDirtyAndTrigger()
                 log.info { "jsonFile set to $value" }
             }
 
@@ -122,6 +123,8 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
          */
         private val subscriptionsMap: MutableMap<K, TransEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>> = ConcurrentHashMap()
 
+        private val dirty = AtomicBoolean(false)
+
         init {
             require(jsonFile.exists().and(jsonFile.canWrite()).and(jsonFile.extension == "json")) {
                 "Provided jsonFile does not exist, is not writable or is not a json file"
@@ -143,18 +146,25 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
             decodeFromJson()?.let { loadedEntities ->
                 log.info { "${loadedEntities.size} objects deserialized from file $jsonFile" }
 
-                addOrReplaceAll(loadedEntities.values.toSet())
+                // Bypass this class's override to avoid marking dirty during disk load
+                super.addOrReplaceAll(loadedEntities.values.toSet())
 
-                // Create subscriptions for loaded entities
                 flowScope.launch {
-                    runForAll { entity ->
-                        val subscription = entity.subscribe { serializationEventChannel.trySend(Unit) }
-                        subscriptionsMap[entity.id] = subscription
-                    }
+                    runForAll { entity -> subscribeEntity(entity) }
                 }
             }
 
             activateEvents(CREATE, UPDATE)
+        }
+
+        private fun subscribeEntity(entity: R) {
+            val subscription = entity.subscribe { markDirtyAndTrigger() }
+            subscriptionsMap[entity.id] = subscription
+        }
+
+        private fun markDirtyAndTrigger() {
+            dirty.set(true)
+            serializationEventChannel.trySend(Unit)
         }
 
         @OptIn(FlowPreview::class)
@@ -168,15 +178,19 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
             }
 
         private suspend fun performSerialization() {
+            if (!dirty.compareAndSet(true, false)) {
+                log.debug { "Skipping serialization, no changes since last write" }
+                return
+            }
             try {
                 val jsonString = json.encodeToString(mapSerializer, entitiesById)
 
-                // Limit serialization to one concurrent operation
                 withContext(ioScope.coroutineContext) {
                     jsonFile.writeText(jsonString)
                 }
                 log.debug { "File updated: $jsonFile" }
             } catch (exception: Exception) {
+                dirty.set(true)
                 log.error(exception) { "Error serializing to file $jsonFile" }
             }
         }
@@ -199,36 +213,31 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
         override fun add(entity: R) =
             super.add(entity).also { added ->
                 if (added) {
-                    serializationEventChannel.trySend(Unit)
-                    val subscription = entity.subscribe { serializationEventChannel.trySend(Unit) }
-                    subscriptionsMap[entity.id] = subscription
+                    markDirtyAndTrigger()
+                    subscribeEntity(entity)
                 }
             }
 
         override fun addOrReplace(entity: R) =
             super.addOrReplace(entity).also { added ->
                 if (added) {
-                    serializationEventChannel.trySend(Unit)
-                    val subscription = entity.subscribe { serializationEventChannel.trySend(Unit) }
-                    subscriptionsMap[entity.id] = subscription
+                    markDirtyAndTrigger()
+                    subscribeEntity(entity)
                 }
             }
 
         override fun addOrReplaceAll(entities: Set<R>) =
             super.addOrReplaceAll(entities).also { added ->
                 if (added) {
-                    serializationEventChannel.trySend(Unit)
-                    entities.forEach { entity ->
-                        val subscription = entity.subscribe { serializationEventChannel.trySend(Unit) }
-                        subscriptionsMap[entity.id] = subscription
-                    }
+                    markDirtyAndTrigger()
+                    entities.forEach { entity -> subscribeEntity(entity) }
                 }
             }
 
         override fun remove(entity: R) =
             super.remove(entity).also { removed ->
                 if (removed) {
-                    serializationEventChannel.trySend(Unit)
+                    markDirtyAndTrigger()
                     val subscription =
                         subscriptionsMap.remove(entity.id)
                             ?: error("Repository should contain a subscription for $entity")
@@ -239,7 +248,7 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
         override fun removeAll(entities: Collection<R>) =
             super.removeAll(entities).also { removed ->
                 if (removed) {
-                    serializationEventChannel.trySend(Unit)
+                    markDirtyAndTrigger()
                     entities.forEach {
                         val subscription =
                             subscriptionsMap.remove(it.id)
@@ -251,7 +260,7 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
 
         override fun clear() {
             super.clear()
-            serializationEventChannel.trySend(Unit)
+            markDirtyAndTrigger()
             subscriptionsMap.forEach { (_, subscription) ->
                 subscription.cancel()
             }
