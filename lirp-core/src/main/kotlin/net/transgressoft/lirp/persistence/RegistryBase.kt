@@ -26,6 +26,7 @@ import net.transgressoft.lirp.event.StandardCrudEvent.Update
 import net.transgressoft.lirp.event.TransEventPublisher
 import mu.KotlinLogging
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 import java.util.function.Consumer
 import java.util.function.Predicate
 import java.util.stream.Collectors
@@ -42,16 +43,23 @@ import java.util.stream.Collectors
  * - Run actions on entities that automatically detect and publish changes
  * - Rich query capabilities with predicate-based searches
  * - Event publishing for entity reads and modifications
- * - Thread-safe operation
+ * - Thread-safe operation under concurrent access when backed by a [ConcurrentHashMap]
+ *
+ * Thread-safety: the default [entitiesById] is a [ConcurrentHashMap], which makes individual
+ * get/put/remove/computeIfPresent operations atomic. Batch methods such as [runForMany],
+ * [runMatching], and [runForAll] operate on weakly-consistent views of the map — they will
+ * not throw [java.util.ConcurrentModificationException] under concurrent modification, but
+ * may or may not reflect entries added or removed after iteration starts.
  *
  * @param K The type of entity identifier, must be [Comparable]
  * @param T The type of entity being stored, must implement [IdentifiableEntity]
- * @property entitiesById The internal map storing entities by their IDs
+ * @property entitiesById The internal map storing entities by their IDs. Must be a thread-safe
+ *   map (e.g. [ConcurrentHashMap]) for safe concurrent access.
  *
  * @see [net.transgressoft.lirp.event.TransEventSubscriber]
  */
 abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
-    protected val entitiesById: MutableMap<K, T> = hashMapOf(),
+    protected val entitiesById: MutableMap<K, T> = ConcurrentHashMap(),
     protected val publisher: TransEventPublisher<CrudEvent.Type, CrudEvent<K, T>> = FlowEventPublisher("Registry")
 ) : TransEventPublisher<CrudEvent.Type, CrudEvent<K, T>> by publisher,
     Registry<K, T> where K : Comparable<K> {

@@ -26,6 +26,7 @@ import net.transgressoft.lirp.event.StandardCrudEvent.Delete
 import net.transgressoft.lirp.event.StandardCrudEvent.Update
 import mu.KotlinLogging
 import java.util.Objects
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Base class for mutable entity repositories with reactive behavior.
@@ -57,7 +58,7 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
     @JvmOverloads
     constructor(
         name: String = "Repository",
-        initialEntities: MutableMap<K, T> = hashMapOf()
+        initialEntities: MutableMap<K, T> = ConcurrentHashMap()
     ) : RegistryBase<K, T>(initialEntities, FlowEventPublisher(name)), Repository<K, T> {
         private val log = KotlinLogging.logger(javaClass.name)
 
