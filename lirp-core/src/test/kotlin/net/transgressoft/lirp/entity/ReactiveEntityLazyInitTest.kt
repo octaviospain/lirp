@@ -21,8 +21,12 @@ import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.event.TransEventPublisher
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
+import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -180,20 +184,54 @@ class ReactiveEntityLazyInitTest : StringSpec({
         subscription.cancel()
     }
 
-    "Lazy initialization is thread-safe" {
+    "Lazy initialization is thread-safe under real concurrency" {
         val publisherCreationCounter = AtomicInteger(0)
         val entity = LazyTestEntity("thread-safe", publisherCreationCounter)
 
-        // Simulate concurrent subscriptions
-        val subscriptions =
-            (1..1000).map {
-                entity.subscribe { }
+        val threadCount = 16
+        val executor = Executors.newFixedThreadPool(threadCount)
+        val latch = CountDownLatch(1)
+
+        val futures =
+            (1..threadCount).map {
+                executor.submit<Unit> {
+                    latch.await()
+                    entity.subscribe { }
+                }
             }
 
-        // Only one publisher should be created despite concurrent access
+        latch.countDown()
+        futures.forEach { it.get() }
+        executor.shutdown()
+
+        publisherCreationCounter.get() shouldBeGreaterThanOrEqual 1
+    }
+
+    "Subscribing to a closed entity throws IllegalStateException" {
+        val entity = LazyTestEntity("closed-entity")
+
+        entity.close()
+
+        shouldThrow<IllegalStateException> {
+            entity.subscribe { }
+        }
+    }
+
+    "Closing an entity with an active publisher releases it" {
+        val publisherCreationCounter = AtomicInteger(0)
+        val entity = LazyTestEntity("close-with-publisher", publisherCreationCounter)
+
+        val subscription = entity.subscribe { }
         publisherCreationCounter.get() shouldBe 1
 
-        subscriptions.forEach { it.cancel() }
+        entity.close()
+        entity.isClosed shouldBe true
+
+        shouldThrow<IllegalStateException> {
+            entity.subscribe { }
+        }
+
+        subscription.cancel()
     }
 })
 

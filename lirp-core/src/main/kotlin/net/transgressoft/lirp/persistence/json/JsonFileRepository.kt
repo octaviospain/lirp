@@ -53,7 +53,7 @@ import kotlinx.serialization.modules.SerializersModule
  * Key features:
  * - Asynchronous JSON serialization using debouncing to optimize I/O operations
  * - Automatic persistence of all repository operations
- * - Thread-safe operations using ConcurrentHashMap by the upstream [Repository]
+ * - Thread-safe operations using ConcurrentHashMap by the upstream [net.transgressoft.lirp.persistence.Repository]
  * - Error handling with logging
  * - Subscription management for entity lifecycle
  *

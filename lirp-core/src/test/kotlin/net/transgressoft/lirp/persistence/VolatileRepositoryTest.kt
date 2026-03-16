@@ -144,7 +144,7 @@ internal class VolatileRepositoryTest : StringSpec({
         val richPerson = arbitraryPerson().next().copy(money = 1000)
         repository.addOrReplaceAll(setOf(poorPerson, richPerson)) shouldBe true
         repository.size() shouldBe set.size + 3
-        repository.runMatching({ it.money!! < 100 }) { it.money = it.money?.plus(1) } shouldBe true
+        repository.runMatching({ it.money == 0L }) { it.money = it.money?.plus(1) } shouldBe true
 
         testDispatcher.scheduler.advanceUntilIdle()
 

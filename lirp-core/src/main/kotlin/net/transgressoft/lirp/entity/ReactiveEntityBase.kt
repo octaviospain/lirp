@@ -26,6 +26,7 @@ import net.transgressoft.lirp.event.TransEventSubscription
 import mu.KotlinLogging
 import java.time.LocalDateTime
 import java.util.concurrent.Flow
+import java.util.concurrent.atomic.AtomicReference
 import java.util.function.Consumer
 import kotlinx.coroutines.flow.SharedFlow
 
@@ -37,10 +38,10 @@ import kotlinx.coroutines.flow.SharedFlow
  * When properties of the entity change, all subscribers are automatically notified with both the updated
  * entity state and the previous state.
  *
- * This implementation uses lazy initialization for the event publisher - the publisher infrastructure
- * (channels, flows, and coroutines) is only created when the first subscriber registers. This significantly
- * reduces memory overhead for entities that are never observed, which is especially beneficial in applications
- * with thousands of reactive entities.
+ * This implementation uses lock-free lazy initialization for the event publisher via AtomicReference CAS -
+ * the publisher infrastructure (channels, flows, and coroutines) is only created when the first subscriber
+ * registers. This significantly reduces memory overhead for entities that are never observed, which is
+ * especially beneficial in applications with thousands of reactive entities.
  *
  * Lifecycle states:
  * - **Created**: No publisher allocated; zero overhead.
@@ -72,27 +73,29 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
 
     /**
      * The lazily initialized publisher. Only created when the first subscriber registers.
+     * Uses AtomicReference for lock-free visibility and CAS-based initialization.
      */
-    @Volatile
-    private var _publisher: TransEventPublisher<MutationEvent.Type, MutationEvent<K, R>>? = null
+    private val publisherRef = AtomicReference<TransEventPublisher<MutationEvent.Type, MutationEvent<K, R>>?>(null)
 
     /**
-     * Gets the publisher, creating it lazily if needed. Thread-safe using double-checked locking.
+     * Gets the publisher, creating it lazily if needed. Thread-safe using AtomicReference CAS loop.
      * Detects a closed (dormant) publisher and recreates it transparently.
+     * If two threads race to initialize, the loser closes its duplicate and retries — only one survives.
      * Throws [IllegalStateException] if the entity is permanently closed.
      */
     private val publisher: TransEventPublisher<MutationEvent.Type, MutationEvent<K, R>>
         get() {
-            val p = _publisher
-            if (p != null && !p.isClosed) return p
-            return synchronized(this) {
-                val p2 = _publisher
-                if (p2 != null && !p2.isClosed) return@synchronized p2
+            while (true) {
+                val current = publisherRef.get()
+                if (current != null && !current.isClosed) return current
                 check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
-                publisherFactory(this::class.java.simpleName).also {
-                    it.activateEvents(MUTATE)
-                    _publisher = it
+                val newPublisher = publisherFactory(this::class.java.simpleName)
+                newPublisher.activateEvents(MUTATE)
+                if (publisherRef.compareAndSet(current, newPublisher)) {
+                    return newPublisher
                 }
+                // CAS failed — another thread won the race; discard our duplicate and retry
+                newPublisher.close()
             }
         }
 
@@ -107,7 +110,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
      * we cannot determine if remote consumers exist.
      */
     private val shouldEmit: Boolean
-        get() = _publisher?.let { !it.isClosed } ?: false
+        get() = publisherRef.get()?.let { !it.isClosed } ?: false
 
     /**
      * The timestamp when this entity was last modified.
@@ -136,8 +139,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     override fun close() {
         if (closed) return
         closed = true
-        _publisher?.close()
-        _publisher = null
+        publisherRef.getAndSet(null)?.close()
     }
 
     override fun emitAsync(event: MutationEvent<K, R>) {
