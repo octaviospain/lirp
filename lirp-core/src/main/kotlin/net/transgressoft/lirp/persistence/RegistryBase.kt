@@ -29,7 +29,6 @@ import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.function.Consumer
 import java.util.function.Predicate
-import java.util.stream.Collectors
 
 /**
  * Base class for read-only entity registries with reactive query capabilities.
@@ -141,14 +140,12 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
     override fun contains(id: K) = entitiesById.containsKey(id)
 
     override fun contains(predicate: Predicate<in T>): Boolean =
-        entitiesById.values.stream()
-            .filter { predicate.test(it) }
-            .findAny().isPresent
+        entitiesById.values.asSequence().any { predicate.test(it) }
 
     override fun search(predicate: Predicate<in T>): Set<T> =
-        entitiesById.values.stream()
+        entitiesById.values.asSequence()
             .filter { predicate.test(it) }
-            .collect(Collectors.toSet())
+            .toSet()
             .also { publisher.emitAsync(Read(it)) }
 
     override fun search(size: Int, predicate: Predicate<in T>): Set<T> =
@@ -173,9 +170,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
             }
 
     override fun findByUniqueId(uniqueId: String): Optional<out T> =
-        entitiesById.values.stream()
-            .filter { it.uniqueId == uniqueId }
-            .findAny()
+        Optional.ofNullable(entitiesById.values.asSequence().firstOrNull { it.uniqueId == uniqueId })
             .also {
                 if (it.isPresent)
                     publisher.emitAsync(Read(it.get()))
