@@ -18,9 +18,9 @@
 package net.transgressoft.lirp.entity
 
 import net.transgressoft.lirp.event.FlowEventPublisher
+import net.transgressoft.lirp.event.LirpEventPublisher
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.event.TransEventPublisher
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
@@ -281,7 +281,7 @@ class LazyTestEntity(
  */
 class CustomPublisherEntity(
     override val id: String,
-    publisherFactory: (String) -> TransEventPublisher<MutationEvent.Type, MutationEvent<String, CustomPublisherEntity>>
+    publisherFactory: (String) -> LirpEventPublisher<MutationEvent.Type, MutationEvent<String, CustomPublisherEntity>>
 ) : ReactiveEntityBase<String, CustomPublisherEntity>(publisherFactory) {
 
     override val uniqueId: String

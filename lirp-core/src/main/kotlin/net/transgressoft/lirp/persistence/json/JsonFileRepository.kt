@@ -20,9 +20,9 @@ package net.transgressoft.lirp.persistence.json
 import net.transgressoft.lirp.entity.ReactiveEntity
 import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
 import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
+import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.event.TransEventSubscription
 import net.transgressoft.lirp.persistence.VolatileRepository
 import mu.KotlinLogging
 import java.io.File
@@ -121,7 +121,7 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
          * Subscriptions map for each entity in the repository are needed to unsubscribe
          * from their changes once they are removed.
          */
-        private val subscriptionsMap: MutableMap<K, TransEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>> = ConcurrentHashMap()
+        private val subscriptionsMap: MutableMap<K, LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>> = ConcurrentHashMap()
 
         private val dirty = AtomicBoolean(false)
 

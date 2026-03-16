@@ -19,7 +19,7 @@ package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.CrudEvent
-import net.transgressoft.lirp.event.TransEventPublisher
+import net.transgressoft.lirp.event.LirpEventPublisher
 import java.util.*
 import java.util.function.Consumer
 import java.util.function.Predicate
@@ -34,7 +34,7 @@ import java.util.function.Predicate
  * @param K The type of the entity's identifier, which must be [Comparable]
  * @param T The type of entities in the registry, which must implement [IdentifiableEntity]
  */
-interface Registry<K, T: IdentifiableEntity<K>> : TransEventPublisher<CrudEvent.Type, CrudEvent<K, T>> where K : Comparable<K> {
+interface Registry<K, T: IdentifiableEntity<K>> : LirpEventPublisher<CrudEvent.Type, CrudEvent<K, T>> where K : Comparable<K> {
 
     /**
      * Applies the given action to the entity with the specified ID if present.

@@ -18,6 +18,6 @@
 package net.transgressoft.lirp.entity
 
 /**
- * Marker interface for entities used in the Transgressoft libraries.
+ * Marker interface for entities used by lirp library.
  */
-interface TransEntity
+interface LirpEntity

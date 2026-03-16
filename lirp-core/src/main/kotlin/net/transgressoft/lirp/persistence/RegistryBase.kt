@@ -21,9 +21,9 @@ import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
 import net.transgressoft.lirp.event.FlowEventPublisher
+import net.transgressoft.lirp.event.LirpEventPublisher
 import net.transgressoft.lirp.event.StandardCrudEvent.Read
 import net.transgressoft.lirp.event.StandardCrudEvent.Update
-import net.transgressoft.lirp.event.TransEventPublisher
 import mu.KotlinLogging
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
@@ -35,7 +35,7 @@ import java.util.function.Predicate
  *
  * `RegistryBase` provides the foundation for entity collections that can be searched and
  * queried, with changes tracked and published to subscribers. It follows a reactive approach
- * by implementing [TransEventPublisher], notifying subscribers of read operations
+ * by implementing [LirpEventPublisher], notifying subscribers of read operations
  * and entity changes.
  *
  * Key features:
@@ -55,12 +55,12 @@ import java.util.function.Predicate
  * @property entitiesById The internal map storing entities by their IDs. Must be a thread-safe
  *   map (e.g. [ConcurrentHashMap]) for safe concurrent access.
  *
- * @see [net.transgressoft.lirp.event.TransEventSubscriber]
+ * @see [net.transgressoft.lirp.event.LirpEventSubscriber]
  */
 abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
     protected val entitiesById: MutableMap<K, T> = ConcurrentHashMap(),
-    protected val publisher: TransEventPublisher<CrudEvent.Type, CrudEvent<K, T>> = FlowEventPublisher("Registry")
-) : TransEventPublisher<CrudEvent.Type, CrudEvent<K, T>> by publisher,
+    protected val publisher: LirpEventPublisher<CrudEvent.Type, CrudEvent<K, T>> = FlowEventPublisher("Registry")
+) : LirpEventPublisher<CrudEvent.Type, CrudEvent<K, T>> by publisher,
     Registry<K, T> where K : Comparable<K> {
     private val log = KotlinLogging.logger(javaClass.name)
 

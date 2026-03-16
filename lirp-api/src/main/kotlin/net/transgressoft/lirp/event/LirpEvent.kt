@@ -20,11 +20,11 @@ package net.transgressoft.lirp.event
 /**
  * An event that can be published and subscribed to within the reactive event system.
  *
- * TransEvent serves as the foundation for all events in the system, providing
+ * LirpEvent serves as the foundation for all events in the system, providing
  * a common interface that all specific event types must implement. This facilitates
  * a consistent approach to event handling, publishing, and subscription.
  */
-interface TransEvent<out T : EventType> {
+interface LirpEvent<out T : EventType> {
 
     /**
      * The type of this event, used to categorize and filter events.

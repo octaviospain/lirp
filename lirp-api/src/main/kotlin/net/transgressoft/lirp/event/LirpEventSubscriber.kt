@@ -17,31 +17,31 @@
 
 package net.transgressoft.lirp.event
 
-import net.transgressoft.lirp.entity.TransEntity
+import net.transgressoft.lirp.entity.LirpEntity
 import java.util.concurrent.Flow
 import java.util.function.Consumer
 
 /**
- * A subscriber to [TransEvent]s that implements the reactive streams [Flow.Subscriber] interface
+ * A subscriber to [LirpEvent]s that implements the reactive streams [Flow.Subscriber] interface
  * with additional capabilities for registering event-specific actions.
  *
  * This interface defines a subscriber that can react to different event types with
  * custom actions, providing a flexible way to respond to events in the system.
  *
  * @param T The type of entities contained in the events this subscriber processes
- * @param E The specific type of [TransEvent] this subscriber consumes
+ * @param E The specific type of [LirpEvent] this subscriber consumes
  *
- * @see [TransEventPublisher]
- * @see [TransEventSubscription]
+ * @see [LirpEventPublisher]
+ * @see [LirpEventSubscription]
  */
-interface TransEventSubscriber<T : TransEntity, ET: EventType, E : TransEvent<ET>> : Flow.Subscriber<E> {
+interface LirpEventSubscriber<T : LirpEntity, ET: EventType, E : LirpEvent<ET>> : Flow.Subscriber<E> {
 
     /**
      * Adds an action to be executed when [Flow.Subscriber.onSubscribe] is called.
      *
-     * @param action The action to be executed, providing the [TransEventSubscription] as parameter
+     * @param action The action to be executed, providing the [LirpEventSubscription] as parameter
      */
-    fun addOnSubscribeEventAction(action: Consumer<TransEventSubscription<T, ET, E>>)
+    fun addOnSubscribeEventAction(action: Consumer<LirpEventSubscription<T, ET, E>>)
 
     /**
      * Adds an action to be executed when [Flow.Subscriber.onNext] is called.

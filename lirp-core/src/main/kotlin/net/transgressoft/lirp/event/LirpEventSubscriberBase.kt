@@ -17,13 +17,13 @@
 
 package net.transgressoft.lirp.event
 
-import net.transgressoft.lirp.entity.TransEntity
+import net.transgressoft.lirp.entity.LirpEntity
 import mu.KotlinLogging
 import java.util.concurrent.Flow
 import java.util.function.Consumer
 
 /**
- * Base implementation of [TransEventSubscriber] that provides common functionality
+ * Base implementation of [LirpEventSubscriber] that provides common functionality
  * for all event subscribers in the system.
  *
  * This class manages collections of actions to be executed in response to different
@@ -31,22 +31,22 @@ import java.util.function.Consumer
  * while allowing concrete subclasses to focus on specific use cases.
  *
  * @param T The type of entities contained in the events this subscriber processes
- * @param E The specific type of [TransEvent] this subscriber consumes
+ * @param E The specific type of [LirpEvent] this subscriber consumes
  * @param name A descriptive name for this subscriber, used in logging and debugging
  *
- * @see [TransEventPublisher]
- * @see [TransEventSubscription]
+ * @see [LirpEventPublisher]
+ * @see [LirpEventSubscription]
  */
-abstract class TransEventSubscriberBase<T : TransEntity, ET: EventType, E : TransEvent<ET>>(protected val name: String) : TransEventSubscriber<T, ET, E> {
+abstract class LirpEventSubscriberBase<T : LirpEntity, ET: EventType, E : LirpEvent<ET>>(protected val name: String) : LirpEventSubscriber<T, ET, E> {
 
     private val log = KotlinLogging.logger {}
 
-    private val onSubscribeEventActions: MutableList<Consumer<TransEventSubscription<T, ET, E>>> = mutableListOf()
+    private val onSubscribeEventActions: MutableList<Consumer<LirpEventSubscription<T, ET, E>>> = mutableListOf()
     private val onNextEventActions: MutableMap<EventType, MutableList<Consumer<E>>> = mutableMapOf()
     private val onErrorEventActions: MutableList<Consumer<Throwable>> = mutableListOf()
     private val onCompleteEventActions: MutableList<Runnable> = mutableListOf()
 
-    protected var subscription: TransEventSubscription<T, ET, E>? = null
+    protected var subscription: LirpEventSubscription<T, ET, E>? = null
 
     init {
         addOnSubscribeEventAction {
@@ -55,7 +55,7 @@ abstract class TransEventSubscriberBase<T : TransEntity, ET: EventType, E : Tran
         }
     }
 
-    final override fun addOnSubscribeEventAction(action: Consumer<TransEventSubscription<T, ET, E>>) {
+    final override fun addOnSubscribeEventAction(action: Consumer<LirpEventSubscription<T, ET, E>>) {
         onSubscribeEventActions.add(action)
         log.trace { "onSubscribe event action added to $name" }
     }
@@ -91,8 +91,8 @@ abstract class TransEventSubscriberBase<T : TransEntity, ET: EventType, E : Tran
 
     @Suppress("UNCHECKED_CAST")
     final override fun onSubscribe(subscription: Flow.Subscription) {
-        if (subscription is TransEventSubscription<*, *, *>) {
-            subscription as TransEventSubscription<T, ET, E>
+        if (subscription is LirpEventSubscription<*, *, *>) {
+            subscription as LirpEventSubscription<T, ET, E>
             onSubscribeEventActions.forEach {
                 log.trace { "$name registered a subscription from ${subscription.source}" }
                 it.accept(subscription)

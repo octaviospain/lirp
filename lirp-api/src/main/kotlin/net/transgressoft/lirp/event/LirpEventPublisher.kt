@@ -17,13 +17,13 @@
 
 package net.transgressoft.lirp.event
 
-import net.transgressoft.lirp.entity.TransEntity
+import net.transgressoft.lirp.entity.LirpEntity
 import java.util.concurrent.Flow
 import java.util.function.Consumer
 import kotlinx.coroutines.flow.SharedFlow
 
 /**
- * A publisher of [TransEvent]s that implements the reactive streams [Flow.Publisher] interface
+ * A publisher of [LirpEvent]s that implements the reactive streams [Flow.Publisher] interface
  * and [AutoCloseable] for deterministic resource cleanup.
  *
  * This interface represents the source of events in the reactive stream, publishing
@@ -34,9 +34,9 @@ import kotlinx.coroutines.flow.SharedFlow
  * and event emissions. The [subscriberCount] property allows observing the number of active subscribers.
  *
  * @param ET The specific type of [EventType] associated with this publisher
- * @param E The specific type of [TransEvent] published by this publisher
+ * @param E The specific type of [LirpEvent] published by this publisher
  */
-interface TransEventPublisher<ET : EventType, out E : TransEvent<ET>> : Flow.Publisher<@UnsafeVariance E>, AutoCloseable {
+interface LirpEventPublisher<ET : EventType, out E : LirpEvent<ET>> : Flow.Publisher<@UnsafeVariance E>, AutoCloseable {
 
     /**
      * A flow of entity change events that collectors can observe.
@@ -63,15 +63,15 @@ interface TransEventPublisher<ET : EventType, out E : TransEvent<ET>> : Flow.Pub
      */
     fun emitAsync(event: @UnsafeVariance E)
 
-    fun subscribe(action: suspend (E) -> Unit): TransEventSubscription<in TransEntity, ET, @UnsafeVariance E>
+    fun subscribe(action: suspend (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, @UnsafeVariance E>
 
     /**
      * Legacy compatibility method for Java-style Consumer subscriptions.
      * Consider migrating to the Kotlin Flow-based subscription method instead.
      */
-    fun subscribe(action: Consumer<in E>): TransEventSubscription<in TransEntity, ET, @UnsafeVariance E> = subscribe(action::accept)
+    fun subscribe(action: Consumer<in E>): LirpEventSubscription<in LirpEntity, ET, @UnsafeVariance E> = subscribe(action::accept)
 
-    fun subscribe(vararg eventTypes: ET, action: suspend (E) -> Unit): TransEventSubscription<in TransEntity, ET, @UnsafeVariance E>
+    fun subscribe(vararg eventTypes: ET, action: suspend (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, @UnsafeVariance E>
 
     fun activateEvents(vararg types: @UnsafeVariance ET)
 

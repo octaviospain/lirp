@@ -17,8 +17,8 @@
 
 package net.transgressoft.lirp.entity
 
+import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.MutationEvent
-import net.transgressoft.lirp.event.TransEventSubscription
 import java.time.LocalDateTime
 import java.util.concurrent.Flow
 import java.util.function.Consumer
@@ -63,13 +63,13 @@ interface ReactiveEntity<K, R : ReactiveEntity<K, R>> :
      * Legacy compatibility method for Java-style Consumer subscriptions.
      * Consider migrating to the Kotlin Flow-based subscription method instead.
      */
-    fun subscribe(action: suspend (MutationEvent<K, R>) -> Unit): TransEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>
+    fun subscribe(action: suspend (MutationEvent<K, R>) -> Unit): LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>
 
-    fun subscribe(action: Consumer<in MutationEvent<K, R>>): TransEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>> =
+    fun subscribe(action: Consumer<in MutationEvent<K, R>>): LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>> =
         subscribe(action::accept)
 
     fun subscribe(vararg eventTypes: MutationEvent.Type, action: Consumer<in MutationEvent<K, R>>):
-        TransEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>
+        LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>
 
     /**
      * Permanently closes this entity and releases its publisher resources.

@@ -20,7 +20,7 @@ package net.transgressoft.lirp.event
 import net.transgressoft.lirp.entity.IdentifiableEntity
 
 /**
- * Represents a [TransEvent] that carries a collection of [net.transgressoft.lirp.entity.IdentifiableEntity] objects
+ * Represents a [LirpEvent] that carries a collection of [net.transgressoft.lirp.entity.IdentifiableEntity] objects
  * related to CRUD (Create, Read, Update, Delete) operations.
  *
  * CrudEvent serves as the base event type for all entity operations in the system,
@@ -31,7 +31,7 @@ import net.transgressoft.lirp.entity.IdentifiableEntity
  * @param K the type of the [net.transgressoft.lirp.entity.IdentifiableEntity] objects' id, which must be [Comparable]
  * @param T the type of the [net.transgressoft.lirp.entity.IdentifiableEntity] objects
  */
-interface CrudEvent<K, out T: IdentifiableEntity<K>>: TransEvent<CrudEvent.Type> where K: Comparable<K> {
+interface CrudEvent<K, out T: IdentifiableEntity<K>>: LirpEvent<CrudEvent.Type> where K: Comparable<K> {
 
     enum class Type(override val code: Int): EventType {
         CREATE(100),
