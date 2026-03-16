@@ -46,9 +46,6 @@ interface ReactiveEntity<K, R : ReactiveEntity<K, R>> :
 
     /**
      * Whether this entity has been permanently closed.
-     *
-     * A closed entity rejects mutations via [mutateAndPublish][net.transgressoft.lirp.entity.ReactiveEntityBase.mutateAndPublish]
-     * and new subscriptions with [IllegalStateException].
      */
     val isClosed: Boolean
 
