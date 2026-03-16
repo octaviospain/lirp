@@ -72,7 +72,6 @@ import kotlinx.serialization.json.put
  *        limitedParallelism(1) on the IO dispatcher to ensure thread-safe file access. For testing,
  *        provide a scope created with a test dispatcher to control virtual time execution.
  */
-@Suppress("UNCHECKED_CAST")
 open class FlexibleJsonFileRepository
     @JvmOverloads
     constructor(
@@ -97,13 +96,17 @@ open class FlexibleJsonFileRepository
          * @param value The default value to use if creating a new reactive string.
          *
          * @return The existing [ReactiveString] if found, or a newly created one with the default value
+         * @throws IllegalStateException if an entry with [id] exists but is not a [ReactiveString]
          */
         @JvmOverloads
         fun getReactiveString(id: String, value: String? = null): ReactiveString {
             val existing = findById(id)
             return if (existing.isPresent) {
-                existing.get() as ReactiveString
+                val entity = existing.get()
+                if (entity is ReactiveString) entity
+                else error("Expected ReactiveString for id '$id' but found ${entity::class.simpleName}")
             } else {
+                @Suppress("UNCHECKED_CAST")
                 ReactiveString(id, value).also { add(it as ReactivePrimitive<Any>) }
             }
         }
@@ -120,13 +123,17 @@ open class FlexibleJsonFileRepository
          * @param value The default value to use if creating a new reactive boolean.
          *
          * @return The existing [ReactiveBoolean] if found, or a newly created one with the default value
+         * @throws IllegalStateException if an entry with [id] exists but is not a [ReactiveBoolean]
          */
         @JvmOverloads
         fun getReactiveBoolean(id: String, value: Boolean? = null): ReactiveBoolean {
             val existing = findById(id)
             return if (existing.isPresent) {
-                existing.get() as ReactiveBoolean
+                val entity = existing.get()
+                if (entity is ReactiveBoolean) entity
+                else error("Expected ReactiveBoolean for id '$id' but found ${entity::class.simpleName}")
             } else {
+                @Suppress("UNCHECKED_CAST")
                 ReactiveBoolean(id, value).also { add(it as ReactivePrimitive<Any>) }
             }
         }
@@ -143,13 +150,17 @@ open class FlexibleJsonFileRepository
          * @param value The default value to use if creating a new reactive integer.
          *
          * @return The existing [ReactiveInt] if found, or a newly created one with the default value
+         * @throws IllegalStateException if an entry with [id] exists but is not a [ReactiveInt]
          */
         @JvmOverloads
         fun getReactiveInt(id: String, value: Int? = null): ReactiveInt {
             val existing = findById(id)
             return if (existing.isPresent) {
-                existing.get() as ReactiveInt
+                val entity = existing.get()
+                if (entity is ReactiveInt) entity
+                else error("Expected ReactiveInt for id '$id' but found ${entity::class.simpleName}")
             } else {
+                @Suppress("UNCHECKED_CAST")
                 ReactiveInt(id, value).also { add(it as ReactivePrimitive<Any>) }
             }
         }
