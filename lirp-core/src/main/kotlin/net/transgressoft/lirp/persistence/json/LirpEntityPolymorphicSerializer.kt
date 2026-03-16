@@ -17,7 +17,7 @@
 
 package net.transgressoft.lirp.persistence.json
 
-import net.transgressoft.lirp.entity.TransEntity
+import net.transgressoft.lirp.entity.LirpEntity
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.descriptors.ClassSerialDescriptorBuilder
 import kotlinx.serialization.encoding.CompositeDecoder
@@ -26,15 +26,15 @@ import kotlinx.serialization.encoding.Decoder
 
 /**
  * A serializer interface that enables polymorphic serialization and deserialization
- * of [TransEntity] subclasses.
+ * of [LirpEntity] subclasses.
  *
  * This interface provides a framework for implementing custom serializers that can
- * handle polymorphic hierarchies of [TransEntity] objects. It abstracts away common
+ * handle polymorphic hierarchies of [LirpEntity] objects. It abstracts away common
  * serialization logic while allowing customization through extension points.
  *
  * Implementation example:
  * ```
- * class MyEntitySerializer : TransEntityPolymorphicSerializer<MyEntity>() {
+ * class MyEntitySerializer : LirpEntityPolymorphicSerializer<MyEntity>() {
  *     override val descriptor: SerialDescriptor = ...
  *
  *     override fun additionalElements(classSerialDescriptorBuilder: ClassSerialDescriptorBuilder) {
@@ -46,9 +46,9 @@ import kotlinx.serialization.encoding.Decoder
  * }
  * ```
  *
- * @param T The specific type of [TransEntity] this serializer handles
+ * @param T The specific type of [LirpEntity] this serializer handles
  */
-interface TransEntityPolymorphicSerializer<T : TransEntity> : KSerializer<T> {
+interface LirpEntityPolymorphicSerializer<T : LirpEntity> : KSerializer<T> {
     /**
      * Default implementation of the [KSerializer.deserialize] method that uses
      * [getPropertiesList] and [createInstance] to construct the object.

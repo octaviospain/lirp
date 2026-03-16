@@ -22,7 +22,7 @@ package net.transgressoft.lirp.entity
  *
  * @param K the type of the ID, which must be comparable
  */
-interface IdentifiableEntity<K> : TransEntity, Cloneable where K : Comparable<K> {
+interface IdentifiableEntity<K> : LirpEntity, Cloneable where K : Comparable<K> {
     /**
      * The id of the entity. It could be different for different [net.transgressoft.lirp.persistence.Repository]
      * implementations.

@@ -18,11 +18,11 @@
 package net.transgressoft.lirp.entity
 
 import net.transgressoft.lirp.event.FlowEventPublisher
+import net.transgressoft.lirp.event.LirpEventPublisher
+import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.MutationEvent.Type.MUTATE
 import net.transgressoft.lirp.event.ReactiveMutationEvent
-import net.transgressoft.lirp.event.TransEventPublisher
-import net.transgressoft.lirp.event.TransEventSubscription
 import mu.KotlinLogging
 import java.time.LocalDateTime
 import java.util.concurrent.Flow
@@ -56,7 +56,7 @@ import kotlinx.coroutines.flow.SharedFlow
  * @see MutationEvent
  */
 abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
-    private val publisherFactory: (String) -> TransEventPublisher<MutationEvent.Type, MutationEvent<K, R>> =
+    private val publisherFactory: (String) -> LirpEventPublisher<MutationEvent.Type, MutationEvent<K, R>> =
         { id -> FlowEventPublisher(id, closeOnEmpty = true) }
 ) : ReactiveEntity<K, R> where K : Comparable<K> {
     private val log = KotlinLogging.logger {}
@@ -75,7 +75,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
      * The lazily initialized publisher. Only created when the first subscriber registers.
      * Uses AtomicReference for lock-free visibility and CAS-based initialization.
      */
-    private val publisherRef = AtomicReference<TransEventPublisher<MutationEvent.Type, MutationEvent<K, R>>?>(null)
+    private val publisherRef = AtomicReference<LirpEventPublisher<MutationEvent.Type, MutationEvent<K, R>>?>(null)
 
     /**
      * Gets the publisher, creating it lazily if needed. Thread-safe using AtomicReference CAS loop.
@@ -83,7 +83,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
      * If two threads race to initialize, the loser closes its duplicate and retries — only one survives.
      * Throws [IllegalStateException] if the entity is permanently closed.
      */
-    private val publisher: TransEventPublisher<MutationEvent.Type, MutationEvent<K, R>>
+    private val publisher: LirpEventPublisher<MutationEvent.Type, MutationEvent<K, R>>
         get() {
             while (true) {
                 val current = publisherRef.get()
@@ -147,7 +147,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
         publisher.emitAsync(event)
     }
 
-    override fun subscribe(action: suspend (MutationEvent<K, R>) -> Unit): TransEventSubscription<in TransEntity, MutationEvent.Type, MutationEvent<K, R>> {
+    override fun subscribe(action: suspend (MutationEvent<K, R>) -> Unit): LirpEventSubscription<in LirpEntity, MutationEvent.Type, MutationEvent<K, R>> {
         check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
         return publisher.subscribe(action)
     }
@@ -158,7 +158,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     }
 
     override fun subscribe(vararg eventTypes: MutationEvent.Type, action: Consumer<in MutationEvent<K, R>>):
-        TransEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>> {
+        LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>> {
         check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
         require(MUTATE in eventTypes) {
             throw IllegalArgumentException("Only UPDATE event is supported for reactive entities")

@@ -2,9 +2,9 @@ package net.transgressoft.lirp.persistence.json.primitives
 
 import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
 import net.transgressoft.lirp.event.EventType
+import net.transgressoft.lirp.event.LirpEventSubscriberBase
+import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.MutationEvent
-import net.transgressoft.lirp.event.TransEventSubscriberBase
-import net.transgressoft.lirp.event.TransEventSubscription
 import net.transgressoft.lirp.persistence.ReactivePrimitive
 import io.kotest.assertions.assertSoftly
 import io.kotest.assertions.nondeterministic.eventually
@@ -16,8 +16,8 @@ import io.kotest.matchers.shouldNotBe
 import kotlin.time.Duration.Companion.milliseconds
 
 private class ReactiveStringSubscriber :
-    TransEventSubscriberBase<ReactivePrimitive<String>, MutationEvent.Type, MutationEvent<String, ReactivePrimitive<String>>>("subscriber") {
-    var subscriptionReceived: TransEventSubscription<ReactivePrimitive<String>, MutationEvent.Type, MutationEvent<String, ReactivePrimitive<String>>>? = null
+    LirpEventSubscriberBase<ReactivePrimitive<String>, MutationEvent.Type, MutationEvent<String, ReactivePrimitive<String>>>("subscriber") {
+    var subscriptionReceived: LirpEventSubscription<ReactivePrimitive<String>, MutationEvent.Type, MutationEvent<String, ReactivePrimitive<String>>>? = null
     val receivedEvents = mutableMapOf<EventType, MutationEvent<String, ReactivePrimitive<String>>>()
 
     init {

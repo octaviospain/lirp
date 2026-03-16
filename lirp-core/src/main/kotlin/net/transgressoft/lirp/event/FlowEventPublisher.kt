@@ -17,7 +17,7 @@
 
 package net.transgressoft.lirp.event
 
-import net.transgressoft.lirp.entity.TransEntity
+import net.transgressoft.lirp.entity.LirpEntity
 import mu.KotlinLogging
 import java.util.concurrent.Flow
 import java.util.concurrent.atomic.AtomicInteger
@@ -123,19 +123,19 @@ data class PublisherConfig(
  * - Subscriber count visibility via [subscriberCount]
  * - Optional self-close when all subscribers cancel via [closeOnEmpty]
  *
- * @param E The specific type of [TransEvent] this publisher will emit
+ * @param E The specific type of [LirpEvent] this publisher will emit
  *
- * @see [TransEventPublisher]
+ * @see [LirpEventPublisher]
  * @see [SharedFlow]
  */
-class FlowEventPublisher<ET : EventType, E: TransEvent<ET>>
+class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
     @JvmOverloads
     constructor(
         private val id: String,
         // SharedFlow for entity change events with sufficient buffer and SUSPEND policy to ensure no events are lost
         private val config: PublisherConfig = PublisherConfig.DEFAULT,
         private val closeOnEmpty: Boolean = false
-    ): TransEventPublisher<ET, E> {
+    ): LirpEventPublisher<ET, E> {
 
         private val log = KotlinLogging.logger {}
 
@@ -229,7 +229,7 @@ class FlowEventPublisher<ET : EventType, E: TransEvent<ET>>
                 if (_subscriberCount.get() == 0 && closeOnEmpty) close()
             }
 
-            subscriber.onSubscribe(ReactiveSubscription<TransEntity>(this, job))
+            subscriber.onSubscribe(ReactiveSubscription<LirpEntity>(this, job))
         }
 
         /**
@@ -238,7 +238,7 @@ class FlowEventPublisher<ET : EventType, E: TransEvent<ET>>
          * @param action The action to execute when the entity changes
          * @return A subscription that can be used to unsubscribe
          */
-        override fun subscribe(action: suspend (E) -> Unit): TransEventSubscription<in TransEntity, ET, E> {
+        override fun subscribe(action: suspend (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, E> {
             check(!isClosed) { "Publisher '$id' is closed" }
             log.trace { "Anonymous subscription registered to $id" }
 
@@ -262,7 +262,7 @@ class FlowEventPublisher<ET : EventType, E: TransEvent<ET>>
             return ReactiveSubscription(this, job)
         }
 
-        override fun subscribe(vararg eventTypes: ET, action: suspend (E) -> Unit): TransEventSubscription<in TransEntity, ET, E> {
+        override fun subscribe(vararg eventTypes: ET, action: suspend (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, E> {
             check(!isClosed) { "Publisher '$id' is closed" }
             log.trace { "Subscription registered to $id for event types: ${eventTypes.joinToString()}" }
 
@@ -300,8 +300,8 @@ class FlowEventPublisher<ET : EventType, E: TransEvent<ET>>
 
         override fun toString() = "FlowEventPublisher(id=$id, activatedEventTypes=$activatedEventTypes)"
 
-        inner class ReactiveSubscription<T: TransEntity>(override val source: TransEventPublisher<ET, E>, private val job: Job)
-        : TransEventSubscription<T, ET, E> {
+        inner class ReactiveSubscription<T: LirpEntity>(override val source: LirpEventPublisher<ET, E>, private val job: Job)
+        : LirpEventSubscription<T, ET, E> {
 
             override fun request(n: Long) {
                 error("Events cannot be requested on demand")

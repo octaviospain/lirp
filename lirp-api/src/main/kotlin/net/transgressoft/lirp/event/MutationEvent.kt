@@ -20,7 +20,7 @@ package net.transgressoft.lirp.event
 import net.transgressoft.lirp.entity.ReactiveEntity
 
 /**
- * Represents a [TransEvent] that tracks a change from a [ReactiveEntity] by keeping both
+ * Represents a [LirpEvent] that tracks a change from a [ReactiveEntity] by keeping both
  * the current state and the previous state.
  *
  * This event type is particularly useful for update operations where understanding
@@ -31,7 +31,7 @@ import net.transgressoft.lirp.entity.ReactiveEntity
  * @param K the type of the [ReactiveEntity] objects' id, which must be [Comparable]
  * @param R the type of the [ReactiveEntity] objects
  */
-interface MutationEvent<K, R : ReactiveEntity<K, R>> : TransEvent<MutationEvent.Type> where K: Comparable<K> {
+interface MutationEvent<K, R : ReactiveEntity<K, R>> : LirpEvent<MutationEvent.Type> where K: Comparable<K> {
 
     enum class Type(override val code: Int): EventType {
         MUTATE(301)

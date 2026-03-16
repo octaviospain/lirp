@@ -9,8 +9,8 @@ import net.transgressoft.lirp.event.CrudEvent.Type.DELETE
 import net.transgressoft.lirp.event.CrudEvent.Type.READ
 import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
 import net.transgressoft.lirp.event.EventType
+import net.transgressoft.lirp.event.LirpEventSubscriberBase
 import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.event.TransEventSubscriberBase
 import io.kotest.assertions.assertSoftly
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldContainAll
@@ -32,7 +32,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 @ExperimentalCoroutinesApi
 internal class VolatileRepositoryTest : StringSpec({
 
-    class SomeClassSubscribedToEvents() : TransEventSubscriberBase<Person, CrudEvent.Type, CrudEvent<Int, Person>>("Some Name") {
+    class SomeClassSubscribedToEvents() : LirpEventSubscriberBase<Person, CrudEvent.Type, CrudEvent<Int, Person>>("Some Name") {
         val createEventEntities = AtomicInteger(0)
         val deletedEventEntities = AtomicInteger(0)
         val receivedEvents = mutableMapOf<EventType, CrudEvent<Int, Person>>()
@@ -257,14 +257,14 @@ internal class VolatileRepositoryTest : StringSpec({
         subscriber.createEventEntities.get() shouldBe 1
     }
 
-    "TransEventSubscriber error and complete actions are triggered correctly" {
+    "LirpEventSubscriber error and complete actions are triggered correctly" {
         // Create a subscriber with error and complete handlers
         val errorFired = AtomicInteger(0)
         val completeFired = AtomicInteger(0)
         val errorMsg = mutableListOf<String>()
 
         val testSubscriber =
-            object : TransEventSubscriberBase<Person, CrudEvent.Type, CrudEvent<Int, Person>>("ErrorCompleteSubscriber") {
+            object : LirpEventSubscriberBase<Person, CrudEvent.Type, CrudEvent<Int, Person>>("ErrorCompleteSubscriber") {
                 init {
                     addOnNextEventAction(CREATE) { /* Just observe */ }
 

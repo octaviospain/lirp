@@ -3,10 +3,10 @@ package net.transgressoft.lirp
 import net.transgressoft.lirp.entity.ReactiveEntity
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.event.EventType
-import net.transgressoft.lirp.event.TransEvent
+import net.transgressoft.lirp.event.LirpEvent
 import net.transgressoft.lirp.persistence.json.JsonFileRepository
 import net.transgressoft.lirp.persistence.json.JsonRepository
-import net.transgressoft.lirp.persistence.json.TransEntityPolymorphicSerializer
+import net.transgressoft.lirp.persistence.json.LirpEntityPolymorphicSerializer
 import io.kotest.property.Arb
 import io.kotest.property.arbitrary.arbitrary
 import io.kotest.property.arbitrary.boolean
@@ -75,7 +75,7 @@ sealed class PersonEventType {
         BORN(201)
     }
 
-    private data class Born<T: Personly>(val genre: Boolean): TransEvent<Type> {
+    private data class Born<T: Personly>(val genre: Boolean): LirpEvent<Type> {
 
         override val type: PersonEventType.Type = Type.BORN
     }
@@ -134,7 +134,7 @@ class PersonlySerializer: HumanSerializer<Personly>() {
         Person(propertiesList[0] as Int, propertiesList[1] as String?, propertiesList[2] as Long?, propertiesList[3] as Boolean)
 }
 
-abstract class HumanSerializer<H : Human<H>> : TransEntityPolymorphicSerializer<H> {
+abstract class HumanSerializer<H : Human<H>> : LirpEntityPolymorphicSerializer<H> {
     override val descriptor: SerialDescriptor =
         buildClassSerialDescriptor("Human") {
             element<String>("type")

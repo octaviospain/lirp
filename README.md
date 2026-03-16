@@ -197,8 +197,8 @@ subscription.cancel()
 
 The library is designed to be extensible, allowing you to create custom publishers and subscribers:
 
-1. **Custom Publishers:** Implement `TransEventPublisher<E>` or extend `TransEventPublisherBase<E>` to create new event sources
-2. **Custom Subscribers:** Implement `TransEventSubscriber<T, E>` or extend `TransEventSubscriberBase<T, E>` to handle events
+1. **Custom Publishers:** Implement `LirpEventPublisher<E>` or extend `LirpEventPublisherBase<E>` to create new event sources
+2. **Custom Subscribers:** Implement `LirpEventSubscriber<T, E>` or extend `TransEventSubscriberBase<T, E>` to handle events
 3. **Custom Events:** Create new event types by implementing the `TransEvent` interface
 
 For Java compatibility or more complex subscription handling, you can also implement a full subscriber:

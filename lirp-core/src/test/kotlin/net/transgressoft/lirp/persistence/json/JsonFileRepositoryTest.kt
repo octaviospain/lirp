@@ -8,8 +8,8 @@ import net.transgressoft.lirp.Personly
 import net.transgressoft.lirp.arbitraryPerson
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
+import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.event.TransEventSubscription
 import io.kotest.assertions.json.shouldEqualJson
 import io.kotest.assertions.json.shouldNotEqualJson
 import io.kotest.assertions.throwables.shouldNotThrowAny
@@ -442,7 +442,7 @@ class JsonFileRepositoryTest : DescribeSpec({
 
         it("publishes create events under concurrency") {
             val events = Collections.synchronizedList(mutableListOf<CrudEvent<Int, Personly>>())
-            val subscription: TransEventSubscription<in Personly, CrudEvent.Type, CrudEvent<Int, Personly>> =
+            val subscription: LirpEventSubscription<in Personly, CrudEvent.Type, CrudEvent<Int, Personly>> =
                 repository.subscribe(CREATE) { events.add(it) }
 
             val testPeople = (1..5_000).map { arbitraryPerson(it).next() }.distinct()
