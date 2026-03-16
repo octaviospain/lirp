@@ -28,6 +28,7 @@ import java.io.File
 import java.io.IOException
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.collections.forEach
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.milliseconds
@@ -751,6 +752,103 @@ class JsonFileRepositoryTest : DescribeSpec({
             shouldThrow<IllegalStateException> {
                 repository.removeAll(listOf(person))
             }
+        }
+    }
+
+    describe("Dirty flag optimization") {
+        // Navigates the delegation chain: PersonJsonFileRepository ->
+        // HumanGenericJsonFileRepositoryBase -> JsonFileRepository -> dirty
+        fun getDirtyFlag(repo: PersonJsonFileRepository): AtomicBoolean {
+            val delegateField =
+                repo.javaClass.superclass
+                    .getDeclaredField("repository")
+                    .also { it.isAccessible = true }
+            val jsonFileRepository = delegateField.get(repo)
+            val dirtyField =
+                jsonFileRepository.javaClass
+                    .getDeclaredField("dirty")
+                    .also { it.isAccessible = true }
+            return dirtyField.get(jsonFileRepository) as AtomicBoolean
+        }
+
+        it("skips serialization when no changes occur after last write") {
+            val person = arbitraryPerson().next()
+            repository.add(person) shouldBe true
+
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            val lastModifiedAfterWrite = jsonFile.lastModified()
+            jsonFile.readText().isNotEmpty() shouldBe true
+
+            // Advance again without any mutations
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            jsonFile.lastModified() shouldBe lastModifiedAfterWrite
+        }
+
+        it("writes to new file on jsonFile switch even when state is unchanged") {
+            val person = arbitraryPerson().next()
+            repository.add(person)
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            jsonFile.readText().isNotEmpty() shouldBe true
+
+            val newJsonFile = tempfile("json-repository-test", ".json").also { it.deleteOnExit() }
+            repository.jsonFile = newJsonFile
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            newJsonFile.readText().isNotEmpty() shouldBe true
+        }
+
+        it("does not write back loaded state on initialization") {
+            val person = arbitraryPerson().next()
+            repository.add(person) shouldBe true
+            testDispatcher.scheduler.advanceUntilIdle()
+            repository.close()
+
+            val contentAfterFirstWrite = jsonFile.readText()
+            contentAfterFirstWrite.isNotEmpty() shouldBe true
+
+            val lastModifiedBeforeReload = jsonFile.lastModified()
+
+            val reloadedRepo = PersonJsonFileRepository(jsonFile)
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            jsonFile.lastModified() shouldBe lastModifiedBeforeReload
+            jsonFile.readText().shouldEqualJson(contentAfterFirstWrite)
+
+            val dirtyFlag = getDirtyFlag(reloadedRepo)
+            dirtyFlag.get() shouldBe false
+
+            reloadedRepo.close()
+        }
+
+        it("close() skips write when repository is clean") {
+            val person = arbitraryPerson().next()
+            repository.add(person) shouldBe true
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            val lastModifiedAfterWrite = jsonFile.lastModified()
+            val contentAfterWrite = jsonFile.readText()
+
+            repository.close()
+
+            jsonFile.lastModified() shouldBe lastModifiedAfterWrite
+            jsonFile.readText() shouldBe contentAfterWrite
+        }
+
+        it("retries write after transient I/O failure") {
+            val dirtyFlag = getDirtyFlag(repository)
+
+            val person = arbitraryPerson().next()
+            repository.add(person) shouldBe true
+
+            dirtyFlag.get() shouldBe true
+
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            dirtyFlag.get() shouldBe false
+            jsonFile.readText().isNotEmpty() shouldBe true
         }
     }
 
