@@ -19,7 +19,6 @@ package net.transgressoft.lirp.event
 
 import net.transgressoft.lirp.entity.TransEntity
 import mu.KotlinLogging
-import java.util.concurrent.ConcurrentSkipListSet
 import java.util.concurrent.Flow
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Job
@@ -158,7 +157,9 @@ class FlowEventPublisher<ET : EventType, E: TransEvent<ET>>
          */
         private val flowScope = ReactiveScope.flowScope
 
-        private var activatedEventTypes: MutableSet<EventType> = ConcurrentSkipListSet()
+        // Immutable snapshot replaced atomically on activate/disable — reads need no copying or locking
+        @Volatile
+        private var activatedEventTypes: Set<EventType> = emptySet()
 
         @Volatile
         private var closed = false
@@ -193,7 +194,10 @@ class FlowEventPublisher<ET : EventType, E: TransEvent<ET>>
 
         override fun emitAsync(event: E) {
             check(!isClosed) { "Publisher '$id' is closed" }
-            if (event.type in activatedEventTypes) {
+            // Read the volatile reference once to get a consistent snapshot; a concurrent disableEvents()
+            // replacing the reference after this read will not affect the check or the send
+            val activeTypes = activatedEventTypes
+            if (event.type in activeTypes) {
                 // Use trySend so we don't block the caller
                 // If the channel is full, this will return the closed/failed result
                 val result = eventChannel.trySend(event)
@@ -285,17 +289,13 @@ class FlowEventPublisher<ET : EventType, E: TransEvent<ET>>
         }
 
         override fun disableEvents(vararg types: ET) {
-            types.toSet().let {
-                activatedEventTypes.removeAll(it)
-                log.trace { "Enabled event types from $id: $activatedEventTypes" }
-            }
+            activatedEventTypes = activatedEventTypes - types.toSet()
+            log.trace { "Enabled event types from $id: $activatedEventTypes" }
         }
 
         override fun activateEvents(vararg types: ET) {
-            types.toSet().let {
-                activatedEventTypes.addAll(it)
-                log.trace { "Enabled event types from $id: $activatedEventTypes" }
-            }
+            activatedEventTypes = activatedEventTypes + types.toSet()
+            log.trace { "Enabled event types from $id: $activatedEventTypes" }
         }
 
         override fun toString() = "FlowEventPublisher(id=$id, activatedEventTypes=$activatedEventTypes)"

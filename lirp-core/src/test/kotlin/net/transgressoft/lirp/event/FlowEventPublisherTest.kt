@@ -36,12 +36,15 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.function.Consumer
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.withContext
 
 @ExperimentalCoroutinesApi
 class FlowEventPublisherTest : DescribeSpec({
@@ -811,6 +814,58 @@ class FlowEventPublisherTest : DescribeSpec({
             testDispatcher.scheduler.advanceUntilIdle()
 
             receivedEvents.size shouldBe 1
+        }
+    }
+
+    describe("TOCTOU safety") {
+        it("emitAsync uses activatedEventTypes snapshot to avoid TOCTOU race") {
+            // Run on real threads so that concurrent activate/disable and emit happen in parallel
+            withContext(Dispatchers.Default) {
+                val publisher =
+                    FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>(
+                        "ToctouPublisher",
+                        PublisherConfig.DEFAULT
+                    ).apply {
+                        activateEvents(CREATE)
+                    }
+                publisher.subscribe { }
+
+                val iterations = 1000
+                val toggleJob =
+                    launch {
+                        repeat(iterations) {
+                            publisher.disableEvents(CREATE)
+                            publisher.activateEvents(CREATE)
+                        }
+                    }
+                val emitJob =
+                    launch {
+                        repeat(iterations) { i ->
+                            publisher.emitAsync(Create(TestEntity("entity-$i")))
+                        }
+                    }
+
+                joinAll(toggleJob, emitJob)
+
+                publisher.close()
+            }
+            // The test passes if no exception is thrown during concurrent operation
+        }
+
+        it("emitAsync filters events when event type is not activated") {
+            val publisher =
+                FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("FilterPublisher").apply {
+                    activateEvents(UPDATE)
+                }
+            val receivedEvents = mutableListOf<CrudEvent<String, TestEntity>>()
+            val subscription = publisher.subscribe { receivedEvents.add(it) }
+
+            publisher.emitAsync(Create(TestEntity("entity-1")))
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            receivedEvents.size shouldBe 0
+
+            subscription.cancel()
         }
     }
 
