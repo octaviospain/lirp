@@ -20,6 +20,7 @@ package net.transgressoft.lirp.event
 import net.transgressoft.lirp.entity.LirpEntity
 import mu.KotlinLogging
 import java.util.concurrent.Flow
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
@@ -134,6 +135,19 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
         private val id: String,
         // SharedFlow for entity change events with sufficient buffer and SUSPEND policy to ensure no events are lost
         private val config: PublisherConfig = PublisherConfig.DEFAULT,
+        /**
+         * When true, the publisher closes itself when the last subscriber cancels and no subscribe
+         * call is currently in-flight.
+         *
+         * Race-condition protection: an atomic "in-flight" counter is incremented before the
+         * subscription coroutine job is launched and decremented after the job is registered.
+         * The [invokeOnCompletion] handler only triggers close if both the subscriber count and the
+         * in-flight counter are zero at the same time, preventing premature shutdown when
+         * subscribers are rapidly subscribing and cancelling concurrently.
+         *
+         * Lifecycle notification: immediately before the close is triggered, the callback
+         * registered via [onCloseOnEmpty] is invoked so observers can react to the imminent shutdown.
+         */
         private val closeOnEmpty: Boolean = false
     ): LirpEventPublisher<ET, E> {
 
@@ -161,14 +175,25 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
         @Volatile
         private var activatedEventTypes: Set<EventType> = emptySet()
 
-        @Volatile
-        private var closed = false
+        private val closedFlag = AtomicBoolean(false)
 
-        override val isClosed: Boolean get() = closed
+        override val isClosed: Boolean get() = closedFlag.get()
 
         private val _subscriberCount = AtomicInteger(0)
 
         override val subscriberCount: Int get() = _subscriberCount.get()
+
+        /**
+         * Tracks subscribe() calls that have incremented [_subscriberCount] but whose coroutine
+         * job has not yet been registered with [invokeOnCompletion]. While this counter is
+         * non-zero, [closeOnEmpty] must not trigger close() even if [_subscriberCount] reaches
+         * zero, because a concurrent subscriber is still being set up.
+         */
+        private val _inFlightSubscribes = AtomicInteger(0)
+
+        /** Optional callback invoked once, just before a closeOnEmpty-triggered [close] call. */
+        @Volatile
+        private var onCloseOnEmptyCallback: (() -> Unit)? = null
 
         init {
             log.trace { "FlowEventPublisher created: $id" }
@@ -185,11 +210,18 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
             }
         }
 
+        /**
+         * Permanently closes this publisher.
+         *
+         * Uses [AtomicBoolean.compareAndSet] to ensure the close logic runs exactly once even
+         * under concurrent calls. After closing, [emitAsync] and all [subscribe] overloads throw
+         * [IllegalStateException]. Idempotent: subsequent calls are safe no-ops.
+         */
         override fun close() {
-            if (closed) return
-            closed = true
-            eventChannel.close()
-            log.trace { "$this closed" }
+            if (closedFlag.compareAndSet(false, true)) {
+                eventChannel.close()
+                log.trace { "$this closed" }
+            }
         }
 
         override fun emitAsync(event: E) {
@@ -208,6 +240,35 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
         }
 
         /**
+         * Registers a callback to be invoked once immediately before a [closeOnEmpty]-triggered
+         * [close] call. This provides a lifecycle notification hook for observers that need to
+         * react before the publisher shuts down.
+         *
+         * Only the most recently registered callback is retained.
+         */
+        fun onCloseOnEmpty(callback: () -> Unit) {
+            onCloseOnEmptyCallback = callback
+        }
+
+        /**
+         * Shared [invokeOnCompletion] handler used by all three subscribe() overloads.
+         *
+         * Decrements [_subscriberCount]. If both [_subscriberCount] and [_inFlightSubscribes]
+         * reach zero and [closeOnEmpty] is enabled, fires the [onCloseOnEmptyCallback] and
+         * then closes this publisher. The double-zero check prevents premature close during
+         * concurrent subscribe/cancel cycles where a new subscriber is still being registered.
+         */
+        private fun Job.registerCompletionHandler() {
+            invokeOnCompletion {
+                _subscriberCount.decrementAndGet()
+                if (closeOnEmpty && _subscriberCount.get() == 0 && _inFlightSubscribes.get() == 0) {
+                    onCloseOnEmptyCallback?.invoke()
+                    close()
+                }
+            }
+        }
+
+        /**
          * Legacy compatibility method to support the existing [Flow.Subscriber] interface.
          * Consider migrating to the Kotlin Flow-based subscription method instead.
          */
@@ -216,6 +277,7 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
             log.trace { "Subscription registered to $subscriber" }
 
             _subscriberCount.incrementAndGet()
+            _inFlightSubscribes.incrementAndGet()
 
             val job =
                 flowScope.launch {
@@ -224,10 +286,8 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
                     }
                 }
 
-            job.invokeOnCompletion {
-                _subscriberCount.decrementAndGet()
-                if (_subscriberCount.get() == 0 && closeOnEmpty) close()
-            }
+            _inFlightSubscribes.decrementAndGet()
+            job.registerCompletionHandler()
 
             subscriber.onSubscribe(ReactiveSubscription<LirpEntity>(this, job))
         }
@@ -243,6 +303,7 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
             log.trace { "Anonymous subscription registered to $id" }
 
             _subscriberCount.incrementAndGet()
+            _inFlightSubscribes.incrementAndGet()
 
             // Each subscription requires its own collection coroutine to handle events independently
             // This is a deliberate design pattern for reactive subscriptions
@@ -254,10 +315,8 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
                     }
                 }
 
-            job.invokeOnCompletion {
-                _subscriberCount.decrementAndGet()
-                if (_subscriberCount.get() == 0 && closeOnEmpty) close()
-            }
+            _inFlightSubscribes.decrementAndGet()
+            job.registerCompletionHandler()
 
             return ReactiveSubscription(this, job)
         }
@@ -267,6 +326,7 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
             log.trace { "Subscription registered to $id for event types: ${eventTypes.joinToString()}" }
 
             _subscriberCount.incrementAndGet()
+            _inFlightSubscribes.incrementAndGet()
 
             // Each subscription requires its own collection coroutine to handle events independently
             // This is a deliberate design pattern for reactive subscriptions
@@ -280,10 +340,8 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
                     }
                 }
 
-            job.invokeOnCompletion {
-                _subscriberCount.decrementAndGet()
-                if (_subscriberCount.get() == 0 && closeOnEmpty) close()
-            }
+            _inFlightSubscribes.decrementAndGet()
+            job.registerCompletionHandler()
 
             return ReactiveSubscription(this, job)
         }
