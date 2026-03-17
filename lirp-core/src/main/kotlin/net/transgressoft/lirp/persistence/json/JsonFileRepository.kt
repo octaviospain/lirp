@@ -58,6 +58,25 @@ import kotlinx.serialization.modules.SerializersModule
  * - Error handling with logging
  * - Subscription management for entity lifecycle
  *
+ * ## Performance Characteristics
+ *
+ * **Single-threaded IO model:** All file writes are serialized through a single-threaded IO dispatcher
+ * (`Dispatchers.IO.limitedParallelism(1)` via [ReactiveScope.ioScope]). This prevents concurrent writes
+ * from corrupting the file and provides deterministic write ordering. The sequential constraint is by design.
+ *
+ * **Debounced write batching:** Multiple rapid mutations are collapsed into a single write after the
+ * configurable [serializationDelay] (default 300ms). This means a burst of 1000 mutations within a
+ * 300ms window produces exactly one file write, not 1000.
+ *
+ * **Scaling envelope:**
+ * - Small to medium repositories (up to a few thousand entities): serialization time is effectively
+ *   instantaneous relative to the debounce window. Write coalescing works well.
+ * - Large repositories (tens of thousands of entities): JSON serialization time may grow to approach
+ *   or exceed the debounce window. In this range, individual writes take longer, and the effective
+ *   coalescing benefit diminishes as each write covers fewer mutations.
+ * - Write throughput is bounded by single-thread JSON serialization time plus file write latency.
+ *   Increasing [serializationDelay] trades write latency for better coalescing in high-mutation scenarios.
+ *
  * @param K The type of entity identifier, must be [Comparable]
  * @param R The type of entity being stored, must implement [ReactiveEntity]
  * @param file The JSON file to store entities in
