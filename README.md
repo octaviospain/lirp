@@ -303,6 +303,26 @@ debugMode.value = true
 3. **Thread Safety** - Concurrent operations are handled safely
 4. **Consistency** - Repository and file are always in sync
 
+## Performance Characteristics
+
+`JsonFileRepository` uses a **single-threaded IO model**: all file writes are serialized through a single
+IO dispatcher thread. This prevents concurrent writes from corrupting the JSON file and provides deterministic
+write ordering. The sequential constraint is intentional.
+
+**Debounced write batching** collapses bursts of mutations into a single file write per debounce window
+(default 300ms, configurable via `serializationDelay`). A burst of 1000 mutations within the window produces
+one file write, not 1000.
+
+Scaling characteristics:
+
+- **Small to medium repositories (up to a few thousand entities):** Serialization time is effectively
+  instantaneous relative to the debounce window. Write coalescing works well, and IO overhead is negligible.
+- **Large repositories (tens of thousands of entities):** JSON serialization time may grow to approach or
+  exceed the debounce window. Individual writes take longer, and effective coalescing diminishes as each write
+  covers fewer mutations. Write throughput is bounded by single-thread JSON serialization time plus file
+  write latency. Increasing `serializationDelay` trades higher write latency for better coalescing in
+  high-mutation scenarios.
+
 ### Java Interoperability
 
 lirp is designed to work seamlessly from both Kotlin and Java code. Below are examples demonstrating how to use the library from Java:
