@@ -59,6 +59,8 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
         override fun add(entity: T): Boolean {
             val previous = entitiesById.putIfAbsent(entity.id, entity)
             if (previous == null) {
+                discoverIndexes(entity)
+                indexEntity(entity)
                 publisher.emitAsync(Create(entity))
                 log.debug { "Entity with id ${entity.id} added to repository: $entity" }
                 return true
@@ -70,9 +72,13 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
         override fun addOrReplace(entity: T): Boolean {
             val oldValue = entitiesById.put(entity.id, entity)
             if (oldValue == null) {
+                discoverIndexes(entity)
+                indexEntity(entity)
                 publisher.emitAsync(Create(entity))
                 log.debug { "Entity with id ${entity.id} added to repository: $entity" }
             } else if (oldValue != entity) {
+                deindexEntity(oldValue)
+                indexEntity(entity)
                 publisher.emitAsync(Update(entity, oldValue))
                 log.debug { "Entity with id ${entity.id} was replaced by $entity" }
             } else {
@@ -91,8 +97,12 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
             entities.forEach { entity ->
                 val oldValue = entitiesById.put(entity.id, entity)
                 if (oldValue == null) {
+                    discoverIndexes(entity)
+                    indexEntity(entity)
                     added.add(entity)
                 } else if (oldValue != entity) {
+                    deindexEntity(oldValue)
+                    indexEntity(entity)
                     updated.add(entity)
                     entitiesBeforeUpdate.add(oldValue)
                 }
@@ -114,6 +124,7 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
         override fun remove(entity: T): Boolean {
             val removed = entitiesById.remove(entity.id, entity)
             if (removed) {
+                deindexEntity(entity)
                 publisher.emitAsync(Delete(entity))
                 log.debug { "Entity with id ${entity.id} was removed: $entity" }
             }
@@ -125,6 +136,7 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
 
             entities.forEach { entity ->
                 if (entitiesById.remove(entity.id, entity)) {
+                    deindexEntity(entity)
                     removed.add(entity)
                 }
             }
@@ -142,6 +154,8 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
             val allEntities = HashSet(entitiesById.values)
             if (allEntities.isNotEmpty()) {
                 entitiesById.clear()
+                // Bulk-clear all index value maps: O(n_indexes) rather than O(n_entities)
+                clearSecondaryIndexes()
                 publisher.emitAsync(Delete(allEntities))
                 log.debug { "${allEntities.size} entities were removed resulting in empty repository" }
             }

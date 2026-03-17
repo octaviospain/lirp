@@ -135,6 +135,45 @@ interface Registry<K, T: IdentifiableEntity<K>> : LirpEventPublisher<CrudEvent.T
     fun size(): Int
 
     /**
+     * Returns all entities whose indexed property identified by [indexName] equals [value], in O(1).
+     *
+     * The returned set is a defensive copy — mutations to the result do not affect the index.
+     * Throws [IllegalArgumentException] if no `@Indexed` property with the given name has been
+     * declared on the entity type held by this registry.
+     *
+     * Example:
+     * ```kotlin
+     * val electronics: Set<Product> = repo.findByIndex("category", "electronics")
+     * ```
+     *
+     * @param indexName The index name: matches the `name` attribute of `@Indexed`, or the field name
+     *        when the attribute is empty
+     * @param value The value to look up in the index
+     * @return A set of all matching entities, or an empty set if none match
+     * @throws IllegalArgumentException if [indexName] is not a declared index on this registry's entity type
+     */
+    fun findByIndex(indexName: String, value: Any): Set<T>
+
+    /**
+     * Returns the first entity whose indexed property identified by [indexName] equals [value], in O(1).
+     *
+     * Throws [IllegalArgumentException] if no `@Indexed` property with the given name has been
+     * declared on the entity type held by this registry.
+     *
+     * Example:
+     * ```kotlin
+     * val first: Optional<Product> = repo.findFirstByIndex("category", "electronics")
+     * ```
+     *
+     * @param indexName The index name: matches the `name` attribute of `@Indexed`, or the field name
+     *        when the attribute is empty
+     * @param value The value to look up in the index
+     * @return An [Optional] containing the first matching entity, or empty if none match
+     * @throws IllegalArgumentException if [indexName] is not a declared index on this registry's entity type
+     */
+    fun findFirstByIndex(indexName: String, value: Any): Optional<out T>
+
+    /**
      * Checks if the registry contains no entities.
      *
      * @return True if the registry is empty, false otherwise
