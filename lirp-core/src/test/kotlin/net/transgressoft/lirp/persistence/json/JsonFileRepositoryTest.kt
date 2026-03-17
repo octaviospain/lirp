@@ -856,6 +856,71 @@ class JsonFileRepositoryTest : DescribeSpec({
         }
     }
 
+    describe("Close contract") {
+        it("close() returns immediately without blocking the calling thread") {
+            // If close() uses runBlocking this test would deadlock on the UnconfinedTestDispatcher
+            val start = System.currentTimeMillis()
+            repository.close()
+            val elapsed = System.currentTimeMillis() - start
+            // Non-blocking close should complete well under 100ms on any machine
+            (elapsed < 200) shouldBe true
+        }
+
+        it("close() is idempotent") {
+            repository.close()
+            repository.close() // must not throw
+        }
+
+        it("add() throws IllegalStateException after close") {
+            repository.close()
+            val person = arbitraryPerson(1).next()
+            shouldThrow<IllegalStateException> {
+                repository.add(person)
+            }
+        }
+
+        it("addOrReplace() throws IllegalStateException after close") {
+            repository.close()
+            val person = arbitraryPerson(1).next()
+            shouldThrow<IllegalStateException> {
+                repository.addOrReplace(person)
+            }
+        }
+
+        it("addOrReplaceAll() throws IllegalStateException after close") {
+            repository.close()
+            val person = arbitraryPerson(1).next()
+            shouldThrow<IllegalStateException> {
+                repository.addOrReplaceAll(setOf(person))
+            }
+        }
+
+        it("remove() throws IllegalStateException after close") {
+            val person = arbitraryPerson(1).next()
+            repository.add(person)
+            repository.close()
+            shouldThrow<IllegalStateException> {
+                repository.remove(person)
+            }
+        }
+
+        it("removeAll() throws IllegalStateException after close") {
+            val person = arbitraryPerson(1).next()
+            repository.add(person)
+            repository.close()
+            shouldThrow<IllegalStateException> {
+                repository.removeAll(listOf(person))
+            }
+        }
+
+        it("clear() throws IllegalStateException after close") {
+            repository.close()
+            shouldThrow<IllegalStateException> {
+                repository.clear()
+            }
+        }
+    }
+
     describe("custom serialization delay") {
         it("uses the configured delay instead of the default") {
             val customDelayFile = tempfile("custom-delay-test", ".json").also { it.deleteOnExit() }
