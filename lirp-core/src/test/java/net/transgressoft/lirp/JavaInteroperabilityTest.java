@@ -4,6 +4,7 @@ import kotlinx.coroutines.CoroutineDispatcher;
 import kotlinx.coroutines.CoroutineScope;
 import kotlinx.coroutines.CoroutineScopeKt;
 import kotlinx.coroutines.ExperimentalCoroutinesApi;
+import kotlinx.coroutines.SupervisorKt;
 import kotlinx.coroutines.test.TestCoroutineDispatchersKt;
 import kotlinx.coroutines.test.TestCoroutineScheduler;
 import net.transgressoft.lirp.event.CrudEvent;
@@ -24,6 +25,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Flow;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -44,8 +46,10 @@ class JavaInteroperabilityTest {
         scheduler = new TestCoroutineScheduler();
         // Create an UnconfinedTestDispatcher which processes coroutines eagerly and can be controlled by the scheduler
         CoroutineDispatcher testDispatcher = TestCoroutineDispatchersKt.UnconfinedTestDispatcher(scheduler, null);
-        // Create a test scope with the controlled dispatcher for deterministic testing
-        CoroutineScope testScope = CoroutineScopeKt.CoroutineScope(testDispatcher);
+        // Create a test scope with the controlled dispatcher for deterministic testing.
+        // SupervisorJob is required so that a failing subscriber coroutine (e.g., in exception isolation tests)
+        // does not cancel the shared parent scope and break subsequent tests — mirroring production ReactiveScope.
+        CoroutineScope testScope = CoroutineScopeKt.CoroutineScope(testDispatcher.plus(SupervisorKt.SupervisorJob(null)));
         // Override the default reactive scopes to use our test scope for predictable test execution
         ReactiveScope.INSTANCE.setFlowScope(testScope);
         ReactiveScope.INSTANCE.setIoScope(testScope);
@@ -425,6 +429,29 @@ class JavaInteroperabilityTest {
 
             assertTrue(result.isPresent());
             assertEquals(alice, result.get());
+        }
+    }
+
+    @Nested
+    @DisplayName("Subscriber Exception Isolation")
+    class SubscriberExceptionIsolationTests {
+
+        @Test
+        @DisplayName("Java Consumer subscriber exception does not prevent other subscribers from receiving events")
+        void javaConsumerSubscriberExceptionDoesNotPreventOtherSubscribersFromReceivingEvents() {
+            var person = new Person(1, "Alice", 0L, true);
+
+            // Throwing Consumer — unconditional exception on every event
+            person.subscribe(event -> { throw new RuntimeException("intentional Java exception"); });
+
+            var healthyCounter = new AtomicInteger(0);
+            person.subscribe(event -> healthyCounter.incrementAndGet());
+
+            person.setName("Bob");
+            person.setName("Charlie");
+            scheduler.advanceUntilIdle();
+
+            assertEquals(2, healthyCounter.get());
         }
     }
 
