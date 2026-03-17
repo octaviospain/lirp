@@ -38,7 +38,6 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
@@ -125,6 +124,9 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
 
         private val dirty = AtomicBoolean(false)
 
+        @Volatile
+        private var closed = false
+
         init {
             require(jsonFile.exists().and(jsonFile.canWrite()).and(jsonFile.extension == "json")) {
                 "Provided jsonFile does not exist, is not writable or is not a json file"
@@ -163,6 +165,7 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
         }
 
         private fun markDirtyAndTrigger() {
+            check(!closed) { "JsonFileRepository is closed" }
             dirty.set(true)
             serializationEventChannel.trySend(Unit)
         }
@@ -200,42 +203,66 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
                 json.decodeFromString(mapSerializer, jsonFile.readText())
             } else null
 
+        /**
+         * Closes this repository and releases all resources.
+         *
+         * Non-blocking and fire-and-forget: closes the serialization channel, launches a final
+         * [performSerialization] in the I/O scope without waiting for it to complete, then cancels
+         * the debounced serialization job and closes the underlying event publisher.
+         *
+         * Any pending dirty state is flushed asynchronously — callers must not rely on the
+         * write having completed by the time this method returns.
+         *
+         * Idempotent: subsequent calls are safe no-ops.
+         *
+         * After closing, all mutating operations ([add], [addOrReplace], [addOrReplaceAll],
+         * [remove], [removeAll], [clear]) throw [IllegalStateException].
+         */
         override fun close() {
-            runBlocking {
-                // Cancel the channel to prevent new events
-                serializationEventChannel.close()
-                // Ensure any pending serialization is performed
+            if (closed) return
+            closed = true
+            serializationEventChannel.close()
+            // Fire-and-forget: flush any pending dirty state without blocking the caller
+            ioScope.launch {
                 performSerialization()
             }
             serializationJob.cancel()
+            super.close()
         }
 
-        override fun add(entity: R) =
-            super.add(entity).also { added ->
+        override fun add(entity: R): Boolean {
+            check(!closed) { "JsonFileRepository is closed" }
+            return super.add(entity).also { added ->
                 if (added) {
                     markDirtyAndTrigger()
                     subscribeEntity(entity)
                 }
             }
+        }
 
-        override fun addOrReplace(entity: R) =
-            super.addOrReplace(entity).also { added ->
+        override fun addOrReplace(entity: R): Boolean {
+            check(!closed) { "JsonFileRepository is closed" }
+            return super.addOrReplace(entity).also { added ->
                 if (added) {
                     markDirtyAndTrigger()
                     subscribeEntity(entity)
                 }
             }
+        }
 
-        override fun addOrReplaceAll(entities: Set<R>) =
-            super.addOrReplaceAll(entities).also { added ->
+        override fun addOrReplaceAll(entities: Set<R>): Boolean {
+            check(!closed) { "JsonFileRepository is closed" }
+            return super.addOrReplaceAll(entities).also { added ->
                 if (added) {
                     markDirtyAndTrigger()
                     entities.forEach { entity -> subscribeEntity(entity) }
                 }
             }
+        }
 
-        override fun remove(entity: R) =
-            super.remove(entity).also { removed ->
+        override fun remove(entity: R): Boolean {
+            check(!closed) { "JsonFileRepository is closed" }
+            return super.remove(entity).also { removed ->
                 if (removed) {
                     markDirtyAndTrigger()
                     val subscription =
@@ -244,9 +271,11 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
                     subscription.cancel()
                 }
             }
+        }
 
-        override fun removeAll(entities: Collection<R>) =
-            super.removeAll(entities).also { removed ->
+        override fun removeAll(entities: Collection<R>): Boolean {
+            check(!closed) { "JsonFileRepository is closed" }
+            return super.removeAll(entities).also { removed ->
                 if (removed) {
                     markDirtyAndTrigger()
                     entities.forEach {
@@ -257,8 +286,10 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
                     }
                 }
             }
+        }
 
         override fun clear() {
+            check(!closed) { "JsonFileRepository is closed" }
             super.clear()
             markDirtyAndTrigger()
             subscriptionsMap.forEach { (_, subscription) ->
