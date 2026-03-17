@@ -1,4 +1,14 @@
+plugins {
+    id 'com.google.devtools.ksp'
+}
+
 description = 'LIRP Core'
+
+ktlint {
+    filter {
+        exclude { it.file.path.contains("/generated/") }
+    }
+}
 
 dependencies {
     api project(path: ':lirp-api')
@@ -8,6 +18,10 @@ dependencies {
     implementation 'io.github.microutils:kotlin-logging-jvm:3.0.5'
     implementation "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion"
     implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0'
+
+    ksp project(path: ':lirp-ksp')
+    kspTest project(path: ':lirp-ksp')
+
     testImplementation(platform('org.junit:junit-bom:6.0.3'))
     testImplementation 'ch.qos.logback:logback-core:1.5.32'
     testImplementation "io.kotest:kotest-assertions-core:$kotestVersion"

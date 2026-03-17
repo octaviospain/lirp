@@ -51,11 +51,100 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
     Registry<K, T> where K : Comparable<K> {
     private val log = KotlinLogging.logger(javaClass.name)
 
+    /**
+     * Nested map structure: indexName -> (fieldValue -> set of entities).
+     * Populated lazily on first entity add by [discoverIndexes]; entries are created per discovered @Indexed property.
+     */
+    private val secondaryIndexes: MutableMap<String, MutableMap<Any, MutableSet<T>>> = ConcurrentHashMap()
+
+    /**
+     * Cached index entries loaded from the KSP-generated [LirpIndexAccessor] for this entity type.
+     * Each entry holds the resolved index name and a direct property getter lambda — no runtime reflection.
+     * Null until discovery runs; an empty list means no generated accessor was found.
+     */
+    @Volatile
+    private var indexEntries: List<IndexEntry<T>>? = null
+
     init {
         // A registry can't create or delete entities,
         // so the CREATE and DELETE events are disabled by default.
         // READ is disabled also because its use case is not clear yet
         activateEvents(UPDATE)
+    }
+
+    /**
+     * Loads the KSP-generated [LirpIndexAccessor] for the entity's class via a convention-based
+     * [Class.forName] lookup (`{EntityClassName}_LirpIndexAccessor`). Uses double-checked locking
+     * to ensure loading runs exactly once and the result is visible to all threads.
+     *
+     * The generated accessor provides [IndexEntry] descriptors with direct property getter lambdas,
+     * completely avoiding `kotlin-reflect` or `java.lang.reflect` overhead for property access.
+     * If no generated accessor is found (KSP not applied), the index entry list remains empty.
+     */
+    @Suppress("UNCHECKED_CAST")
+    protected fun discoverIndexes(entity: T) {
+        if (indexEntries != null) return
+        synchronized(this) {
+            if (indexEntries != null) return
+            val entries =
+                try {
+                    val accessorClass = Class.forName("${entity.javaClass.name}_LirpIndexAccessor")
+                    val accessor = accessorClass.getDeclaredConstructor().newInstance() as LirpIndexAccessor<T>
+                    accessor.entries
+                } catch (_: ClassNotFoundException) {
+                    emptyList()
+                }
+            for (entry in entries) {
+                secondaryIndexes.putIfAbsent(entry.indexName, ConcurrentHashMap())
+            }
+            indexEntries = entries
+        }
+    }
+
+    /**
+     * Adds [entity] to all secondary indexes. For each @Indexed property whose value is non-null,
+     * the entity is inserted into the corresponding value bucket. Null values are silently skipped
+     * because [ConcurrentHashMap] does not permit null keys.
+     */
+    protected fun indexEntity(entity: T) {
+        val entries = indexEntries ?: return
+        for ((indexName, getter) in entries) {
+            val value = getter(entity) ?: continue
+            secondaryIndexes[indexName]?.computeIfAbsent(value) { ConcurrentHashMap.newKeySet() }?.add(entity)
+        }
+    }
+
+    /**
+     * Removes [entity] from all secondary indexes. Null property values are silently skipped.
+     */
+    protected fun deindexEntity(entity: T) {
+        val entries = indexEntries ?: return
+        for ((indexName, getter) in entries) {
+            val value = getter(entity) ?: continue
+            secondaryIndexes[indexName]?.get(value)?.remove(entity)
+        }
+    }
+
+    /**
+     * Clears all value buckets in every secondary index. O(n_indexes) operation — does not iterate entities.
+     * Intended for use in bulk-clear operations such as [net.transgressoft.lirp.persistence.VolatileRepository.clear].
+     */
+    protected fun clearSecondaryIndexes() {
+        secondaryIndexes.values.forEach { it.clear() }
+    }
+
+    override fun findByIndex(indexName: String, value: Any): Set<T> {
+        val indexMap =
+            secondaryIndexes[indexName]
+                ?: throw IllegalArgumentException("No index declared for property '$indexName'")
+        return indexMap[value]?.toSet() ?: emptySet()
+    }
+
+    override fun findFirstByIndex(indexName: String, value: Any): Optional<out T> {
+        val indexMap =
+            secondaryIndexes[indexName]
+                ?: throw IllegalArgumentException("No index declared for property '$indexName'")
+        return Optional.ofNullable(indexMap[value]?.firstOrNull())
     }
 
     override fun iterator(): Iterator<T> = entitiesById.values.iterator()

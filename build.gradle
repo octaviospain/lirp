@@ -3,6 +3,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 import org.jlleitschuh.gradle.ktlint.reporter.ReporterType
 
 plugins {
+    id 'com.google.devtools.ksp' version '2.3.6' apply false
     id 'com.vanniktech.maven.publish' version '0.36.0'
     id 'jacoco-report-aggregation'
     id 'org.jetbrains.dokka' version '2.1.0'
@@ -19,6 +20,7 @@ repositories {
 
 ext {
     kotlinVersion = '2.3.10'
+    kspVersion = '2.3.6'
     coroutinesVersion = '1.10.2'
     kotestVersion = '6.1.7'
 }

@@ -79,6 +79,8 @@ Built on [Kotlin Coroutines](https://github.com/Kotlin/kotlinx.coroutines) and [
 
 - [Core Concepts: Reactive Event System](#-core-concepts-reactive-event-system)
 - [Core Concepts: JSON Serialization](#-core-concepts-json-serialization)
+- [Performance Characteristics](#performance-characteristics)
+- [Search Performance](#search-performance)
 - [Java Interoperability](#java-interoperability)
 - [Contributing](#-contributing)
 - [License and Attributions](#-license-and-attributions)
@@ -416,6 +418,106 @@ var reloadedRepo = new FlexibleJsonFileRepository(configFile);
 ```
 
 For complete working examples, see [JavaInteroperabilityTest.java](https://github.com/octaviospain/lirp/blob/master/lirp-core/src/test/java/net/transgressoft/lirp/JavaInteroperabilityTest.java) in the repository.
+
+## Search Performance
+
+lirp provides two complementary query strategies for repositories: lazy predicate search and secondary indexes.
+Choosing the right strategy depends on collection size, access frequency, and the type of lookup.
+
+### Lazy Search
+
+`lazySearch(predicate)` returns a Kotlin `Sequence<T>` — no intermediate collection is allocated.
+The sequence is evaluated element by element; traversal stops as soon as a terminal operation is satisfied.
+`searchStream(predicate)` provides the same behaviour for Java callers as a `Stream<T>`.
+
+The existing `search()` methods remain available for backward compatibility. They delegate internally to
+`lazySearch()` and materialise the result into a `Set<T>`, so they are the right choice when you need
+the full result or a Read event.
+
+Use early-termination terminals to avoid scanning the entire collection:
+
+```kotlin
+// Kotlin — stop after finding the first 5 matches
+val top5 = repository.lazySearch { it.category == "electronics" }.take(5).toList()
+
+// Kotlin — stop at the first match
+val first = repository.lazySearch { it.active }.firstOrNull()
+```
+
+```java
+// Java — stop after finding the first 5 matches
+List<Product> top5 = repository.searchStream(p -> p.getCategory().equals("electronics"))
+    .limit(5)
+    .collect(Collectors.toList());
+
+// Java — stop at the first match
+Optional<Product> first = repository.searchStream(Product::isActive).findFirst();
+```
+
+Neither `lazySearch` nor `searchStream` emits Read events. Use `search(predicate)` when event
+notification is required.
+
+### Secondary Indexes
+
+Annotate entity properties with `@Indexed` to enable O(1) equality lookups via `findByIndex` and
+`findFirstByIndex`. The repository discovers annotated properties on the first entity insertion and
+maintains the index eagerly on every subsequent mutation — the index is always consistent.
+
+```kotlin
+data class Product(
+    override val id: Int,
+    @Indexed val category: String,
+    @Indexed(name = "sku") val stockKeepingUnit: String
+) : ReactiveEntityBase<Int, Product>() {
+    override val uniqueId = "product-$id"
+    override fun clone() = copy()
+}
+
+val repository = VolatileRepository<Int, Product>("Products")
+repository.add(Product(1, "electronics", "SKU-001"))
+repository.add(Product(2, "electronics", "SKU-002"))
+
+// O(1) lookup — no collection scan
+val electronics: Set<Product> = repository.findByIndex("category", "electronics")
+val bySku: Optional<Product> = repository.findFirstByIndex("sku", "SKU-001")
+```
+
+Key characteristics:
+
+- **O(1) equality lookup** — backed by a nested `ConcurrentHashMap`; lookup time does not grow with
+  collection size.
+- **Eager maintenance** — indexes are updated synchronously on every add, replace, remove, and clear
+  operation. There is no stale-index window.
+- **Null values skipped** — entities with a `null` value for an indexed property are not included in that
+  index; no NullPointerException is thrown.
+- **`@field:` use-site target required in Kotlin** — Kotlin properties compile to a backing field plus
+  accessor methods. The `@field:` use-site target ensures the annotation appears on the JVM backing
+  field where Java reflection can discover it at runtime.
+- `findByIndex` returns a **defensive copy** — mutations to the returned set do not affect the internal
+  index bucket.
+
+### Scaling Guidance
+
+- **For small collections:** `search()` with a predicate is sufficient; the linear scan overhead is
+  negligible and the simpler API requires no annotation setup.
+
+- **For large collections with frequent equality lookups:** prefer `@Indexed` and `findByIndex` over
+  predicate search. The O(1) lookup time does not change with collection size, while a predicate scan
+  grows linearly.
+
+- **For partial result sets:** prefer `lazySearch().take(n)` (or `searchStream().limit(n)`) over
+  `search(size, predicate)`. Lazy evaluation stops as soon as `n` matches are found, whereas the eager
+  variant still iterates further in some cases.
+
+- **Index cardinality:** indexes work best for properties with moderate cardinality — for example,
+  a `category` field with tens of distinct values. Very high-cardinality properties (such as a unique
+  identifier) provide little lookup benefit over `findById`. Very low-cardinality properties on large
+  collections (such as a boolean `active` flag) produce large index buckets and consume proportionally
+  more memory.
+
+- **Index overhead:** each `@Indexed` property adds memory proportional to the number of distinct values
+  and the entity count. There is also a constant-time overhead per mutation to update the index buckets.
+  For write-heavy workloads with infrequent reads, weigh this trade-off carefully.
 
 ## 🤝 Contributing
 

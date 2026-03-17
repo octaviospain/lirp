@@ -1,0 +1,7 @@
+description = 'LIRP KSP Processor - Compile-time index accessor generation'
+
+dependencies {
+    api project(path: ':lirp-api')
+
+    implementation "com.google.devtools.ksp:symbol-processing-api:$kspVersion"
+}

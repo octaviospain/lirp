@@ -168,8 +168,14 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
             decodeFromJson()?.let { loadedEntities ->
                 log.info { "${loadedEntities.size} objects deserialized from file $jsonFile" }
 
-                // Bypass this class's override to avoid marking dirty during disk load
+                // Bypass this class's override to avoid marking dirty during disk load.
+                // super.addOrReplaceAll bypasses VolatileRepository's index hooks, so indexes are rebuilt manually.
                 super.addOrReplaceAll(loadedEntities.values.toSet())
+
+                loadedEntities.values.forEach { entity ->
+                    discoverIndexes(entity)
+                    indexEntity(entity)
+                }
 
                 flowScope.launch {
                     forEach { entity -> subscribeEntity(entity) }
