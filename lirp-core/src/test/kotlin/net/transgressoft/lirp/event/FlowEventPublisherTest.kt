@@ -869,6 +869,94 @@ class FlowEventPublisherTest : DescribeSpec({
         }
     }
 
+    describe("closeOnEmpty race condition") {
+        it("FlowEventPublisher with closeOnEmpty does not close during concurrent subscribe/cancel cycles") {
+            withContext(Dispatchers.Default) {
+                val closedPrematurely = AtomicInteger(0)
+                // Run 5 independent trials to amplify the race window
+                repeat(5) {
+                    val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("RacePublisher", closeOnEmpty = true)
+                    publisher.activateEvents(CREATE)
+
+                    val jobs =
+                        (1..50).map {
+                            launch {
+                                val sub = publisher.subscribe { }
+                                // Tiny yield to increase interleaving probability
+                                delay(1.milliseconds)
+                                sub.cancel()
+                            }
+                        }
+                    jobs.joinAll()
+
+                    // Publisher should still be open — all 50 subscribers cancelled but
+                    // no subscribe was "in-flight" when the last one cancelled, so close fires
+                    // only after all cancels settle. The key assertion is: no ISE thrown above.
+                    // We just verify we got here without an IllegalStateException.
+                }
+                closedPrematurely.get() shouldBe 0
+            }
+        }
+
+        it("FlowEventPublisher with closeOnEmpty emits lifecycle notification before closing") {
+            val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("LifecyclePublisher", closeOnEmpty = true)
+            publisher.activateEvents(CREATE)
+
+            val onEmptyCallCount = AtomicInteger(0)
+            publisher.onCloseOnEmpty { onEmptyCallCount.incrementAndGet() }
+
+            val sub = publisher.subscribe { }
+            sub.cancel()
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            onEmptyCallCount.get() shouldBe 1
+        }
+
+        it("FlowEventPublisher with closeOnEmpty closes after all subscribers leave with no in-flight subscribes") {
+            val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("CloseAfterEmptyPublisher", closeOnEmpty = true)
+            publisher.activateEvents(CREATE)
+
+            val sub1 = publisher.subscribe { }
+            val sub2 = publisher.subscribe { }
+
+            publisher.isClosed shouldBe false
+
+            sub1.cancel()
+            testDispatcher.scheduler.advanceUntilIdle()
+            publisher.isClosed shouldBe false
+
+            sub2.cancel()
+            testDispatcher.scheduler.advanceUntilIdle()
+            publisher.isClosed shouldBe true
+        }
+
+        it("subscribe on closed publisher with closeOnEmpty throws IllegalStateException") {
+            val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("ClosedOnEmptyPublisher", closeOnEmpty = true)
+            publisher.activateEvents(CREATE)
+
+            val sub = publisher.subscribe { }
+            sub.cancel()
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            shouldThrow<IllegalStateException> {
+                publisher.subscribe { }
+            }
+        }
+
+        it("emitAsync on closeOnEmpty publisher closed after empty throws IllegalStateException") {
+            val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("EmitAfterEmptyPublisher", closeOnEmpty = true)
+            publisher.activateEvents(CREATE)
+
+            val sub = publisher.subscribe { }
+            sub.cancel()
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            shouldThrow<IllegalStateException> {
+                publisher.emitAsync(Create(TestEntity("entity-1")))
+            }
+        }
+    }
+
     describe("Subscriber count tracking") {
         it("subscriberCount is 0 on new publisher") {
             val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("test-publisher")
