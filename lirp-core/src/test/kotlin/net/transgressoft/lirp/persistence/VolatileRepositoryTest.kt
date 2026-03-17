@@ -2,7 +2,6 @@ package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.Person
 import net.transgressoft.lirp.arbitraryPerson
-import net.transgressoft.lirp.entity.toIds
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
 import net.transgressoft.lirp.event.CrudEvent.Type.DELETE
@@ -105,19 +104,18 @@ internal class VolatileRepositoryTest : StringSpec({
         }
     }
 
-    "Repository run actions on events and send update events when they are modified" {
+    "Repository addOrReplace sends UPDATE event with previous entity in oldEntities" {
         val person = arbitraryPerson().next()
         repository.add(person) shouldBe true
-        val previousMoney = person.money!!
-        repository.runForSingle(person.id) { it.money = it.money?.plus(1) } shouldBe true
-        repository.findById(person.id).get().money shouldBe previousMoney + 1
+        val updatedPerson = person.copy(money = person.money!! + 1)
+        repository.addOrReplace(updatedPerson) shouldBe true
 
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertSoftly(subscriber.receivedEvents[UPDATE]) {
             it?.let {
-                this?.entities?.values?.shouldContainOnly(person)
-                this?.oldEntities?.values?.shouldContainOnly(person.copy(money = previousMoney))
+                this?.entities?.values?.shouldContainOnly(updatedPerson)
+                this?.oldEntities?.values?.shouldContainOnly(person)
             }
         }
 
@@ -125,13 +123,14 @@ internal class VolatileRepositoryTest : StringSpec({
         val previousSetMoney = set.stream().collect(Collectors.toMap({ it.id }, { it.money }))
         repository + set shouldBe true
         repository.size() shouldBe set.size + 1
-        repository.runForMany(set.toIds()) { it.money = it.money?.plus(1) } shouldBe true
+        val updatedSet = set.map { it.copy(money = it.money!! + 1) }.toSet()
+        repository.addOrReplaceAll(updatedSet) shouldBe true
 
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertSoftly(subscriber.receivedEvents[UPDATE]) {
             it?.let {
-                this?.entities?.values?.shouldContainAll(set)
+                this?.entities?.values?.shouldContainAll(updatedSet)
                 this?.oldEntities?.values?.shouldContainAll(set.map { it.copy(money = previousSetMoney[it.id]) })
             }
         }
@@ -144,16 +143,29 @@ internal class VolatileRepositoryTest : StringSpec({
         val richPerson = arbitraryPerson().next().copy(money = 1000)
         repository.addOrReplaceAll(setOf(poorPerson, richPerson)) shouldBe true
         repository.size() shouldBe set.size + 3
-        repository.runMatching({ it.money == 0L }) { it.money = it.money?.plus(1) } shouldBe true
+        val updatedPoorPerson = poorPerson.copy(money = 1)
+        repository.addOrReplace(updatedPoorPerson) shouldBe true
 
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertSoftly(subscriber.receivedEvents[UPDATE]) {
             it?.let {
-                this?.entities?.values.shouldContainOnly(poorPerson)
+                this?.entities?.values.shouldContainOnly(updatedPoorPerson)
                 this?.oldEntities?.values.shouldContainOnly(poorPerson.copy(money = 0))
             }
         }
+    }
+
+    "Registry iterates over all entities via Iterable" {
+        val people = Arb.set(arbitraryPerson(), 3..3).next()
+        repository.addOrReplaceAll(people) shouldBe true
+
+        val iterated = mutableSetOf<Person>()
+        for (person in repository) {
+            iterated.add(person)
+        }
+
+        iterated shouldContainOnly people
     }
 
     "Repository publishes CRUD events received by a subscriber" {
@@ -335,7 +347,7 @@ internal class VolatileRepositoryTest : StringSpec({
         updateEventsReceived.get() shouldBe 0
 
         // Update the person to trigger UPDATE event
-        repository.runForSingle(person.id) { it.money = it.money?.plus(100) } shouldBe true
+        repository.addOrReplace(person.copy(money = person.money!! + 100)) shouldBe true
 
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -356,7 +368,7 @@ internal class VolatileRepositoryTest : StringSpec({
         receivedPersonIds shouldContainOnly setOf(person.id) // Should not contain person2.id
 
         // But UPDATE subscription should still work
-        repository.runForSingle(person2.id) { it.money = it.money?.plus(100) } shouldBe true
+        repository.addOrReplace(person2.copy(money = person2.money!! + 100)) shouldBe true
 
         testDispatcher.scheduler.advanceUntilIdle()
 

@@ -31,11 +31,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
- * Concurrency tests verifying that [RegistryBase] batch operations are safe under concurrent
- * modification of the underlying [java.util.concurrent.ConcurrentHashMap].
+ * Concurrency tests verifying that [RegistryBase] iteration and search operations are safe
+ * under concurrent modification of the underlying [java.util.concurrent.ConcurrentHashMap].
  *
- * These tests prove that [RegistryBase.runForMany], [RegistryBase.runMatching],
- * [RegistryBase.runForAll], and [RegistryBase.search] do not throw
+ * These tests prove that [RegistryBase.iterator] and [RegistryBase.search] do not throw
  * [java.util.ConcurrentModificationException] when entities are added or removed
  * concurrently via another coroutine.
  */
@@ -55,16 +54,14 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
         ReactiveScope.resetDefaultFlowScope()
     }
 
-    "RegistryBase runForMany completes without error under concurrent entity additions" {
+    "RegistryBase iterator completes without error under concurrent entity additions" {
         val concurrentCoroutines = 50
         val iterationsPerCoroutine = 100
         val initialSize = 100
 
-        val repository = VolatileRepository<Int, Person>("runForMany-concurrency-test")
+        val repository = VolatileRepository<Int, Person>("iterator-concurrency-test")
         val initialEntities = (1..initialSize).map { arbitraryPerson(it).next() }
         initialEntities.forEach { repository.add(it) }
-
-        val targetIds = initialEntities.map { it.id }.toSet()
 
         shouldNotThrowAny {
             val writerJobs =
@@ -81,7 +78,7 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
             val readerJob =
                 launch(Dispatchers.Default) {
                     repeat(iterationsPerCoroutine) {
-                        repository.runForMany(targetIds) { /* read-only action */ }
+                        repository.forEach { /* read-only iteration */ }
                     }
                 }
 
@@ -90,12 +87,12 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
         }
     }
 
-    "RegistryBase runMatching completes without error under concurrent entity removals" {
+    "RegistryBase iterator completes without error under concurrent entity removals" {
         val concurrentCoroutines = 50
         val iterationsPerCoroutine = 100
         val initialSize = 100
 
-        val repository = VolatileRepository<Int, Person>("runMatching-concurrency-test")
+        val repository = VolatileRepository<Int, Person>("iterator-removal-concurrency-test")
         val allEntities =
             (1..initialSize + concurrentCoroutines * iterationsPerCoroutine)
                 .map { arbitraryPerson(it).next() }
@@ -115,7 +112,7 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
             val readerJob =
                 launch(Dispatchers.Default) {
                     repeat(iterationsPerCoroutine) {
-                        repository.runMatching({ true }) { /* read-only action */ }
+                        repository.forEach { /* read-only iteration */ }
                     }
                 }
 
@@ -124,12 +121,12 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
         }
     }
 
-    "RegistryBase runForAll completes without error under concurrent modifications" {
+    "RegistryBase iterator completes without error under concurrent add and remove" {
         val concurrentCoroutines = 50
         val iterationsPerCoroutine = 100
         val initialSize = 100
 
-        val repository = VolatileRepository<Int, Person>("runForAll-concurrency-test")
+        val repository = VolatileRepository<Int, Person>("iterator-mixed-concurrency-test")
         val initialEntities = (1..initialSize).map { arbitraryPerson(it).next() }
         initialEntities.forEach { repository.add(it) }
 
@@ -148,7 +145,7 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
             val readerJob =
                 launch(Dispatchers.Default) {
                     repeat(iterationsPerCoroutine) {
-                        repository.runForAll { /* read-only action */ }
+                        repository.forEach { /* read-only iteration */ }
                     }
                 }
 

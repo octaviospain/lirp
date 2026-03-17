@@ -150,7 +150,7 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
                 super.addOrReplaceAll(loadedEntities.values.toSet())
 
                 flowScope.launch {
-                    runForAll { entity -> subscribeEntity(entity) }
+                    forEach { entity -> subscribeEntity(entity) }
                 }
             }
 

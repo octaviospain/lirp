@@ -23,39 +23,24 @@ import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
 import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.LirpEventPublisher
 import net.transgressoft.lirp.event.StandardCrudEvent.Read
-import net.transgressoft.lirp.event.StandardCrudEvent.Update
 import mu.KotlinLogging
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
-import java.util.function.Consumer
 import java.util.function.Predicate
 
 /**
  * Base class for read-only entity registries with reactive query capabilities.
  *
- * `RegistryBase` provides the foundation for entity collections that can be searched and
- * queried, with changes tracked and published to subscribers. It follows a reactive approach
- * by implementing [LirpEventPublisher], notifying subscribers of read operations
- * and entity changes.
- *
- * Key features:
- * - Run actions on entities that automatically detect and publish changes
- * - Rich query capabilities with predicate-based searches
- * - Event publishing for entity reads and modifications
- * - Thread-safe operation under concurrent access when backed by a [ConcurrentHashMap]
- *
- * Thread-safety: the default [entitiesById] is a [ConcurrentHashMap], which makes individual
- * get/put/remove/computeIfPresent operations atomic. Batch methods such as [runForMany],
- * [runMatching], and [runForAll] operate on weakly-consistent views of the map — they will
- * not throw [java.util.ConcurrentModificationException] under concurrent modification, but
+ * Provides a searchable, iterable entity collection backed by a [ConcurrentHashMap].
+ * Query results and entity reads are published to subscribers as [CrudEvent] events.
+ * Iteration via [iterator] is weakly-consistent: it will not throw
+ * [java.util.ConcurrentModificationException] under concurrent modification, but
  * may or may not reflect entries added or removed after iteration starts.
  *
  * @param K The type of entity identifier, must be [Comparable]
  * @param T The type of entity being stored, must implement [IdentifiableEntity]
- * @property entitiesById The internal map storing entities by their IDs. Must be a thread-safe
- *   map (e.g. [ConcurrentHashMap]) for safe concurrent access.
- *
- * @see [net.transgressoft.lirp.event.LirpEventSubscriber]
+ * @property entitiesById The internal map storing entities by their IDs
+ * @property publisher The event publisher for broadcasting entity operations
  */
 abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
     protected val entitiesById: MutableMap<K, T> = ConcurrentHashMap(),
@@ -71,71 +56,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
         activateEvents(UPDATE)
     }
 
-    @Suppress("UNCHECKED_CAST")
-    override fun runForSingle(id: K, entityAction: Consumer<in T>): Boolean {
-        val entity = entitiesById[id] ?: return false
-        val previousHashcode = entity.hashCode()
-        val entityBeforeUpdate = entity.clone() as T
-
-        entityAction.accept(entity)
-
-        if (previousHashcode != entity.hashCode()) {
-            log.debug { "Entity with id ${entity.id} was modified as a result of an action" }
-            publisher.emitAsync(Update(entity, entityBeforeUpdate))
-            return true
-        }
-        return false
-    }
-
-    override fun runForMany(ids: Set<K>, entityAction: Consumer<in T>): Boolean =
-        ids.mapNotNull { entitiesById[it] }.let {
-            if (it.isNotEmpty()) {
-                runActionAndReplaceModifiedEntities(it.toSet(), entityAction)
-            } else {
-                false
-            }
-        }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun runActionAndReplaceModifiedEntities(entities: Set<T>, entityAction: Consumer<in T>): Boolean {
-        val updates =
-            entities.mapNotNull { entity ->
-                val previousHashCode = entity.hashCode()
-                val entityBeforeChange = entity.clone() as T
-
-                entityAction.accept(entity)
-
-                if (previousHashCode != entity.hashCode()) {
-                    // Ensure the entity in the map is still this entity
-                    entitiesById.computeIfPresent(entity.id) { _, current ->
-                        if (current == entityBeforeChange)
-                            entity
-                        else current
-                    }
-                    log.debug { "Entity with id ${entity.id} was modified as a result of an action" }
-                    Pair(entity, entityBeforeChange)
-                } else null
-            }
-
-        if (updates.isNotEmpty()) {
-            val (modified, originals) = updates.unzip()
-            publisher.emitAsync(Update(modified, originals))
-            return true
-        }
-
-        return false
-    }
-
-    override fun runMatching(predicate: Predicate<in T>, entityAction: Consumer<in T>): Boolean =
-        search(predicate).let {
-            if (it.isNotEmpty()) {
-                runActionAndReplaceModifiedEntities(it, entityAction)
-            } else {
-                false
-            }
-        }
-
-    override fun runForAll(entityAction: Consumer<in T>) = runActionAndReplaceModifiedEntities(entitiesById.values.toSet(), entityAction)
+    override fun iterator(): Iterator<T> = entitiesById.values.iterator()
 
     override fun contains(id: K) = entitiesById.containsKey(id)
 

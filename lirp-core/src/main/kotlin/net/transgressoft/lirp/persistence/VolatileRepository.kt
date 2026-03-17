@@ -29,25 +29,15 @@ import java.util.Objects
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Base class for mutable entity repositories with reactive behavior.
+ * In-memory entity repository with reactive event publishing.
  *
- * `RepositoryBase` extends [RegistryBase] to provide full CRUD (Create, Read, Update, Delete)
- * operations on entities. It maintains a collection of entities that can be modified through
- * add, remove, and replace operations, with all changes automatically published to subscribers.
+ * Extends [RegistryBase] with full CRUD operations. All mutations are published as
+ * [net.transgressoft.lirp.event.CrudEvent] events: [add] emits CREATE, [remove]/[removeAll]/[clear] emit DELETE,
+ * and [addOrReplace] emits CREATE for new entities or UPDATE (with the previous entity
+ * in [net.transgressoft.lirp.event.CrudEvent.oldEntities]) when replacing an existing entity. No event is emitted
+ * when the replacement entity is identical to the existing one.
  *
- * Key features:
- * - Full CRUD operations with event publishing
- * - Bulk operations for adding/replacing/removing multiple entities
- * - Optimized entity replacement with change detection
- * - Detailed logging of repository operations
- *
- * Since this repository is volatile, all data is lost when the application terminates
- * or when the repository instance is garbage collected.
- *
- * Example usage:
- * ```
- * class UserRepository : VolatileRepository("UserRepository")
- * ```
+ * Data is volatile — all entities are lost when the repository is garbage collected.
  *
  * @param K The type of entity identifier, must be [Comparable]
  * @param T The type of entity being stored, must implement [IdentifiableEntity]

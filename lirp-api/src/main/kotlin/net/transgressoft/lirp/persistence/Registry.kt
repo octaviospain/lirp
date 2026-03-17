@@ -21,67 +21,19 @@ import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.LirpEventPublisher
 import java.util.*
-import java.util.function.Consumer
 import java.util.function.Predicate
 
 /**
- * A registry represents a read-only collection of entities that can be queried and accessed.
+ * A read-only, iterable collection of entities that can be queried and observed.
  *
- * The Registry provides a foundation for entity management with query capabilities
- * but intentionally restricts modification operations. Entities within a Registry
- * are uniquely identified by their ID, allowing for consistent and predictable access.
+ * Registry provides query capabilities over a collection of [IdentifiableEntity] instances,
+ * with entity access by ID, predicate-based search, and iteration via [Iterable].
+ * Iteration is weakly-consistent when backed by a [java.util.concurrent.ConcurrentHashMap].
  *
  * @param K The type of the entity's identifier, which must be [Comparable]
  * @param T The type of entities in the registry, which must implement [IdentifiableEntity]
  */
-interface Registry<K, T: IdentifiableEntity<K>> : LirpEventPublisher<CrudEvent.Type, CrudEvent<K, T>> where K : Comparable<K> {
-
-    /**
-     * Applies the given action to the entity with the specified ID if present.
-     *
-     * If the action results in a different entity state (determined by hash code comparison),
-     * the entity will be replaced in the registry.
-     *
-     * @param id The ID of the entity to apply the action to
-     * @param entityAction The action to apply to the entity
-     * @return True if the entity was found and the action was applied, false otherwise
-     */
-    fun runForSingle(id: K, entityAction: Consumer<in T>): Boolean
-
-    /**
-     * Applies the given action to all entities with the specified IDs if present.
-     *
-     * If the action results in different entity states (determined by hash code comparison),
-     * the entities will be replaced in the registry.
-     *
-     * @param ids The set of IDs of entities to apply the action to
-     * @param entityAction The action to apply to the entities
-     * @return True if any entity was found and the action was applied, false otherwise
-     */
-    fun runForMany(ids: Set<K>, entityAction: Consumer<in T>): Boolean
-
-    /**
-     * Applies the given action to all entities that match the specified predicate.
-     *
-     * If the action results in different entity states (determined by hash code comparison),
-     * the entities will be replaced in the registry.
-     *
-     * @param predicate The predicate to match entities against
-     * @param entityAction The action to apply to matching entities
-     * @return True if any entity matched and the action was applied, false otherwise
-     */
-    fun runMatching(predicate: Predicate<in T>, entityAction: Consumer<in T>): Boolean
-
-    /**
-     * Applies the given action to all entities in the registry.
-     *
-     * If the action results in different entity states (determined by hash code comparison),
-     * the entities will be replaced in the registry.
-     *
-     * @param entityAction The action to apply to all entities
-     * @return True if the action was applied to any entity, false if the registry is empty
-     */
-    fun runForAll(entityAction: Consumer<in T>): Boolean
+interface Registry<K, T: IdentifiableEntity<K>> : LirpEventPublisher<CrudEvent.Type, CrudEvent<K, T>>, Iterable<T> where K : Comparable<K> {
 
     /**
      * Checks if the registry contains an entity with the specified ID.
