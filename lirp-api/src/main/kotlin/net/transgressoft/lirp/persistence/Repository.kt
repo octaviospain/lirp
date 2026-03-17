@@ -58,6 +58,10 @@ interface Repository<K, T: IdentifiableEntity<K>> : Registry<K, T> where K : Com
     /**
      * Adds all given entities to the repository, replacing any existing entities with the same IDs.
      *
+     * This operation is atomic: if any entity fails to be processed (e.g., due to an indexing error),
+     * all changes made during this call are rolled back and the repository is restored to its
+     * state before the call. The exception that caused the failure is rethrown after rollback.
+     *
      * @param entities The set of entities to add or replace
      * @return True if any entity was added or replaced, false otherwise
      */

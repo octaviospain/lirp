@@ -90,22 +90,31 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
         override fun addOrReplaceAll(entities: Set<T>): Boolean {
             if (entities.isEmpty()) return false
 
+            // Snapshot state before mutation for atomic rollback
+            val snapshot = LinkedHashMap<K, T?>(entities.size)
             val added = mutableListOf<T>()
             val updated = mutableListOf<T>()
             val entitiesBeforeUpdate = mutableListOf<T>()
 
-            entities.forEach { entity ->
-                val oldValue = entitiesById.put(entity.id, entity)
-                if (oldValue == null) {
-                    discoverIndexes(entity)
-                    indexEntity(entity)
-                    added.add(entity)
-                } else if (oldValue != entity) {
-                    deindexEntity(oldValue)
-                    indexEntity(entity)
-                    updated.add(entity)
-                    entitiesBeforeUpdate.add(oldValue)
+            try {
+                entities.forEach { entity ->
+                    snapshot[entity.id] = entitiesById[entity.id]
+
+                    val oldValue = entitiesById.put(entity.id, entity)
+                    if (oldValue == null) {
+                        discoverIndexes(entity)
+                        indexEntity(entity)
+                        added.add(entity)
+                    } else if (oldValue != entity) {
+                        deindexEntity(oldValue)
+                        indexEntity(entity)
+                        updated.add(entity)
+                        entitiesBeforeUpdate.add(oldValue)
+                    }
                 }
+            } catch (exception: Exception) {
+                rollback(snapshot, added, updated, entitiesBeforeUpdate)
+                throw exception
             }
 
             if (added.isNotEmpty()) {
@@ -119,6 +128,27 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
             }
 
             return added.isNotEmpty() || updated.isNotEmpty()
+        }
+
+        private fun rollback(
+            snapshot: Map<K, T?>,
+            added: List<T>,
+            updated: List<T>,
+            entitiesBeforeUpdate: List<T>
+        ) {
+            // Undo index changes for entities that were successfully processed
+            added.forEach { deindexEntity(it) }
+            updated.forEach { deindexEntity(it) }
+            entitiesBeforeUpdate.forEach { indexEntity(it) }
+
+            // Restore the primary map to its pre-operation state
+            for ((id, previousEntity) in snapshot) {
+                if (previousEntity != null) {
+                    entitiesById[id] = previousEntity
+                } else {
+                    entitiesById.remove(id)
+                }
+            }
         }
 
         override fun remove(entity: T): Boolean {
