@@ -22,6 +22,7 @@ import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.LirpEventPublisher
 import java.util.*
 import java.util.function.Predicate
+import java.util.stream.Stream
 
 /**
  * A read-only, iterable collection of entities that can be queried and observed.
@@ -52,7 +53,41 @@ interface Registry<K, T: IdentifiableEntity<K>> : LirpEventPublisher<CrudEvent.T
     fun contains(predicate: Predicate<in T>): Boolean
 
     /**
+     * Returns a lazy [Sequence] of entities that match the specified predicate.
+     *
+     * The sequence is evaluated lazily over the backing collection with O(n) worst-case complexity.
+     * No intermediate collection is allocated, making this suitable for large registries or
+     * short-circuit consumers. Use [Sequence.take], [Sequence.firstOrNull], or any other
+     * Sequence terminal operation to limit traversal.
+     *
+     * This method does NOT emit [net.transgressoft.lirp.event.CrudEvent.Type.READ] events.
+     * Use [search] to obtain a materialized result with event notification.
+     *
+     * @param predicate The predicate to match entities against
+     * @return A lazy [Sequence] of matching entities
+     */
+    fun lazySearch(predicate: Predicate<in T>): Sequence<T>
+
+    /**
+     * Returns a Java [Stream] of entities that match the specified predicate, for Java interop callers.
+     *
+     * The stream is backed by a lazy [Sequence] with O(n) worst-case complexity.
+     * Callers may use [Stream.limit] and [Stream.findFirst] for early termination without
+     * evaluating the entire collection.
+     *
+     * This method does NOT emit [net.transgressoft.lirp.event.CrudEvent.Type.READ] events.
+     * Use [search] to obtain a materialized result with event notification.
+     *
+     * @param predicate The predicate to match entities against
+     * @return A sequential [Stream] of matching entities
+     */
+    fun searchStream(predicate: Predicate<in T>): Stream<T>
+
+    /**
      * Returns all entities that match the specified predicate.
+     *
+     * Delegates to [lazySearch] internally for a single code path, then materialises the result
+     * into a [Set] and emits a [net.transgressoft.lirp.event.CrudEvent.Type.READ] event.
      *
      * @param predicate The predicate to match entities against
      * @return A set of all entities matching the predicate

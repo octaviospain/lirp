@@ -27,6 +27,8 @@ import mu.KotlinLogging
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.function.Predicate
+import java.util.stream.Stream
+import java.util.stream.StreamSupport
 
 /**
  * Base class for read-only entity registries with reactive query capabilities.
@@ -63,18 +65,17 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
     override fun contains(predicate: Predicate<in T>): Boolean =
         entitiesById.values.asSequence().any { predicate.test(it) }
 
+    override fun lazySearch(predicate: Predicate<in T>): Sequence<T> =
+        entitiesById.values.asSequence().filter { predicate.test(it) }
+
+    override fun searchStream(predicate: Predicate<in T>): Stream<T> =
+        StreamSupport.stream(lazySearch(predicate).asIterable().spliterator(), false)
+
     override fun search(predicate: Predicate<in T>): Set<T> =
-        entitiesById.values.asSequence()
-            .filter { predicate.test(it) }
-            .toSet()
-            .also { publisher.emitAsync(Read(it)) }
+        lazySearch(predicate).toSet().also { publisher.emitAsync(Read(it)) }
 
     override fun search(size: Int, predicate: Predicate<in T>): Set<T> =
-        entitiesById.values.asSequence()
-            .filter { predicate.test(it) }
-            .take(size)
-            .toSet()
-            .also { publisher.emitAsync(Read(it)) }
+        lazySearch(predicate).take(size).toSet().also { publisher.emitAsync(Read(it)) }
 
     override fun findFirst(predicate: Predicate<in T>): Optional<out T> =
         Optional.ofNullable(entitiesById.values.firstOrNull { predicate.test(it) })
