@@ -10,6 +10,7 @@ import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
 import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.ReactiveScope
+import net.transgressoft.lirp.persistence.LirpDeserializationException
 import io.kotest.assertions.json.shouldEqualJson
 import io.kotest.assertions.json.shouldNotEqualJson
 import io.kotest.assertions.throwables.shouldNotThrowAny
@@ -19,6 +20,8 @@ import io.kotest.engine.spec.tempfile
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.types.shouldBeInstanceOf
 import io.kotest.property.arbitrary.next
 import io.mockk.every
 import io.mockk.mockk
@@ -938,6 +941,74 @@ class JsonFileRepositoryTest : DescribeSpec({
                 customDelayFile.readText().isNotEmpty() shouldBe true
             } finally {
                 customRepo.close()
+            }
+        }
+    }
+
+    describe("Deserialization error handling") {
+        it("JsonFileRepository throws LirpDeserializationException on malformed JSON") {
+            val corruptFile = tempfile("corrupt-json", ".json").also { it.deleteOnExit() }
+            corruptFile.writeText("{invalid")
+
+            shouldThrow<LirpDeserializationException> {
+                PersonJsonFileRepository(corruptFile)
+            }
+        }
+
+        it("JsonFileRepository exception wraps original serialization cause") {
+            val corruptFile = tempfile("corrupt-json-cause", ".json").also { it.deleteOnExit() }
+            corruptFile.writeText("{invalid")
+
+            val exception =
+                shouldThrow<LirpDeserializationException> {
+                    PersonJsonFileRepository(corruptFile)
+                }
+
+            exception.cause.shouldBeInstanceOf<Exception>()
+        }
+
+        it("JsonFileRepository exception message includes file path") {
+            val corruptFile = tempfile("corrupt-json-path", ".json").also { it.deleteOnExit() }
+            corruptFile.writeText("{invalid")
+
+            val exception =
+                shouldThrow<LirpDeserializationException> {
+                    PersonJsonFileRepository(corruptFile)
+                }
+
+            exception.message shouldContain corruptFile.absolutePath
+        }
+
+        it("JsonFileRepository with valid JSON initializes normally") {
+            val person = arbitraryPerson(42).next()
+            val validFile = tempfile("valid-json", ".json").also { it.deleteOnExit() }
+            validFile.writeText(
+                """
+                {
+                    "${person.id}": {
+                        "type": "Person",
+                        "id": ${person.id},
+                        "name": "${person.name}",
+                        "money": ${person.money},
+                        "morals": ${person.morals}
+                    }
+                }"""
+            )
+
+            shouldNotThrowAny {
+                val repo = PersonJsonFileRepository(validFile)
+                repo.size() shouldBe 1
+                repo.close()
+            }
+        }
+
+        it("JsonFileRepository with empty JSON file initializes with no entities") {
+            val emptyFile = tempfile("empty-json", ".json").also { it.deleteOnExit() }
+
+            shouldNotThrowAny {
+                val repo = PersonJsonFileRepository(emptyFile)
+                repo.size() shouldBe 0
+                repo.close()
             }
         }
     }

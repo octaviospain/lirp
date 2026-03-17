@@ -23,6 +23,7 @@ import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
 import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.ReactiveScope
+import net.transgressoft.lirp.persistence.LirpDeserializationException
 import net.transgressoft.lirp.persistence.VolatileRepository
 import mu.KotlinLogging
 import java.io.File
@@ -198,10 +199,18 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
             }
         }
 
-        private fun decodeFromJson(): Map<K, R>? =
-            if (jsonFile.readText().isNotEmpty()) {
-                json.decodeFromString(mapSerializer, jsonFile.readText())
-            } else null
+        private fun decodeFromJson(): Map<K, R>? {
+            val content = jsonFile.readText()
+            if (content.isEmpty()) return null
+            return try {
+                json.decodeFromString(mapSerializer, content)
+            } catch (exception: Exception) {
+                throw LirpDeserializationException(
+                    "Failed to deserialize entities from file: ${jsonFile.absolutePath}",
+                    exception
+                )
+            }
+        }
 
         /**
          * Closes this repository and releases all resources.
