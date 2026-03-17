@@ -23,7 +23,6 @@ import java.io.File;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -396,49 +395,23 @@ class JavaInteroperabilityTest {
         }
 
         @Test
-        @DisplayName("runForMany applies action to entities with the given IDs")
-        void runForManyAppliesActionToEntitiesWithGivenIds() {
-            var repository = new VolatileRepository<Integer, Person>("RunForManyRepo");
-            repository.add(new Person(1, "Alice", 100L, true));
-            repository.add(new Person(2, "Bob", 200L, false));
-            repository.add(new Person(3, "Charlie", 300L, true));
+        @DisplayName("iterator returns all entities in the repository")
+        void iteratorReturnsAllEntitiesInRepository() {
+            var repository = new VolatileRepository<Integer, Person>("IteratorRepo");
+            var alice = new Person(1, "Alice", 100L, true);
+            var bob = new Person(2, "Bob", 200L, false);
+            var charlie = new Person(3, "Charlie", 300L, true);
+            repository.add(alice);
+            repository.add(bob);
+            repository.add(charlie);
 
-            repository.runForMany(Set.of(1, 2), person -> person.setName("Updated"));
-            scheduler.advanceUntilIdle();
+            var iterated = new ArrayList<Person>();
+            for (var person : repository) {
+                iterated.add(person);
+            }
 
-            assertEquals("Updated", repository.findById(1).get().getName());
-            assertEquals("Updated", repository.findById(2).get().getName());
-            assertEquals("Charlie", repository.findById(3).get().getName());
-        }
-
-        @Test
-        @DisplayName("runMatching applies action only to entities matching the predicate")
-        void runMatchingAppliesActionOnlyToMatchingEntities() {
-            var repository = new VolatileRepository<Integer, Person>("RunMatchingRepo");
-            repository.add(new Person(1, "Alice", 100L, true));
-            repository.add(new Person(2, "Bob", 200L, false));
-            repository.add(new Person(3, "Charlie", 300L, true));
-
-            repository.runMatching(Personly::getMorals, person -> person.setName("Moral"));
-            scheduler.advanceUntilIdle();
-
-            assertEquals("Moral", repository.findById(1).get().getName());
-            assertEquals("Bob", repository.findById(2).get().getName());
-            assertEquals("Moral", repository.findById(3).get().getName());
-        }
-
-        @Test
-        @DisplayName("runForAll applies action to every entity in the repository")
-        void runForAllAppliesActionToEveryEntity() {
-            var repository = new VolatileRepository<Integer, Person>("RunForAllRepo");
-            repository.add(new Person(1, "Alice", 100L, true));
-            repository.add(new Person(2, "Bob", 200L, false));
-
-            repository.runForAll(person -> person.setName("All"));
-            scheduler.advanceUntilIdle();
-
-            assertEquals("All", repository.findById(1).get().getName());
-            assertEquals("All", repository.findById(2).get().getName());
+            assertEquals(3, iterated.size());
+            assertTrue(iterated.containsAll(List.of(alice, bob, charlie)));
         }
 
         @Test
@@ -478,12 +451,12 @@ class JavaInteroperabilityTest {
         }
 
         @Test
-        @DisplayName("runForSingle mutates entity and findById reflects change")
-        void runForSingleMutatesEntityAndFindByIdReflectsChange() {
-            var repository = new VolatileRepository<Integer, Person>("RunForSingleRepo");
+        @DisplayName("addOrReplace with updated entity and findById reflects change")
+        void addOrReplaceWithUpdatedEntityAndFindByIdReflectsChange() {
+            var repository = new VolatileRepository<Integer, Person>("AddOrReplaceNameRepo");
             repository.add(new Person(1, "Alice", 0L, true));
 
-            repository.runForSingle(1, person -> person.setName("John"));
+            repository.addOrReplace(new Person(1, "John", 0L, true));
             scheduler.advanceUntilIdle();
 
             assertEquals("John", repository.findById(1).get().getName());

@@ -149,7 +149,7 @@ class JsonFileRepositoryTest : DescribeSpec({
             repository.findFirst { it.name == "John Namechanged" } shouldBePresent { it shouldBe person }
         }
 
-        it("serializes on mutation inside repository action") {
+        it("serializes on addOrReplace") {
             val person = arbitraryPerson().next()
             repository.add(person) shouldBe true
             testDispatcher.scheduler.advanceUntilIdle()
@@ -166,7 +166,8 @@ class JsonFileRepositoryTest : DescribeSpec({
                 }"""
             jsonFile.readText().shouldEqualJson(expectedRepositoryJson)
 
-            repository.runForSingle(person.id) { it.name = "John Namechanged" }
+            val updatedPerson = (person as Person).copy(initialName = "John Namechanged")
+            repository.addOrReplace(updatedPerson) shouldBe true
             testDispatcher.scheduler.advanceUntilIdle()
 
             expectedRepositoryJson = """
@@ -186,16 +187,17 @@ class JsonFileRepositoryTest : DescribeSpec({
             val jsonFile = tempfile("debounce-test", ".json").also { it.deleteOnExit() }
             val repository = PersonJsonFileRepository(jsonFile)
 
-            val person: Person = arbitraryPerson(1).next()
-            repository.add(person)
-            val initialMoney = person.money!!
+            val initialPerson: Person = arbitraryPerson(1).next()
+            repository.add(initialPerson)
+            val initialMoney = initialPerson.money!!
 
             // Make many rapid changes that should be debounced
-            repeat(100) {
-                repository.runForSingle(person.id) { (it as Person).money = it.money?.plus(1) } shouldBe true
+            repeat(100) { i ->
+                val current = repository.findById(initialPerson.id).get() as Person
+                repository.addOrReplace(current.copy(money = current.money!! + 1)) shouldBe true
             }
 
-            person.money shouldBe initialMoney + 100
+            repository.findById(initialPerson.id).get().money shouldBe initialMoney + 100
 
             testDispatcher.scheduler.advanceUntilIdle()
 
@@ -203,7 +205,7 @@ class JsonFileRepositoryTest : DescribeSpec({
             val reloaded = PersonJsonFileRepository(jsonFile)
             testDispatcher.scheduler.advanceUntilIdle()
 
-            reloaded.findById(person.id).get().money shouldBe person.money
+            reloaded.findById(initialPerson.id).get().money shouldBe initialMoney + 100
             reloaded.close()
 
             repository.close()
@@ -564,7 +566,8 @@ class JsonFileRepositoryTest : DescribeSpec({
 
             // Rapid modifications
             repeat(50) { i ->
-                repository.runForSingle(person.id) { it.name = "Name-$i" }
+                val current = repository.findById(person.id).get() as Person
+                repository.addOrReplace(current.copy(initialName = "Name-$i"))
             }
 
             testDispatcher.scheduler.advanceUntilIdle()
@@ -583,8 +586,9 @@ class JsonFileRepositoryTest : DescribeSpec({
 
             // Rapid sequence
             repository.add(person)
-            repository.runForSingle(person.id) { it.name = "Modified" }
-            repository.remove(person)
+            val modified = (person as Person).copy(initialName = "Modified")
+            repository.addOrReplace(modified)
+            repository.remove(modified)
 
             testDispatcher.scheduler.advanceUntilIdle()
 
@@ -616,7 +620,7 @@ class JsonFileRepositoryTest : DescribeSpec({
             repo2.findById(person.id).isPresent shouldBe true
 
             // Modify in repo2
-            repo2.runForSingle(person.id) { it.name = "Modified in repo2" }
+            repo2.addOrReplace((repo2.findById(person.id).get() as Person).copy(initialName = "Modified in repo2"))
 
             testDispatcher.scheduler.advanceUntilIdle()
             repo2.close()
@@ -656,7 +660,7 @@ class JsonFileRepositoryTest : DescribeSpec({
             repository.add(p1)
             repository.add(p2)
             repository.add(p3)
-            repository.runForSingle(p1.id) { it.name = "Modified" }
+            repository.addOrReplace((p1 as Person).copy(initialName = "Modified"))
             repository.remove(p2)
 
             testDispatcher.scheduler.advanceUntilIdle()
