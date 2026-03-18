@@ -61,6 +61,8 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
             if (previous == null) {
                 discoverIndexes(entity)
                 indexEntity(entity)
+                discoverRefs(entity)
+                bindEntityRefs(entity)
                 publisher.emitAsync(Create(entity))
                 log.debug { "Entity with id ${entity.id} added to repository: $entity" }
                 return true
@@ -74,6 +76,8 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
             if (oldValue == null) {
                 discoverIndexes(entity)
                 indexEntity(entity)
+                discoverRefs(entity)
+                bindEntityRefs(entity)
                 publisher.emitAsync(Create(entity))
                 log.debug { "Entity with id ${entity.id} added to repository: $entity" }
             } else if (oldValue != entity) {
@@ -104,6 +108,7 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
                     if (oldValue == null) {
                         discoverIndexes(entity)
                         indexEntity(entity)
+                        bindEntityRefs(entity)
                         added.add(entity)
                     } else if (oldValue != entity) {
                         deindexEntity(oldValue)
