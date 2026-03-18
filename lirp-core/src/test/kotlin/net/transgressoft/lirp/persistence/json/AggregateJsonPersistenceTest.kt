@@ -21,8 +21,8 @@ import net.transgressoft.lirp.event.AggregateMutationEvent
 import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.BubbleUpOrder
 import net.transgressoft.lirp.persistence.Customer
-import net.transgressoft.lirp.persistence.RegistryBase
-import net.transgressoft.lirp.persistence.VolatileRepository
+import net.transgressoft.lirp.persistence.CustomerVolatileRepo
+import net.transgressoft.lirp.persistence.LirpRepository
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempfile
 import io.kotest.matchers.optional.shouldBePresent
@@ -63,17 +63,11 @@ class AggregateJsonPersistenceTest : FunSpec({
     afterSpec {
         ReactiveScope.resetDefaultIoScope()
         ReactiveScope.resetDefaultFlowScope()
-        RegistryBase.clearRegistries()
-    }
-
-    beforeEach {
-        RegistryBase.clearRegistries()
     }
 
     test("JsonFileRepository serializes entity with aggregate ref as ID-only, no resolved object") {
         val orderFile = tempfile("order-repo", ".json").also { it.deleteOnExit() }
-        val customerRepo = VolatileRepository<Int, Customer>("Customers")
-        RegistryBase.registerRegistry(Customer::class.java, customerRepo)
+        val customerRepo = CustomerVolatileRepo()
         val orderRepo = BubbleUpOrderJsonFileRepository(orderFile)
 
         val customer = Customer(1, "Alice")
@@ -94,8 +88,7 @@ class AggregateJsonPersistenceTest : FunSpec({
 
     test("JsonFileRepository loaded entity can resolve aggregate ref after child repo is populated") {
         val orderFile = tempfile("order-repo-reload", ".json").also { it.deleteOnExit() }
-        val customerRepo = VolatileRepository<Int, Customer>("Customers")
-        RegistryBase.registerRegistry(Customer::class.java, customerRepo)
+        val customerRepo = CustomerVolatileRepo()
         val orderRepo = BubbleUpOrderJsonFileRepository(orderFile)
 
         val customer = Customer(1, "Bob")
@@ -105,11 +98,10 @@ class AggregateJsonPersistenceTest : FunSpec({
 
         testDispatcher.scheduler.advanceUntilIdle()
         orderRepo.close()
+        customerRepo.close()
 
         // Reload from disk — the new repo must re-wire refs so resolve() works
-        RegistryBase.clearRegistries()
-        val customerRepo2 = VolatileRepository<Int, Customer>("Customers2")
-        RegistryBase.registerRegistry(Customer::class.java, customerRepo2)
+        val customerRepo2 = CustomerVolatileRepo()
         // Add customer to the repo BEFORE creating order repo so binding finds it at init time
         customerRepo2.add(Customer(1, "Bob"))
         val orderRepo2 = BubbleUpOrderJsonFileRepository(orderFile)
@@ -125,8 +117,7 @@ class AggregateJsonPersistenceTest : FunSpec({
 
     test("Bubble-up event from child entity triggers JsonFileRepository persistence write") {
         val orderFile = tempfile("order-repo-bubbleup", ".json").also { it.deleteOnExit() }
-        val customerRepo = VolatileRepository<Int, Customer>("Customers")
-        RegistryBase.registerRegistry(Customer::class.java, customerRepo)
+        val customerRepo = CustomerVolatileRepo()
         val orderRepo = BubbleUpOrderJsonFileRepository(orderFile, 50)
 
         val customer = Customer(1, "Carol")
@@ -170,8 +161,7 @@ class AggregateJsonPersistenceTest : FunSpec({
 
     test("After reload, bubble-up re-wiring works when entity is re-added to repo") {
         val orderFile = tempfile("order-repo-rewire", ".json").also { it.deleteOnExit() }
-        val customerRepo = VolatileRepository<Int, Customer>("Customers")
-        RegistryBase.registerRegistry(Customer::class.java, customerRepo)
+        val customerRepo = CustomerVolatileRepo()
         val orderRepo = BubbleUpOrderJsonFileRepository(orderFile, 50)
 
         val customer = Customer(1, "Dave")
@@ -181,12 +171,11 @@ class AggregateJsonPersistenceTest : FunSpec({
 
         testDispatcher.scheduler.advanceUntilIdle()
         orderRepo.close()
+        customerRepo.close()
 
         // Reload — register customer repo and populate BEFORE creating order repo
         // so that wireRefBubbleUp can resolve the child entity and subscribe to it
-        RegistryBase.clearRegistries()
-        val customerRepo2 = VolatileRepository<Int, Customer>("Customers2")
-        RegistryBase.registerRegistry(Customer::class.java, customerRepo2)
+        val customerRepo2 = CustomerVolatileRepo()
         customerRepo2.add(Customer(1, "Dave"))
         val orderRepo2 = BubbleUpOrderJsonFileRepository(orderFile, 50)
 
@@ -213,8 +202,11 @@ class AggregateJsonPersistenceTest : FunSpec({
 /**
  * Test-scoped [JsonFileRepository] for [BubbleUpOrder] entities.
  *
- * Registers itself in [RegistryBase.globalRegistries] for zero-config aggregate ref binding.
+ * Annotated with [@LirpRepository][LirpRepository] so the KSP processor generates
+ * [BubbleUpOrderJsonFileRepository_LirpRegistryInfo], which triggers auto-registration in
+ * the global registry map at construction time.
  */
+@LirpRepository
 class BubbleUpOrderJsonFileRepository(
     file: java.io.File,
     serializationDelayMs: Long = 300L
@@ -222,8 +214,4 @@ class BubbleUpOrderJsonFileRepository(
         file,
         MapSerializer(Long.serializer(), BubbleUpOrder.serializer()),
         serializationDelay = serializationDelayMs.milliseconds
-    ) {
-    init {
-        RegistryBase.registerRegistry(BubbleUpOrder::class.java, this)
-    }
-}
+    )

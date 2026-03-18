@@ -59,7 +59,6 @@ data class Order(
     override val uniqueId: String get() = "order-$id"
 
     @ReactiveEntityRef(bubbleUp = false)
-    @Transient
     val customer by aggregateRef<Customer, Int> { customerId }
 
     override fun clone(): Order = copy()
@@ -79,7 +78,6 @@ data class BubbleUpOrder(
     override val uniqueId: String get() = "bubble-up-order-$id"
 
     @ReactiveEntityRef(bubbleUp = true)
-    @Transient
     val customer by aggregateRef<Customer, Int> { customerId }
 
     override fun clone(): BubbleUpOrder = copy()
@@ -115,7 +113,6 @@ data class EntityB(
     override val uniqueId: String get() = "entity-b-$id"
 
     @ReactiveEntityRef(bubbleUp = true)
-    @Transient
     val refA by aggregateRef<EntityA, Int> { entityAId }
 
     override fun clone(): EntityB = copy()
@@ -135,7 +132,6 @@ data class EntityC(
     override val uniqueId: String get() = "entity-c-$id"
 
     @ReactiveEntityRef(bubbleUp = true)
-    @Transient
     val refB by aggregateRef<EntityB, Int> { entityBId }
 
     override fun clone(): EntityC = copy()
@@ -153,7 +149,6 @@ data class CascadeOrder(
     override val uniqueId: String get() = "cascade-order-$id"
 
     @ReactiveEntityRef(onDelete = CascadeAction.CASCADE)
-    @Transient
     val customer by aggregateRef<Customer, Int> { customerId }
 
     override fun clone(): CascadeOrder = copy()
@@ -171,7 +166,6 @@ data class DetachOrder(
     override val uniqueId: String get() = "detach-order-$id"
 
     @ReactiveEntityRef(bubbleUp = true, onDelete = CascadeAction.DETACH)
-    @Transient
     val customer by aggregateRef<Customer, Int> { customerId }
 
     override fun clone(): DetachOrder = copy()
@@ -188,8 +182,65 @@ data class NoneOrder(
     override val uniqueId: String get() = "none-order-$id"
 
     @ReactiveEntityRef(onDelete = CascadeAction.NONE)
-    @Transient
     val customer by aggregateRef<Customer, Int> { customerId }
 
     override fun clone(): NoneOrder = copy()
 }
+
+/**
+ * Test repository subclass for [Customer] entities.
+ *
+ * Annotated with [@LirpRepository][LirpRepository] so the KSP processor generates
+ * [CustomerVolatileRepo_LirpRegistryInfo] which triggers auto-registration in
+ * the global registry map at construction time.
+ */
+@LirpRepository
+class CustomerVolatileRepo : VolatileRepository<Int, Customer>("Customers")
+
+/**
+ * Test repository subclass for [Order] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class OrderVolatileRepo : VolatileRepository<Long, Order>("Orders")
+
+/**
+ * Test repository subclass for [BubbleUpOrder] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class BubbleUpOrderVolatileRepo : VolatileRepository<Long, BubbleUpOrder>("BubbleUpOrders")
+
+/**
+ * Test repository subclass for [CascadeOrder] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class CascadeOrderVolatileRepo : VolatileRepository<Long, CascadeOrder>("CascadeOrders")
+
+/**
+ * Test repository subclass for [DetachOrder] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class DetachOrderVolatileRepo : VolatileRepository<Long, DetachOrder>("DetachOrders")
+
+/**
+ * Test repository subclass for [NoneOrder] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class NoneOrderVolatileRepo : VolatileRepository<Long, NoneOrder>("NoneOrders")
+
+/**
+ * Test repository subclass for [EntityA] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class EntityAVolatileRepo : VolatileRepository<Int, EntityA>("EntityAs")
+
+/**
+ * Test repository subclass for [EntityB] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class EntityBVolatileRepo : VolatileRepository<Int, EntityB>("EntityBs")
+
+/**
+ * Test repository subclass for [EntityC] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class EntityCVolatileRepo : VolatileRepository<Int, EntityC>("EntityCs")

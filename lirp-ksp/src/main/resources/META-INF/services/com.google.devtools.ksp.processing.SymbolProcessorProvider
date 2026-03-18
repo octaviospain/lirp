@@ -1,2 +1,3 @@
 net.transgressoft.lirp.ksp.IndexedProcessorProvider
 net.transgressoft.lirp.ksp.ReactiveEntityRefProcessorProvider
+net.transgressoft.lirp.ksp.LirpRepositoryProcessorProvider

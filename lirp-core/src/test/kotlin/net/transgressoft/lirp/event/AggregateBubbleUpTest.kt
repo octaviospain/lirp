@@ -18,13 +18,17 @@
 package net.transgressoft.lirp.event
 
 import net.transgressoft.lirp.persistence.BubbleUpOrder
+import net.transgressoft.lirp.persistence.BubbleUpOrderVolatileRepo
 import net.transgressoft.lirp.persistence.Customer
+import net.transgressoft.lirp.persistence.CustomerVolatileRepo
 import net.transgressoft.lirp.persistence.EntityA
+import net.transgressoft.lirp.persistence.EntityAVolatileRepo
 import net.transgressoft.lirp.persistence.EntityB
+import net.transgressoft.lirp.persistence.EntityBVolatileRepo
 import net.transgressoft.lirp.persistence.EntityC
+import net.transgressoft.lirp.persistence.EntityCVolatileRepo
 import net.transgressoft.lirp.persistence.Order
-import net.transgressoft.lirp.persistence.RegistryBase
-import net.transgressoft.lirp.persistence.VolatileRepository
+import net.transgressoft.lirp.persistence.OrderVolatileRepo
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
@@ -54,22 +58,25 @@ internal class AggregateBubbleUpTest : FunSpec({
         ReactiveScope.ioScope = testScope
     }
 
-    lateinit var customerRepo: VolatileRepository<Int, Customer>
+    lateinit var customerRepo: CustomerVolatileRepo
+    val activeRepos = mutableListOf<AutoCloseable>()
 
     beforeEach {
-        customerRepo = VolatileRepository("Customers")
-        RegistryBase.registerRegistry(Customer::class.java, customerRepo)
+        customerRepo = CustomerVolatileRepo()
+        activeRepos.clear()
+        activeRepos.add(customerRepo)
     }
 
     afterEach {
-        RegistryBase.clearRegistries()
+        activeRepos.forEach { it.close() }
+        activeRepos.clear()
     }
 
     test("BubbleUpOrder receives AggregateMutationEvent when referenced Customer mutates") {
         val customer = Customer(id = 1, name = "Alice")
         customerRepo.add(customer)
 
-        val orderRepo = VolatileRepository<Long, BubbleUpOrder>("BubbleUpOrders")
+        val orderRepo = BubbleUpOrderVolatileRepo().also { activeRepos.add(it) }
         val order = BubbleUpOrder(id = 100L, customerId = 1)
         orderRepo.add(order)
 
@@ -91,7 +98,7 @@ internal class AggregateBubbleUpTest : FunSpec({
         val customer = Customer(id = 1, name = "Alice")
         customerRepo.add(customer)
 
-        val orderRepo = VolatileRepository<Long, BubbleUpOrder>("BubbleUpOrders")
+        val orderRepo = BubbleUpOrderVolatileRepo().also { activeRepos.add(it) }
         val order = BubbleUpOrder(id = 100L, customerId = 1)
         orderRepo.add(order)
 
@@ -115,7 +122,7 @@ internal class AggregateBubbleUpTest : FunSpec({
         val customer = Customer(id = 1, name = "Alice")
         customerRepo.add(customer)
 
-        val orderRepo = VolatileRepository<Long, BubbleUpOrder>("BubbleUpOrders")
+        val orderRepo = BubbleUpOrderVolatileRepo().also { activeRepos.add(it) }
         val order = BubbleUpOrder(id = 100L, customerId = 1)
         orderRepo.add(order)
 
@@ -143,7 +150,7 @@ internal class AggregateBubbleUpTest : FunSpec({
         val customer = Customer(id = 1, name = "Alice")
         customerRepo.add(customer)
 
-        val orderRepo = VolatileRepository<Long, Order>("Orders")
+        val orderRepo = OrderVolatileRepo().also { activeRepos.add(it) }
         val order = Order(id = 100L, customerId = 1)
         orderRepo.add(order)
 
@@ -159,12 +166,9 @@ internal class AggregateBubbleUpTest : FunSpec({
     }
 
     test("Bubble-up propagation is single-level only: EntityA mutation notifies EntityB but NOT EntityC") {
-        val repoA = VolatileRepository<Int, EntityA>("EntityAs")
-        val repoB = VolatileRepository<Int, EntityB>("EntityBs")
-        val repoC = VolatileRepository<Int, EntityC>("EntityCs")
-
-        RegistryBase.registerRegistry(EntityA::class.java, repoA)
-        RegistryBase.registerRegistry(EntityB::class.java, repoB)
+        val repoA = EntityAVolatileRepo().also { activeRepos.add(it) }
+        val repoB = EntityBVolatileRepo().also { activeRepos.add(it) }
+        val repoC = EntityCVolatileRepo().also { activeRepos.add(it) }
 
         val entityA = EntityA(id = 1, value = "original")
         val entityB = EntityB(id = 10, entityAId = 1)

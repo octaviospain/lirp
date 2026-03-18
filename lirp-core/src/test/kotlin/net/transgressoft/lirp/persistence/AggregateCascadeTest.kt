@@ -48,31 +48,33 @@ internal class AggregateCascadeTest : FunSpec({
         ReactiveScope.ioScope = testScope
     }
 
-    lateinit var customerRepo: VolatileRepository<Int, Customer>
+    lateinit var customerRepo: CustomerVolatileRepo
+    var orderRepo: VolatileRepository<*, *>? = null
 
     beforeEach {
-        customerRepo = VolatileRepository("Customers")
-        RegistryBase.registerRegistry(Customer::class.java, customerRepo)
+        customerRepo = CustomerVolatileRepo()
+        orderRepo = null
     }
 
     afterEach {
-        RegistryBase.clearRegistries()
+        customerRepo.close()
+        orderRepo?.close()
+        orderRepo = null
     }
 
     test("CASCADE remove() deletes the referenced Customer from its repository") {
         val customer = Customer(id = 1, name = "Alice")
         customerRepo.add(customer)
 
-        val orderRepo = VolatileRepository<Long, CascadeOrder>("CascadeOrders")
-        RegistryBase.registerRegistry(CascadeOrder::class.java, orderRepo)
+        val cascadeOrderRepo = CascadeOrderVolatileRepo().also { orderRepo = it }
         val order = CascadeOrder(id = 100L, customerId = 1)
-        orderRepo.add(order)
+        cascadeOrderRepo.add(order)
 
         // Verify setup
         customerRepo.findById(1).shouldBePresent()
 
         // Remove the parent — cascade should remove the child
-        orderRepo.remove(order)
+        cascadeOrderRepo.remove(order)
 
         customerRepo.contains(1) shouldBe false
     }
@@ -83,18 +85,17 @@ internal class AggregateCascadeTest : FunSpec({
         customerRepo.add(customer1)
         customerRepo.add(customer2)
 
-        val orderRepo = VolatileRepository<Long, CascadeOrder>("CascadeOrders")
-        RegistryBase.registerRegistry(CascadeOrder::class.java, orderRepo)
+        val cascadeOrderRepo = CascadeOrderVolatileRepo().also { orderRepo = it }
         val order1 = CascadeOrder(id = 100L, customerId = 1)
         val order2 = CascadeOrder(id = 101L, customerId = 2)
-        orderRepo.add(order1)
-        orderRepo.add(order2)
+        cascadeOrderRepo.add(order1)
+        cascadeOrderRepo.add(order2)
 
         // Verify setup
         customerRepo.size() shouldBe 2
 
         // Clear all parents — cascade should remove all children
-        orderRepo.clear()
+        cascadeOrderRepo.clear()
 
         customerRepo.size() shouldBe 0
     }
@@ -103,10 +104,9 @@ internal class AggregateCascadeTest : FunSpec({
         val customer = Customer(id = 1, name = "Alice")
         customerRepo.add(customer)
 
-        val orderRepo = VolatileRepository<Long, DetachOrder>("DetachOrders")
-        RegistryBase.registerRegistry(DetachOrder::class.java, orderRepo)
+        val detachOrderRepo = DetachOrderVolatileRepo().also { orderRepo = it }
         val order = DetachOrder(id = 100L, customerId = 1)
-        orderRepo.add(order)
+        detachOrderRepo.add(order)
 
         // Subscribe to order events (to check bubble-up is active before detach)
         val eventCountBefore = AtomicInteger(0)
@@ -125,7 +125,7 @@ internal class AggregateCascadeTest : FunSpec({
         eventCountBefore.get() shouldBe 1
 
         // Remove the parent — DETACH should cancel subscription, customer stays
-        orderRepo.remove(order)
+        detachOrderRepo.remove(order)
 
         // Customer still exists
         customerRepo.contains(1) shouldBe true
@@ -142,13 +142,12 @@ internal class AggregateCascadeTest : FunSpec({
         val customer = Customer(id = 1, name = "Alice")
         customerRepo.add(customer)
 
-        val orderRepo = VolatileRepository<Long, NoneOrder>("NoneOrders")
-        RegistryBase.registerRegistry(NoneOrder::class.java, orderRepo)
+        val noneOrderRepo = NoneOrderVolatileRepo().also { orderRepo = it }
         val order = NoneOrder(id = 100L, customerId = 1)
-        orderRepo.add(order)
+        noneOrderRepo.add(order)
 
         // Remove the parent with NONE cascade action
-        orderRepo.remove(order)
+        noneOrderRepo.remove(order)
 
         // Customer still exists
         customerRepo.contains(1) shouldBe true
@@ -158,10 +157,9 @@ internal class AggregateCascadeTest : FunSpec({
         val customer = Customer(id = 1, name = "Alice")
         customerRepo.add(customer)
 
-        val orderRepo = VolatileRepository<Long, DetachOrder>("DetachOrders")
-        RegistryBase.registerRegistry(DetachOrder::class.java, orderRepo)
+        val detachOrderRepo = DetachOrderVolatileRepo().also { orderRepo = it }
         val order = DetachOrder(id = 100L, customerId = 1)
-        orderRepo.add(order)
+        detachOrderRepo.add(order)
 
         val eventCount = AtomicInteger(0)
         val initialLatch = CountDownLatch(1)

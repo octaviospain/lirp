@@ -12,10 +12,12 @@ import net.transgressoft.lirp.event.CrudEvent;
 import net.transgressoft.lirp.event.MutationEvent;
 import net.transgressoft.lirp.event.ReactiveScope;
 import net.transgressoft.lirp.persistence.BubbleUpOrder;
+import net.transgressoft.lirp.persistence.BubbleUpOrderVolatileRepo;
 import net.transgressoft.lirp.persistence.Customer;
+import net.transgressoft.lirp.persistence.CustomerVolatileRepo;
 import net.transgressoft.lirp.persistence.Order;
+import net.transgressoft.lirp.persistence.OrderVolatileRepo;
 import net.transgressoft.lirp.persistence.ReactiveEntityReference;
-import net.transgressoft.lirp.persistence.RegistryBase;
 import net.transgressoft.lirp.persistence.VolatileRepository;
 import net.transgressoft.lirp.persistence.json.FlexibleJsonFileRepository;
 import net.transgressoft.lirp.persistence.json.primitives.ReactiveString;
@@ -469,20 +471,19 @@ class JavaInteroperabilityTest {
     @DisplayName("Aggregate Reference")
     class AggregateReferenceTests {
 
-        VolatileRepository<Integer, Customer> customerRepo;
-        VolatileRepository<Long, Order> orderRepo;
+        CustomerVolatileRepo customerRepo;
+        OrderVolatileRepo orderRepo;
 
         @BeforeEach
         void setupRepos() {
-            customerRepo = new VolatileRepository<>("Customers");
-            orderRepo = new VolatileRepository<>("Orders");
-            RegistryBase.registerRegistry(Customer.class, customerRepo);
-            RegistryBase.registerRegistry(Order.class, orderRepo);
+            customerRepo = new CustomerVolatileRepo();
+            orderRepo = new OrderVolatileRepo();
         }
 
         @AfterEach
         void cleanupRepos() {
-            RegistryBase.clearRegistries();
+            customerRepo.close();
+            orderRepo.close();
         }
 
         @Test
@@ -518,8 +519,7 @@ class JavaInteroperabilityTest {
         void javaSubscriberReceivesAggregateMutationEventAsMutationEventSubtype() throws InterruptedException {
             var customer = new Customer(1, "Bob");
             var order = new BubbleUpOrder(10L, 1);
-            var bubbleUpOrderRepo = new VolatileRepository<Long, BubbleUpOrder>("BubbleUpOrders");
-            RegistryBase.registerRegistry(BubbleUpOrder.class, bubbleUpOrderRepo);
+            var bubbleUpOrderRepo = new BubbleUpOrderVolatileRepo();
 
             customerRepo.add(customer);
             bubbleUpOrderRepo.add(order);
@@ -541,6 +541,7 @@ class JavaInteroperabilityTest {
             assertTrue(latch.await(2, SECONDS));
             assertNotNull(receivedAggregateEvent.get());
             assertInstanceOf(AggregateMutationEvent.class, receivedAggregateEvent.get());
+            bubbleUpOrderRepo.close();
         }
     }
 
