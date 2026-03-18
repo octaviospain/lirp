@@ -23,6 +23,7 @@ import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
 import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.LirpEventPublisher
 import net.transgressoft.lirp.event.StandardCrudEvent.Read
+import net.transgressoft.lirp.persistence.LirpRegistryInfo
 import mu.KotlinLogging
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
@@ -78,6 +79,22 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
         // so the CREATE and DELETE events are disabled by default.
         // READ is disabled also because its use case is not clear yet
         activateEvents(UPDATE)
+        // Auto-register if @LirpRepository KSP accessor is present
+        try {
+            val infoClass = Class.forName(this::class.java.name + "_LirpRegistryInfo")
+            val info = infoClass.getDeclaredConstructor().newInstance() as LirpRegistryInfo
+            val existing = globalRegistries.putIfAbsent(info.entityClass, this)
+            check(!(existing != null && existing !== this)) {
+                "A repository for ${info.entityClass.simpleName} is already registered. Only one @LirpRepository per entity type is allowed."
+            }
+        } catch (_: ClassNotFoundException) {
+            // Not a @LirpRepository-annotated subclass — skip silently
+        }
+    }
+
+    override fun close() {
+        globalRegistries.entries.removeIf { (_, registry) -> registry === this }
+        publisher.close()
     }
 
     /**
@@ -186,13 +203,13 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
             try {
                 val field = entity.javaClass.getDeclaredField(entry.refName)
                 field.isAccessible = true
-                bindDelegateField(field.get(entity), registry)
+                bindDelegateField(field[entity], registry)
             } catch (_: NoSuchFieldException) {
                 // Kotlin property delegates are stored as backing fields named "<propertyName>$delegate"
                 try {
                     val delegateField = entity.javaClass.getDeclaredField("${entry.refName}\$delegate")
                     delegateField.isAccessible = true
-                    bindDelegateField(delegateField.get(entity), registry)
+                    bindDelegateField(delegateField[entity], registry)
                 } catch (_: NoSuchFieldException) {
                     log.warn { "Could not find delegate field for ref '${entry.refName}' on ${entity.javaClass.simpleName}" }
                 }
@@ -262,12 +279,12 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
         try {
             val field = entity.javaClass.getDeclaredField(refName)
             field.isAccessible = true
-            field.get(entity)
+            field[entity]
         } catch (_: NoSuchFieldException) {
             try {
                 val delegateField = entity.javaClass.getDeclaredField("${refName}\$delegate")
                 delegateField.isAccessible = true
-                delegateField.get(entity)
+                delegateField[entity]
             } catch (_: NoSuchFieldException) {
                 log.warn { "Could not find delegate field for ref '$refName' on ${entity.javaClass.simpleName}" }
                 null
@@ -345,34 +362,26 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
     companion object {
         /**
          * Application-level registry map: entity class -> Registry that holds that entity type.
-         * Repositories self-register here when constructed so that [bindEntityRefs] can locate
-         * the correct [Registry] for each aggregate reference without any manual wiring.
+         * Registration happens automatically at construction time for `@LirpRepository`-annotated
+         * subclasses via the KSP-generated `{ClassName}_LirpRegistryInfo` class. Deregistration
+         * happens automatically in [close]. Used by [bindEntityRefs] to locate the correct
+         * [Registry] for each aggregate reference without any manual wiring.
          *
          * Keyed by entity [Class] to avoid Kotlin type-erasure issues with generic types.
          */
         @JvmStatic
-        val globalRegistries: ConcurrentHashMap<Class<*>, Registry<*, *>> = ConcurrentHashMap()
+        private val globalRegistries: ConcurrentHashMap<Class<*>, Registry<*, *>> = ConcurrentHashMap()
 
         /**
-         * Registers a [registry] as the canonical store for entities of [entityClass].
-         * Called automatically when constructing typed repositories. Consumers may call this
-         * directly when using custom [Registry] implementations.
-         *
-         * @param entityClass the entity type stored in this registry
-         * @param registry the registry that holds entities of [entityClass]
+         * Returns the registered [Registry] for the given [entityClass], or `null` if none is registered.
          */
         @JvmStatic
-        fun registerRegistry(entityClass: Class<*>, registry: Registry<*, *>) {
-            globalRegistries[entityClass] = registry
-        }
+        internal fun registryFor(entityClass: Class<*>): Registry<*, *>? = globalRegistries[entityClass]
 
         /**
-         * Removes all registered registries. Intended for use in tests to prevent state leaking
-         * between test cases.
+         * Returns the number of currently registered repositories.
          */
         @JvmStatic
-        fun clearRegistries() {
-            globalRegistries.clear()
-        }
+        internal fun registryCount(): Int = globalRegistries.size
     }
 }

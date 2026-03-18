@@ -169,7 +169,7 @@ class JsonFileRepositoryTest : DescribeSpec({
                 }"""
             jsonFile.readText().shouldEqualJson(expectedRepositoryJson)
 
-            val updatedPerson = (person as Person).copy(initialName = "John Namechanged")
+            val updatedPerson = person.copy(initialName = "John Namechanged")
             repository.addOrReplace(updatedPerson) shouldBe true
             testDispatcher.scheduler.advanceUntilIdle()
 
@@ -589,7 +589,7 @@ class JsonFileRepositoryTest : DescribeSpec({
 
             // Rapid sequence
             repository.add(person)
-            val modified = (person as Person).copy(initialName = "Modified")
+            val modified = person.copy(initialName = "Modified")
             repository.addOrReplace(modified)
             repository.remove(modified)
 
@@ -663,7 +663,7 @@ class JsonFileRepositoryTest : DescribeSpec({
             repository.add(p1)
             repository.add(p2)
             repository.add(p3)
-            repository.addOrReplace((p1 as Person).copy(initialName = "Modified"))
+            repository.addOrReplace(p1.copy(initialName = "Modified"))
             repository.remove(p2)
 
             testDispatcher.scheduler.advanceUntilIdle()

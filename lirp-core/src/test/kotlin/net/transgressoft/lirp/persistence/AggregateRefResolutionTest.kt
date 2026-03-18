@@ -46,17 +46,17 @@ internal class AggregateRefResolutionTest : FunSpec({
         ReactiveScope.ioScope = testScope
     }
 
-    lateinit var customerRepo: VolatileRepository<Int, Customer>
-    lateinit var orderRepo: VolatileRepository<Long, Order>
+    lateinit var customerRepo: CustomerVolatileRepo
+    lateinit var orderRepo: OrderVolatileRepo
 
     beforeEach {
-        customerRepo = VolatileRepository<Int, Customer>("Customers")
-        orderRepo = VolatileRepository<Long, Order>("Orders")
-        RegistryBase.registerRegistry(Customer::class.java, customerRepo)
+        customerRepo = CustomerVolatileRepo()
+        orderRepo = OrderVolatileRepo()
     }
 
     afterEach {
-        RegistryBase.clearRegistries()
+        customerRepo.close()
+        orderRepo.close()
     }
 
     test("resolve returns the referenced customer entity when it exists in the repository") {
