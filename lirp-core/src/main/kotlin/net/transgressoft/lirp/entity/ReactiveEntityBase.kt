@@ -23,6 +23,8 @@ import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.MutationEvent.Type.MUTATE
 import net.transgressoft.lirp.event.ReactiveMutationEvent
+import net.transgressoft.lirp.event.StandardAggregateMutationEvent
+import net.transgressoft.lirp.persistence.AggregateRefDelegate
 import mu.KotlinLogging
 import java.time.LocalDateTime
 import java.util.concurrent.Flow
@@ -133,18 +135,73 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     /**
      * Permanently closes this entity and releases its publisher resources.
      *
-     * Sets the closed flag, closes the publisher if initialized, and nullifies it.
+     * Before closing the publisher, cancels all bubble-up subscriptions from [AggregateRefDelegate]
+     * properties to prevent stale subscription handles after the entity is no longer active.
+     * This always executes DETACH-style cleanup regardless of the configured [CascadeAction] —
+     * CASCADE removal from external repositories only runs from repository remove/clear operations.
+     *
      * Idempotent: subsequent calls are safe no-ops.
      */
     override fun close() {
         if (closed) return
         closed = true
+        cancelAllBubbleUpSubscriptions()
         publisherRef.getAndSet(null)?.close()
+    }
+
+    /**
+     * Scans this entity's declared fields for [AggregateRefDelegate] instances (stored as
+     * `<propertyName>$delegate` backing fields by Kotlin) and calls [AggregateRefDelegate.cancelBubbleUp]
+     * on each one. Ensures bubble-up subscriptions are cleaned up when the entity is closed.
+     */
+    private fun cancelAllBubbleUpSubscriptions() {
+        var clazz: Class<*>? = this.javaClass
+        while (clazz != null && clazz != ReactiveEntityBase::class.java) {
+            for (field in clazz.declaredFields) {
+                if (field.name.endsWith("\$delegate")) {
+                    try {
+                        field.isAccessible = true
+                        val delegate = field.get(this)
+                        if (delegate is AggregateRefDelegate<*, *>) {
+                            delegate.cancelBubbleUp()
+                        }
+                    } catch (_: Exception) {
+                        // Best-effort cleanup — field access may fail in restricted environments
+                    }
+                }
+            }
+            clazz = clazz.superclass
+        }
     }
 
     override fun emitAsync(event: MutationEvent<K, R>) {
         check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
         publisher.emitAsync(event)
+    }
+
+    /**
+     * Creates and emits a [StandardAggregateMutationEvent] on this entity's publisher.
+     *
+     * Called by [AggregateRefDelegate] when a referenced child entity mutates and bubble-up
+     * propagation is enabled. This method is defined on [ReactiveEntityBase] because it has
+     * direct access to the correctly-typed `R` parameter, avoiding the type erasure problem
+     * that arises when emitting from external (wildcard-typed) call sites.
+     *
+     * @param refName the property name of the [@ReactiveEntityRef][net.transgressoft.lirp.persistence.ReactiveEntityRef]
+     *   annotated property that triggered the bubble-up
+     * @param childEvent the original [MutationEvent] from the referenced child entity
+     */
+    @Suppress("UNCHECKED_CAST")
+    internal fun emitBubbleUpEvent(refName: String, childEvent: MutationEvent<*, *>) {
+        check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
+        val aggregateEvent =
+            StandardAggregateMutationEvent(
+                newEntity = this as R,
+                oldEntity = this as R,
+                refName = refName,
+                childEvent = childEvent
+            )
+        publisher.emitAsync(aggregateEvent)
     }
 
     override fun subscribe(action: suspend (MutationEvent<K, R>) -> Unit): LirpEventSubscription<in LirpEntity, MutationEvent.Type, MutationEvent<K, R>> {

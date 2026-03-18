@@ -80,11 +80,23 @@ class ReactiveEntityRefProcessor(
 
                 val bubbleUp = annotation.arguments.firstOrNull { it.name?.asString() == "bubbleUp" }?.value as? Boolean ?: false
 
-                // onDelete argument is an enum value — extract its simple name (e.g., "DETACH")
-                val onDeleteValue = annotation.arguments.firstOrNull { it.name?.asString() == "onDelete" }?.value
+                // onDelete argument is an enum value — extract its simple name (e.g., "CASCADE", "DETACH", "NONE")
+                // KSP represents enum annotation arguments as KSType instances. The declaration's simpleName
+                // gives the enum constant name directly.
+                val onDeleteArg = annotation.arguments.firstOrNull { it.name?.asString() == "onDelete" }
+                val onDeleteValue = onDeleteArg?.value
                 val cascadeActionName =
-                    when (onDeleteValue) {
-                        is KSType -> onDeleteValue.declaration.simpleName.asString()
+                    when {
+                        onDeleteValue is KSType -> onDeleteValue.declaration.simpleName.asString()
+                        // Fallback: KSP sometimes returns the enum value as a string representation
+                        onDeleteValue != null -> {
+                            val str = onDeleteValue.toString()
+                            when {
+                                str.endsWith("CASCADE") -> "CASCADE"
+                                str.endsWith("NONE") -> "NONE"
+                                else -> "DETACH"
+                            }
+                        }
                         else -> "DETACH"
                     }
 
