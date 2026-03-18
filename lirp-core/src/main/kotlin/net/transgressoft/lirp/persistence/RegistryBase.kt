@@ -65,6 +65,14 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
     @Volatile
     private var indexEntries: List<IndexEntry<T>>? = null
 
+    /**
+     * Cached reference entries loaded from the KSP-generated [LirpRefAccessor] for this entity type.
+     * Each entry holds the reference name, an ID getter lambda, the referenced class, and metadata.
+     * Null until discovery runs; an empty list means no generated accessor was found.
+     */
+    @Volatile
+    private var refEntries: List<RefEntry<T>>? = null
+
     init {
         // A registry can't create or delete entities,
         // so the CREATE and DELETE events are disabled by default.
@@ -131,6 +139,71 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
      */
     protected fun clearSecondaryIndexes() {
         secondaryIndexes.values.forEach { it.clear() }
+    }
+
+    /**
+     * Loads the KSP-generated [LirpRefAccessor] for the entity's class via a convention-based
+     * [Class.forName] lookup (`{EntityClassName}_LirpRefAccessor`). Uses double-checked locking
+     * to ensure loading runs exactly once and the result is visible to all threads.
+     *
+     * The generated accessor provides [RefEntry] descriptors with direct ID getter lambdas,
+     * completely avoiding `kotlin-reflect` or `java.lang.reflect` overhead. If no generated
+     * accessor is found (KSP not applied or no [@ReactiveEntityRef][ReactiveEntityRef] annotations),
+     * the reference entry list remains empty.
+     */
+    @Suppress("UNCHECKED_CAST")
+    protected fun discoverRefs(entity: T) {
+        if (refEntries != null) return
+        synchronized(this) {
+            if (refEntries != null) return
+            refEntries =
+                try {
+                    val accessorClass = Class.forName("${entity.javaClass.name}_LirpRefAccessor")
+                    val accessor = accessorClass.getDeclaredConstructor().newInstance() as LirpRefAccessor<T>
+                    accessor.entries
+                } catch (_: ClassNotFoundException) {
+                    emptyList()
+                }
+        }
+    }
+
+    /**
+     * Binds each [AggregateRefDelegate] on [entity] to the [Registry] that holds its referenced
+     * entity type. For each [RefEntry] discovered via [discoverRefs], this method:
+     *
+     * 1. Gets the raw ID of the referenced entity via [RefEntry.idGetter].
+     * 2. Looks up the [Registry] for [RefEntry.referencedClass] in the companion-level registry map.
+     * 3. If found, calls [AggregateRefDelegate.bindRegistry] on the property value.
+     *
+     * Only properties that are [AggregateRefDelegate] instances are processed — non-delegate
+     * implementations of [ReactiveEntityReference] are skipped silently.
+     */
+    protected fun bindEntityRefs(entity: T) {
+        val entries = refEntries ?: return
+        for (entry in entries) {
+            val registry = globalRegistries[entry.referencedClass] ?: continue
+            // Locate the delegate by its property name using getDeclaredField to avoid KProperty overhead
+            try {
+                val field = entity.javaClass.getDeclaredField(entry.refName)
+                field.isAccessible = true
+                bindDelegateField(field.get(entity), registry)
+            } catch (_: NoSuchFieldException) {
+                // Kotlin property delegates are stored as backing fields named "<propertyName>$delegate"
+                try {
+                    val delegateField = entity.javaClass.getDeclaredField("${entry.refName}\$delegate")
+                    delegateField.isAccessible = true
+                    bindDelegateField(delegateField.get(entity), registry)
+                } catch (_: NoSuchFieldException) {
+                    log.warn { "Could not find delegate field for ref '${entry.refName}' on ${entity.javaClass.simpleName}" }
+                }
+            }
+        }
+    }
+
+    private fun bindDelegateField(fieldValue: Any?, registry: Registry<*, *>) {
+        if (fieldValue is AggregateRefDelegate<*, *>) {
+            fieldValue.bindRegistryUntyped(registry)
+        }
     }
 
     override fun findByIndex(indexName: String, value: Any): Set<T> {
@@ -200,4 +273,38 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
     }
 
     override fun hashCode() = Objects.hash(entitiesById)
+
+    companion object {
+        /**
+         * Application-level registry map: entity class -> Registry that holds that entity type.
+         * Repositories self-register here when constructed so that [bindEntityRefs] can locate
+         * the correct [Registry] for each aggregate reference without any manual wiring.
+         *
+         * Keyed by entity [Class] to avoid Kotlin type-erasure issues with generic types.
+         */
+        @JvmStatic
+        val globalRegistries: ConcurrentHashMap<Class<*>, Registry<*, *>> = ConcurrentHashMap()
+
+        /**
+         * Registers a [registry] as the canonical store for entities of [entityClass].
+         * Called automatically when constructing typed repositories. Consumers may call this
+         * directly when using custom [Registry] implementations.
+         *
+         * @param entityClass the entity type stored in this registry
+         * @param registry the registry that holds entities of [entityClass]
+         */
+        @JvmStatic
+        fun registerRegistry(entityClass: Class<*>, registry: Registry<*, *>) {
+            globalRegistries[entityClass] = registry
+        }
+
+        /**
+         * Removes all registered registries. Intended for use in tests to prevent state leaking
+         * between test cases.
+         */
+        @JvmStatic
+        fun clearRegistries() {
+            globalRegistries.clear()
+        }
+    }
 }
