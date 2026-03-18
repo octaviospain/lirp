@@ -7,14 +7,22 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi;
 import kotlinx.coroutines.SupervisorKt;
 import kotlinx.coroutines.test.TestCoroutineDispatchersKt;
 import kotlinx.coroutines.test.TestCoroutineScheduler;
+import net.transgressoft.lirp.event.AggregateMutationEvent;
 import net.transgressoft.lirp.event.CrudEvent;
 import net.transgressoft.lirp.event.MutationEvent;
 import net.transgressoft.lirp.event.ReactiveScope;
+import net.transgressoft.lirp.persistence.BubbleUpOrder;
+import net.transgressoft.lirp.persistence.Customer;
+import net.transgressoft.lirp.persistence.Order;
+import net.transgressoft.lirp.persistence.ReactiveEntityReference;
+import net.transgressoft.lirp.persistence.RegistryBase;
 import net.transgressoft.lirp.persistence.VolatileRepository;
 import net.transgressoft.lirp.persistence.json.FlexibleJsonFileRepository;
 import net.transgressoft.lirp.persistence.json.primitives.ReactiveString;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -24,10 +32,12 @@ import java.io.File;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -452,6 +462,85 @@ class JavaInteroperabilityTest {
             scheduler.advanceUntilIdle();
 
             assertEquals(2, healthyCounter.get());
+        }
+    }
+
+    @Nested
+    @DisplayName("Aggregate Reference")
+    class AggregateReferenceTests {
+
+        VolatileRepository<Integer, Customer> customerRepo;
+        VolatileRepository<Long, Order> orderRepo;
+
+        @BeforeEach
+        void setupRepos() {
+            customerRepo = new VolatileRepository<>("Customers");
+            orderRepo = new VolatileRepository<>("Orders");
+            RegistryBase.registerRegistry(Customer.class, customerRepo);
+            RegistryBase.registerRegistry(Order.class, orderRepo);
+        }
+
+        @AfterEach
+        void cleanupRepos() {
+            RegistryBase.clearRegistries();
+        }
+
+        @Test
+        @DisplayName("Java can access aggregate ref via getter and call resolve()")
+        void javaCanAccessAggregateRefViaGetterAndCallResolve() {
+            var customer = new Customer(1, "Alice");
+            var order = new Order(10L, 1);
+
+            customerRepo.add(customer);
+            orderRepo.add(order);
+            scheduler.advanceUntilIdle();
+
+            ReactiveEntityReference<Customer, Integer> ref = order.getCustomer();
+            assertNotNull(ref);
+            assertTrue(ref.resolve().isPresent());
+            assertEquals("Alice", ref.resolve().get().getName());
+        }
+
+        @Test
+        @DisplayName("Java resolve returns empty Optional when referenced entity not in repo")
+        void javaResolveReturnsEmptyOptionalWhenReferencedEntityNotInRepo() {
+            var order = new Order(10L, 99);
+            orderRepo.add(order);
+            scheduler.advanceUntilIdle();
+
+            ReactiveEntityReference<Customer, Integer> ref = order.getCustomer();
+            assertNotNull(ref);
+            assertFalse(ref.resolve().isPresent());
+        }
+
+        @Test
+        @DisplayName("Java subscriber receives AggregateMutationEvent as MutationEvent subtype")
+        void javaSubscriberReceivesAggregateMutationEventAsMutationEventSubtype() throws InterruptedException {
+            var customer = new Customer(1, "Bob");
+            var order = new BubbleUpOrder(10L, 1);
+            var bubbleUpOrderRepo = new VolatileRepository<Long, BubbleUpOrder>("BubbleUpOrders");
+            RegistryBase.registerRegistry(BubbleUpOrder.class, bubbleUpOrderRepo);
+
+            customerRepo.add(customer);
+            bubbleUpOrderRepo.add(order);
+            scheduler.advanceUntilIdle();
+
+            var latch = new CountDownLatch(1);
+            var receivedAggregateEvent = new AtomicReference<MutationEvent<?, ?>>(null);
+
+            order.subscribe(event -> {
+                if (event instanceof AggregateMutationEvent) {
+                    receivedAggregateEvent.set(event);
+                    latch.countDown();
+                }
+            });
+
+            customer.updateName("Bob Updated");
+            scheduler.advanceUntilIdle();
+
+            assertTrue(latch.await(2, SECONDS));
+            assertNotNull(receivedAggregateEvent.get());
+            assertInstanceOf(AggregateMutationEvent.class, receivedAggregateEvent.get());
         }
     }
 
