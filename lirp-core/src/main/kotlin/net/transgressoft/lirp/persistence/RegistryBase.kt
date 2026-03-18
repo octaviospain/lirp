@@ -206,6 +206,74 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
         }
     }
 
+    /**
+     * Wires bubble-up subscriptions for all aggregate references on [entity] that have
+     * `bubbleUp = true`. For each such reference, [AggregateRefDelegate.wireBubbleUp] is called
+     * with the parent entity and the reference name.
+     *
+     * This method is called after [bindEntityRefs] so that the delegate already has the bound
+     * registry before the referenced entity is resolved for subscription.
+     */
+    protected fun wireRefBubbleUp(entity: T) {
+        val entries = refEntries ?: return
+        for (entry in entries) {
+            if (!entry.bubbleUp) continue
+            val delegate = findDelegateField(entity, entry.refName) ?: continue
+            if (delegate is AggregateRefDelegate<*, *>) {
+                delegate.wireBubbleUp(entity as net.transgressoft.lirp.entity.ReactiveEntity<*, *>, entry.refName)
+            }
+        }
+    }
+
+    /**
+     * Executes cascade actions for all aggregate references declared on [entity].
+     *
+     * Called by [VolatileRepository] during [net.transgressoft.lirp.persistence.VolatileRepository.remove]
+     * and [net.transgressoft.lirp.persistence.VolatileRepository.clear]. Each reference delegate's
+     * [AggregateRefDelegate.executeCascade] is invoked with its configured [net.transgressoft.lirp.entity.CascadeAction].
+     */
+    protected fun executeCascadeForEntity(entity: T) {
+        val entries = refEntries ?: return
+        for (entry in entries) {
+            val delegate = findDelegateField(entity, entry.refName) ?: continue
+            if (delegate is AggregateRefDelegate<*, *>) {
+                delegate.executeCascade(entry.cascadeAction)
+            }
+        }
+    }
+
+    /**
+     * Executes DETACH cleanup (cancels bubble-up subscriptions) for all aggregate references on [entity].
+     *
+     * Called by [net.transgressoft.lirp.entity.ReactiveEntityBase.close] to ensure subscription cleanup
+     * when an entity is permanently closed, regardless of the configured cascade action.
+     */
+    protected fun detachAllRefs(entity: T) {
+        val entries = refEntries ?: return
+        for (entry in entries) {
+            val delegate = findDelegateField(entity, entry.refName) ?: continue
+            if (delegate is AggregateRefDelegate<*, *>) {
+                delegate.cancelBubbleUp()
+            }
+        }
+    }
+
+    private fun findDelegateField(entity: T, refName: String): Any? =
+        try {
+            val field = entity.javaClass.getDeclaredField(refName)
+            field.isAccessible = true
+            field.get(entity)
+        } catch (_: NoSuchFieldException) {
+            try {
+                val delegateField = entity.javaClass.getDeclaredField("${refName}\$delegate")
+                delegateField.isAccessible = true
+                delegateField.get(entity)
+            } catch (_: NoSuchFieldException) {
+                log.warn { "Could not find delegate field for ref '$refName' on ${entity.javaClass.simpleName}" }
+                null
+            }
+        }
+
     override fun findByIndex(indexName: String, value: Any): Set<T> {
         val indexMap =
             secondaryIndexes[indexName]

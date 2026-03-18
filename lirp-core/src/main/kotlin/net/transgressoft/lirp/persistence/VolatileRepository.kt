@@ -63,6 +63,7 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
                 indexEntity(entity)
                 discoverRefs(entity)
                 bindEntityRefs(entity)
+                wireRefBubbleUp(entity)
                 publisher.emitAsync(Create(entity))
                 log.debug { "Entity with id ${entity.id} added to repository: $entity" }
                 return true
@@ -78,6 +79,7 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
                 indexEntity(entity)
                 discoverRefs(entity)
                 bindEntityRefs(entity)
+                wireRefBubbleUp(entity)
                 publisher.emitAsync(Create(entity))
                 log.debug { "Entity with id ${entity.id} added to repository: $entity" }
             } else if (oldValue != entity) {
@@ -108,7 +110,9 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
                     if (oldValue == null) {
                         discoverIndexes(entity)
                         indexEntity(entity)
+                        discoverRefs(entity)
                         bindEntityRefs(entity)
+                        wireRefBubbleUp(entity)
                         added.add(entity)
                     } else if (oldValue != entity) {
                         deindexEntity(oldValue)
@@ -160,6 +164,7 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
             val removed = entitiesById.remove(entity.id, entity)
             if (removed) {
                 deindexEntity(entity)
+                executeCascadeForEntity(entity)
                 publisher.emitAsync(Delete(entity))
                 log.debug { "Entity with id ${entity.id} was removed: $entity" }
             }
@@ -172,6 +177,7 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
             entities.forEach { entity ->
                 if (entitiesById.remove(entity.id, entity)) {
                     deindexEntity(entity)
+                    executeCascadeForEntity(entity)
                     removed.add(entity)
                 }
             }
@@ -191,6 +197,7 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
                 entitiesById.clear()
                 // Bulk-clear all index value maps: O(n_indexes) rather than O(n_entities)
                 clearSecondaryIndexes()
+                allEntities.forEach { executeCascadeForEntity(it) }
                 publisher.emitAsync(Delete(allEntities))
                 log.debug { "${allEntities.size} entities were removed resulting in empty repository" }
             }
