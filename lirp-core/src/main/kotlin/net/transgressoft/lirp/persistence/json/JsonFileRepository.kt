@@ -175,6 +175,9 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
                 loadedEntities.values.forEach { entity ->
                     discoverIndexes(entity)
                     indexEntity(entity)
+                    discoverRefs(entity)
+                    bindEntityRefs(entity)
+                    wireRefBubbleUp(entity)
                 }
 
                 flowScope.launch {
