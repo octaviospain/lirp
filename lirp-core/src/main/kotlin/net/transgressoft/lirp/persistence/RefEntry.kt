@@ -28,9 +28,6 @@ import net.transgressoft.lirp.entity.CascadeAction
  * for both ID value access and delegate access. Mirrors [IndexEntry] but extends it with
  * aggregate-reference-specific fields.
  *
- * Moved from `lirp-api` to `lirp-core` because [delegateGetter] returns [AggregateRefDelegate],
- * which is a `lirp-core` type.
- *
  * @param T The entity type that declares the reference
  * @param K The referenced entity's ID type — must be [Comparable]. Null IDs are prohibited at the
  *   type level; all referenced entity IDs must be non-null.

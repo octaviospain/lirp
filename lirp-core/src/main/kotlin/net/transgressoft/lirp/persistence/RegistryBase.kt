@@ -212,12 +212,9 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
                 clazz.declaredFields.any { field ->
                     field.name.endsWith("\$delegate") && delegateType.isAssignableFrom(field.type)
                 }
-            if (hasDelegateField) {
-                throw IllegalStateException(
-                    "Entity ${entityClass.simpleName} has ${delegateType.simpleName} delegate properties " +
-                        "but no KSP-generated $accessorSuffix was found. " +
-                        "Ensure the lirp-ksp processor is applied."
-                )
+            check(!hasDelegateField) {
+                "Entity ${entityClass.simpleName} has ${delegateType.simpleName} delegate properties " +
+                    "but no KSP-generated $accessorSuffix was found. Ensure the lirp-ksp processor is applied."
             }
             clazz = clazz.superclass
         }
