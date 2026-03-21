@@ -25,6 +25,7 @@ import net.transgressoft.lirp.event.MutationEvent.Type.MUTATE
 import net.transgressoft.lirp.event.ReactiveMutationEvent
 import net.transgressoft.lirp.event.StandardAggregateMutationEvent
 import net.transgressoft.lirp.persistence.AggregateRefDelegate
+import net.transgressoft.lirp.persistence.LirpRefAccessor
 import mu.KotlinLogging
 import java.time.LocalDateTime
 import java.util.concurrent.Flow
@@ -72,6 +73,17 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     private var closed = false
 
     override val isClosed: Boolean get() = closed
+
+    /**
+     * Cached KSP-generated [LirpRefAccessor] for this entity's class, discovered lazily on first [close].
+     * Null if no accessor was found (entity has no [@ReactiveEntityRef][net.transgressoft.lirp.persistence.ReactiveEntityRef] properties).
+     */
+    @Volatile
+    private var _refAccessor: LirpRefAccessor<*>? = null
+
+    /** Guards double-checked locking for [_refAccessor] initialization. */
+    @Volatile
+    private var _refAccessorLoaded = false
 
     /**
      * The lazily initialized publisher. Only created when the first subscriber registers.
@@ -135,42 +147,44 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     /**
      * Permanently closes this entity and releases its publisher resources.
      *
-     * Before closing the publisher, cancels all bubble-up subscriptions from [AggregateRefDelegate]
-     * properties to prevent stale subscription handles after the entity is no longer active.
-     * This always executes DETACH-style cleanup regardless of the configured [CascadeAction] —
-     * CASCADE removal from external repositories only runs from repository remove/clear operations.
+     * Before closing the publisher, cancels all bubble-up subscriptions via the KSP-generated
+     * [LirpRefAccessor] for this entity's class. This always executes DETACH-style cleanup
+     * regardless of the configured [CascadeAction] — CASCADE removal from external repositories
+     * only runs from repository remove/clear operations.
      *
      * Idempotent: subsequent calls are safe no-ops.
      */
+    @Suppress("UNCHECKED_CAST")
     override fun close() {
         if (closed) return
         closed = true
-        cancelAllBubbleUpSubscriptions()
+        (loadRefAccessor() as? LirpRefAccessor<R>)?.cancelAllBubbleUp(this as R)
         publisherRef.getAndSet(null)?.close()
     }
 
     /**
-     * Scans this entity's declared fields for [AggregateRefDelegate] instances (stored as
-     * `<propertyName>$delegate` backing fields by Kotlin) and calls [AggregateRefDelegate.cancelBubbleUp]
-     * on each one. Ensures bubble-up subscriptions are cleaned up when the entity is closed.
+     * Discovers the KSP-generated [LirpRefAccessor] for this entity's concrete class via a
+     * convention-based [Class.forName] lookup (`{EntityClassName}_LirpRefAccessor`). Uses
+     * double-checked locking so the lookup runs at most once per entity instance and the result
+     * is visible to all threads.
+     *
+     * Returns `null` if no accessor was found (entity has no [@ReactiveEntityRef][net.transgressoft.lirp.persistence.ReactiveEntityRef]
+     * properties or KSP was not applied). Entities GC'd without [close] never incur this cost —
+     * consistent with the lazy publisher pattern.
      */
-    private fun cancelAllBubbleUpSubscriptions() {
-        var clazz: Class<*>? = this.javaClass
-        while (clazz != null && clazz != ReactiveEntityBase::class.java) {
-            for (field in clazz.declaredFields) {
-                if (field.name.endsWith("\$delegate")) {
-                    try {
-                        field.isAccessible = true
-                        val delegate = field.get(this)
-                        if (delegate is AggregateRefDelegate<*, *>) {
-                            delegate.cancelBubbleUp()
-                        }
-                    } catch (_: Exception) {
-                        // Best-effort cleanup — field access may fail in restricted environments
-                    }
+    private fun loadRefAccessor(): LirpRefAccessor<*>? {
+        if (_refAccessorLoaded) return _refAccessor
+        synchronized(this) {
+            if (_refAccessorLoaded) return _refAccessor
+            _refAccessor =
+                try {
+                    val accessorClass = Class.forName("${this.javaClass.name}_LirpRefAccessor")
+                    accessorClass.getDeclaredConstructor().newInstance() as? LirpRefAccessor<*>
+                } catch (_: ClassNotFoundException) {
+                    null
                 }
-            }
-            clazz = clazz.superclass
+            _refAccessorLoaded = true
+            return _refAccessor
         }
     }
 
