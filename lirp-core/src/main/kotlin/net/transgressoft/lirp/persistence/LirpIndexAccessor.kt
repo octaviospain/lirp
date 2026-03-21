@@ -27,6 +27,10 @@ package net.transgressoft.lirp.persistence
  * The generated [entries] contain direct property getter lambdas compiled to regular method calls,
  * completely avoiding `kotlin-reflect` or `java.lang.reflect` overhead.
  *
+ * Moved from `lirp-api` to `lirp-core` for consistency with [RefEntry] and [LirpRefAccessor].
+ * The package name (`net.transgressoft.lirp.persistence`) is unchanged, so all existing import
+ * statements in consumers remain valid.
+ *
  * @param T The entity type this accessor was generated for
  */
 interface LirpIndexAccessor<T> {
