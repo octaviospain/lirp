@@ -26,6 +26,7 @@ import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.MutationEvent
 import mu.KotlinLogging
 import java.util.Optional
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.properties.ReadOnlyProperty
 import kotlin.reflect.KProperty
 
@@ -47,6 +48,15 @@ import kotlin.reflect.KProperty
  * [net.transgressoft.lirp.event.StandardAggregateMutationEvent], allowing parent subscribers to
  * react to descendant state changes without subscribing to each child individually.
  * Use [cancelBubbleUp] to remove the subscription.
+ *
+ * **Lazy re-wiring:** When the reference ID changes (e.g., via `mutateAndPublish` on the owning
+ * entity), the bubble-up subscription is re-wired to the new referenced entity on the next
+ * [resolve] call. If the new entity is not yet in the registry, the old subscription remains
+ * active until a future [resolve] succeeds.
+ *
+ * **Thread safety:** [registryRef] and [bubbleUpSubscription] use [AtomicReference] for lock-free
+ * visibility. The [wireBubbleUp] and [cancelBubbleUp] methods use `getAndSet` to atomically swap
+ * subscriptions, preventing subscription leaks under concurrent access.
  *
  * **Cascade:** The [executeCascade] method executes the configured [CascadeAction] when the parent
  * entity is removed from its repository, as triggered by [VolatileRepository].
@@ -81,15 +91,37 @@ class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
      * The bound registry used to look up the referenced entity by ID.
      * Null until [bindRegistry] is called (typically at entity add-time by [RegistryBase]).
      */
-    @Volatile
-    private var registry: Registry<K, E>? = null
+    private val registryRef = AtomicReference<Registry<K, E>?>(null)
 
     /**
      * Active subscription to the referenced entity's changes flow for bubble-up propagation.
      * Null when bubble-up is not active or has been cancelled.
+     * Uses AtomicReference so [wireBubbleUp] and [cancelBubbleUp] can atomically swap the
+     * subscription without holding a lock, preventing subscription leaks under concurrent access.
+     */
+    private val bubbleUpSubscription = AtomicReference<LirpEventSubscription<*, *, *>?>(null)
+
+    /**
+     * The reference ID of the entity that was most recently wired for bubble-up.
+     * Compared against the current [idProvider] result in [resolve] to detect FK changes.
+     * Reset to null by [cancelBubbleUp] to force a re-wire attempt on next [resolve].
+     */
+    private val lastWiredId = AtomicReference<Any?>(null)
+
+    /**
+     * The parent entity passed to [wireBubbleUp]. Non-null signals that bubble-up is configured
+     * for this delegate, enabling the lazy re-wire check in [resolve].
+     * Written once at wiring time; read under happens-before from [resolve].
      */
     @Volatile
-    private var bubbleUpSubscription: LirpEventSubscription<*, *, *>? = null
+    private var bubbleUpParent: ReactiveEntity<*, *>? = null
+
+    /**
+     * The reference property name passed to [wireBubbleUp], used when constructing aggregate events
+     * during re-wiring in [rewireIfResolvable].
+     */
+    @Volatile
+    private var bubbleUpRefName: String? = null
 
     override val referenceId: K get() = idProvider()
 
@@ -99,11 +131,16 @@ class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
      * is added to a repository.
      */
     fun bindRegistry(registry: Registry<K, E>) {
-        this.registry = registry
+        registryRef.set(registry)
     }
 
     /**
      * Lazily resolves the referenced entity from the bound [Registry].
+     *
+     * If bubble-up is configured and the reference ID has changed since the last successful wiring,
+     * attempts to re-subscribe to the new referenced entity before returning the result. If the new
+     * entity is not yet in the registry, the old subscription remains active until a future [resolve]
+     * call succeeds.
      *
      * Returns [Optional.empty] if:
      * - The delegate has not yet been bound to a registry (entity not yet added to a repository)
@@ -116,12 +153,24 @@ class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
      */
     @Suppress("UNCHECKED_CAST")
     override fun resolve(): Optional<E> {
-        val reg = registry ?: return Optional.empty()
-        return reg.findById(idProvider()) as Optional<E>
+        val reg = registryRef.get() ?: return Optional.empty()
+        val currentId = idProvider()
+        // Lazy re-wire: if the reference ID changed since last wiring, attempt to re-subscribe.
+        // bubbleUpParent != null acts as proxy for "bubble-up was configured" to skip re-wire overhead
+        // for delegates that do not use bubble-up.
+        if (bubbleUpParent != null && currentId != lastWiredId.get()) {
+            rewireIfResolvable(currentId, reg)
+        }
+        return reg.findById(currentId) as Optional<E>
     }
 
     /**
      * Subscribes to the referenced entity's `changes` flow to forward mutations to the parent.
+     *
+     * Stores [parentEntity] and [refName] for use in future re-wire attempts triggered by [resolve].
+     * If the referenced entity resolves at call time, wires the bubble-up subscription immediately.
+     * If it does not resolve yet, records the current ID so that a future [resolve] call will
+     * attempt wiring when the entity becomes available.
      *
      * For each [MutationEvent] received from the referenced entity, a
      * [net.transgressoft.lirp.event.StandardAggregateMutationEvent] is emitted on the
@@ -138,39 +187,35 @@ class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
      */
     @Suppress("UNCHECKED_CAST")
     fun wireBubbleUp(parentEntity: ReactiveEntity<*, *>, refName: String) {
-        val referencedEntity = resolve().orElse(null) ?: return
+        bubbleUpParent = parentEntity
+        bubbleUpRefName = refName
+        val referencedEntity =
+            resolve().orElse(null) ?: run {
+                // Entity not found yet — record the ID so resolve() will re-wire when entity appears
+                lastWiredId.set(idProvider())
+                return
+            }
         // Bubble-up only makes sense for ReactiveEntity children (which can emit mutation events)
         if (referencedEntity !is ReactiveEntity<*, *> || referencedEntity.isClosed) return
 
-        // Type parameters are erased at runtime; the self-referential bound R : ReactiveEntity<K, R>
-        // cannot be verified at the wildcard call site. ReactiveEntityBase.emitBubbleUpEvent() is used
-        // here because it is defined on the entity class itself (which has the correctly-typed R),
-        // allowing StandardAggregateMutationEvent to be constructed with the right bound at that site.
-        val rawChild = referencedEntity as ReactiveEntity<Any, *>
-        val subscription =
-            rawChild.subscribe { childEvent ->
-                // Only forward direct mutations (ReactiveMutationEvent), NOT AggregateMutationEvents.
-                // This enforces single-level bubble-up: A->B->C mutates A, B notifies its subscribers,
-                // but C should NOT receive A's event — only direct mutations to B would trigger C's bubble-up.
-                if (!parentEntity.isClosed &&
-                    parentEntity is ReactiveEntityBase<*, *> &&
-                    childEvent !is AggregateMutationEvent<*, *>
-                ) {
-                    parentEntity.emitBubbleUpEvent(refName, childEvent)
-                }
-            }
-        bubbleUpSubscription = subscription
+        val newSub = createBubbleUpSubscription(referencedEntity, parentEntity, refName)
+        val oldSub = bubbleUpSubscription.getAndSet(newSub)
+        oldSub?.cancel()
+        lastWiredId.set(idProvider())
     }
 
     /**
      * Cancels the active bubble-up subscription if one exists.
      *
+     * Resets [lastWiredId] to null so that a future [resolve] call will attempt re-wiring if
+     * [wireBubbleUp] is called again (e.g., after the entity is re-added to its repository).
+     *
      * Called by [VolatileRepository] when the parent entity is removed with
      * [CascadeAction.DETACH], and by [ReactiveEntityBase] on entity close.
      */
     fun cancelBubbleUp() {
-        bubbleUpSubscription?.cancel()
-        bubbleUpSubscription = null
+        bubbleUpSubscription.getAndSet(null)?.cancel()
+        lastWiredId.set(null)
     }
 
     /**
@@ -193,7 +238,7 @@ class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
     fun executeCascade(cascadeAction: CascadeAction, owningEntity: Any) {
         when (cascadeAction) {
             CascadeAction.CASCADE -> {
-                val repo = registry
+                val repo = registryRef.get()
                 if (repo !is Repository<*, *>) {
                     log.warn { "Cannot execute CASCADE: bound registry is not a Repository for ${idProvider()}" }
                     return
@@ -214,7 +259,7 @@ class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
                 // Find which entity class this registry manages by matching against globalRegistries
                 val targetClass =
                     RegistryBase.globalRegistries.entries
-                        .firstOrNull { (_, reg) -> reg === registry }
+                        .firstOrNull { (_, reg) -> reg === registryRef.get() }
                         ?.key
                         ?: return // Registry not bound or not registered — nothing to check
 
@@ -261,6 +306,64 @@ class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
             val targetKey = RegistryBase.cascadeKey(entry.referencedClass, targetId)
             check(targetKey !in visited) {
                 "Cascade cycle detected: entity '${entry.referencedClass.simpleName}(id=$targetId)' is already being cascaded on this thread"
+            }
+        }
+    }
+
+    /**
+     * Attempts to re-wire the bubble-up subscription to the entity with [newId] in [reg].
+     *
+     * If the entity is found and is a non-closed [ReactiveEntity], atomically replaces the
+     * current subscription with a new one and cancels the old. Updates [lastWiredId] to [newId]
+     * on success. If the entity is not found, the existing subscription is preserved and
+     * [lastWiredId] is not updated, so a future [resolve] call will retry.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun rewireIfResolvable(newId: K, reg: Registry<K, E>) {
+        val newEntity = reg.findById(newId).orElse(null) ?: return
+        val parent = bubbleUpParent ?: return
+        val refName = bubbleUpRefName ?: return
+        if (newEntity !is ReactiveEntity<*, *> || newEntity.isClosed) return
+        if (parent.isClosed) return
+
+        val newSub = createBubbleUpSubscription(newEntity, parent, refName)
+        val oldSub = bubbleUpSubscription.getAndSet(newSub)
+        oldSub?.cancel()
+        lastWiredId.set(newId)
+    }
+
+    /**
+     * Creates a subscription on [referencedEntity] that forwards non-aggregate [MutationEvent]s
+     * to [parentEntity] as [net.transgressoft.lirp.event.StandardAggregateMutationEvent] via
+     * [ReactiveEntityBase.emitBubbleUpEvent].
+     *
+     * The [AggregateMutationEvent] filter enforces single-level bubble-up: transitive events
+     * (those already wrapped in an [AggregateMutationEvent]) are not re-forwarded upward.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun createBubbleUpSubscription(
+        referencedEntity: ReactiveEntity<*, *>,
+        parentEntity: ReactiveEntity<*, *>,
+        refName: String
+    ): LirpEventSubscription<*, *, *> {
+        // K bound on ReactiveEntity<K, R> cannot be verified at this wildcard call site;
+        // the cast is safe because subscribe() only reads from the entity's publisher,
+        // which is internally consistent regardless of the type parameter.
+        val rawChild = referencedEntity as ReactiveEntity<Any, *>
+        return rawChild.subscribe { childEvent ->
+            // Type parameters are erased at runtime; the self-referential bound R : ReactiveEntity<K, R>
+            // cannot be verified at the wildcard call site. ReactiveEntityBase.emitBubbleUpEvent() is used
+            // here because it is defined on the entity class itself (which has the correctly-typed R),
+            // allowing StandardAggregateMutationEvent to be constructed with the right bound at that site.
+            //
+            // Only forward direct mutations (ReactiveMutationEvent), NOT AggregateMutationEvents.
+            // This enforces single-level bubble-up: A->B->C mutates A, B notifies its subscribers,
+            // but C should NOT receive A's event — only direct mutations to B would trigger C's bubble-up.
+            if (!parentEntity.isClosed &&
+                parentEntity is ReactiveEntityBase<*, *> &&
+                childEvent !is AggregateMutationEvent<*, *>
+            ) {
+                parentEntity.emitBubbleUpEvent(refName, childEvent)
             }
         }
     }

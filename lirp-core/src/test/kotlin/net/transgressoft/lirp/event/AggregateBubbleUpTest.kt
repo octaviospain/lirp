@@ -27,6 +27,8 @@ import net.transgressoft.lirp.persistence.EntityB
 import net.transgressoft.lirp.persistence.EntityBVolatileRepo
 import net.transgressoft.lirp.persistence.EntityC
 import net.transgressoft.lirp.persistence.EntityCVolatileRepo
+import net.transgressoft.lirp.persistence.MutableRefOrder
+import net.transgressoft.lirp.persistence.MutableRefOrderVolatileRepo
 import net.transgressoft.lirp.persistence.Order
 import net.transgressoft.lirp.persistence.OrderVolatileRepo
 import io.kotest.core.annotation.DisplayName
@@ -163,6 +165,122 @@ internal class AggregateBubbleUpTest : FunSpec({
         // Wait briefly to confirm no event arrives
         Thread.sleep(300)
         receivedEventCount.get() shouldBe 0
+    }
+
+    test("Bubble-up re-wires to new entity after reference ID change via mutateAndPublish") {
+        val customer1 = Customer(id = 1, name = "Alice")
+        val customer2 = Customer(id = 2, name = "Bob")
+        customerRepo.add(customer1)
+        customerRepo.add(customer2)
+
+        val orderRepo = MutableRefOrderVolatileRepo().also { activeRepos.add(it) }
+        val order = MutableRefOrder(id = 100L, customerId = 1)
+        orderRepo.add(order)
+
+        val latch1 = CountDownLatch(1)
+        val receivedCount = java.util.concurrent.atomic.AtomicInteger(0)
+
+        order.subscribe { event ->
+            if (event is AggregateMutationEvent<*, *>) {
+                receivedCount.incrementAndGet()
+                latch1.countDown()
+            }
+        }
+
+        // Verify initial wiring: customer1 mutation arrives
+        customer1.updateName("Alice Updated")
+        latch1.await(2, TimeUnit.SECONDS) shouldBe true
+        receivedCount.get() shouldBe 1
+
+        // Change reference to customer2, then trigger re-wire via resolve()
+        order.changeCustomer(2)
+        order.customer.resolve()
+
+        val latch2 = CountDownLatch(1)
+        order.subscribe { event ->
+            if (event is AggregateMutationEvent<*, *>) {
+                latch2.countDown()
+            }
+        }
+
+        // Mutate customer2 — should arrive (re-wired)
+        customer2.updateName("Bob Updated")
+        latch2.await(2, TimeUnit.SECONDS) shouldBe true
+
+        // Mutate customer1 — should NOT produce further aggregate events
+        val countBeforeOldMutation = receivedCount.get()
+        customer1.updateName("Alice Again")
+        Thread.sleep(300)
+        // No additional events from old customer1 subscription
+        receivedCount.get() shouldBe countBeforeOldMutation
+    }
+
+    test("Bubble-up stays on old entity when new reference ID does not resolve") {
+        val customer1 = Customer(id = 1, name = "Alice")
+        customerRepo.add(customer1)
+
+        val orderRepo = MutableRefOrderVolatileRepo().also { activeRepos.add(it) }
+        val order = MutableRefOrder(id = 100L, customerId = 1)
+        orderRepo.add(order)
+
+        val eventCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val latch = CountDownLatch(1)
+
+        order.subscribe { event ->
+            if (event is AggregateMutationEvent<*, *>) {
+                eventCount.incrementAndGet()
+                latch.countDown()
+            }
+        }
+
+        // Verify initial wiring
+        customer1.updateName("Alice Updated")
+        latch.await(2, TimeUnit.SECONDS) shouldBe true
+
+        // Change to non-existent ID — re-wire should fail, old subscription preserved
+        order.changeCustomer(999)
+        order.customer.resolve() // triggers re-wire attempt — should fail
+
+        // Old subscription to customer1 still active
+        val countBefore = eventCount.get()
+        customer1.updateName("Alice Again")
+        Thread.sleep(300)
+        eventCount.get() shouldBe countBefore + 1
+    }
+
+    test("Bubble-up re-wires after initially unresolvable new ID becomes available") {
+        val customer1 = Customer(id = 1, name = "Alice")
+        customerRepo.add(customer1)
+
+        val orderRepo = MutableRefOrderVolatileRepo().also { activeRepos.add(it) }
+        val order = MutableRefOrder(id = 100L, customerId = 1)
+        orderRepo.add(order)
+
+        // Change to ID 2 — not yet in repo
+        order.changeCustomer(2)
+        order.customer.resolve() // re-wire fails, old sub (or none if customer1 was initial) stays
+
+        // Add customer2
+        val customer2 = Customer(id = 2, name = "Bob")
+        customerRepo.add(customer2)
+
+        // Trigger re-wire again — now succeeds
+        order.customer.resolve()
+
+        val eventCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val latch = CountDownLatch(1)
+
+        order.subscribe { event ->
+            if (event is AggregateMutationEvent<*, *>) {
+                eventCount.incrementAndGet()
+                latch.countDown()
+            }
+        }
+
+        // Mutate customer2 — should arrive after successful re-wire
+        customer2.updateName("Bob Updated")
+        latch.await(2, TimeUnit.SECONDS) shouldBe true
+        eventCount.get() shouldBe 1
     }
 
     test("Bubble-up propagation is single-level only: EntityA mutation notifies EntityB but NOT EntityC") {
