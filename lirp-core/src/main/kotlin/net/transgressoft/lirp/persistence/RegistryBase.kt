@@ -18,6 +18,7 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
+import net.transgressoft.lirp.entity.ReactiveEntity
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
 import net.transgressoft.lirp.event.FlowEventPublisher
@@ -117,6 +118,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
                     val accessor = accessorClass.getDeclaredConstructor().newInstance() as LirpIndexAccessor<T>
                     accessor.entries
                 } catch (_: ClassNotFoundException) {
+                    // No LirpIndexAccessor generated — warn only since @Indexed delegate is not a runtime-visible pattern
                     emptyList()
                 }
             for (entry in entries) {
@@ -179,8 +181,45 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
                     val accessor = accessorClass.getDeclaredConstructor().newInstance() as LirpRefAccessor<T>
                     accessor.entries
                 } catch (_: ClassNotFoundException) {
+                    failFastIfDelegatePresent(entity.javaClass, AggregateRefDelegate::class.java, "LirpRefAccessor")
                     emptyList()
                 }
+        }
+    }
+
+    /**
+     * Checks whether [entityClass] has any `${'$'}delegate` backing fields whose type is assignable
+     * from [delegateType]. If so, throws [IllegalStateException] indicating that the KSP-generated
+     * accessor class was not found.
+     *
+     * LIRP annotations use [AnnotationRetention.BINARY] which is invisible to runtime reflection.
+     * Instead, the check inspects the JVM backing fields: Kotlin stores `by aggregateRef { ... }`
+     * delegate properties as `<propName>${'$'}delegate` fields of type [AggregateRefDelegate]. If such
+     * fields exist but no [LirpRefAccessor] was generated, the entity was not processed by KSP.
+     *
+     * This check uses reflection exactly once per entity type (guarded by the double-checked locking
+     * in [discoverRefs] and [discoverIndexes]) and only executes on the error path (ClassNotFoundException).
+     * It is not on the hot path for entity operations.
+     *
+     * @param entityClass the entity class whose declared fields should be inspected
+     * @param delegateType the delegate type to look for (e.g., [AggregateRefDelegate])
+     * @param accessorSuffix the suffix of the expected KSP-generated accessor class (e.g., "LirpRefAccessor")
+     */
+    private fun failFastIfDelegatePresent(entityClass: Class<*>, delegateType: Class<*>, accessorSuffix: String) {
+        var clazz: Class<*>? = entityClass
+        while (clazz != null) {
+            val hasDelegateField =
+                clazz.declaredFields.any { field ->
+                    field.name.endsWith("\$delegate") && delegateType.isAssignableFrom(field.type)
+                }
+            if (hasDelegateField) {
+                throw IllegalStateException(
+                    "Entity ${entityClass.simpleName} has ${delegateType.simpleName} delegate properties " +
+                        "but no KSP-generated $accessorSuffix was found. " +
+                        "Ensure the lirp-ksp processor is applied."
+                )
+            }
+            clazz = clazz.superclass
         }
     }
 
@@ -188,38 +227,20 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
      * Binds each [AggregateRefDelegate] on [entity] to the [Registry] that holds its referenced
      * entity type. For each [RefEntry] discovered via [discoverRefs], this method:
      *
-     * 1. Gets the raw ID of the referenced entity via [RefEntry.idGetter].
-     * 2. Looks up the [Registry] for [RefEntry.referencedClass] in the companion-level registry map.
-     * 3. If found, calls [AggregateRefDelegate.bindRegistry] on the property value.
+     * 1. Looks up the [Registry] for [RefEntry.referencedClass] in the companion-level registry map.
+     * 2. If found, calls [AggregateRefDelegate.bindRegistry] on the delegate obtained via [RefEntry.delegateGetter].
      *
-     * Only properties that are [AggregateRefDelegate] instances are processed — non-delegate
-     * implementations of [ReactiveEntityReference] are skipped silently.
+     * The unchecked cast consolidates type erasure at one call site. It is safe because
+     * [RefEntry.referencedClass] and the delegate's K type are consistent — the KSP processor
+     * generates both from the same referenced entity class declaration.
      */
+    @Suppress("UNCHECKED_CAST")
     protected fun bindEntityRefs(entity: T) {
         val entries = refEntries ?: return
         for (entry in entries) {
             val registry = globalRegistries[entry.referencedClass] ?: continue
-            // Locate the delegate by its property name using getDeclaredField to avoid KProperty overhead
-            try {
-                val field = entity.javaClass.getDeclaredField(entry.refName)
-                field.isAccessible = true
-                bindDelegateField(field[entity], registry)
-            } catch (_: NoSuchFieldException) {
-                // Kotlin property delegates are stored as backing fields named "<propertyName>$delegate"
-                try {
-                    val delegateField = entity.javaClass.getDeclaredField("${entry.refName}\$delegate")
-                    delegateField.isAccessible = true
-                    bindDelegateField(delegateField[entity], registry)
-                } catch (_: NoSuchFieldException) {
-                    log.warn { "Could not find delegate field for ref '${entry.refName}' on ${entity.javaClass.simpleName}" }
-                }
-            }
-        }
-    }
-
-    private fun bindDelegateField(fieldValue: Any?, registry: Registry<*, *>) {
-        if (fieldValue is AggregateRefDelegate<*, *>) {
-            fieldValue.bindRegistryUntyped(registry)
+            val typed = entry.delegateGetter(entity) as AggregateRefDelegate<IdentifiableEntity<Comparable<Any>>, Comparable<Any>>
+            typed.bindRegistry(registry as Registry<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>)
         }
     }
 
@@ -235,10 +256,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
         val entries = refEntries ?: return
         for (entry in entries) {
             if (!entry.bubbleUp) continue
-            val delegate = findDelegateField(entity, entry.refName) ?: continue
-            if (delegate is AggregateRefDelegate<*, *>) {
-                delegate.wireBubbleUp(entity as net.transgressoft.lirp.entity.ReactiveEntity<*, *>, entry.refName)
-            }
+            entry.delegateGetter(entity).wireBubbleUp(entity as ReactiveEntity<*, *>, entry.refName)
         }
     }
 
@@ -252,44 +270,22 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
     protected fun executeCascadeForEntity(entity: T) {
         val entries = refEntries ?: return
         for (entry in entries) {
-            val delegate = findDelegateField(entity, entry.refName) ?: continue
-            if (delegate is AggregateRefDelegate<*, *>) {
-                delegate.executeCascade(entry.cascadeAction)
-            }
+            entry.delegateGetter(entity).executeCascade(entry.cascadeAction)
         }
     }
 
     /**
-     * Executes DETACH cleanup (cancels bubble-up subscriptions) for all aggregate references on [entity].
+     * Cancels bubble-up subscriptions for all aggregate references on [entity].
      *
-     * Called by [net.transgressoft.lirp.entity.ReactiveEntityBase.close] to ensure subscription cleanup
-     * when an entity is permanently closed, regardless of the configured cascade action.
+     * Called when an entity is permanently closed to ensure subscription cleanup,
+     * regardless of the configured cascade action.
      */
     protected fun detachAllRefs(entity: T) {
         val entries = refEntries ?: return
         for (entry in entries) {
-            val delegate = findDelegateField(entity, entry.refName) ?: continue
-            if (delegate is AggregateRefDelegate<*, *>) {
-                delegate.cancelBubbleUp()
-            }
+            entry.delegateGetter(entity).cancelBubbleUp()
         }
     }
-
-    private fun findDelegateField(entity: T, refName: String): Any? =
-        try {
-            val field = entity.javaClass.getDeclaredField(refName)
-            field.isAccessible = true
-            field[entity]
-        } catch (_: NoSuchFieldException) {
-            try {
-                val delegateField = entity.javaClass.getDeclaredField("${refName}\$delegate")
-                delegateField.isAccessible = true
-                delegateField[entity]
-            } catch (_: NoSuchFieldException) {
-                log.warn { "Could not find delegate field for ref '$refName' on ${entity.javaClass.simpleName}" }
-                null
-            }
-        }
 
     override fun findByIndex(indexName: String, value: Any): Set<T> {
         val indexMap =

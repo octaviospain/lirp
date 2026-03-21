@@ -103,16 +103,6 @@ class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
     }
 
     /**
-     * Binds this delegate to an untyped registry, performing an unchecked cast internally.
-     * Used by [RegistryBase.bindEntityRefs] when the registry type cannot be expressed at
-     * the call site due to type erasure.
-     */
-    @Suppress("UNCHECKED_CAST")
-    internal fun bindRegistryUntyped(registry: Registry<*, *>) {
-        this.registry = registry as Registry<K, E>
-    }
-
-    /**
      * Lazily resolves the referenced entity from the bound [Registry].
      *
      * Returns [Optional.empty] if:
