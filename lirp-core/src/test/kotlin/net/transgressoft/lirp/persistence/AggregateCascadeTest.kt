@@ -29,7 +29,11 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
@@ -226,6 +230,47 @@ internal class AggregateCascadeTest : FunSpec({
         // Remove order2 — customer already gone, should complete without error (not throw)
         cascadeOrderRepo.remove(order2)
         customerRepo.contains(1) shouldBe false
+    }
+
+    test("Concurrent wireBubbleUp and cancelBubbleUp do not leak subscriptions") {
+        val customer = Customer(id = 1, name = "Alice")
+        customerRepo.add(customer)
+
+        val bubbleUpOrderRepo = BubbleUpOrderVolatileRepo().also { orderRepo = it }
+        val order = BubbleUpOrder(id = 100L, customerId = 1)
+        bubbleUpOrderRepo.add(order)
+
+        // Cast to AggregateRefDelegate to access wireBubbleUp/cancelBubbleUp directly.
+        // order.customer returns this (the delegate itself) via getValue().
+        val delegate = order.customer as AggregateRefDelegate<Customer, Int>
+
+        // Launch 50 coroutines: even-indexed wire, odd-indexed cancel
+        runBlocking {
+            (0 until 50).map { index ->
+                launch(Dispatchers.Default) {
+                    if (index % 2 == 0) {
+                        delegate.wireBubbleUp(order, "customer")
+                    } else {
+                        delegate.cancelBubbleUp()
+                    }
+                }
+            }.joinAll()
+        }
+
+        // Final clean state: cancel any residual subscription
+        delegate.cancelBubbleUp()
+
+        // After final cancel, no events should be forwarded
+        val eventCount = AtomicInteger(0)
+        order.subscribe { event ->
+            if (event is AggregateMutationEvent<*, *>) {
+                eventCount.incrementAndGet()
+            }
+        }
+
+        customer.updateName("Alice Updated After Concurrent Storm")
+        Thread.sleep(300)
+        eventCount.get() shouldBe 0
     }
 
     test("ReactiveEntityBase close() always executes DETACH cleanup regardless of cascade config") {
