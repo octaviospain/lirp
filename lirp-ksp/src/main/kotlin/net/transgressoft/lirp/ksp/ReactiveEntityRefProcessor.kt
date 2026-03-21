@@ -153,21 +153,25 @@ class ReactiveEntityRefProcessor(
         val entriesCode =
             entries.joinToString(",\n        ") { meta ->
                 val referencedSimpleName = meta.referencedClassFqn.substringAfterLast('.')
-                "@Suppress(\"UNCHECKED_CAST\")\n        RefEntry(\n" +
-                    "            refName = \"${meta.refName}\",\n" +
-                    "            idGetter = { it.${meta.propertyName}.referenceId },\n" +
-                    "            delegateGetter = { it.${meta.propertyName} as AggregateRefDelegate<*, *> },\n" +
-                    "            referencedClass = $referencedSimpleName::class.java,\n" +
-                    "            bubbleUp = ${meta.bubbleUp},\n" +
-                    "            cascadeAction = CascadeAction.${meta.cascadeAction}\n" +
-                    "        )"
+                """
+                @Suppress("UNCHECKED_CAST")
+                RefEntry(
+                    refName = "${meta.refName}",
+                    idGetter = { it.${meta.propertyName}.referenceId },
+                    delegateGetter = { it.${meta.propertyName} as AggregateRefDelegate<*, *> },
+                    referencedClass = $referencedSimpleName::class.java,
+                    bubbleUp = ${meta.bubbleUp},
+                    cascadeAction = CascadeAction.${meta.cascadeAction}
+                )
+                """.trimIndent()
             }
 
-        // Build cancelAllBubbleUp override: iterates entries and cancels each delegate's bubble-up
         val cancelAllBubbleUpCode =
-            "    override fun cancelAllBubbleUp(entity: $className) {\n" +
-                "        entries.forEach { entry -> entry.delegateGetter(entity).cancelBubbleUp() }\n" +
-                "    }"
+            """
+            override fun cancelAllBubbleUp(entity: $className) {
+                entries.forEach { entry -> entry.delegateGetter(entity).cancelBubbleUp() }
+            }
+            """.trimIndent()
 
         file.write(
             buildString {

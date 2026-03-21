@@ -34,10 +34,6 @@ package net.transgressoft.lirp.persistence
  * this method, the class will fail to compile — this is the compile-time safety net ensuring all
  * implementations remain consistent with the contract.
  *
- * Moved from `lirp-api` to `lirp-core` because [RefEntry] now references [AggregateRefDelegate].
- *
- * Mirrors [LirpIndexAccessor] structurally — the same convention-based discovery pattern applies.
- *
  * @param T The entity type this accessor was generated for
  */
 interface LirpRefAccessor<T> {
