@@ -54,5 +54,12 @@ enum class CascadeAction {
      * Bubble-up subscriptions, if active, are left in place. Use with caution — subscription
      * cleanup becomes the caller's responsibility.
      */
-    NONE
+    NONE,
+
+    /**
+     * Prevents deletion of the referenced entity if it is still referenced by other entities.
+     * Throws [IllegalStateException] at deletion time when other references exist.
+     * The entity triggering the cascade is excluded from the reference check.
+     */
+    RESTRICT
 }

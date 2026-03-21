@@ -19,10 +19,12 @@ package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.event.AggregateMutationEvent
 import net.transgressoft.lirp.event.ReactiveScope
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -151,6 +153,79 @@ internal class AggregateCascadeTest : FunSpec({
 
         // Customer still exists
         customerRepo.contains(1) shouldBe true
+    }
+
+    test("RESTRICT remove() throws IllegalStateException when another entity still references the target Customer") {
+        val customer = Customer(id = 1, name = "Alice")
+        customerRepo.add(customer)
+
+        val restrictOrderRepo = RestrictOrderVolatileRepo().also { orderRepo = it }
+        val order1 = RestrictOrder(id = 100L, customerId = 1)
+        val order2 = RestrictOrder(id = 101L, customerId = 1)
+        restrictOrderRepo.add(order1)
+        restrictOrderRepo.add(order2)
+
+        // order1 references customer; order2 also references customer
+        // Removing order1 should throw because order2 still references customer
+        val exception =
+            shouldThrow<IllegalStateException> {
+                restrictOrderRepo.remove(order1)
+            }
+        exception.message shouldContain "Cannot cascade-delete"
+    }
+
+    test("RESTRICT remove() allows deletion when no other entity references the target Customer") {
+        val customer = Customer(id = 1, name = "Alice")
+        customerRepo.add(customer)
+
+        val restrictOrderRepo = RestrictOrderVolatileRepo().also { orderRepo = it }
+        val order = RestrictOrder(id = 100L, customerId = 1)
+        restrictOrderRepo.add(order)
+
+        // Only order references customer — removal proceeds without error
+        restrictOrderRepo.remove(order)
+
+        // Customer still exists (RESTRICT does not cascade-delete, just prevents if others reference)
+        customerRepo.contains(1) shouldBe true
+    }
+
+    test("CASCADE on a cyclic reference graph throws IllegalStateException with cycle detected message") {
+        val cyclicParentRepo = CyclicParentVolatileRepo().also { orderRepo = it }
+        var cyclicChildRepo: CyclicChildVolatileRepo? = null
+        try {
+            cyclicChildRepo = CyclicChildVolatileRepo()
+            val parent = CyclicParent(id = 1L, childId = 2L)
+            val child = CyclicChild(id = 2L, parentId = 1L)
+            cyclicParentRepo.add(parent)
+            cyclicChildRepo.add(child)
+
+            val exception =
+                shouldThrow<IllegalStateException> {
+                    cyclicParentRepo.remove(parent)
+                }
+            exception.message shouldContain "Cascade cycle detected"
+        } finally {
+            cyclicChildRepo?.close()
+        }
+    }
+
+    test("CASCADE on an already-removed entity logs warning and returns without error") {
+        val customer = Customer(id = 1, name = "Alice")
+        customerRepo.add(customer)
+
+        val cascadeOrderRepo = CascadeOrderVolatileRepo().also { orderRepo = it }
+        val order1 = CascadeOrder(id = 100L, customerId = 1)
+        val order2 = CascadeOrder(id = 101L, customerId = 1)
+        cascadeOrderRepo.add(order1)
+        cascadeOrderRepo.add(order2)
+
+        // Remove order1 — customer gets cascade-deleted
+        cascadeOrderRepo.remove(order1)
+        customerRepo.contains(1) shouldBe false
+
+        // Remove order2 — customer already gone, should complete without error (not throw)
+        cascadeOrderRepo.remove(order2)
+        customerRepo.contains(1) shouldBe false
     }
 
     test("ReactiveEntityBase close() always executes DETACH cleanup regardless of cascade config") {
