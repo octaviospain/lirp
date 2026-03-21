@@ -39,10 +39,12 @@ import net.transgressoft.lirp.entity.CascadeAction
  *   regular method call accessing the backing field's [AggregateRefDelegate.referenceId], not reflection.
  *   Returns [K] (non-null) since null IDs are not permitted.
  * @property delegateGetter KSP-generated lambda that directly returns the [AggregateRefDelegate]
- *   instance from the entity's `propertyName${'$'}delegate` backing field. Used by [RegistryBase] to
- *   call [AggregateRefDelegate.bindRegistry], [AggregateRefDelegate.wireBubbleUp],
+ *   instance by casting the property value (which at runtime IS the delegate, since
+ *   [AggregateRefDelegate.getValue] returns `this`). Used by [RegistryBase] to call
+ *   [AggregateRefDelegate.bindRegistry], [AggregateRefDelegate.wireBubbleUp],
  *   [AggregateRefDelegate.executeCascade], and [AggregateRefDelegate.cancelBubbleUp] without
- *   any `java.lang.reflect` field access.
+ *   any `java.lang.reflect` field access. Star-projected because aggregate references on the same
+ *   entity may reference different entity types with different K types.
  * @property referencedClass The [Class] of the referenced entity type, used for registry lookup
  * @property bubbleUp Whether mutation events from the referenced entity propagate to the referencing
  *   entity's subscribers as [net.transgressoft.lirp.event.AggregateMutationEvent]
@@ -51,7 +53,7 @@ import net.transgressoft.lirp.entity.CascadeAction
 data class RefEntry<T, K : Comparable<K>>(
     val refName: String,
     val idGetter: (T) -> K,
-    val delegateGetter: (T) -> AggregateRefDelegate<*, K>,
+    val delegateGetter: (T) -> AggregateRefDelegate<*, *>,
     val referencedClass: Class<*>,
     val bubbleUp: Boolean,
     val cascadeAction: CascadeAction

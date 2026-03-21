@@ -26,17 +26,29 @@ import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.google.devtools.ksp.symbol.KSType
+import com.google.devtools.ksp.symbol.KSTypeAlias
 import com.google.devtools.ksp.validate
 
 private const val REACTIVE_ENTITY_REF_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.ReactiveEntityRef"
+private const val REACTIVE_ENTITY_REFERENCE_FQN = "net.transgressoft.lirp.persistence.ReactiveEntityReference"
 
 /**
  * KSP processor that generates [LirpRefAccessor][net.transgressoft.lirp.persistence.LirpRefAccessor]
  * implementations for entity classes containing
  * [@ReactiveEntityRef][net.transgressoft.lirp.persistence.ReactiveEntityRef] properties.
  *
- * For each entity class, a `{ClassName}_LirpRefAccessor` is generated in the same package, providing
- * direct ID getter lambdas and aggregate reference metadata — zero runtime reflection.
+ * For each entity class, a `{ClassName}_LirpRefAccessor` is generated in the same package, providing:
+ * - Direct ID getter lambdas (`idGetter`) via the delegate's `referenceId` property
+ * - Direct delegate getter lambdas (`delegateGetter`) via the Kotlin `${'$'}delegate` backing field convention
+ * - A `cancelAllBubbleUp` override that cancels all bubble-up subscriptions without any reflection
+ *
+ * The generated code uses named constructor arguments for [RefEntry][net.transgressoft.lirp.persistence.RefEntry]
+ * so that future field additions remain backward-compatible.
+ *
+ * Type resolution handles type aliases and intermediate interfaces: if a property's declared type
+ * is a type alias or an intermediate interface (not `ReactiveEntityReference` directly), the processor
+ * recursively walks the supertype chain to find the `ReactiveEntityReference<E, K>` supertype and
+ * extracts `E` from its first type argument.
  */
 class ReactiveEntityRefProcessor(
     private val codeGenerator: CodeGenerator,
@@ -100,9 +112,10 @@ class ReactiveEntityRefProcessor(
                         else -> "DETACH"
                     }
 
-                // The referenced entity class is the first type argument of ReactiveEntityReference<E, K>
+                // The referenced entity class is extracted recursively, handling type aliases
+                // and intermediate interfaces that extend ReactiveEntityReference<E, K>
                 val referencedClassFqn =
-                    extractReferencedClassFqn(prop)
+                    findReferencedClassFqnFromType(prop.type.resolve())
                         ?: run {
                             logger.warn("Cannot determine referenced class for property '${prop.simpleName.asString()}' in $className — skipping")
                             return@mapNotNull null
@@ -132,11 +145,29 @@ class ReactiveEntityRefProcessor(
                 .filter { it.contains('.') }
                 .sorted()
 
+        // Build RefEntry named constructor calls with delegateGetter and typed idGetter.
+        // Since AggregateRefDelegate.getValue() returns `this`, accessing `it.propName` at runtime
+        // returns the delegate itself typed as ReactiveEntityReference<E, K>. Casting to
+        // AggregateRefDelegate<*, *> is safe — the only aggregateRef<E,K> implementation is
+        // AggregateRefDelegate. The UNCHECKED_CAST suppression is placed on each RefEntry call.
         val entriesCode =
             entries.joinToString(",\n        ") { meta ->
                 val referencedSimpleName = meta.referencedClassFqn.substringAfterLast('.')
-                "RefEntry(\"${meta.refName}\", { it.${meta.propertyName} }, $referencedSimpleName::class.java, ${meta.bubbleUp}, CascadeAction.${meta.cascadeAction})"
+                "@Suppress(\"UNCHECKED_CAST\")\n        RefEntry(\n" +
+                    "            refName = \"${meta.refName}\",\n" +
+                    "            idGetter = { it.${meta.propertyName}.referenceId },\n" +
+                    "            delegateGetter = { it.${meta.propertyName} as AggregateRefDelegate<*, *> },\n" +
+                    "            referencedClass = $referencedSimpleName::class.java,\n" +
+                    "            bubbleUp = ${meta.bubbleUp},\n" +
+                    "            cascadeAction = CascadeAction.${meta.cascadeAction}\n" +
+                    "        )"
             }
+
+        // Build cancelAllBubbleUp override: iterates entries and cancels each delegate's bubble-up
+        val cancelAllBubbleUpCode =
+            "    override fun cancelAllBubbleUp(entity: $className) {\n" +
+                "        entries.forEach { entry -> entry.delegateGetter(entity).cancelBubbleUp() }\n" +
+                "    }"
 
         file.write(
             buildString {
@@ -145,6 +176,7 @@ class ReactiveEntityRefProcessor(
                     appendLine()
                 }
                 appendLine("import net.transgressoft.lirp.entity.CascadeAction")
+                appendLine("import net.transgressoft.lirp.persistence.AggregateRefDelegate")
                 appendLine("import net.transgressoft.lirp.persistence.LirpRefAccessor")
                 appendLine("import net.transgressoft.lirp.persistence.RefEntry")
                 for (importFqn in referencedImports) {
@@ -153,12 +185,14 @@ class ReactiveEntityRefProcessor(
                 appendLine()
                 appendLine("/**")
                 appendLine(" * KSP-generated aggregate reference accessor for [$className].")
-                appendLine(" * Provides direct ID getter lambdas and reference metadata — no runtime reflection.")
+                appendLine(" * Provides direct ID getter and delegate getter lambdas — no runtime reflection.")
                 appendLine(" */")
                 appendLine("public class $accessorName : LirpRefAccessor<$className> {")
-                appendLine("    override val entries: List<RefEntry<$className>> = listOf(")
+                appendLine("    override val entries: List<RefEntry<$className, *>> = listOf(")
                 appendLine("        $entriesCode")
                 appendLine("    )")
+                appendLine()
+                appendLine(cancelAllBubbleUpCode)
                 appendLine("}")
             }.toByteArray()
         )
@@ -168,19 +202,48 @@ class ReactiveEntityRefProcessor(
     }
 
     /**
-     * Extracts the fully qualified name of the referenced entity class from the property's
-     * declared type. The property type is expected to be `ReactiveEntityReference<E, K>` where
-     * `E` is the referenced entity type.
+     * Recursively extracts the fully qualified name of the referenced entity class from a [KSType].
+     *
+     * Resolution strategy (in priority order):
+     * 1. If the type is a [KSTypeAlias], unwrap and recurse on the aliased type.
+     * 2. If the type has type arguments (direct generic such as `ReactiveEntityReference<Customer, Int>`),
+     *    extract the FQN of the first type argument (`Customer`).
+     * 3. If the type is a class declaration (possibly an intermediate interface), walk its supertype
+     *    chain looking for a supertype whose FQN matches [REACTIVE_ENTITY_REFERENCE_FQN] and extract
+     *    the first type argument from that supertype.
+     *
+     * Returns `null` if no referenced entity class can be determined.
      */
-    private fun extractReferencedClassFqn(prop: KSPropertyDeclaration): String? {
-        val propType = prop.type.resolve()
-        // If the property uses a delegate (by aggregateRef<E,K> { ... }), the declared type
-        // in source is ReactiveEntityReference<E, K>. We get the first type argument.
-        val typeArgs = propType.arguments
+    private fun findReferencedClassFqnFromType(type: KSType): String? {
+        val declaration = type.declaration
+
+        // Case 1: type alias — unwrap and recurse
+        if (declaration is KSTypeAlias) {
+            return findReferencedClassFqnFromType(declaration.type.resolve())
+        }
+
+        // Case 2: type has direct type arguments (ReactiveEntityReference<E, K> or similar)
+        val typeArgs = type.arguments
         if (typeArgs.isNotEmpty()) {
             val firstArg = typeArgs.first().type?.resolve()
             return firstArg?.declaration?.qualifiedName?.asString()
         }
+
+        // Case 3: intermediate interface — walk supertype chain for ReactiveEntityReference<E, K>
+        if (declaration is KSClassDeclaration) {
+            for (superType in declaration.superTypes) {
+                val resolvedSuperType = superType.resolve()
+                val superFqn = resolvedSuperType.declaration.qualifiedName?.asString()
+                if (superFqn == REACTIVE_ENTITY_REFERENCE_FQN) {
+                    val firstArg = resolvedSuperType.arguments.firstOrNull()?.type?.resolve()
+                    return firstArg?.declaration?.qualifiedName?.asString()
+                }
+                // Recurse deeper for multi-level inheritance chains
+                val deepResult = findReferencedClassFqnFromType(resolvedSuperType)
+                if (deepResult != null) return deepResult
+            }
+        }
+
         return null
     }
 }
