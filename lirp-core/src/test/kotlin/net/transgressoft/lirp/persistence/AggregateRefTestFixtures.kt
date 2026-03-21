@@ -314,3 +314,30 @@ class CyclicParentVolatileRepo : VolatileRepository<Long, CyclicParent>("CyclicP
  */
 @LirpRepository
 class CyclicChildVolatileRepo : VolatileRepository<Long, CyclicChild>("CyclicChildren")
+
+/**
+ * Test entity representing an order whose customer reference can be changed via [changeCustomer].
+ *
+ * Used in [net.transgressoft.lirp.event.AggregateBubbleUpTest] to verify that bubble-up subscriptions
+ * are re-wired to the new referenced entity after the reference ID changes via [mutateAndPublish].
+ */
+@Serializable
+data class MutableRefOrder(
+    override val id: Long,
+    var customerId: Int
+) : ReactiveEntityBase<Long, MutableRefOrder>() {
+    override val uniqueId: String get() = "mutable-ref-order-$id"
+
+    @ReactiveEntityRef(bubbleUp = true)
+    val customer by aggregateRef<Customer, Int> { customerId }
+
+    override fun clone(): MutableRefOrder = copy()
+
+    fun changeCustomer(newId: Int) = mutateAndPublish(newId, customerId) { customerId = it }
+}
+
+/**
+ * Test repository subclass for [MutableRefOrder] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class MutableRefOrderVolatileRepo : VolatileRepository<Long, MutableRefOrder>("MutableRefOrders")
