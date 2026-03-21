@@ -106,6 +106,7 @@ class ReactiveEntityRefProcessor(
                             when {
                                 str.endsWith("CASCADE") -> "CASCADE"
                                 str.endsWith("NONE") -> "NONE"
+                                str.endsWith("RESTRICT") -> "RESTRICT"
                                 else -> "DETACH"
                             }
                         }

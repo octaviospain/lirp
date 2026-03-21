@@ -263,11 +263,25 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
      * Called by [VolatileRepository] during [net.transgressoft.lirp.persistence.VolatileRepository.remove]
      * and [net.transgressoft.lirp.persistence.VolatileRepository.clear]. Each reference delegate's
      * [AggregateRefDelegate.executeCascade] is invoked with its configured [net.transgressoft.lirp.entity.CascadeAction].
+     *
+     * Uses a [ThreadLocal] visited set to detect and reject cyclic cascade graphs. If [entity] is
+     * already being cascaded on the current thread, an [IllegalStateException] is thrown immediately.
+     * The set is cleared after the top-level cascade entry point returns.
      */
     protected fun executeCascadeForEntity(entity: T) {
         val entries = refEntries ?: return
-        for (entry in entries) {
-            entry.delegateGetter(entity).executeCascade(entry.cascadeAction)
+        val visited = cascadeVisited.get()
+        val isTopLevel = visited.isEmpty()
+        val key = cascadeKey(entity.javaClass, entity.id!!)
+        try {
+            check(visited.add(key)) {
+                "Cascade cycle detected: entity '${entity.uniqueId}' is already being cascaded on this thread"
+            }
+            for (entry in entries) {
+                entry.delegateGetter(entity).executeCascade(entry.cascadeAction, entity)
+            }
+        } finally {
+            if (isTopLevel) visited.clear()
         }
     }
 
@@ -363,7 +377,63 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
          * Keyed by entity [Class] to avoid Kotlin type-erasure issues with generic types.
          */
         @JvmStatic
-        private val globalRegistries: ConcurrentHashMap<Class<*>, Registry<*, *>> = ConcurrentHashMap()
+        internal val globalRegistries: ConcurrentHashMap<Class<*>, Registry<*, *>> = ConcurrentHashMap()
+
+        /**
+         * Cache for [LirpRefAccessor] instances per entity class, to avoid repeated [Class.forName]
+         * lookups during RESTRICT reference scans. Uses [Optional] as the map value to cache both
+         * "found" and "not found" states — [ConcurrentHashMap] does not accept null values directly.
+         */
+        @JvmStatic
+        private val refAccessorCache: ConcurrentHashMap<Class<*>, Optional<LirpRefAccessor<Any>>> = ConcurrentHashMap()
+
+        /**
+         * Per-thread set of cascade cascade keys in the format `"${entityClass.name}:${entityId}"`,
+         * tracking entities currently being cascade-processed on the calling thread.
+         * Used to detect cycles in cascade graphs and throw [IllegalStateException] before an
+         * infinite loop can occur. Keyed by class-name and entity ID (not uniqueId) so that cycle
+         * detection works even after the entity has been removed from its repository.
+         */
+        @JvmStatic
+        private val cascadeVisited: ThreadLocal<MutableSet<String>> = ThreadLocal.withInitial { mutableSetOf() }
+
+        /**
+         * Computes the cascade key for an entity: `"${entityClass.name}:${entityId}"`.
+         * This format allows cycle detection by class and ID without requiring a live registry lookup.
+         */
+        @JvmStatic
+        internal fun cascadeKey(entityClass: Class<*>, entityId: Any): String = "${entityClass.name}:$entityId"
+
+        /**
+         * Returns a weakly-consistent snapshot of all currently registered registries as an immutable map.
+         * Used by [AggregateRefDelegate] during RESTRICT cascade checks to scan across all repositories.
+         */
+        @JvmStatic
+        internal fun globalRegistriesSnapshot(): Map<Class<*>, Registry<*, *>> = HashMap(globalRegistries)
+
+        /**
+         * Returns the current contents of the per-thread cascade visited set as a read-only view.
+         * Used by [AggregateRefDelegate] to detect cycles before attempting a CASCADE remove.
+         */
+        @JvmStatic
+        internal fun cascadeVisitedGet(): Set<String> = Collections.unmodifiableSet(cascadeVisited.get())
+
+        /**
+         * Returns the [LirpRefAccessor] for [entityClass], loading it via a convention-based
+         * [Class.forName] lookup on first call and caching the result. Returns `null` if no
+         * KSP-generated accessor exists for the class.
+         */
+        @JvmStatic
+        @Suppress("UNCHECKED_CAST")
+        internal fun refAccessorFor(entityClass: Class<*>): LirpRefAccessor<Any>? =
+            refAccessorCache.computeIfAbsent(entityClass) {
+                try {
+                    val accessorClass = Class.forName("${entityClass.name}_LirpRefAccessor")
+                    Optional.of(accessorClass.getDeclaredConstructor().newInstance() as LirpRefAccessor<Any>)
+                } catch (_: ClassNotFoundException) {
+                    Optional.empty()
+                }
+            }.orElse(null)
 
         /**
          * Returns the registered [Registry] for the given [entityClass], or `null` if none is registered.

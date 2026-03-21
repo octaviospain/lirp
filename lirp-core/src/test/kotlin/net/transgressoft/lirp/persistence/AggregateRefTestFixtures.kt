@@ -244,3 +244,73 @@ class EntityBVolatileRepo : VolatileRepository<Int, EntityB>("EntityBs")
  */
 @LirpRepository
 class EntityCVolatileRepo : VolatileRepository<Int, EntityC>("EntityCs")
+
+/**
+ * Test entity with RESTRICT delete action: removing this entity from its repository is prevented
+ * if the referenced [Customer] is still referenced by other entities. Only the owner itself
+ * is excluded from the reference check.
+ */
+@Serializable
+data class RestrictOrder(
+    override val id: Long,
+    var customerId: Int
+) : ReactiveEntityBase<Long, RestrictOrder>() {
+    override val uniqueId: String get() = "restrict-order-$id"
+
+    @ReactiveEntityRef(onDelete = CascadeAction.RESTRICT)
+    val customer by aggregateRef<Customer, Int> { customerId }
+
+    override fun clone(): RestrictOrder = copy()
+}
+
+/**
+ * Test entity forming a cyclic graph: CyclicParent references CyclicChild with CASCADE, and
+ * CyclicChild references CyclicParent with CASCADE. Used to test cycle detection.
+ */
+@Serializable
+data class CyclicParent(
+    override val id: Long,
+    var childId: Long
+) : ReactiveEntityBase<Long, CyclicParent>() {
+    override val uniqueId: String get() = "cyclic-parent-$id"
+
+    @ReactiveEntityRef(onDelete = CascadeAction.CASCADE)
+    val child by aggregateRef<CyclicChild, Long> { childId }
+
+    override fun clone(): CyclicParent = copy()
+}
+
+/**
+ * Test entity forming a cyclic graph: CyclicChild references CyclicParent with CASCADE.
+ * Used to test cycle detection in cascade deletion.
+ */
+@Serializable
+data class CyclicChild(
+    override val id: Long,
+    var parentId: Long
+) : ReactiveEntityBase<Long, CyclicChild>() {
+    override val uniqueId: String get() = "cyclic-child-$id"
+
+    @ReactiveEntityRef(onDelete = CascadeAction.CASCADE)
+    val parent by aggregateRef<CyclicParent, Long> { parentId }
+
+    override fun clone(): CyclicChild = copy()
+}
+
+/**
+ * Test repository subclass for [RestrictOrder] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class RestrictOrderVolatileRepo : VolatileRepository<Long, RestrictOrder>("RestrictOrders")
+
+/**
+ * Test repository subclass for [CyclicParent] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class CyclicParentVolatileRepo : VolatileRepository<Long, CyclicParent>("CyclicParents")
+
+/**
+ * Test repository subclass for [CyclicChild] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class CyclicChildVolatileRepo : VolatileRepository<Long, CyclicChild>("CyclicChildren")

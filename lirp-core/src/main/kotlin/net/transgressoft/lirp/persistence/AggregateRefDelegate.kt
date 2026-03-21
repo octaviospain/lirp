@@ -178,13 +178,19 @@ class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
      *
      * - [CascadeAction.CASCADE]: resolves the referenced entity and removes it from its bound [Registry]
      *   if the registry implements [Repository]. If the registry is read-only, logs a warning and skips.
+     *   If the referenced entity is already absent (e.g. removed by a prior cascade path), logs a warning
+     *   and returns without throwing.
+     * - [CascadeAction.RESTRICT]: scans all global registries for entities that reference the same target
+     *   entity. Throws [IllegalStateException] if any entity other than [owningEntity] still references
+     *   the target. Takes no action if the check passes.
      * - [CascadeAction.DETACH]: cancels the bubble-up subscription via [cancelBubbleUp]
      * - [CascadeAction.NONE]: intentional no-op
      *
      * @param cascadeAction the cascade action to execute
+     * @param owningEntity the entity that owns this delegate; excluded from the RESTRICT reference check
      */
     @Suppress("UNCHECKED_CAST")
-    fun executeCascade(cascadeAction: CascadeAction) {
+    fun executeCascade(cascadeAction: CascadeAction, owningEntity: Any) {
         when (cascadeAction) {
             CascadeAction.CASCADE -> {
                 val repo = registry
@@ -193,12 +199,69 @@ class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
                     return
                 }
                 val referencedEntity = resolve().orElse(null)
-                if (referencedEntity != null) {
-                    (repo as Repository<K, E>).remove(referencedEntity)
+                if (referencedEntity == null) {
+                    log.warn { "Entity(id=${idProvider()}) already removed by prior cascade" }
+                    return
+                }
+                // Check for cycle: if the referenced entity has any CASCADE reference pointing back to
+                // an entity already in the cascade-visited set on this thread, removing it would cause
+                // an infinite cascade loop. Check one level ahead using the KSP-generated ref accessor.
+                checkForCascadeCycle(referencedEntity)
+                (repo as Repository<K, E>).remove(referencedEntity)
+            }
+            CascadeAction.RESTRICT -> {
+                val targetId = idProvider()
+                // Find which entity class this registry manages by matching against globalRegistries
+                val targetClass =
+                    RegistryBase.globalRegistries.entries
+                        .firstOrNull { (_, reg) -> reg === registry }
+                        ?.key
+                        ?: return // Registry not bound or not registered — nothing to check
+
+                @Suppress("UNCHECKED_CAST")
+                for ((entityClass, otherRegistry) in RegistryBase.globalRegistriesSnapshot()) {
+                    val accessor = RegistryBase.refAccessorFor(entityClass) ?: continue
+                    for (entity in otherRegistry) {
+                        // Exclude the entity that is triggering the cascade
+                        if (entity === owningEntity) continue
+                        for (entry in accessor.entries as List<RefEntry<Any, *>>) {
+                            if (entry.referencedClass == targetClass && entry.idGetter(entity) == targetId) {
+                                throw IllegalStateException(
+                                    "Cannot cascade-delete ${targetClass.simpleName}(id=$targetId): still referenced by other entities"
+                                )
+                            }
+                        }
+                    }
                 }
             }
             CascadeAction.DETACH -> cancelBubbleUp()
             CascadeAction.NONE -> { /* intentional no-op */ }
+        }
+    }
+
+    /**
+     * Checks whether [referencedEntity] has any CASCADE reference pointing back to an entity already
+     * in the current thread-local cascade visited set. If a direct CASCADE reference from
+     * [referencedEntity] targets an entity by class and ID that matches a cascade key already in the
+     * visited set, an [IllegalStateException] is thrown with a "Cascade cycle detected" message.
+     *
+     * Uses the cascade key format `"${entityClass.name}:${entityId}"` which allows cycle detection
+     * even after the entity has been removed from its repository. This is a one-level lookahead:
+     * it inspects the immediate CASCADE refs of [referencedEntity] only. Deeper cycles are detected
+     * transitively as the cascade chain unwinds.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun checkForCascadeCycle(referencedEntity: IdentifiableEntity<*>) {
+        val visited = RegistryBase.cascadeVisitedGet()
+        if (visited.isEmpty()) return
+        val accessor = RegistryBase.refAccessorFor(referencedEntity.javaClass) ?: return
+        for (entry in accessor.entries as List<RefEntry<Any, *>>) {
+            if (entry.cascadeAction != CascadeAction.CASCADE) continue
+            val targetId = entry.idGetter(referencedEntity)
+            val targetKey = RegistryBase.cascadeKey(entry.referencedClass, targetId)
+            check(targetKey !in visited) {
+                "Cascade cycle detected: entity '${entry.referencedClass.simpleName}(id=$targetId)' is already being cascaded on this thread"
+            }
         }
     }
 
