@@ -18,7 +18,7 @@
 package net.transgressoft.lirp.event
 
 import net.transgressoft.lirp.Person
-import net.transgressoft.lirp.persistence.VolatileRepository
+import net.transgressoft.lirp.PersonVolatileRepo
 import io.kotest.core.spec.style.DescribeSpec
 import io.kotest.matchers.comparables.shouldBeGreaterThan
 import io.kotest.matchers.longs.shouldBeLessThan
@@ -215,7 +215,7 @@ class SlowSubscriberTest : DescribeSpec({
             val fastCounter = AtomicInteger(0)
             val slowCounter = AtomicInteger(0)
 
-            val repository = VolatileRepository<Int, Person>("slow-repo-test")
+            val repository = PersonVolatileRepo()
 
             val fastSub = repository.subscribe { fastCounter.incrementAndGet() }
             val slowSub =
@@ -224,10 +224,10 @@ class SlowSubscriberTest : DescribeSpec({
                     slowCounter.incrementAndGet()
                 }
 
-            // add() triggers CrudEvent emission via trySend — non-blocking
+            // create() triggers CrudEvent emission via trySend — non-blocking
             val start = System.currentTimeMillis()
             repeat(EVENT_COUNT) { i ->
-                repository.add(Person(id = i, money = i.toLong(), morals = true))
+                repository.create(Person(id = i, money = i.toLong(), morals = true))
             }
             val emissionMs = System.currentTimeMillis() - start
 
@@ -242,13 +242,14 @@ class SlowSubscriberTest : DescribeSpec({
 
             fastSub.cancel()
             slowSub.cancel()
+            repository.close()
         }
 
         it("both subscribers receive all events when repository events are paced").config(timeout = 30.seconds) {
             val fastLatch = CountDownLatch(EVENT_COUNT)
             val slowLatch = CountDownLatch(EVENT_COUNT)
 
-            val repository = VolatileRepository<Int, Person>("slow-repo-paced-test")
+            val repository = PersonVolatileRepo()
 
             val fastSub = repository.subscribe { fastLatch.countDown() }
             val slowSub =
@@ -260,7 +261,7 @@ class SlowSubscriberTest : DescribeSpec({
             val pacedIntervalMs = SLOW_DELAY_MS + 10L
             dedicatedScope.launch {
                 repeat(EVENT_COUNT) { i ->
-                    repository.add(Person(id = i, money = i.toLong(), morals = true))
+                    repository.create(Person(id = i, money = i.toLong(), morals = true))
                     delay(pacedIntervalMs.milliseconds)
                 }
             }.join()
@@ -273,6 +274,7 @@ class SlowSubscriberTest : DescribeSpec({
 
             fastSub.cancel()
             slowSub.cancel()
+            repository.close()
         }
     }
 })

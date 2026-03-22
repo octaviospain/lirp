@@ -43,15 +43,24 @@ import java.util.stream.StreamSupport
  *
  * @param K The type of entity identifier, must be [Comparable]
  * @param T The type of entity being stored, must implement [IdentifiableEntity]
+ * @param context The [LirpContext] this registry registers into. Defaults to [LirpContext.default]
+ *        for production use; tests should supply a fresh context for isolation.
  * @property entitiesById The internal map storing entities by their IDs
  * @property publisher The event publisher for broadcasting entity operations
  */
-abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
-    protected val entitiesById: MutableMap<K, T> = ConcurrentHashMap(),
-    protected val publisher: LirpEventPublisher<CrudEvent.Type, CrudEvent<K, T>> = FlowEventPublisher("Registry")
+abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
+    internal val context: LirpContext,
+    protected val entitiesById: MutableMap<K, T>,
+    protected val publisher: LirpEventPublisher<CrudEvent.Type, CrudEvent<K, T>>
 ) : LirpEventPublisher<CrudEvent.Type, CrudEvent<K, T>> by publisher,
     Registry<K, T> where K : Comparable<K> {
     private val log = KotlinLogging.logger(javaClass.name)
+
+    @JvmOverloads
+    constructor(
+        entitiesById: MutableMap<K, T> = ConcurrentHashMap(),
+        publisher: LirpEventPublisher<CrudEvent.Type, CrudEvent<K, T>> = FlowEventPublisher("Registry")
+    ) : this(LirpContext.default, entitiesById, publisher)
 
     /**
      * Nested map structure: indexName -> (fieldValue -> set of entities).
@@ -84,8 +93,8 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
         try {
             val infoClass = Class.forName(this::class.java.name + "_LirpRegistryInfo")
             val info = infoClass.getDeclaredConstructor().newInstance() as LirpRegistryInfo
-            val existing = globalRegistries.putIfAbsent(info.entityClass, this)
-            check(!(existing != null && existing !== this)) {
+            val registered = context.register(info.entityClass, this)
+            check(registered || context.registryFor(info.entityClass) === this) {
                 "A repository for ${info.entityClass.simpleName} is already registered. Only one @LirpRepository per entity type is allowed."
             }
         } catch (_: ClassNotFoundException) {
@@ -94,7 +103,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
     }
 
     override fun close() {
-        globalRegistries.entries.removeIf { (_, registry) -> registry === this }
+        context.deregister(this)
         publisher.close()
     }
 
@@ -235,9 +244,9 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
     protected fun bindEntityRefs(entity: T) {
         val entries = refEntries ?: return
         for (entry in entries) {
-            val registry = globalRegistries[entry.referencedClass] ?: continue
+            val registry = context.registryFor(entry.referencedClass) ?: continue
             val typed = entry.delegateGetter(entity) as AggregateRefDelegate<IdentifiableEntity<Comparable<Any>>, Comparable<Any>>
-            typed.bindRegistry(registry as Registry<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>)
+            typed.bindRegistry(registry as Registry<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>, context)
         }
     }
 
@@ -270,9 +279,9 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
      */
     protected fun executeCascadeForEntity(entity: T) {
         val entries = refEntries ?: return
-        val visited = cascadeVisited.get()
+        val visited = context.cascadeVisited.get()
         val isTopLevel = visited.isEmpty()
-        val key = cascadeKey(entity.javaClass, entity.id!!)
+        val key = cascadeKey(entity.javaClass, entity.id)
         try {
             check(visited.add(key)) {
                 "Cascade cycle detected: entity '${entity.uniqueId}' is already being cascaded on this thread"
@@ -368,34 +377,13 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
 
     companion object {
         /**
-         * Application-level registry map: entity class -> Registry that holds that entity type.
-         * Registration happens automatically at construction time for `@LirpRepository`-annotated
-         * subclasses via the KSP-generated `{ClassName}_LirpRegistryInfo` class. Deregistration
-         * happens automatically in [close]. Used by [bindEntityRefs] to locate the correct
-         * [Registry] for each aggregate reference without any manual wiring.
-         *
-         * Keyed by entity [Class] to avoid Kotlin type-erasure issues with generic types.
-         */
-        @JvmStatic
-        internal val globalRegistries: ConcurrentHashMap<Class<*>, Registry<*, *>> = ConcurrentHashMap()
-
-        /**
          * Cache for [LirpRefAccessor] instances per entity class, to avoid repeated [Class.forName]
          * lookups during RESTRICT reference scans. Uses [Optional] as the map value to cache both
          * "found" and "not found" states — [ConcurrentHashMap] does not accept null values directly.
+         * Context-independent: the same accessor class is valid regardless of which context the registry is in.
          */
         @JvmStatic
         private val refAccessorCache: ConcurrentHashMap<Class<*>, Optional<LirpRefAccessor<Any>>> = ConcurrentHashMap()
-
-        /**
-         * Per-thread set of cascade cascade keys in the format `"${entityClass.name}:${entityId}"`,
-         * tracking entities currently being cascade-processed on the calling thread.
-         * Used to detect cycles in cascade graphs and throw [IllegalStateException] before an
-         * infinite loop can occur. Keyed by class-name and entity ID (not uniqueId) so that cycle
-         * detection works even after the entity has been removed from its repository.
-         */
-        @JvmStatic
-        private val cascadeVisited: ThreadLocal<MutableSet<String>> = ThreadLocal.withInitial { mutableSetOf() }
 
         /**
          * Computes the cascade key for an entity: `"${entityClass.name}:${entityId}"`.
@@ -403,20 +391,6 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
          */
         @JvmStatic
         internal fun cascadeKey(entityClass: Class<*>, entityId: Any): String = "${entityClass.name}:$entityId"
-
-        /**
-         * Returns a weakly-consistent snapshot of all currently registered registries as an immutable map.
-         * Used by [AggregateRefDelegate] during RESTRICT cascade checks to scan across all repositories.
-         */
-        @JvmStatic
-        internal fun globalRegistriesSnapshot(): Map<Class<*>, Registry<*, *>> = HashMap(globalRegistries)
-
-        /**
-         * Returns the current contents of the per-thread cascade visited set as a read-only view.
-         * Used by [AggregateRefDelegate] to detect cycles before attempting a CASCADE remove.
-         */
-        @JvmStatic
-        internal fun cascadeVisitedGet(): Set<String> = Collections.unmodifiableSet(cascadeVisited.get())
 
         /**
          * Returns the [LirpRefAccessor] for [entityClass], loading it via a convention-based
@@ -434,17 +408,5 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>>(
                     Optional.empty()
                 }
             }.orElse(null)
-
-        /**
-         * Returns the registered [Registry] for the given [entityClass], or `null` if none is registered.
-         */
-        @JvmStatic
-        internal fun registryFor(entityClass: Class<*>): Registry<*, *>? = globalRegistries[entityClass]
-
-        /**
-         * Returns the number of currently registered repositories.
-         */
-        @JvmStatic
-        internal fun registryCount(): Int = globalRegistries.size
     }
 }

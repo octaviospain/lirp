@@ -25,6 +25,7 @@ import net.transgressoft.lirp.event.AggregateMutationEvent
 import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.MutationEvent
 import mu.KotlinLogging
+import java.util.Collections
 import java.util.Optional
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.properties.ReadOnlyProperty
@@ -94,6 +95,13 @@ class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
     private val registryRef = AtomicReference<Registry<K, E>?>(null)
 
     /**
+     * The [LirpContext] this delegate was bound into. Set at [bindRegistry] time so that RESTRICT
+     * cascade scans and cascade cycle detection use the same context as the owning repository,
+     * rather than the global default.
+     */
+    private var context: LirpContext? = null
+
+    /**
      * Active subscription to the referenced entity's changes flow for bubble-up propagation.
      * Null when bubble-up is not active or has been cancelled.
      * Uses AtomicReference so [wireBubbleUp] and [cancelBubbleUp] can atomically swap the
@@ -126,12 +134,16 @@ class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
     override val referenceId: K get() = idProvider()
 
     /**
-     * Binds this delegate to the registry that holds the referenced entity type.
-     * Called automatically by [RegistryBase.bindEntityRefs] when the owning entity
-     * is added to a repository.
+     * Binds this delegate to the registry that holds the referenced entity type, and associates
+     * it with the [LirpContext] of the owning repository. Called automatically by
+     * [RegistryBase.bindEntityRefs] when the owning entity is added to a repository.
+     *
+     * The context is stored so that [doRestrict] and [checkForCascadeCycle] operate against
+     * the scoped registry set rather than any global state.
      */
-    fun bindRegistry(registry: Registry<K, E>) {
+    internal fun bindRegistry(registry: Registry<K, E>, context: LirpContext) {
         registryRef.set(registry)
+        this.context = context
     }
 
     /**
@@ -264,15 +276,16 @@ class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
 
     private fun doRestrict(owningEntity: Any) {
         val targetId = idProvider()
-        // Find which entity class this registry manages by matching against globalRegistries
+        val ctx = context ?: return
+        // Find which entity class this registry manages by matching against the context's registry map
         val targetClass =
-            RegistryBase.globalRegistries.entries
+            ctx.registriesSnapshot().entries
                 .firstOrNull { (_, reg) -> reg === registryRef.get() }
                 ?.key
                 ?: return // Registry not bound or not registered — nothing to check
 
         @Suppress("UNCHECKED_CAST")
-        for ((entityClass, otherRegistry) in RegistryBase.globalRegistriesSnapshot()) {
+        for ((entityClass, otherRegistry) in ctx.registriesSnapshot()) {
             val accessor = RegistryBase.refAccessorFor(entityClass) ?: continue
             for (entity in otherRegistry) {
                 // Exclude the entity that is triggering the cascade
@@ -299,7 +312,8 @@ class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
      */
     @Suppress("UNCHECKED_CAST")
     private fun checkForCascadeCycle(referencedEntity: IdentifiableEntity<*>) {
-        val visited = RegistryBase.cascadeVisitedGet()
+        val ctx = context ?: return
+        val visited = Collections.unmodifiableSet(ctx.cascadeVisited.get())
         if (visited.isEmpty()) return
         val accessor = RegistryBase.refAccessorFor(referencedEntity.javaClass) ?: return
         for (entry in accessor.entries) {

@@ -17,7 +17,7 @@
 
 package net.transgressoft.lirp.persistence
 
-import net.transgressoft.lirp.Person
+import net.transgressoft.lirp.PersonVolatileRepo
 import net.transgressoft.lirp.arbitraryPerson
 import net.transgressoft.lirp.event.ReactiveScope
 import io.kotest.assertions.throwables.shouldNotThrowAny
@@ -59,9 +59,10 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
         val iterationsPerCoroutine = 100
         val initialSize = 100
 
-        val repository = VolatileRepository<Int, Person>("iterator-concurrency-test")
+        val ctx = LirpContext()
+        val repository = PersonVolatileRepo(ctx)
         val initialEntities = (1..initialSize).map { arbitraryPerson(it).next() }
-        initialEntities.forEach { repository.add(it) }
+        initialEntities.forEach(repository::create)
 
         shouldNotThrowAny {
             val writerJobs =
@@ -70,7 +71,7 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
                         repeat(iterationsPerCoroutine) { i ->
                             val id = initialSize + coroutineIndex * iterationsPerCoroutine + i
                             val extra = arbitraryPerson(id).next()
-                            repository.add(extra)
+                            repository.create(extra)
                         }
                     }
                 }
@@ -85,6 +86,7 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
             writerJobs.joinAll()
             readerJob.join()
         }
+        ctx.close()
     }
 
     "RegistryBase iterator completes without error under concurrent entity removals" {
@@ -92,11 +94,12 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
         val iterationsPerCoroutine = 100
         val initialSize = 100
 
-        val repository = VolatileRepository<Int, Person>("iterator-removal-concurrency-test")
+        val ctx = LirpContext()
+        val repository = PersonVolatileRepo(ctx)
         val allEntities =
             (1..initialSize + concurrentCoroutines * iterationsPerCoroutine)
                 .map { arbitraryPerson(it).next() }
-        allEntities.forEach { repository.add(it) }
+        allEntities.forEach(repository::create)
 
         shouldNotThrowAny {
             val removerJobs =
@@ -119,6 +122,7 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
             removerJobs.joinAll()
             readerJob.join()
         }
+        ctx.close()
     }
 
     "RegistryBase iterator completes without error under concurrent add and remove" {
@@ -126,9 +130,10 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
         val iterationsPerCoroutine = 100
         val initialSize = 100
 
-        val repository = VolatileRepository<Int, Person>("iterator-mixed-concurrency-test")
+        val ctx = LirpContext()
+        val repository = PersonVolatileRepo(ctx)
         val initialEntities = (1..initialSize).map { arbitraryPerson(it).next() }
-        initialEntities.forEach { repository.add(it) }
+        initialEntities.forEach(repository::create)
 
         shouldNotThrowAny {
             val writerJobs =
@@ -137,7 +142,7 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
                         repeat(iterationsPerCoroutine) { i ->
                             val id = initialSize + coroutineIndex * iterationsPerCoroutine + i
                             val extra = arbitraryPerson(id).next()
-                            repository.add(extra)
+                            repository.create(extra)
                         }
                     }
                 }
@@ -152,6 +157,7 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
             writerJobs.joinAll()
             readerJob.join()
         }
+        ctx.close()
     }
 
     "RegistryBase search completes without error under concurrent modifications" {
@@ -159,9 +165,10 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
         val iterationsPerCoroutine = 100
         val initialSize = 100
 
-        val repository = VolatileRepository<Int, Person>("search-concurrency-test")
+        val ctx = LirpContext()
+        val repository = PersonVolatileRepo(ctx)
         val initialEntities = (1..initialSize).map { arbitraryPerson(it).next() }
-        initialEntities.forEach { repository.add(it) }
+        initialEntities.forEach(repository::create)
 
         shouldNotThrowAny {
             val modifierJobs =
@@ -170,7 +177,7 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
                         repeat(iterationsPerCoroutine) { i ->
                             if (i % 2 == 0) {
                                 val id = initialSize + coroutineIndex * iterationsPerCoroutine + i
-                                repository.add(arbitraryPerson(id).next())
+                                repository.create(arbitraryPerson(id).next())
                             } else {
                                 val entity = initialEntities[(coroutineIndex + i) % initialSize]
                                 repository.remove(entity)
@@ -189,5 +196,6 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
             modifierJobs.joinAll()
             searchJob.join()
         }
+        ctx.close()
     }
 })

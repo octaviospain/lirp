@@ -18,7 +18,8 @@
 package net.transgressoft.lirp.event
 
 import net.transgressoft.lirp.Person
-import net.transgressoft.lirp.persistence.VolatileRepository
+import net.transgressoft.lirp.PersonVolatileRepo
+import net.transgressoft.lirp.Personly
 import io.kotest.core.spec.style.DescribeSpec
 import io.kotest.matchers.shouldBe
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -57,12 +58,12 @@ class ConcurrencyStressTest : DescribeSpec({
     describe("FlowEventPublisher under concurrent CrudEvent load") {
 
         it("delivers all CrudEvents to all subscribers without loss").config(timeout = 30.seconds) {
-            val repository = VolatileRepository<Int, Person>("crud-stress-test")
+            val repository = PersonVolatileRepo()
 
             // Each subscriber collects events and counts down a latch per received event
-            val queue1 = ConcurrentLinkedQueue<CrudEvent<Int, Person>>()
-            val queue2 = ConcurrentLinkedQueue<CrudEvent<Int, Person>>()
-            val queue3 = ConcurrentLinkedQueue<CrudEvent<Int, Person>>()
+            val queue1 = ConcurrentLinkedQueue<CrudEvent<Int, Personly>>()
+            val queue2 = ConcurrentLinkedQueue<CrudEvent<Int, Personly>>()
+            val queue3 = ConcurrentLinkedQueue<CrudEvent<Int, Personly>>()
 
             val latch1 = CountDownLatch(TOTAL_EVENTS)
             val latch2 = CountDownLatch(TOTAL_EVENTS)
@@ -91,7 +92,7 @@ class ConcurrencyStressTest : DescribeSpec({
                     launch(Dispatchers.Default) {
                         repeat(EVENTS_PER_WRITER) { eventIndex ->
                             val id = writerIndex * EVENTS_PER_WRITER + eventIndex
-                            repository.add(Person(id = id, money = id.toLong(), morals = true))
+                            repository.create(Person(id = id, money = id.toLong(), morals = true))
                         }
                     }
                 }
@@ -114,6 +115,7 @@ class ConcurrencyStressTest : DescribeSpec({
             sub1.cancel()
             sub2.cancel()
             sub3.cancel()
+            repository.close()
         }
     }
 
@@ -186,7 +188,7 @@ class ConcurrencyStressTest : DescribeSpec({
     describe("FlowEventPublisher under interleaved CRUD and mutation load") {
 
         it("delivers all events under interleaved CRUD and mutation operations").config(timeout = 30.seconds) {
-            val repository = VolatileRepository<Int, Person>("interleaved-crud-stress-test")
+            val repository = PersonVolatileRepo()
 
             // Standalone mutation publisher, separate from repository publisher
             val mutationPublisher =
@@ -202,8 +204,8 @@ class ConcurrencyStressTest : DescribeSpec({
             val expectedMutationEvents = mutationWriterCount * EVENTS_PER_WRITER
 
             // Separate queues and latches per event type per subscriber
-            val crudQueue1 = ConcurrentLinkedQueue<CrudEvent<Int, Person>>()
-            val crudQueue2 = ConcurrentLinkedQueue<CrudEvent<Int, Person>>()
+            val crudQueue1 = ConcurrentLinkedQueue<CrudEvent<Int, Personly>>()
+            val crudQueue2 = ConcurrentLinkedQueue<CrudEvent<Int, Personly>>()
             val mutQueue1 = ConcurrentLinkedQueue<MutationEvent<String, TestEntity>>()
             val mutQueue2 = ConcurrentLinkedQueue<MutationEvent<String, TestEntity>>()
 
@@ -240,7 +242,7 @@ class ConcurrencyStressTest : DescribeSpec({
                     launch(Dispatchers.Default) {
                         repeat(EVENTS_PER_WRITER) { eventIndex ->
                             val id = writerIndex * EVENTS_PER_WRITER + eventIndex
-                            repository.add(Person(id = id, money = id.toLong(), morals = true))
+                            repository.create(Person(id = id, money = id.toLong(), morals = true))
                         }
                     }
                 }
@@ -277,6 +279,7 @@ class ConcurrencyStressTest : DescribeSpec({
             mutSub1.cancel()
             mutSub2.cancel()
             mutationPublisher.close()
+            repository.close()
         }
     }
 })

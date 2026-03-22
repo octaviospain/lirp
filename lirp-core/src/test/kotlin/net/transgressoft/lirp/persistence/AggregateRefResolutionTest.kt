@@ -30,9 +30,9 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 /**
  * Tests for DDD-02: aggregate reference resolve() returns entities from bound repositories.
  *
- * Each test adds an [Order] to a [VolatileRepository], which triggers reference discovery and
- * binding via [RegistryBase]. The [customer] reference is then resolved against a separately
- * maintained [Customer] repository.
+ * Each test creates a fresh [LirpContext] for isolation. Adding an [Order] to a [VolatileRepository]
+ * triggers reference discovery and binding via [RegistryBase]. The [customer] reference is then
+ * resolved against a separately maintained [Customer] repository in the same context.
  */
 @DisplayName("AggregateRefDelegate")
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -46,45 +46,40 @@ internal class AggregateRefResolutionTest : FunSpec({
         ReactiveScope.ioScope = testScope
     }
 
+    lateinit var ctx: LirpContext
     lateinit var customerRepo: CustomerVolatileRepo
     lateinit var orderRepo: OrderVolatileRepo
 
     beforeEach {
-        customerRepo = CustomerVolatileRepo()
-        orderRepo = OrderVolatileRepo()
+        ctx = LirpContext()
+        customerRepo = CustomerVolatileRepo(ctx)
+        orderRepo = OrderVolatileRepo(ctx)
     }
 
     afterEach {
-        customerRepo.close()
-        orderRepo.close()
+        ctx.close()
     }
 
     test("resolve returns the referenced customer entity when it exists in the repository") {
-        val customer = Customer(id = 1, name = "Alice")
-        customerRepo.add(customer)
+        customerRepo.create(id = 1, name = "Alice")
 
-        val order = Order(id = 100L, customerId = 1)
-        orderRepo.add(order)
+        val order = orderRepo.create(id = 100L, customerId = 1)!!
 
         val resolved = order.customer.resolve()
-        resolved.shouldBePresent { it shouldBe customer }
+        resolved.shouldBePresent { it shouldBe customerRepo.findById(1).get() }
     }
 
     test("resolve returns Optional.empty when the referenced customer does not exist in the repository") {
-        val order = Order(id = 100L, customerId = 999)
-        orderRepo.add(order)
+        val order = orderRepo.create(id = 100L, customerId = 999)!!
 
         order.customer.resolve().shouldBeEmpty()
     }
 
     test("resolve returns updated entity after the referenced customerId field changes") {
-        val customer1 = Customer(id = 1, name = "Alice")
-        val customer2 = Customer(id = 2, name = "Bob")
-        customerRepo.add(customer1)
-        customerRepo.add(customer2)
+        val customer1 = customerRepo.create(id = 1, name = "Alice")!!
+        val customer2 = customerRepo.create(id = 2, name = "Bob")!!
 
-        val order = Order(id = 100L, customerId = 1)
-        orderRepo.add(order)
+        val order = orderRepo.create(id = 100L, customerId = 1)!!
 
         order.customer.resolve().shouldBePresent { it shouldBe customer1 }
 
@@ -95,11 +90,9 @@ internal class AggregateRefResolutionTest : FunSpec({
     }
 
     test("resolve returns Optional.empty after referenced customer is removed from repository") {
-        val customer = Customer(id = 1, name = "Alice")
-        customerRepo.add(customer)
+        val customer = customerRepo.create(id = 1, name = "Alice")!!
 
-        val order = Order(id = 100L, customerId = 1)
-        orderRepo.add(order)
+        val order = orderRepo.create(id = 100L, customerId = 1)!!
 
         // Confirm initial resolution works
         order.customer.resolve().shouldBePresent()
@@ -109,5 +102,24 @@ internal class AggregateRefResolutionTest : FunSpec({
 
         // Cache should not return stale data — findById called fresh each time
         order.customer.resolve().shouldBeEmpty()
+    }
+
+    test("cross-context isolation: order in context B cannot resolve customer registered only in context A") {
+        val ctxA = LirpContext()
+        val ctxB = LirpContext()
+
+        try {
+            val customerRepoA = CustomerVolatileRepo(ctxA)
+            customerRepoA.create(id = 1, name = "Alice")
+
+            val orderRepoB = OrderVolatileRepo(ctxB)
+            val order = orderRepoB.create(id = 100L, customerId = 1)!!
+
+            // Context B has no customer repo — resolution should return empty
+            order.customer.resolve().shouldBeEmpty()
+        } finally {
+            ctxA.close()
+            ctxB.close()
+        }
     }
 })

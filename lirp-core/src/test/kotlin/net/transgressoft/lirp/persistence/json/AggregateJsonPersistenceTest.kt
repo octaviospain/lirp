@@ -20,8 +20,8 @@ package net.transgressoft.lirp.persistence.json
 import net.transgressoft.lirp.event.AggregateMutationEvent
 import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.BubbleUpOrder
-import net.transgressoft.lirp.persistence.Customer
 import net.transgressoft.lirp.persistence.CustomerVolatileRepo
+import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpRepository
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempfile
@@ -66,14 +66,13 @@ class AggregateJsonPersistenceTest : FunSpec({
     }
 
     test("JsonFileRepository serializes entity with aggregate ref as ID-only, no resolved object") {
+        val ctx = LirpContext()
         val orderFile = tempfile("order-repo", ".json").also { it.deleteOnExit() }
-        val customerRepo = CustomerVolatileRepo()
-        val orderRepo = BubbleUpOrderJsonFileRepository(orderFile)
+        val customerRepo = CustomerVolatileRepo(ctx)
+        val orderRepo = BubbleUpOrderJsonFileRepository(ctx, orderFile)
 
-        val customer = Customer(1, "Alice")
-        val order = BubbleUpOrder(10L, 1)
-        customerRepo.add(customer)
-        orderRepo.add(order)
+        customerRepo.create(1, "Alice")
+        orderRepo.create(10L, 1)
 
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -82,48 +81,44 @@ class AggregateJsonPersistenceTest : FunSpec({
         json shouldContain "\"customerId\": 1"
         json shouldNotContain "\"customer\""
 
-        orderRepo.close()
-        customerRepo.close()
+        ctx.close()
     }
 
     test("JsonFileRepository loaded entity can resolve aggregate ref after child repo is populated") {
+        val ctx1 = LirpContext()
         val orderFile = tempfile("order-repo-reload", ".json").also { it.deleteOnExit() }
-        val customerRepo = CustomerVolatileRepo()
-        val orderRepo = BubbleUpOrderJsonFileRepository(orderFile)
+        val customerRepo = CustomerVolatileRepo(ctx1)
+        val orderRepo = BubbleUpOrderJsonFileRepository(ctx1, orderFile)
 
-        val customer = Customer(1, "Bob")
-        val order = BubbleUpOrder(10L, 1)
-        customerRepo.add(customer)
-        orderRepo.add(order)
+        customerRepo.create(1, "Bob")
+        orderRepo.create(10L, 1)
 
         testDispatcher.scheduler.advanceUntilIdle()
-        orderRepo.close()
-        customerRepo.close()
+        ctx1.close()
 
         // Reload from disk — the new repo must re-wire refs so resolve() works
-        val customerRepo2 = CustomerVolatileRepo()
+        val ctx2 = LirpContext()
+        val customerRepo2 = CustomerVolatileRepo(ctx2)
         // Add customer to the repo BEFORE creating order repo so binding finds it at init time
-        customerRepo2.add(Customer(1, "Bob"))
-        val orderRepo2 = BubbleUpOrderJsonFileRepository(orderFile)
+        customerRepo2.create(1, "Bob")
+        val orderRepo2 = BubbleUpOrderJsonFileRepository(ctx2, orderFile)
 
         testDispatcher.scheduler.advanceUntilIdle()
 
         val reloadedOrder = orderRepo2.findById(10L).get()
         reloadedOrder.customer.resolve() shouldBePresent { it.name shouldBe "Bob" }
 
-        orderRepo2.close()
-        customerRepo2.close()
+        ctx2.close()
     }
 
     test("Bubble-up event from child entity triggers JsonFileRepository persistence write") {
+        val ctx = LirpContext()
         val orderFile = tempfile("order-repo-bubbleup", ".json").also { it.deleteOnExit() }
-        val customerRepo = CustomerVolatileRepo()
-        val orderRepo = BubbleUpOrderJsonFileRepository(orderFile, 50)
+        val customerRepo = CustomerVolatileRepo(ctx)
+        val orderRepo = BubbleUpOrderJsonFileRepository(ctx, orderFile, 50)
 
-        val customer = Customer(1, "Carol")
-        val order = BubbleUpOrder(10L, 1)
-        customerRepo.add(customer)
-        orderRepo.add(order)
+        val customer = customerRepo.create(1, "Carol")!!
+        val order = orderRepo.create(10L, 1)!!
 
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -155,29 +150,27 @@ class AggregateJsonPersistenceTest : FunSpec({
         // We verify by checking the write occurred (file was touched after mutation)
         updatedJson shouldBe initialJson
 
-        orderRepo.close()
-        customerRepo.close()
+        ctx.close()
     }
 
     test("After reload, bubble-up re-wiring works when entity is re-added to repo") {
+        val ctx1 = LirpContext()
         val orderFile = tempfile("order-repo-rewire", ".json").also { it.deleteOnExit() }
-        val customerRepo = CustomerVolatileRepo()
-        val orderRepo = BubbleUpOrderJsonFileRepository(orderFile, 50)
+        val customerRepo = CustomerVolatileRepo(ctx1)
+        val orderRepo = BubbleUpOrderJsonFileRepository(ctx1, orderFile, 50)
 
-        val customer = Customer(1, "Dave")
-        val order = BubbleUpOrder(10L, 1)
-        customerRepo.add(customer)
-        orderRepo.add(order)
+        customerRepo.create(1, "Dave")
+        orderRepo.create(10L, 1)
 
         testDispatcher.scheduler.advanceUntilIdle()
-        orderRepo.close()
-        customerRepo.close()
+        ctx1.close()
 
         // Reload — register customer repo and populate BEFORE creating order repo
         // so that wireRefBubbleUp can resolve the child entity and subscribe to it
-        val customerRepo2 = CustomerVolatileRepo()
-        customerRepo2.add(Customer(1, "Dave"))
-        val orderRepo2 = BubbleUpOrderJsonFileRepository(orderFile, 50)
+        val ctx2 = LirpContext()
+        val customerRepo2 = CustomerVolatileRepo(ctx2)
+        customerRepo2.create(1, "Dave")
+        val orderRepo2 = BubbleUpOrderJsonFileRepository(ctx2, orderFile, 50)
 
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -194,8 +187,7 @@ class AggregateJsonPersistenceTest : FunSpec({
 
         bubbleUpLatch.await(2, TimeUnit.SECONDS) shouldBe true
 
-        orderRepo2.close()
-        customerRepo2.close()
+        ctx2.close()
     }
 })
 
@@ -204,14 +196,20 @@ class AggregateJsonPersistenceTest : FunSpec({
  *
  * Annotated with [@LirpRepository][LirpRepository] so the KSP processor generates
  * [BubbleUpOrderJsonFileRepository_LirpRegistryInfo], which triggers auto-registration in
- * the global registry map at construction time.
+ * the provided context at construction time.
  */
 @LirpRepository
-class BubbleUpOrderJsonFileRepository(
+class BubbleUpOrderJsonFileRepository internal constructor(
+    context: LirpContext,
     file: java.io.File,
     serializationDelayMs: Long = 300L
 ) : JsonFileRepository<Long, BubbleUpOrder>(
+        context,
         file,
         MapSerializer(Long.serializer(), BubbleUpOrder.serializer()),
         serializationDelay = serializationDelayMs.milliseconds
-    )
+    ) {
+    constructor(file: java.io.File, serializationDelayMs: Long = 300L) : this(LirpContext.default, file, serializationDelayMs)
+
+    fun create(id: Long, customerId: Int): BubbleUpOrder? = add(BubbleUpOrder(id, customerId))
+}

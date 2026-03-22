@@ -4,6 +4,9 @@ import net.transgressoft.lirp.entity.ReactiveEntity
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.event.EventType
 import net.transgressoft.lirp.event.LirpEvent
+import net.transgressoft.lirp.persistence.LirpContext
+import net.transgressoft.lirp.persistence.LirpRepository
+import net.transgressoft.lirp.persistence.VolatileRepository
 import net.transgressoft.lirp.persistence.json.JsonFileRepository
 import net.transgressoft.lirp.persistence.json.JsonRepository
 import net.transgressoft.lirp.persistence.json.LirpEntityPolymorphicSerializer
@@ -94,7 +97,7 @@ fun arbitraryPerson(id: Int = defaultId, money: Long = defaultMoney) =
         )
     }
 
-abstract class HumanGenericJsonFileRepositoryBase<H: Human<H>>(private val repository: JsonFileRepository<Int, H>): JsonRepository<Int, H> by repository {
+abstract class HumanGenericJsonFileRepositoryBase<H: Human<H>>(protected val repository: JsonFileRepository<Int, H>): JsonRepository<Int, H> by repository {
 
     override fun hashCode(): Int = repository.hashCode()
 
@@ -102,6 +105,21 @@ abstract class HumanGenericJsonFileRepositoryBase<H: Human<H>>(private val repos
         if (this === other) true
         else if (other is HumanGenericJsonFileRepositoryBase<*>) repository == other.repository
         else false
+}
+
+/**
+ * Test-scoped volatile repository for [Personly] entities.
+ *
+ * Used by tests that need a typed factory method for creating [Person] instances without
+ * directly calling the protected [VolatileRepository.add] method.
+ */
+@LirpRepository
+class PersonVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Int, Personly>(context, "PersonRepository") {
+    constructor() : this(LirpContext.default)
+
+    fun create(person: Person): Person? = add(person) as Person?
 }
 
 class PersonJsonFileRepository(file: File, serializationDelay: Duration = 300.milliseconds): HumanGenericJsonFileRepositoryBase<Personly>(
@@ -115,7 +133,13 @@ class PersonJsonFileRepository(file: File, serializationDelay: Duration = 300.mi
         },
         serializationDelay
     )
-)
+) {
+    fun add(person: Personly): Boolean = repository.addEntity(person) != null
+
+    fun addOrReplace(person: Personly): Boolean = repository.replaceEntity(person)
+
+    fun addOrReplaceAll(people: Collection<Personly>): Boolean = repository.replaceAllEntities(people)
+}
 
 class PersonlySerializer: HumanSerializer<Personly>() {
 

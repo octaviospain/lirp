@@ -1,6 +1,7 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.Person
+import net.transgressoft.lirp.PersonVolatileRepo
 import net.transgressoft.lirp.arbitraryPerson
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.CrudEvent.Type.READ
@@ -41,6 +42,24 @@ data class IndexedProduct(
 }
 
 /**
+ * Test-local repository subclass for [IndexedProduct] entities.
+ *
+ * Exposes typed factory and mutation methods for use in index-related tests.
+ */
+class IndexedProductVolatileRepo : VolatileRepository<Int, IndexedProduct>("IndexedRepo") {
+    fun create(product: IndexedProduct): IndexedProduct? = add(product)
+
+    fun replace(product: IndexedProduct): Boolean {
+        val existing = findById(product.id)
+        if (existing.isPresent) {
+            if (existing.get() == product) return false
+            remove(existing.get())
+        }
+        return add(product) != null
+    }
+}
+
+/**
  * Tests for lazy search methods added to [RegistryBase] via the [net.transgressoft.lirp.persistence.Registry] interface.
  *
  * Covers lazy evaluation through [Registry.lazySearch], Java Stream interop through [Registry.searchStream],
@@ -50,7 +69,8 @@ data class IndexedProduct(
 @ExperimentalCoroutinesApi
 internal class SearchPerformanceTest : StringSpec({
 
-    lateinit var repository: VolatileRepository<Int, Person>
+    lateinit var ctx: LirpContext
+    lateinit var repository: PersonVolatileRepo
 
     val testDispatcher = UnconfinedTestDispatcher()
     val testScope = CoroutineScope(testDispatcher)
@@ -61,12 +81,17 @@ internal class SearchPerformanceTest : StringSpec({
     }
 
     beforeTest {
+        ctx = LirpContext()
         repository =
-            VolatileRepository<Int, Person>("SearchPerformanceRepository").apply {
+            PersonVolatileRepo(ctx).apply {
                 activateEvents(READ)
             }
         val people = Arb.set(arbitraryPerson(), 10..10).next()
-        repository.addOrReplaceAll(people)
+        people.forEach { repository.create(it) }
+    }
+
+    afterTest {
+        ctx.close()
     }
 
     afterSpec {
@@ -98,7 +123,6 @@ internal class SearchPerformanceTest : StringSpec({
             true
         }.take(n).toList()
 
-        // Only n predicates should have been evaluated due to early termination
         evaluatedCount.get() shouldBe n
     }
 
@@ -185,13 +209,13 @@ internal class SearchPerformanceTest : StringSpec({
     // Secondary index tests
 
     "VolatileRepository findByIndex returns entities matching the indexed property value" {
-        val indexRepo = VolatileRepository<Int, IndexedProduct>("IndexedRepo")
+        val indexRepo = IndexedProductVolatileRepo()
         val electronics1 = IndexedProduct(1, "electronics", null)
         val electronics2 = IndexedProduct(2, "electronics", null)
         val clothing = IndexedProduct(3, "clothing", null)
-        indexRepo.add(electronics1)
-        indexRepo.add(electronics2)
-        indexRepo.add(clothing)
+        indexRepo.create(electronics1)
+        indexRepo.create(electronics2)
+        indexRepo.create(clothing)
 
         val result = indexRepo.findByIndex("category", "electronics")
 
@@ -199,9 +223,9 @@ internal class SearchPerformanceTest : StringSpec({
     }
 
     "VolatileRepository findFirstByIndex returns Optional with first matching entity" {
-        val indexRepo = VolatileRepository<Int, IndexedProduct>("IndexedRepo")
+        val indexRepo = IndexedProductVolatileRepo()
         val product = IndexedProduct(1, "books", null)
-        indexRepo.add(product)
+        indexRepo.create(product)
 
         val result = indexRepo.findFirstByIndex("category", "books")
 
@@ -209,8 +233,8 @@ internal class SearchPerformanceTest : StringSpec({
     }
 
     "VolatileRepository findByIndex returns empty set when no entities match the value" {
-        val indexRepo = VolatileRepository<Int, IndexedProduct>("IndexedRepo")
-        indexRepo.add(IndexedProduct(1, "electronics", null))
+        val indexRepo = IndexedProductVolatileRepo()
+        indexRepo.create(IndexedProduct(1, "electronics", null))
 
         val result = indexRepo.findByIndex("category", "furniture")
 
@@ -218,8 +242,8 @@ internal class SearchPerformanceTest : StringSpec({
     }
 
     "VolatileRepository findFirstByIndex returns empty Optional when no entities match" {
-        val indexRepo = VolatileRepository<Int, IndexedProduct>("IndexedRepo")
-        indexRepo.add(IndexedProduct(1, "electronics", null))
+        val indexRepo = IndexedProductVolatileRepo()
+        indexRepo.create(IndexedProduct(1, "electronics", null))
 
         val result = indexRepo.findFirstByIndex("category", "furniture")
 
@@ -227,8 +251,8 @@ internal class SearchPerformanceTest : StringSpec({
     }
 
     "VolatileRepository findByIndex throws IllegalArgumentException for undeclared index name" {
-        val indexRepo = VolatileRepository<Int, IndexedProduct>("IndexedRepo")
-        indexRepo.add(IndexedProduct(1, "electronics", null))
+        val indexRepo = IndexedProductVolatileRepo()
+        indexRepo.create(IndexedProduct(1, "electronics", null))
 
         shouldThrow<IllegalArgumentException> {
             indexRepo.findByIndex("nonExistentIndex", "any")
@@ -236,8 +260,8 @@ internal class SearchPerformanceTest : StringSpec({
     }
 
     "VolatileRepository findFirstByIndex throws IllegalArgumentException for undeclared index name" {
-        val indexRepo = VolatileRepository<Int, IndexedProduct>("IndexedRepo")
-        indexRepo.add(IndexedProduct(1, "electronics", null))
+        val indexRepo = IndexedProductVolatileRepo()
+        indexRepo.create(IndexedProduct(1, "electronics", null))
 
         shouldThrow<IllegalArgumentException> {
             indexRepo.findFirstByIndex("nonExistentIndex", "any")
@@ -245,9 +269,9 @@ internal class SearchPerformanceTest : StringSpec({
     }
 
     "VolatileRepository index updates correctly on add — new entity appears in index" {
-        val indexRepo = VolatileRepository<Int, IndexedProduct>("IndexedRepo")
+        val indexRepo = IndexedProductVolatileRepo()
         val product = IndexedProduct(1, "tools", null)
-        indexRepo.add(product)
+        indexRepo.create(product)
 
         val result = indexRepo.findByIndex("category", "tools")
 
@@ -255,9 +279,9 @@ internal class SearchPerformanceTest : StringSpec({
     }
 
     "VolatileRepository index updates correctly on remove — removed entity disappears from index" {
-        val indexRepo = VolatileRepository<Int, IndexedProduct>("IndexedRepo")
+        val indexRepo = IndexedProductVolatileRepo()
         val product = IndexedProduct(1, "tools", null)
-        indexRepo.add(product)
+        indexRepo.create(product)
         indexRepo.remove(product)
 
         val result = indexRepo.findByIndex("category", "tools")
@@ -265,12 +289,12 @@ internal class SearchPerformanceTest : StringSpec({
         result.shouldBeEmpty()
     }
 
-    "VolatileRepository index updates correctly on addOrReplace — old value deindexed, new value indexed" {
-        val indexRepo = VolatileRepository<Int, IndexedProduct>("IndexedRepo")
+    "VolatileRepository index updates correctly on replace — old value deindexed, new value indexed" {
+        val indexRepo = IndexedProductVolatileRepo()
         val original = IndexedProduct(1, "gadgets", null)
         val replacement = IndexedProduct(1, "appliances", null)
-        indexRepo.add(original)
-        indexRepo.addOrReplace(replacement)
+        indexRepo.create(original)
+        indexRepo.replace(replacement)
 
         val gadgets = indexRepo.findByIndex("category", "gadgets")
         val appliances = indexRepo.findByIndex("category", "appliances")
@@ -280,9 +304,9 @@ internal class SearchPerformanceTest : StringSpec({
     }
 
     "VolatileRepository index clears correctly on clear — all index maps emptied" {
-        val indexRepo = VolatileRepository<Int, IndexedProduct>("IndexedRepo")
-        indexRepo.add(IndexedProduct(1, "electronics", null))
-        indexRepo.add(IndexedProduct(2, "electronics", null))
+        val indexRepo = IndexedProductVolatileRepo()
+        indexRepo.create(IndexedProduct(1, "electronics", null))
+        indexRepo.create(IndexedProduct(2, "electronics", null))
         indexRepo.clear()
 
         val result = indexRepo.findByIndex("category", "electronics")
@@ -291,48 +315,46 @@ internal class SearchPerformanceTest : StringSpec({
     }
 
     "VolatileRepository null indexed property value does not cause NPE — entity not indexed for that property" {
-        val indexRepo = VolatileRepository<Int, IndexedProduct>("IndexedRepo")
-        // nullableTag is null — should not be indexed under "tag"
+        val indexRepo = IndexedProductVolatileRepo()
         val product = IndexedProduct(1, "electronics", null)
-        indexRepo.add(product)
+        indexRepo.create(product)
 
-        // The "tag" index should exist but have no entry for any value (entity skipped)
         val result = indexRepo.findByIndex("tag", "anything")
 
         result.shouldBeEmpty()
     }
 
     "VolatileRepository null indexed property does not prevent indexing of non-null properties" {
-        val indexRepo = VolatileRepository<Int, IndexedProduct>("IndexedRepo")
+        val indexRepo = IndexedProductVolatileRepo()
         val product = IndexedProduct(1, "electronics", null)
-        indexRepo.add(product)
+        indexRepo.create(product)
 
         val result = indexRepo.findByIndex("category", "electronics")
 
         result shouldContain product
     }
 
-    "VolatileRepository index works correctly after addOrReplaceAll with mixed new and replacement entities" {
-        val indexRepo = VolatileRepository<Int, IndexedProduct>("IndexedRepo")
+    "VolatileRepository index works correctly after batch replace with mixed new and replacement entities" {
+        val indexRepo = IndexedProductVolatileRepo()
         val existing = IndexedProduct(1, "books", null)
-        indexRepo.add(existing)
+        indexRepo.create(existing)
 
         val replacement = IndexedProduct(1, "magazines", null)
         val newEntity = IndexedProduct(2, "books", null)
-        indexRepo.addOrReplaceAll(setOf(replacement, newEntity))
+        indexRepo.replace(replacement)
+        indexRepo.create(newEntity)
 
         val books = indexRepo.findByIndex("category", "books")
         val magazines = indexRepo.findByIndex("category", "magazines")
 
-        // original entity (id=1) moved from "books" to "magazines"
         books shouldContainOnly setOf(newEntity)
         magazines shouldContainOnly setOf(replacement)
     }
 
     "VolatileRepository index with named @Indexed annotation resolves by custom name" {
-        val indexRepo = VolatileRepository<Int, IndexedProduct>("IndexedRepo")
+        val indexRepo = IndexedProductVolatileRepo()
         val product = IndexedProduct(1, "electronics", "premium")
-        indexRepo.add(product)
+        indexRepo.create(product)
 
         val result = indexRepo.findByIndex("tag", "premium")
 
@@ -340,13 +362,13 @@ internal class SearchPerformanceTest : StringSpec({
     }
 
     "VolatileRepository index maintains correct state after removeAll" {
-        val indexRepo = VolatileRepository<Int, IndexedProduct>("IndexedRepo")
+        val indexRepo = IndexedProductVolatileRepo()
         val product1 = IndexedProduct(1, "sports", null)
         val product2 = IndexedProduct(2, "sports", null)
         val product3 = IndexedProduct(3, "sports", null)
-        indexRepo.add(product1)
-        indexRepo.add(product2)
-        indexRepo.add(product3)
+        indexRepo.create(product1)
+        indexRepo.create(product2)
+        indexRepo.create(product3)
 
         indexRepo.removeAll(listOf(product1, product2))
 
@@ -356,14 +378,13 @@ internal class SearchPerformanceTest : StringSpec({
     }
 
     "VolatileRepository findByIndex returns defensive copy — mutations to result do not affect index" {
-        val indexRepo = VolatileRepository<Int, IndexedProduct>("IndexedRepo")
+        val indexRepo = IndexedProductVolatileRepo()
         val product = IndexedProduct(1, "electronics", null)
-        indexRepo.add(product)
+        indexRepo.create(product)
 
         val result = indexRepo.findByIndex("category", "electronics").toMutableSet()
         result.clear()
 
-        // Index should still contain the entity
         val afterMutation = indexRepo.findByIndex("category", "electronics")
         afterMutation shouldContain product
     }

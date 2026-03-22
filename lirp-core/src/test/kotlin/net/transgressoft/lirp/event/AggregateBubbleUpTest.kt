@@ -17,19 +17,14 @@
 
 package net.transgressoft.lirp.event
 
-import net.transgressoft.lirp.persistence.BubbleUpOrder
 import net.transgressoft.lirp.persistence.BubbleUpOrderVolatileRepo
 import net.transgressoft.lirp.persistence.Customer
 import net.transgressoft.lirp.persistence.CustomerVolatileRepo
-import net.transgressoft.lirp.persistence.EntityA
 import net.transgressoft.lirp.persistence.EntityAVolatileRepo
-import net.transgressoft.lirp.persistence.EntityB
 import net.transgressoft.lirp.persistence.EntityBVolatileRepo
-import net.transgressoft.lirp.persistence.EntityC
 import net.transgressoft.lirp.persistence.EntityCVolatileRepo
-import net.transgressoft.lirp.persistence.MutableRefOrder
+import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.MutableRefOrderVolatileRepo
-import net.transgressoft.lirp.persistence.Order
 import net.transgressoft.lirp.persistence.OrderVolatileRepo
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
@@ -60,27 +55,22 @@ internal class AggregateBubbleUpTest : FunSpec({
         ReactiveScope.ioScope = testScope
     }
 
-    lateinit var customerRepo: CustomerVolatileRepo
-    val activeRepos = mutableListOf<AutoCloseable>()
+    lateinit var ctx: LirpContext
 
     beforeEach {
-        customerRepo = CustomerVolatileRepo()
-        activeRepos.clear()
-        activeRepos.add(customerRepo)
+        ctx = LirpContext()
     }
 
     afterEach {
-        activeRepos.forEach { it.close() }
-        activeRepos.clear()
+        ctx.close()
     }
 
     test("BubbleUpOrder receives AggregateMutationEvent when referenced Customer mutates") {
-        val customer = Customer(id = 1, name = "Alice")
-        customerRepo.add(customer)
+        val customerRepo = CustomerVolatileRepo(ctx)
+        val customer = customerRepo.create(id = 1, name = "Alice")!!
 
-        val orderRepo = BubbleUpOrderVolatileRepo().also { activeRepos.add(it) }
-        val order = BubbleUpOrder(id = 100L, customerId = 1)
-        orderRepo.add(order)
+        val orderRepo = BubbleUpOrderVolatileRepo(ctx)
+        val order = orderRepo.create(id = 100L, customerId = 1)!!
 
         val receivedEvent = AtomicReference<MutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
@@ -97,12 +87,11 @@ internal class AggregateBubbleUpTest : FunSpec({
     }
 
     test("AggregateMutationEvent refName matches the declared reference property name") {
-        val customer = Customer(id = 1, name = "Alice")
-        customerRepo.add(customer)
+        val customerRepo = CustomerVolatileRepo(ctx)
+        val customer = customerRepo.create(id = 1, name = "Alice")!!
 
-        val orderRepo = BubbleUpOrderVolatileRepo().also { activeRepos.add(it) }
-        val order = BubbleUpOrder(id = 100L, customerId = 1)
-        orderRepo.add(order)
+        val orderRepo = BubbleUpOrderVolatileRepo(ctx)
+        val order = orderRepo.create(id = 100L, customerId = 1)!!
 
         val receivedEvent = AtomicReference<AggregateMutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
@@ -121,12 +110,11 @@ internal class AggregateBubbleUpTest : FunSpec({
     }
 
     test("AggregateMutationEvent childEvent contains the original MutationEvent from the referenced Customer") {
-        val customer = Customer(id = 1, name = "Alice")
-        customerRepo.add(customer)
+        val customerRepo = CustomerVolatileRepo(ctx)
+        val customer = customerRepo.create(id = 1, name = "Alice")!!
 
-        val orderRepo = BubbleUpOrderVolatileRepo().also { activeRepos.add(it) }
-        val order = BubbleUpOrder(id = 100L, customerId = 1)
-        orderRepo.add(order)
+        val orderRepo = BubbleUpOrderVolatileRepo(ctx)
+        val order = orderRepo.create(id = 100L, customerId = 1)!!
 
         val receivedEvent = AtomicReference<AggregateMutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
@@ -149,12 +137,11 @@ internal class AggregateBubbleUpTest : FunSpec({
     }
 
     test("Order with bubbleUp=false does NOT receive events when referenced Customer mutates") {
-        val customer = Customer(id = 1, name = "Alice")
-        customerRepo.add(customer)
+        val customerRepo = CustomerVolatileRepo(ctx)
+        val customer = customerRepo.create(id = 1, name = "Alice")!!
 
-        val orderRepo = OrderVolatileRepo().also { activeRepos.add(it) }
-        val order = Order(id = 100L, customerId = 1)
-        orderRepo.add(order)
+        val orderRepo = OrderVolatileRepo(ctx)
+        val order = orderRepo.create(id = 100L, customerId = 1)!!
 
         val receivedEventCount = java.util.concurrent.atomic.AtomicInteger(0)
 
@@ -168,14 +155,12 @@ internal class AggregateBubbleUpTest : FunSpec({
     }
 
     test("Bubble-up re-wires to new entity after reference ID change via mutateAndPublish") {
-        val customer1 = Customer(id = 1, name = "Alice")
-        val customer2 = Customer(id = 2, name = "Bob")
-        customerRepo.add(customer1)
-        customerRepo.add(customer2)
+        val customerRepo = CustomerVolatileRepo(ctx)
+        val customer1 = customerRepo.create(id = 1, name = "Alice")!!
+        val customer2 = customerRepo.create(id = 2, name = "Bob")!!
 
-        val orderRepo = MutableRefOrderVolatileRepo().also { activeRepos.add(it) }
-        val order = MutableRefOrder(id = 100L, customerId = 1)
-        orderRepo.add(order)
+        val orderRepo = MutableRefOrderVolatileRepo(ctx)
+        val order = orderRepo.create(id = 100L, customerId = 1)!!
 
         val latch1 = CountDownLatch(1)
         val receivedCount = java.util.concurrent.atomic.AtomicInteger(0)
@@ -216,12 +201,11 @@ internal class AggregateBubbleUpTest : FunSpec({
     }
 
     test("Bubble-up stays on old entity when new reference ID does not resolve") {
-        val customer1 = Customer(id = 1, name = "Alice")
-        customerRepo.add(customer1)
+        val customerRepo = CustomerVolatileRepo(ctx)
+        val customer1 = customerRepo.create(id = 1, name = "Alice")!!
 
-        val orderRepo = MutableRefOrderVolatileRepo().also { activeRepos.add(it) }
-        val order = MutableRefOrder(id = 100L, customerId = 1)
-        orderRepo.add(order)
+        val orderRepo = MutableRefOrderVolatileRepo(ctx)
+        val order = orderRepo.create(id = 100L, customerId = 1)!!
 
         val eventCount = java.util.concurrent.atomic.AtomicInteger(0)
         val latch = CountDownLatch(1)
@@ -249,20 +233,18 @@ internal class AggregateBubbleUpTest : FunSpec({
     }
 
     test("Bubble-up re-wires after initially unresolvable new ID becomes available") {
-        val customer1 = Customer(id = 1, name = "Alice")
-        customerRepo.add(customer1)
+        val customerRepo = CustomerVolatileRepo(ctx)
+        val customer1 = customerRepo.create(id = 1, name = "Alice")!!
 
-        val orderRepo = MutableRefOrderVolatileRepo().also { activeRepos.add(it) }
-        val order = MutableRefOrder(id = 100L, customerId = 1)
-        orderRepo.add(order)
+        val orderRepo = MutableRefOrderVolatileRepo(ctx)
+        val order = orderRepo.create(id = 100L, customerId = 1)!!
 
         // Change to ID 2 — not yet in repo
         order.changeCustomer(2)
         order.customer.resolve() // re-wire fails, old sub (or none if customer1 was initial) stays
 
         // Add customer2
-        val customer2 = Customer(id = 2, name = "Bob")
-        customerRepo.add(customer2)
+        val customer2 = customerRepo.create(id = 2, name = "Bob")!!
 
         // Trigger re-wire again — now succeeds
         order.customer.resolve()
@@ -284,17 +266,13 @@ internal class AggregateBubbleUpTest : FunSpec({
     }
 
     test("Bubble-up propagation is single-level only: EntityA mutation notifies EntityB but NOT EntityC") {
-        val repoA = EntityAVolatileRepo().also { activeRepos.add(it) }
-        val repoB = EntityBVolatileRepo().also { activeRepos.add(it) }
-        val repoC = EntityCVolatileRepo().also { activeRepos.add(it) }
+        val repoA = EntityAVolatileRepo(ctx)
+        val repoB = EntityBVolatileRepo(ctx)
+        val repoC = EntityCVolatileRepo(ctx)
 
-        val entityA = EntityA(id = 1, value = "original")
-        val entityB = EntityB(id = 10, entityAId = 1)
-        val entityC = EntityC(id = 100, entityBId = 10)
-
-        repoA.add(entityA)
-        repoB.add(entityB)
-        repoC.add(entityC)
+        val entityA = repoA.create(id = 1, value = "original")!!
+        val entityB = repoB.create(id = 10, entityAId = 1)!!
+        val entityC = repoC.create(id = 100, entityBId = 10)!!
 
         val bReceivedLatch = CountDownLatch(1)
         val cReceivedCount = java.util.concurrent.atomic.AtomicInteger(0)
