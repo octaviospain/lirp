@@ -25,60 +25,86 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 
 /**
- * Unit tests for the [LirpRepository] auto-registration lifecycle.
+ * Unit tests for the [LirpRepository] auto-registration lifecycle using scoped [LirpContext] instances.
  *
- * Verifies that annotated repository subclasses register themselves at construction,
- * that duplicate registrations throw [IllegalStateException], that [RegistryBase.close]
- * deregisters the repo, that unannotated repos are skipped, and that re-registration
- * after close succeeds.
+ * Verifies that annotated repository subclasses register themselves at construction into the given
+ * context, that duplicate registrations throw [IllegalStateException], that [RegistryBase.close]
+ * deregisters the repo, that unannotated repos are skipped, that re-registration after close succeeds,
+ * and that [LirpContext.close] closes all registered repositories.
  */
 @DisplayName("LirpRepositoryDiscovery")
 internal class LirpRepositoryDiscoveryTest : FunSpec({
 
-    val openRepos = mutableListOf<AutoCloseable>()
+    lateinit var ctx: LirpContext
+
+    beforeEach {
+        ctx = LirpContext()
+    }
 
     afterEach {
-        openRepos.forEach { it.close() }
-        openRepos.clear()
+        ctx.close()
     }
 
     test("annotated repo auto-registers at construction") {
-        val repo = CustomerVolatileRepo().also { openRepos.add(it) }
+        val repo = CustomerVolatileRepo(ctx)
 
-        RegistryBase.registryFor(Customer::class.java).shouldNotBeNull() shouldBe repo
+        ctx.registryFor(Customer::class.java).shouldNotBeNull() shouldBe repo
     }
 
     test("duplicate registration for same entity type throws ISE") {
-        CustomerVolatileRepo().also { openRepos.add(it) }
+        CustomerVolatileRepo(ctx)
 
         shouldThrow<IllegalStateException> {
-            CustomerVolatileRepo()
+            CustomerVolatileRepo(ctx)
         }.message shouldBe "A repository for Customer is already registered. Only one @LirpRepository per entity type is allowed."
     }
 
-    test("close() deregisters repo") {
-        val repo = CustomerVolatileRepo()
-        RegistryBase.registryFor(Customer::class.java).shouldNotBeNull()
+    test("close() deregisters repo from context") {
+        val repo = CustomerVolatileRepo(ctx)
+        ctx.registryFor(Customer::class.java).shouldNotBeNull()
 
         repo.close()
 
-        RegistryBase.registryFor(Customer::class.java).shouldBeNull()
+        ctx.registryFor(Customer::class.java).shouldBeNull()
     }
 
     test("unannotated VolatileRepository does not auto-register") {
-        VolatileRepository<Int, Customer>("test").also { openRepos.add(it) }
-
-        RegistryBase.registryFor(Customer::class.java).shouldBeNull()
+        val unannotated = VolatileRepository<Int, Customer>("test")
+        try {
+            ctx.registryFor(Customer::class.java).shouldBeNull()
+        } finally {
+            unannotated.close()
+        }
     }
 
     test("re-registration succeeds after first repo is closed") {
-        val repo1 = CustomerVolatileRepo()
-        RegistryBase.registryFor(Customer::class.java).shouldNotBeNull()
+        val repo1 = CustomerVolatileRepo(ctx)
+        ctx.registryFor(Customer::class.java).shouldNotBeNull()
 
         repo1.close()
-        RegistryBase.registryFor(Customer::class.java).shouldBeNull()
+        ctx.registryFor(Customer::class.java).shouldBeNull()
 
-        val repo2 = CustomerVolatileRepo().also { openRepos.add(it) }
-        RegistryBase.registryFor(Customer::class.java).shouldNotBeNull() shouldBe repo2
+        val repo2 = CustomerVolatileRepo(ctx)
+        ctx.registryFor(Customer::class.java).shouldNotBeNull() shouldBe repo2
+    }
+
+    test("LirpContext.close() closes all registered repositories") {
+        val customerRepo = CustomerVolatileRepo(ctx)
+        val orderRepo = OrderVolatileRepo(ctx)
+
+        ctx.registries().size shouldBe 2
+
+        ctx.close()
+
+        customerRepo.isClosed shouldBe true
+        orderRepo.isClosed shouldBe true
+        ctx.registries().size shouldBe 0
+    }
+
+    test("LirpContext.close() is idempotent") {
+        CustomerVolatileRepo(ctx)
+
+        ctx.close()
+        ctx.close() // must not throw
     }
 })

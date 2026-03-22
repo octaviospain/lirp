@@ -52,17 +52,18 @@ internal class ReflectionFreeVerificationTest : FunSpec({
         ReactiveScope.ioScope = testScope
     }
 
+    lateinit var ctx: LirpContext
     lateinit var customerRepo: CustomerVolatileRepo
     lateinit var orderRepo: OrderVolatileRepo
 
     beforeEach {
-        customerRepo = CustomerVolatileRepo()
-        orderRepo = OrderVolatileRepo()
+        ctx = LirpContext()
+        customerRepo = CustomerVolatileRepo(ctx)
+        orderRepo = OrderVolatileRepo(ctx)
     }
 
     afterEach {
-        customerRepo.close()
-        orderRepo.close()
+        ctx.close()
     }
 
     test("RegistryBase does not contain findDelegateField reflection helper method") {
@@ -90,56 +91,43 @@ internal class ReflectionFreeVerificationTest : FunSpec({
     }
 
     test("bindEntityRefs path resolves customer reference after adding order to repository") {
-        val customer = Customer(id = 1, name = "Alice")
-        val order = Order(id = 100L, customerId = 1)
-        customerRepo.add(customer)
-
-        // Adding triggers discoverRefs -> bindEntityRefs via delegateGetter (no getDeclaredField)
-        orderRepo.add(order)
+        val customer = customerRepo.create(id = 1, name = "Alice")!!
+        val order = orderRepo.create(id = 100L, customerId = 1)!!
 
         order.customer.resolve() shouldBePresent { it.name shouldBe "Alice" }
     }
 
     test("wireRefBubbleUp path wires subscription when bubbleUp is true") {
-        val customer = Customer(id = 2, name = "Bob")
-        val order = BubbleUpOrder(id = 200L, customerId = 2)
-        customerRepo.add(customer)
+        val customer = customerRepo.create(id = 2, name = "Bob")!!
 
-        // BubbleUpOrder has bubbleUp=true, so wireRefBubbleUp is called via delegateGetter
-        val bubbleUpRepo = BubbleUpOrderVolatileRepo()
-        bubbleUpRepo.add(order)
+        val bubbleUpRepo = BubbleUpOrderVolatileRepo(ctx)
+        val order = bubbleUpRepo.create(id = 200L, customerId = 2)!!
 
         var received = false
         order.subscribe { received = true }
         customer.updateName("Bobby")
 
         received shouldBe true
-        bubbleUpRepo.close()
     }
 
     test("executeCascadeForEntity path removes referenced entity on CASCADE delete") {
-        val customer = Customer(id = 3, name = "Charlie")
-        val cascadeOrder = CascadeOrder(id = 300L, customerId = 3)
-        customerRepo.add(customer)
+        val customer = customerRepo.create(id = 3, name = "Charlie")!!
 
-        val cascadeRepo = CascadeOrderVolatileRepo()
-        cascadeRepo.add(cascadeOrder)
+        val cascadeRepo = CascadeOrderVolatileRepo(ctx)
+        val cascadeOrder = cascadeRepo.create(id = 300L, customerId = 3)!!
 
         // Removing triggers executeCascadeForEntity via delegateGetter (no findDelegateField)
         cascadeRepo.remove(cascadeOrder)
 
         // CASCADE: referenced customer is also removed
         customerRepo.findById(3).shouldBeEmpty()
-        cascadeRepo.close()
     }
 
     test("detachAllRefs path via close() cancels bubble-up subscriptions without field scan") {
-        val customer = Customer(id = 4, name = "Dana")
-        val detachOrder = DetachOrder(id = 400L, customerId = 4)
-        customerRepo.add(customer)
+        val customer = customerRepo.create(id = 4, name = "Dana")!!
 
-        val detachRepo = DetachOrderVolatileRepo()
-        detachRepo.add(detachOrder)
+        val detachRepo = DetachOrderVolatileRepo(ctx)
+        val detachOrder = detachRepo.create(id = 400L, customerId = 4)!!
 
         var receivedAfterClose = false
         detachOrder.subscribe { receivedAfterClose = true }
@@ -150,6 +138,5 @@ internal class ReflectionFreeVerificationTest : FunSpec({
 
         // After close, no further events should be received
         receivedAfterClose shouldBe false
-        detachRepo.close()
     }
 })

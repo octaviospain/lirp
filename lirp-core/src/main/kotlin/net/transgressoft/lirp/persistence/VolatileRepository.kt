@@ -23,7 +23,6 @@ import net.transgressoft.lirp.event.CrudEvent.Type.DELETE
 import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.StandardCrudEvent.Create
 import net.transgressoft.lirp.event.StandardCrudEvent.Delete
-import net.transgressoft.lirp.event.StandardCrudEvent.Update
 import mu.KotlinLogging
 import java.util.Objects
 import java.util.concurrent.ConcurrentHashMap
@@ -31,11 +30,21 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * In-memory entity repository with reactive event publishing.
  *
- * Extends [RegistryBase] with full CRUD operations. All mutations are published as
- * [net.transgressoft.lirp.event.CrudEvent] events: [add] emits CREATE, [remove]/[removeAll]/[clear] emit DELETE,
- * and [addOrReplace] emits CREATE for new entities or UPDATE (with the previous entity
- * in [net.transgressoft.lirp.event.CrudEvent.oldEntities]) when replacing an existing entity. No event is emitted
- * when the replacement entity is identical to the existing one.
+ * Extends [RegistryBase] with CRUD operations following the repository-as-factory pattern:
+ * entity creation is gated through the protected [add] method, which callers access only
+ * via typed factory methods on concrete subclasses. Subclasses expose a domain-specific
+ * API (e.g., `create(name: String): MyEntity`) that calls [add] internally:
+ *
+ * ```kotlin
+ * class CustomerRepository : VolatileRepository<Int, Customer>() {
+ *     fun create(name: String): Customer {
+ *         val entity = Customer(nextId(), name)
+ *         return add(entity) ?: error("Duplicate customer id: ${entity.id}")
+ *     }
+ * }
+ * ```
+ *
+ * [add] emits a CREATE event; [remove]/[removeAll]/[clear] emit DELETE events.
  *
  * Data is volatile — all entities are lost when the repository is garbage collected.
  *
@@ -45,18 +54,42 @@ import java.util.concurrent.ConcurrentHashMap
  * @property initialEntities Optional map of entities to initialize the repository with
  */
 open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
-    @JvmOverloads
-    constructor(
-        name: String = "Repository",
-        initialEntities: MutableMap<K, T> = ConcurrentHashMap()
-    ) : RegistryBase<K, T>(initialEntities, FlowEventPublisher(name)), Repository<K, T> {
+    internal constructor(
+        context: LirpContext,
+        name: String,
+        initialEntities: MutableMap<K, T>
+    ) : RegistryBase<K, T>(context, initialEntities, FlowEventPublisher(name)), Repository<K, T> {
+
+        internal constructor(
+            context: LirpContext,
+            name: String
+        ) : this(context, name, ConcurrentHashMap())
+
+        @JvmOverloads
+        constructor(
+            name: String = "Repository",
+            initialEntities: MutableMap<K, T> = ConcurrentHashMap()
+        ) : this(LirpContext.default, name, initialEntities)
+
         private val log = KotlinLogging.logger(javaClass.name)
 
         init {
             activateEvents(CREATE, DELETE)
         }
 
-        override fun add(entity: T): Boolean {
+        /**
+         * Adds [entity] to this repository if no entity with the same ID already exists.
+         *
+         * On success, discovers indexes and aggregate references, binds the delegate registries,
+         * wires bubble-up subscriptions, and emits a CREATE event. Returns [entity] so that
+         * callers can chain factory construction.
+         *
+         * Returns `null` without modifying state if an entity with the same ID is already present.
+         *
+         * @param entity The entity to add
+         * @return The added entity on success, or `null` if the ID already exists
+         */
+        protected open fun add(entity: T): T? {
             val previous = entitiesById.putIfAbsent(entity.id, entity)
             if (previous == null) {
                 discoverIndexes(entity)
@@ -66,98 +99,10 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
                 wireRefBubbleUp(entity)
                 publisher.emitAsync(Create(entity))
                 log.debug { "Entity with id ${entity.id} added to repository: $entity" }
-                return true
+                return entity
             }
 
-            return false
-        }
-
-        override fun addOrReplace(entity: T): Boolean {
-            val oldValue = entitiesById.put(entity.id, entity)
-            if (oldValue == null) {
-                discoverIndexes(entity)
-                indexEntity(entity)
-                discoverRefs(entity)
-                bindEntityRefs(entity)
-                wireRefBubbleUp(entity)
-                publisher.emitAsync(Create(entity))
-                log.debug { "Entity with id ${entity.id} added to repository: $entity" }
-            } else if (oldValue != entity) {
-                deindexEntity(oldValue)
-                indexEntity(entity)
-                publisher.emitAsync(Update(entity, oldValue))
-                log.debug { "Entity with id ${entity.id} was replaced by $entity" }
-            } else {
-                return false
-            }
-            return true
-        }
-
-        override fun addOrReplaceAll(entities: Set<T>): Boolean {
-            if (entities.isEmpty()) return false
-
-            // Snapshot state before mutation for atomic rollback
-            val snapshot = LinkedHashMap<K, T?>(entities.size)
-            val added = mutableListOf<T>()
-            val updated = mutableListOf<T>()
-            val entitiesBeforeUpdate = mutableListOf<T>()
-
-            try {
-                entities.forEach { entity ->
-                    snapshot[entity.id] = entitiesById[entity.id]
-
-                    val oldValue = entitiesById.put(entity.id, entity)
-                    if (oldValue == null) {
-                        discoverIndexes(entity)
-                        indexEntity(entity)
-                        discoverRefs(entity)
-                        bindEntityRefs(entity)
-                        wireRefBubbleUp(entity)
-                        added.add(entity)
-                    } else if (oldValue != entity) {
-                        deindexEntity(oldValue)
-                        indexEntity(entity)
-                        updated.add(entity)
-                        entitiesBeforeUpdate.add(oldValue)
-                    }
-                }
-            } catch (exception: Exception) {
-                rollback(snapshot, added, updated, entitiesBeforeUpdate)
-                throw exception
-            }
-
-            if (added.isNotEmpty()) {
-                publisher.emitAsync(Create(added))
-                log.debug { "${added.size} entities were added: $added" }
-            }
-
-            if (updated.isNotEmpty()) {
-                publisher.emitAsync(Update(updated, entitiesBeforeUpdate))
-                log.debug { "${updated.size} entities were replaced: $updated" }
-            }
-
-            return added.isNotEmpty() || updated.isNotEmpty()
-        }
-
-        private fun rollback(
-            snapshot: Map<K, T?>,
-            added: List<T>,
-            updated: List<T>,
-            entitiesBeforeUpdate: List<T>
-        ) {
-            // Undo index changes for entities that were successfully processed
-            added.forEach { deindexEntity(it) }
-            updated.forEach { deindexEntity(it) }
-            entitiesBeforeUpdate.forEach { indexEntity(it) }
-
-            // Restore the primary map to its pre-operation state
-            for ((id, previousEntity) in snapshot) {
-                if (previousEntity != null) {
-                    entitiesById[id] = previousEntity
-                } else {
-                    entitiesById.remove(id)
-                }
-            }
+            return null
         }
 
         override fun remove(entity: T): Boolean {

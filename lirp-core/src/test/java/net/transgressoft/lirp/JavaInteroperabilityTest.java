@@ -15,6 +15,7 @@ import net.transgressoft.lirp.persistence.BubbleUpOrder;
 import net.transgressoft.lirp.persistence.BubbleUpOrderVolatileRepo;
 import net.transgressoft.lirp.persistence.Customer;
 import net.transgressoft.lirp.persistence.CustomerVolatileRepo;
+import net.transgressoft.lirp.persistence.LirpContext;
 import net.transgressoft.lirp.persistence.Order;
 import net.transgressoft.lirp.persistence.OrderVolatileRepo;
 import net.transgressoft.lirp.persistence.ReactiveEntityReference;
@@ -221,18 +222,18 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("Flow.Subscriber receives repository CRUD events via onNext")
         void flowSubscriberReceivesRepositoryCrudEventsViaOnNext() {
-            var repository = new VolatileRepository<Integer, Person>("TestRepo");
-            List<CrudEvent<Integer, ? extends Person>> receivedEvents = new ArrayList<>();
+            var repository = new PersonVolatileRepo();
+            List<CrudEvent<Integer, ? extends Personly>> receivedEvents = new ArrayList<>();
             AtomicReference<Flow.Subscription> subscriptionRef = new AtomicReference<>();
 
-            Flow.Subscriber<CrudEvent<Integer, ? extends Person>> subscriber = new Flow.Subscriber<>() {
+            Flow.Subscriber<CrudEvent<Integer, ? extends Personly>> subscriber = new Flow.Subscriber<>() {
                 @Override
                 public void onSubscribe(Flow.Subscription subscription) {
                     subscriptionRef.set(subscription);
                 }
 
                 @Override
-                public void onNext(CrudEvent<Integer, ? extends Person> item) {
+                public void onNext(CrudEvent<Integer, ? extends Personly> item) {
                     receivedEvents.add(item);
                 }
 
@@ -248,13 +249,15 @@ class JavaInteroperabilityTest {
             };
 
             repository.subscribe(subscriber);
-            repository.add(new Person(1, "Alice", 100L, true));
+            repository.create(new Person(1, "Alice", 100L, true));
             scheduler.advanceUntilIdle();
 
             assertNotNull(subscriptionRef.get(), "onSubscribe must be called");
             assertEquals(1, receivedEvents.size());
             assertTrue(receivedEvents.get(0).isCreate());
             assertEquals("Alice", receivedEvents.get(0).getEntities().get(1).getName());
+
+            repository.close();
         }
 
         @Test
@@ -341,11 +344,11 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("Repository closes properly via try-with-resources")
         void repositoryClosesProperlyViaTryWithResources() {
-            VolatileRepository<Integer, Person>[] repoRef = new VolatileRepository[1];
+            PersonVolatileRepo[] repoRef = new PersonVolatileRepo[1];
 
-            try (var repository = new VolatileRepository<Integer, Person>("AutoCloseRepo")) {
+            try (var repository = new PersonVolatileRepo()) {
                 repoRef[0] = repository;
-                repository.add(new Person(1, "Alice", 0L, true));
+                repository.create(new Person(1, "Alice", 0L, true));
                 scheduler.advanceUntilIdle();
             }
 
@@ -361,86 +364,92 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("search with Predicate returns only matching entities")
         void searchWithPredicateReturnsOnlyMatchingEntities() {
-            var repository = new VolatileRepository<Integer, Person>("SearchRepo");
-            repository.add(new Person(1, "Alice", 100L, true));
-            repository.add(new Person(2, "Bob", 200L, false));
-            repository.add(new Person(3, "Charlie", 300L, true));
+            var repository = new PersonVolatileRepo();
+            repository.create(new Person(1, "Alice", 100L, true));
+            repository.create(new Person(2, "Bob", 200L, false));
+            repository.create(new Person(3, "Charlie", 300L, true));
 
             var result = repository.search(person -> person.getName().startsWith("A"));
 
             assertEquals(1, result.size());
             assertEquals("Alice", result.iterator().next().getName());
+            repository.close();
         }
 
         @Test
         @DisplayName("search with size limit returns at most the requested number")
         void searchWithSizeLimitReturnsAtMostTheRequestedNumber() {
-            var repository = new VolatileRepository<Integer, Person>("SizeLimitRepo");
-            repository.add(new Person(1, "Alice", 100L, true));
-            repository.add(new Person(2, "Bob", 200L, false));
-            repository.add(new Person(3, "Charlie", 300L, true));
+            var repository = new PersonVolatileRepo();
+            repository.create(new Person(1, "Alice", 100L, true));
+            repository.create(new Person(2, "Bob", 200L, false));
+            repository.create(new Person(3, "Charlie", 300L, true));
 
             var result = repository.search(2, person -> true);
 
             assertEquals(2, result.size());
+            repository.close();
         }
 
         @Test
         @DisplayName("findFirst with Predicate returns a matching entity")
         void findFirstWithPredicateReturnsMatchingEntity() {
-            var repository = new VolatileRepository<Integer, Person>("FindFirstRepo");
-            repository.add(new Person(1, "Alice", 50L, true));
-            repository.add(new Person(2, "Bob", 200L, false));
-            repository.add(new Person(3, "Charlie", 300L, true));
+            var repository = new PersonVolatileRepo();
+            repository.create(new Person(1, "Alice", 50L, true));
+            repository.create(new Person(2, "Bob", 200L, false));
+            repository.create(new Person(3, "Charlie", 300L, true));
 
             var result = repository.findFirst(person -> person.getMoney() > 100L);
 
             assertTrue(result.isPresent());
             assertTrue(result.get().getMoney() > 100L);
+            repository.close();
         }
 
         @Test
         @DisplayName("contains with Predicate detects existing and non-existing entities")
         void containsWithPredicateDetectsExistingAndNonExistingEntities() {
-            var repository = new VolatileRepository<Integer, Person>("ContainsRepo");
-            repository.add(new Person(1, "Alice", 100L, true));
-            repository.add(new Person(2, "Bob", 200L, false));
+            var repository = new PersonVolatileRepo();
+            repository.create(new Person(1, "Alice", 100L, true));
+            repository.create(new Person(2, "Bob", 200L, false));
 
             assertTrue(repository.contains(person -> person.getName().equals("Alice")));
             assertFalse(repository.contains(person -> person.getName().equals("NonExistent")));
+            repository.close();
         }
 
         @Test
         @DisplayName("iterator returns all entities in the repository")
         void iteratorReturnsAllEntitiesInRepository() {
-            var repository = new VolatileRepository<Integer, Person>("IteratorRepo");
+            var repository = new PersonVolatileRepo();
             var alice = new Person(1, "Alice", 100L, true);
             var bob = new Person(2, "Bob", 200L, false);
             var charlie = new Person(3, "Charlie", 300L, true);
-            repository.add(alice);
-            repository.add(bob);
-            repository.add(charlie);
+            repository.create(alice);
+            repository.create(bob);
+            repository.create(charlie);
 
-            var iterated = new ArrayList<Person>();
+            var iterated = new ArrayList<Personly>();
             for (var person : repository) {
                 iterated.add(person);
             }
 
             assertEquals(3, iterated.size());
             assertTrue(iterated.containsAll(List.of(alice, bob, charlie)));
+            repository.close();
         }
 
         @Test
         @DisplayName("findByUniqueId returns the entity with the matching unique ID")
         void findByUniqueIdReturnsEntityWithMatchingUniqueId() {
-            var repository = new VolatileRepository<Integer, Person>("UniqueIdRepo");
+            var repository = new PersonVolatileRepo();
             var alice = new Person(1, "Alice", 100L, true);
-            repository.add(alice);
+            repository.create(alice);
 
             var result = repository.findByUniqueId(alice.getUniqueId());
 
             assertTrue(result.isPresent());
             assertEquals(alice, result.get());
+            repository.close();
         }
     }
 
@@ -471,31 +480,30 @@ class JavaInteroperabilityTest {
     @DisplayName("Aggregate Reference")
     class AggregateReferenceTests {
 
+        LirpContext ctx;
         CustomerVolatileRepo customerRepo;
         OrderVolatileRepo orderRepo;
 
         @BeforeEach
         void setupRepos() {
-            customerRepo = new CustomerVolatileRepo();
-            orderRepo = new OrderVolatileRepo();
+            ctx = new LirpContext();
+            customerRepo = new CustomerVolatileRepo(ctx);
+            orderRepo = new OrderVolatileRepo(ctx);
         }
 
         @AfterEach
         void cleanupRepos() {
-            customerRepo.close();
-            orderRepo.close();
+            ctx.close();
         }
 
         @Test
         @DisplayName("Java can access aggregate ref via getter and call resolve()")
         void javaCanAccessAggregateRefViaGetterAndCallResolve() {
-            var customer = new Customer(1, "Alice");
-            var order = new Order(10L, 1);
-
-            customerRepo.add(customer);
-            orderRepo.add(order);
+            customerRepo.create(1, "Alice");
+            orderRepo.create(10L, 1);
             scheduler.advanceUntilIdle();
 
+            var order = orderRepo.findById(10L).get();
             ReactiveEntityReference<Customer, Integer> ref = order.getCustomer();
             assertNotNull(ref);
             assertTrue(ref.resolve().isPresent());
@@ -505,10 +513,10 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("Java resolve returns empty Optional when referenced entity not in repo")
         void javaResolveReturnsEmptyOptionalWhenReferencedEntityNotInRepo() {
-            var order = new Order(10L, 99);
-            orderRepo.add(order);
+            orderRepo.create(10L, 99);
             scheduler.advanceUntilIdle();
 
+            var order = orderRepo.findById(10L).get();
             ReactiveEntityReference<Customer, Integer> ref = order.getCustomer();
             assertNotNull(ref);
             assertFalse(ref.resolve().isPresent());
@@ -517,13 +525,12 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("Java subscriber receives AggregateMutationEvent as MutationEvent subtype")
         void javaSubscriberReceivesAggregateMutationEventAsMutationEventSubtype() throws InterruptedException {
-            var customer = new Customer(1, "Bob");
-            var order = new BubbleUpOrder(10L, 1);
-            var bubbleUpOrderRepo = new BubbleUpOrderVolatileRepo();
-
-            customerRepo.add(customer);
-            bubbleUpOrderRepo.add(order);
+            customerRepo.create(1, "Bob");
+            var bubbleUpOrderRepo = new BubbleUpOrderVolatileRepo(ctx);
+            bubbleUpOrderRepo.create(10L, 1);
             scheduler.advanceUntilIdle();
+
+            var order = bubbleUpOrderRepo.findById(10L).get();
 
             var latch = new CountDownLatch(1);
             var receivedAggregateEvent = new AtomicReference<MutationEvent<?, ?>>(null);
@@ -535,13 +542,12 @@ class JavaInteroperabilityTest {
                 }
             });
 
-            customer.updateName("Bob Updated");
+            customerRepo.findById(1).get().updateName("Bob Updated");
             scheduler.advanceUntilIdle();
 
             assertTrue(latch.await(2, SECONDS));
             assertNotNull(receivedAggregateEvent.get());
             assertInstanceOf(AggregateMutationEvent.class, receivedAggregateEvent.get());
-            bubbleUpOrderRepo.close();
         }
     }
 
@@ -550,63 +556,32 @@ class JavaInteroperabilityTest {
     class RepositoryCrudTests {
 
         @Test
-        @DisplayName("add publishes CREATE event with the added entity")
-        void addPublishesCreateEventWithAddedEntity() {
-            var repository = new VolatileRepository<Integer, Person>("AddRepo");
-            var eventEntities = new ArrayList<Person>();
+        @DisplayName("create publishes CREATE event with the added entity")
+        void createPublishesCreateEventWithAddedEntity() {
+            var repository = new PersonVolatileRepo();
+            var eventEntities = new ArrayList<Personly>();
 
             var subscription = repository.subscribe(
                 event -> eventEntities.addAll(event.getEntities().values()));
 
-            repository.add(new Person(1, "Alice", 0L, true));
+            repository.create(new Person(1, "Alice", 0L, true));
             scheduler.advanceUntilIdle();
 
             assertEquals(1, eventEntities.size());
             assertEquals("Alice", eventEntities.get(0).getName());
 
             subscription.cancel();
-        }
-
-        @Test
-        @DisplayName("addOrReplace with updated entity and findById reflects change")
-        void addOrReplaceWithUpdatedEntityAndFindByIdReflectsChange() {
-            var repository = new VolatileRepository<Integer, Person>("AddOrReplaceNameRepo");
-            repository.add(new Person(1, "Alice", 0L, true));
-
-            repository.addOrReplace(new Person(1, "John", 0L, true));
-            scheduler.advanceUntilIdle();
-
-            assertEquals("John", repository.findById(1).get().getName());
-        }
-
-        @Test
-        @DisplayName("addOrReplace replaces existing entity and publishes UPDATE event")
-        void addOrReplaceReplacesExistingEntityAndPublishesUpdateEvent() {
-            var repository = new VolatileRepository<Integer, Person>("AddOrReplaceRepo");
-            repository.activateEvents(CrudEvent.Type.UPDATE);
-            repository.add(new Person(1, "Alice", 100L, true));
-
-            List<CrudEvent<Integer, ? extends Person>> receivedEvents = new ArrayList<>();
-            var subscription = repository.subscribe(event -> receivedEvents.add(event));
-
-            repository.addOrReplace(new Person(1, "Bob", 200L, false));
-            scheduler.advanceUntilIdle();
-
-            assertEquals("Bob", repository.findById(1).get().getName());
-            assertEquals(1, receivedEvents.size());
-            assertTrue(receivedEvents.get(0).isUpdate());
-
-            subscription.cancel();
+            repository.close();
         }
 
         @Test
         @DisplayName("remove deletes entity and publishes DELETE event")
         void removeDeletesEntityAndPublishesDeleteEvent() {
-            var repository = new VolatileRepository<Integer, Person>("RemoveRepo");
+            var repository = new PersonVolatileRepo();
             var alice = new Person(1, "Alice", 100L, true);
-            repository.add(alice);
+            repository.create(alice);
 
-            List<CrudEvent<Integer, ? extends Person>> receivedEvents = new ArrayList<>();
+            List<CrudEvent<Integer, ? extends Personly>> receivedEvents = new ArrayList<>();
             var subscription = repository.subscribe(event -> receivedEvents.add(event));
 
             repository.remove(alice);
@@ -617,35 +592,37 @@ class JavaInteroperabilityTest {
             assertTrue(receivedEvents.get(0).isDelete());
 
             subscription.cancel();
+            repository.close();
         }
 
         @Test
         @DisplayName("removeAll deletes multiple entities at once")
         void removeAllDeletesMultipleEntitiesAtOnce() {
-            var repository = new VolatileRepository<Integer, Person>("RemoveAllRepo");
+            var repository = new PersonVolatileRepo();
             var alice = new Person(1, "Alice", 100L, true);
             var bob = new Person(2, "Bob", 200L, false);
             var charlie = new Person(3, "Charlie", 300L, true);
-            repository.add(alice);
-            repository.add(bob);
-            repository.add(charlie);
+            repository.create(alice);
+            repository.create(bob);
+            repository.create(charlie);
 
             repository.removeAll(List.of(alice, bob));
             scheduler.advanceUntilIdle();
 
             assertEquals(1, repository.size());
             assertTrue(repository.findById(3).isPresent());
+            repository.close();
         }
 
         @Test
         @DisplayName("clear removes all entities and publishes DELETE event")
         void clearRemovesAllEntitiesAndPublishesDeleteEvent() {
-            var repository = new VolatileRepository<Integer, Person>("ClearRepo");
-            repository.add(new Person(1, "Alice", 100L, true));
-            repository.add(new Person(2, "Bob", 200L, false));
-            repository.add(new Person(3, "Charlie", 300L, true));
+            var repository = new PersonVolatileRepo();
+            repository.create(new Person(1, "Alice", 100L, true));
+            repository.create(new Person(2, "Bob", 200L, false));
+            repository.create(new Person(3, "Charlie", 300L, true));
 
-            List<CrudEvent<Integer, ? extends Person>> receivedEvents = new ArrayList<>();
+            List<CrudEvent<Integer, ? extends Personly>> receivedEvents = new ArrayList<>();
             var subscription = repository.subscribe(event -> receivedEvents.add(event));
 
             repository.clear();
@@ -656,6 +633,7 @@ class JavaInteroperabilityTest {
             assertTrue(receivedEvents.get(0).isDelete());
 
             subscription.cancel();
+            repository.close();
         }
     }
 }

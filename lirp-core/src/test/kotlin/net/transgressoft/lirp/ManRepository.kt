@@ -43,7 +43,11 @@ open class ManJsonFileRepository(file: File) :
                 }
             }
         )
-    )
+    ) {
+    fun add(man: Manly): Boolean = repository.addEntity(man) != null
+
+    fun addOrReplaceAll(men: Collection<Manly>): Boolean = repository.replaceAllEntities(men)
+}
 
 class ManlySerializer : HumanSerializer<Manly>() {
     override fun additionalElements(classSerialDescriptorBuilder: ClassSerialDescriptorBuilder) {

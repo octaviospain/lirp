@@ -20,61 +20,23 @@ package net.transgressoft.lirp.persistence
 import net.transgressoft.lirp.entity.IdentifiableEntity
 
 /**
- * A repository extends the [Registry] interface to provide a mutable collection of entities
- * that can be modified through add, remove, and replace operations.
+ * A repository extends the [Registry] interface with lifecycle-management operations.
  *
- * While a Registry is read-only, a Repository allows for full CRUD operations on entities,
- * making it suitable for contexts where entities need to be managed with complete lifecycle
- * control.
+ * While a [Registry] is read-only, a [Repository] allows entities to be removed and
+ * the collection to be cleared. Entity creation happens via factory methods defined on
+ * concrete subclasses — this is the repository-as-factory convention: the repository is
+ * the sole entry point for adding entities so that registration, index construction, and
+ * aggregate reference wiring all occur at one place.
+ *
+ * Concrete subclasses expose typed factory methods (e.g., `create(...)`, `register(...)`)
+ * that call the protected `add()` implementation. Callers should depend on the specific
+ * subclass when creating entities, and on [Repository] or [Registry] when only querying
+ * or removing them.
  *
  * @param K The type of the entity's identifier, which must be [Comparable]
  * @param T The type of entities in the repository, which must implement [IdentifiableEntity]
  */
 interface Repository<K, T: IdentifiableEntity<K>> : Registry<K, T> where K : Comparable<K> {
-    /**
-     * Adds the given entity to the repository if it doesn't already exist.
-     *
-     * @param entity The entity to add
-     * @return True if the entity was added, false if it already existed
-     */
-    fun add(entity: T): Boolean
-
-    /**
-     * Operator overload for adding an entity using the plus operator.
-     *
-     * @param entity The entity to add
-     * @return True if the entity was added, false if it already existed
-     */
-    operator fun plus(entity: T): Boolean = add(entity)
-
-    /**
-     * Adds the given entity to the repository, replacing any existing entity with the same ID.
-     *
-     * @param entity The entity to add or replace
-     * @return True if the entity was added or replaced an existing entity, false otherwise
-     */
-    fun addOrReplace(entity: T): Boolean
-
-    /**
-     * Adds all given entities to the repository, replacing any existing entities with the same IDs.
-     *
-     * This operation is atomic: if any entity fails to be processed (e.g., due to an indexing error),
-     * all changes made during this call are rolled back and the repository is restored to its
-     * state before the call. The exception that caused the failure is rethrown after rollback.
-     *
-     * @param entities The set of entities to add or replace
-     * @return True if any entity was added or replaced, false otherwise
-     */
-    fun addOrReplaceAll(entities: Set<T>): Boolean
-
-    /**
-     * Operator overload for adding a set of entities using the plus operator.
-     *
-     * @param entities The set of entities to add
-     * @return True if any entity was added, false otherwise
-     */
-    operator fun plus(entities: Set<T>): Boolean = addOrReplaceAll(entities)
-
     /**
      * Removes the given entity from the repository.
      *

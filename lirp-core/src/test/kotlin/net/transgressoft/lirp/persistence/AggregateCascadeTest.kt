@@ -54,48 +54,40 @@ internal class AggregateCascadeTest : FunSpec({
         ReactiveScope.ioScope = testScope
     }
 
-    lateinit var customerRepo: CustomerVolatileRepo
-    var orderRepo: VolatileRepository<*, *>? = null
+    lateinit var ctx: LirpContext
 
     beforeEach {
-        customerRepo = CustomerVolatileRepo()
-        orderRepo = null
+        ctx = LirpContext()
     }
 
     afterEach {
-        customerRepo.close()
-        orderRepo?.close()
-        orderRepo = null
+        ctx.close()
     }
 
     test("CASCADE remove() deletes the referenced Customer from its repository") {
-        val customer = Customer(id = 1, name = "Alice")
-        customerRepo.add(customer)
+        val customerRepo = CustomerVolatileRepo(ctx)
+        val customer = customerRepo.create(id = 1, name = "Alice")!!
 
-        val cascadeOrderRepo = CascadeOrderVolatileRepo().also { orderRepo = it }
-        val order = CascadeOrder(id = 100L, customerId = 1)
-        cascadeOrderRepo.add(order)
+        val cascadeOrderRepo = CascadeOrderVolatileRepo(ctx)
+        cascadeOrderRepo.create(id = 100L, customerId = 1)
 
         // Verify setup
         customerRepo.findById(1).shouldBePresent()
 
         // Remove the parent — cascade should remove the child
-        cascadeOrderRepo.remove(order)
+        cascadeOrderRepo.remove(cascadeOrderRepo.findById(100L).get())
 
         customerRepo.contains(1) shouldBe false
     }
 
     test("CASCADE clear() deletes all referenced Customers from their repositories") {
-        val customer1 = Customer(id = 1, name = "Alice")
-        val customer2 = Customer(id = 2, name = "Bob")
-        customerRepo.add(customer1)
-        customerRepo.add(customer2)
+        val customerRepo = CustomerVolatileRepo(ctx)
+        customerRepo.create(id = 1, name = "Alice")
+        customerRepo.create(id = 2, name = "Bob")
 
-        val cascadeOrderRepo = CascadeOrderVolatileRepo().also { orderRepo = it }
-        val order1 = CascadeOrder(id = 100L, customerId = 1)
-        val order2 = CascadeOrder(id = 101L, customerId = 2)
-        cascadeOrderRepo.add(order1)
-        cascadeOrderRepo.add(order2)
+        val cascadeOrderRepo = CascadeOrderVolatileRepo(ctx)
+        cascadeOrderRepo.create(id = 100L, customerId = 1)
+        cascadeOrderRepo.create(id = 101L, customerId = 2)
 
         // Verify setup
         customerRepo.size() shouldBe 2
@@ -107,12 +99,11 @@ internal class AggregateCascadeTest : FunSpec({
     }
 
     test("DETACH remove() cancels the bubble-up subscription but referenced Customer remains in repository") {
-        val customer = Customer(id = 1, name = "Alice")
-        customerRepo.add(customer)
+        val customerRepo = CustomerVolatileRepo(ctx)
+        val customer = customerRepo.create(id = 1, name = "Alice")!!
 
-        val detachOrderRepo = DetachOrderVolatileRepo().also { orderRepo = it }
-        val order = DetachOrder(id = 100L, customerId = 1)
-        detachOrderRepo.add(order)
+        val detachOrderRepo = DetachOrderVolatileRepo(ctx)
+        val order = detachOrderRepo.create(id = 100L, customerId = 1)!!
 
         // Subscribe to order events (to check bubble-up is active before detach)
         val eventCountBefore = AtomicInteger(0)
@@ -145,12 +136,11 @@ internal class AggregateCascadeTest : FunSpec({
     }
 
     test("NONE remove() does nothing — referenced Customer stays in repository and subscription stays active") {
-        val customer = Customer(id = 1, name = "Alice")
-        customerRepo.add(customer)
+        val customerRepo = CustomerVolatileRepo(ctx)
+        customerRepo.create(id = 1, name = "Alice")
 
-        val noneOrderRepo = NoneOrderVolatileRepo().also { orderRepo = it }
-        val order = NoneOrder(id = 100L, customerId = 1)
-        noneOrderRepo.add(order)
+        val noneOrderRepo = NoneOrderVolatileRepo(ctx)
+        val order = noneOrderRepo.create(id = 100L, customerId = 1)!!
 
         // Remove the parent with NONE cascade action
         noneOrderRepo.remove(order)
@@ -160,14 +150,12 @@ internal class AggregateCascadeTest : FunSpec({
     }
 
     test("RESTRICT remove() throws IllegalStateException when another entity still references the target Customer") {
-        val customer = Customer(id = 1, name = "Alice")
-        customerRepo.add(customer)
+        val customerRepo = CustomerVolatileRepo(ctx)
+        customerRepo.create(id = 1, name = "Alice")
 
-        val restrictOrderRepo = RestrictOrderVolatileRepo().also { orderRepo = it }
-        val order1 = RestrictOrder(id = 100L, customerId = 1)
-        val order2 = RestrictOrder(id = 101L, customerId = 1)
-        restrictOrderRepo.add(order1)
-        restrictOrderRepo.add(order2)
+        val restrictOrderRepo = RestrictOrderVolatileRepo(ctx)
+        val order1 = restrictOrderRepo.create(id = 100L, customerId = 1)!!
+        restrictOrderRepo.create(id = 101L, customerId = 1)
 
         // order1 references customer; order2 also references customer
         // Removing order1 should throw because order2 still references customer
@@ -179,12 +167,11 @@ internal class AggregateCascadeTest : FunSpec({
     }
 
     test("RESTRICT remove() allows deletion when no other entity references the target Customer") {
-        val customer = Customer(id = 1, name = "Alice")
-        customerRepo.add(customer)
+        val customerRepo = CustomerVolatileRepo(ctx)
+        customerRepo.create(id = 1, name = "Alice")
 
-        val restrictOrderRepo = RestrictOrderVolatileRepo().also { orderRepo = it }
-        val order = RestrictOrder(id = 100L, customerId = 1)
-        restrictOrderRepo.add(order)
+        val restrictOrderRepo = RestrictOrderVolatileRepo(ctx)
+        val order = restrictOrderRepo.create(id = 100L, customerId = 1)!!
 
         // Only order references customer — removal proceeds without error
         restrictOrderRepo.remove(order)
@@ -194,34 +181,26 @@ internal class AggregateCascadeTest : FunSpec({
     }
 
     test("CASCADE on a cyclic reference graph throws IllegalStateException with cycle detected message") {
-        val cyclicParentRepo = CyclicParentVolatileRepo().also { orderRepo = it }
-        var cyclicChildRepo: CyclicChildVolatileRepo? = null
-        try {
-            cyclicChildRepo = CyclicChildVolatileRepo()
-            val parent = CyclicParent(id = 1L, childId = 2L)
-            val child = CyclicChild(id = 2L, parentId = 1L)
-            cyclicParentRepo.add(parent)
-            cyclicChildRepo.add(child)
+        val cyclicParentRepo = CyclicParentVolatileRepo(ctx)
+        val cyclicChildRepo = CyclicChildVolatileRepo(ctx)
 
-            val exception =
-                shouldThrow<IllegalStateException> {
-                    cyclicParentRepo.remove(parent)
-                }
-            exception.message shouldContain "Cascade cycle detected"
-        } finally {
-            cyclicChildRepo?.close()
-        }
+        val parent = cyclicParentRepo.create(id = 1L, childId = 2L)!!
+        cyclicChildRepo.create(id = 2L, parentId = 1L)
+
+        val exception =
+            shouldThrow<IllegalStateException> {
+                cyclicParentRepo.remove(parent)
+            }
+        exception.message shouldContain "Cascade cycle detected"
     }
 
     test("CASCADE on an already-removed entity logs warning and returns without error") {
-        val customer = Customer(id = 1, name = "Alice")
-        customerRepo.add(customer)
+        val customerRepo = CustomerVolatileRepo(ctx)
+        customerRepo.create(id = 1, name = "Alice")
 
-        val cascadeOrderRepo = CascadeOrderVolatileRepo().also { orderRepo = it }
-        val order1 = CascadeOrder(id = 100L, customerId = 1)
-        val order2 = CascadeOrder(id = 101L, customerId = 1)
-        cascadeOrderRepo.add(order1)
-        cascadeOrderRepo.add(order2)
+        val cascadeOrderRepo = CascadeOrderVolatileRepo(ctx)
+        val order1 = cascadeOrderRepo.create(id = 100L, customerId = 1)!!
+        val order2 = cascadeOrderRepo.create(id = 101L, customerId = 1)!!
 
         // Remove order1 — customer gets cascade-deleted
         cascadeOrderRepo.remove(order1)
@@ -233,12 +212,11 @@ internal class AggregateCascadeTest : FunSpec({
     }
 
     test("Concurrent wireBubbleUp and cancelBubbleUp do not leak subscriptions") {
-        val customer = Customer(id = 1, name = "Alice")
-        customerRepo.add(customer)
+        val customerRepo = CustomerVolatileRepo(ctx)
+        val customer = customerRepo.create(id = 1, name = "Alice")!!
 
-        val bubbleUpOrderRepo = BubbleUpOrderVolatileRepo().also { orderRepo = it }
-        val order = BubbleUpOrder(id = 100L, customerId = 1)
-        bubbleUpOrderRepo.add(order)
+        val bubbleUpOrderRepo = BubbleUpOrderVolatileRepo(ctx)
+        val order = bubbleUpOrderRepo.create(id = 100L, customerId = 1)!!
 
         // Cast to AggregateRefDelegate to access wireBubbleUp/cancelBubbleUp directly.
         // order.customer returns this (the delegate itself) via getValue().
@@ -274,12 +252,11 @@ internal class AggregateCascadeTest : FunSpec({
     }
 
     test("ReactiveEntityBase close() always executes DETACH cleanup regardless of cascade config") {
-        val customer = Customer(id = 1, name = "Alice")
-        customerRepo.add(customer)
+        val customerRepo = CustomerVolatileRepo(ctx)
+        val customer = customerRepo.create(id = 1, name = "Alice")!!
 
-        val detachOrderRepo = DetachOrderVolatileRepo().also { orderRepo = it }
-        val order = DetachOrder(id = 100L, customerId = 1)
-        detachOrderRepo.add(order)
+        val detachOrderRepo = DetachOrderVolatileRepo(ctx)
+        val order = detachOrderRepo.create(id = 100L, customerId = 1)!!
 
         val eventCount = AtomicInteger(0)
         val initialLatch = CountDownLatch(1)

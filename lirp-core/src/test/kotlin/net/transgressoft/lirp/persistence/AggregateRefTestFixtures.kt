@@ -192,58 +192,112 @@ data class NoneOrder(
  *
  * Annotated with [@LirpRepository][LirpRepository] so the KSP processor generates
  * [CustomerVolatileRepo_LirpRegistryInfo] which triggers auto-registration in
- * the global registry map at construction time.
+ * the provided context at construction time.
  */
 @LirpRepository
-class CustomerVolatileRepo : VolatileRepository<Int, Customer>("Customers")
+class CustomerVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Int, Customer>(context, "Customers") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Int, name: String): Customer? = add(Customer(id, name))
+}
 
 /**
  * Test repository subclass for [Order] entities, auto-registered via [@LirpRepository][LirpRepository].
  */
 @LirpRepository
-class OrderVolatileRepo : VolatileRepository<Long, Order>("Orders")
+class OrderVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Long, Order>(context, "Orders") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Long, customerId: Int): Order? = add(Order(id, customerId))
+}
 
 /**
  * Test repository subclass for [BubbleUpOrder] entities, auto-registered via [@LirpRepository][LirpRepository].
  */
 @LirpRepository
-class BubbleUpOrderVolatileRepo : VolatileRepository<Long, BubbleUpOrder>("BubbleUpOrders")
+class BubbleUpOrderVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Long, BubbleUpOrder>(context, "BubbleUpOrders") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Long, customerId: Int): BubbleUpOrder? = add(BubbleUpOrder(id, customerId))
+}
 
 /**
  * Test repository subclass for [CascadeOrder] entities, auto-registered via [@LirpRepository][LirpRepository].
  */
 @LirpRepository
-class CascadeOrderVolatileRepo : VolatileRepository<Long, CascadeOrder>("CascadeOrders")
+class CascadeOrderVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Long, CascadeOrder>(context, "CascadeOrders") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Long, customerId: Int): CascadeOrder? = add(CascadeOrder(id, customerId))
+}
 
 /**
  * Test repository subclass for [DetachOrder] entities, auto-registered via [@LirpRepository][LirpRepository].
  */
 @LirpRepository
-class DetachOrderVolatileRepo : VolatileRepository<Long, DetachOrder>("DetachOrders")
+class DetachOrderVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Long, DetachOrder>(context, "DetachOrders") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Long, customerId: Int): DetachOrder? = add(DetachOrder(id, customerId))
+}
 
 /**
  * Test repository subclass for [NoneOrder] entities, auto-registered via [@LirpRepository][LirpRepository].
  */
 @LirpRepository
-class NoneOrderVolatileRepo : VolatileRepository<Long, NoneOrder>("NoneOrders")
+class NoneOrderVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Long, NoneOrder>(context, "NoneOrders") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Long, customerId: Int): NoneOrder? = add(NoneOrder(id, customerId))
+}
 
 /**
  * Test repository subclass for [EntityA] entities, auto-registered via [@LirpRepository][LirpRepository].
  */
 @LirpRepository
-class EntityAVolatileRepo : VolatileRepository<Int, EntityA>("EntityAs")
+class EntityAVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Int, EntityA>(context, "EntityAs") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Int, value: String): EntityA? = add(EntityA(id, value))
+}
 
 /**
  * Test repository subclass for [EntityB] entities, auto-registered via [@LirpRepository][LirpRepository].
  */
 @LirpRepository
-class EntityBVolatileRepo : VolatileRepository<Int, EntityB>("EntityBs")
+class EntityBVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Int, EntityB>(context, "EntityBs") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Int, entityAId: Int): EntityB? = add(EntityB(id, entityAId))
+}
 
 /**
  * Test repository subclass for [EntityC] entities, auto-registered via [@LirpRepository][LirpRepository].
  */
 @LirpRepository
-class EntityCVolatileRepo : VolatileRepository<Int, EntityC>("EntityCs")
+class EntityCVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Int, EntityC>(context, "EntityCs") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Int, entityBId: Int): EntityC? = add(EntityC(id, entityBId))
+}
 
 /**
  * Test entity with RESTRICT delete action: removing this entity from its repository is prevented
@@ -301,19 +355,37 @@ data class CyclicChild(
  * Test repository subclass for [RestrictOrder] entities, auto-registered via [@LirpRepository][LirpRepository].
  */
 @LirpRepository
-class RestrictOrderVolatileRepo : VolatileRepository<Long, RestrictOrder>("RestrictOrders")
+class RestrictOrderVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Long, RestrictOrder>(context, "RestrictOrders") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Long, customerId: Int): RestrictOrder? = add(RestrictOrder(id, customerId))
+}
 
 /**
  * Test repository subclass for [CyclicParent] entities, auto-registered via [@LirpRepository][LirpRepository].
  */
 @LirpRepository
-class CyclicParentVolatileRepo : VolatileRepository<Long, CyclicParent>("CyclicParents")
+class CyclicParentVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Long, CyclicParent>(context, "CyclicParents") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Long, childId: Long): CyclicParent? = add(CyclicParent(id, childId))
+}
 
 /**
  * Test repository subclass for [CyclicChild] entities, auto-registered via [@LirpRepository][LirpRepository].
  */
 @LirpRepository
-class CyclicChildVolatileRepo : VolatileRepository<Long, CyclicChild>("CyclicChildren")
+class CyclicChildVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Long, CyclicChild>(context, "CyclicChildren") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Long, parentId: Long): CyclicChild? = add(CyclicChild(id, parentId))
+}
 
 /**
  * Test entity representing an order whose customer reference can be changed via [changeCustomer].
@@ -340,4 +412,10 @@ data class MutableRefOrder(
  * Test repository subclass for [MutableRefOrder] entities, auto-registered via [@LirpRepository][LirpRepository].
  */
 @LirpRepository
-class MutableRefOrderVolatileRepo : VolatileRepository<Long, MutableRefOrder>("MutableRefOrders")
+class MutableRefOrderVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Long, MutableRefOrder>(context, "MutableRefOrders") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Long, customerId: Int): MutableRefOrder? = add(MutableRefOrder(id, customerId))
+}

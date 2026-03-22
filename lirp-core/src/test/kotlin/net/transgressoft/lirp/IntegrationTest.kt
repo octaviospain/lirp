@@ -17,6 +17,7 @@
 
 package net.transgressoft.lirp
 
+import net.transgressoft.lirp.PersonVolatileRepo
 import net.transgressoft.lirp.entity.LazyTestEntity
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.FlowEventPublisher
@@ -25,7 +26,7 @@ import net.transgressoft.lirp.event.PublisherConfig
 import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.event.StandardCrudEvent.Create
 import net.transgressoft.lirp.event.TestEntity
-import net.transgressoft.lirp.persistence.VolatileRepository
+import net.transgressoft.lirp.persistence.LirpContext
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.core.spec.style.DescribeSpec
 import io.kotest.engine.spec.tempfile
@@ -110,7 +111,8 @@ class IntegrationTest : DescribeSpec({
             val opsPerCoroutine = 1000
             val entityPoolSize = 100
 
-            val repository = VolatileRepository<Int, Person>("stress-test-repo")
+            val ctx = LirpContext()
+            val repository = PersonVolatileRepo(ctx)
             val personPool = (1..entityPoolSize).map { arbitraryPerson(it).next() }
 
             val jobs =
@@ -120,10 +122,17 @@ class IntegrationTest : DescribeSpec({
                         repeat(opsPerCoroutine) {
                             val person = personPool[random.nextInt(personPool.size)]
                             when (random.nextInt(5)) {
-                                0 -> repository.add(person)
+                                0 -> repository.create(person)
                                 1 -> repository.remove(person)
-                                2 -> repository.addOrReplace(person)
-                                3 -> repository.addOrReplaceAll(personPool.shuffled(random).take(10).toSet())
+                                2 -> {
+                                    repository.remove(person)
+                                    repository.create(person)
+                                }
+                                3 ->
+                                    personPool.shuffled(random).take(10).forEach { p ->
+                                        repository.remove(p)
+                                        repository.create(p)
+                                    }
                                 4 -> repository.clear()
                             }
                         }
@@ -136,6 +145,7 @@ class IntegrationTest : DescribeSpec({
             val reportedSize = repository.size()
             val foundCount = (1..entityPoolSize).count { repository.findById(it).isPresent }
             reportedSize shouldBe foundCount
+            ctx.close()
         }
     }
 

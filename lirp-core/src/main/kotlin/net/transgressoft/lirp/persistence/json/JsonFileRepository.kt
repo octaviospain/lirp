@@ -23,6 +23,8 @@ import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
 import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.ReactiveScope
+import net.transgressoft.lirp.event.StandardCrudEvent
+import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpDeserializationException
 import net.transgressoft.lirp.persistence.VolatileRepository
 import mu.KotlinLogging
@@ -87,13 +89,22 @@ import kotlinx.serialization.modules.SerializersModule
  *        higher values batch more changes into fewer writes.
  */
 open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
-    @JvmOverloads
-    constructor(
+    internal constructor(
+        context: LirpContext,
         file: File,
         private val mapSerializer: KSerializer<Map<K, R>>,
         private val repositorySerializersModule: SerializersModule = SerializersModule {},
         private val serializationDelay: Duration = 300.milliseconds
-    ) : VolatileRepository<K, R>("JsonFileRepository-${file.name}"), JsonRepository<K, R> {
+    ) : VolatileRepository<K, R>(context, "JsonFileRepository-${file.name}", ConcurrentHashMap()), JsonRepository<K, R> {
+
+        @JvmOverloads
+        constructor(
+            file: File,
+            mapSerializer: KSerializer<Map<K, R>>,
+            repositorySerializersModule: SerializersModule = SerializersModule {},
+            serializationDelay: Duration = 300.milliseconds
+        ) : this(LirpContext.default, file, mapSerializer, repositorySerializersModule, serializationDelay)
+
         private val log = KotlinLogging.logger(javaClass.name)
 
         final override var jsonFile: File = file
@@ -164,21 +175,15 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
 
             disableEvents(CREATE, UPDATE)
 
-            // Load entities from the JSON file on initialization and create subscriptions
+            // Load entities from the JSON file on initialization and create subscriptions.
+            // CREATE events emitted by add() during disk reload are silently discarded because
+            // CREATE events are disabled above for the duration of the init block.
+            // dirty is reset after loading to avoid triggering a write for the loaded state.
             decodeFromJson()?.let { loadedEntities ->
                 log.info { "${loadedEntities.size} objects deserialized from file $jsonFile" }
 
-                // Bypass this class's override to avoid marking dirty during disk load.
-                // super.addOrReplaceAll bypasses VolatileRepository's index hooks, so indexes are rebuilt manually.
-                super.addOrReplaceAll(loadedEntities.values.toSet())
-
-                loadedEntities.values.forEach { entity ->
-                    discoverIndexes(entity)
-                    indexEntity(entity)
-                    discoverRefs(entity)
-                    bindEntityRefs(entity)
-                    wireRefBubbleUp(entity)
-                }
+                loadedEntities.values.forEach { entity -> add(entity) }
+                dirty.set(false)
 
                 flowScope.launch {
                     forEach { entity -> subscribeEntity(entity) }
@@ -252,8 +257,8 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
          *
          * Idempotent: subsequent calls are safe no-ops.
          *
-         * After closing, all mutating operations ([add], [addOrReplace], [addOrReplaceAll],
-         * [remove], [removeAll], [clear]) throw [IllegalStateException].
+         * After closing, all mutating operations ([add], [remove], [removeAll], [clear])
+         * throw [IllegalStateException].
          */
         override fun close() {
             if (closed) return
@@ -267,34 +272,60 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
             super.close()
         }
 
-        override fun add(entity: R): Boolean {
+        override fun add(entity: R): R? {
             check(!closed) { "JsonFileRepository is closed" }
-            return super.add(entity).also { added ->
-                if (added) {
+            return super.add(entity)?.also {
+                markDirtyAndTrigger()
+                subscribeEntity(entity)
+            }
+        }
+
+        /** Exposes [add] for use in test fixture wrappers that delegate to this repository. */
+        internal fun addEntity(entity: R): R? = add(entity)
+
+        /**
+         * Adds [entity] if not already present, or replaces it with an UPDATE event if the entity
+         * exists and differs. Emits CREATE when adding new, UPDATE when replacing existing.
+         * Used by test fixture wrappers that delegate to this repository.
+         */
+        internal fun replaceEntity(entity: R): Boolean {
+            check(!closed) { "JsonFileRepository is closed" }
+            val oldEntity = entitiesById.put(entity.id, entity)
+            return when {
+                oldEntity == null -> {
+                    // New entity: same as add()
+                    discoverIndexes(entity)
+                    indexEntity(entity)
+                    discoverRefs(entity)
+                    bindEntityRefs(entity)
+                    wireRefBubbleUp(entity)
+                    publisher.emitAsync(StandardCrudEvent.Create(entity))
                     markDirtyAndTrigger()
                     subscribeEntity(entity)
+                    true
+                }
+                oldEntity != entity -> {
+                    // Replaced entity: update indexes and emit UPDATE
+                    deindexEntity(oldEntity)
+                    indexEntity(entity)
+                    publisher.emitAsync(StandardCrudEvent.Update(entity, oldEntity))
+                    markDirtyAndTrigger()
+                    subscribeEntity(entity)
+                    true
+                }
+                else -> {
+                    // No change: restore previous value and return false
+                    entitiesById[entity.id] = oldEntity
+                    false
                 }
             }
         }
 
-        override fun addOrReplace(entity: R): Boolean {
-            check(!closed) { "JsonFileRepository is closed" }
-            return super.addOrReplace(entity).also { added ->
-                if (added) {
-                    markDirtyAndTrigger()
-                    subscribeEntity(entity)
-                }
-            }
-        }
-
-        override fun addOrReplaceAll(entities: Set<R>): Boolean {
-            check(!closed) { "JsonFileRepository is closed" }
-            return super.addOrReplaceAll(entities).also { added ->
-                if (added) {
-                    markDirtyAndTrigger()
-                    entities.forEach { entity -> subscribeEntity(entity) }
-                }
-            }
+        /** Exposes bulk replace for test fixture wrappers. */
+        internal fun replaceAllEntities(entities: Collection<R>): Boolean {
+            var changed = false
+            entities.forEach { if (replaceEntity(it)) changed = true }
+            return changed
         }
 
         override fun remove(entity: R): Boolean {
