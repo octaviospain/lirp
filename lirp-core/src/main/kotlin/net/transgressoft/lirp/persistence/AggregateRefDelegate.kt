@@ -237,50 +237,52 @@ class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
     @Suppress("UNCHECKED_CAST")
     fun executeCascade(cascadeAction: CascadeAction, owningEntity: Any) {
         when (cascadeAction) {
-            CascadeAction.CASCADE -> {
-                val repo = registryRef.get()
-                if (repo !is Repository<*, *>) {
-                    log.warn { "Cannot execute CASCADE: bound registry is not a Repository for ${idProvider()}" }
-                    return
-                }
-                val referencedEntity = resolve().orElse(null)
-                if (referencedEntity == null) {
-                    log.warn { "Entity(id=${idProvider()}) already removed by prior cascade" }
-                    return
-                }
-                // Check for cycle: if the referenced entity has any CASCADE reference pointing back to
-                // an entity already in the cascade-visited set on this thread, removing it would cause
-                // an infinite cascade loop. Check one level ahead using the KSP-generated ref accessor.
-                checkForCascadeCycle(referencedEntity)
-                (repo as Repository<K, E>).remove(referencedEntity)
-            }
-            CascadeAction.RESTRICT -> {
-                val targetId = idProvider()
-                // Find which entity class this registry manages by matching against globalRegistries
-                val targetClass =
-                    RegistryBase.globalRegistries.entries
-                        .firstOrNull { (_, reg) -> reg === registryRef.get() }
-                        ?.key
-                        ?: return // Registry not bound or not registered — nothing to check
+            CascadeAction.CASCADE -> doCascade()
+            CascadeAction.RESTRICT -> doRestrict(owningEntity)
+            CascadeAction.DETACH -> cancelBubbleUp()
+            CascadeAction.NONE -> { /* intentional no-op */ }
+        }
+    }
 
-                @Suppress("UNCHECKED_CAST")
-                for ((entityClass, otherRegistry) in RegistryBase.globalRegistriesSnapshot()) {
-                    val accessor = RegistryBase.refAccessorFor(entityClass) ?: continue
-                    for (entity in otherRegistry) {
-                        // Exclude the entity that is triggering the cascade
-                        if (entity === owningEntity) continue
-                        for (entry in accessor.entries as List<RefEntry<Any, *>>) {
-                            if (entry.referencedClass == targetClass && entry.idGetter(entity) == targetId) {
-                                throw IllegalStateException(
-                                    "Cannot cascade-delete ${targetClass.simpleName}(id=$targetId): still referenced by other entities"
-                                )
-                            }
-                        }
+    private fun doCascade() {
+        val repo = registryRef.get()
+        if (repo !is Repository<*, *>) {
+            log.warn { "Cannot execute CASCADE: bound registry is not a Repository for ${idProvider()}" }
+            return
+        }
+        val referencedEntity = resolve().orElse(null)
+        if (referencedEntity == null) {
+            log.warn { "Entity(id=${idProvider()}) already removed by prior cascade" }
+            return
+        }
+        // Check for cycle: if the referenced entity has any CASCADE reference pointing back to
+        // an entity already in the cascade-visited set on this thread, removing it would cause
+        // an infinite cascade loop. Check one level ahead using the KSP-generated ref accessor.
+        checkForCascadeCycle(referencedEntity)
+        (repo as Repository<K, E>).remove(referencedEntity)
+    }
+
+    private fun doRestrict(owningEntity: Any) {
+        val targetId = idProvider()
+        // Find which entity class this registry manages by matching against globalRegistries
+        val targetClass =
+            RegistryBase.globalRegistries.entries
+                .firstOrNull { (_, reg) -> reg === registryRef.get() }
+                ?.key
+                ?: return // Registry not bound or not registered — nothing to check
+
+        @Suppress("UNCHECKED_CAST")
+        for ((entityClass, otherRegistry) in RegistryBase.globalRegistriesSnapshot()) {
+            val accessor = RegistryBase.refAccessorFor(entityClass) ?: continue
+            for (entity in otherRegistry) {
+                // Exclude the entity that is triggering the cascade
+                if (entity === owningEntity) continue
+                for (entry in accessor.entries) {
+                    check(!(entry.referencedClass == targetClass && entry.idGetter(entity) == targetId)) {
+                        "Cannot cascade-delete ${targetClass.simpleName}(id=$targetId): still referenced by other entities"
                     }
                 }
             }
-            CascadeAction.DETACH -> cancelBubbleUp()
-            CascadeAction.NONE -> { /* intentional no-op */ }
         }
     }
 
@@ -300,7 +302,7 @@ class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
         val visited = RegistryBase.cascadeVisitedGet()
         if (visited.isEmpty()) return
         val accessor = RegistryBase.refAccessorFor(referencedEntity.javaClass) ?: return
-        for (entry in accessor.entries as List<RefEntry<Any, *>>) {
+        for (entry in accessor.entries) {
             if (entry.cascadeAction != CascadeAction.CASCADE) continue
             val targetId = entry.idGetter(referencedEntity)
             val targetKey = RegistryBase.cascadeKey(entry.referencedClass, targetId)
@@ -349,7 +351,7 @@ class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
         // K bound on ReactiveEntity<K, R> cannot be verified at this wildcard call site;
         // the cast is safe because subscribe() only reads from the entity's publisher,
         // which is internally consistent regardless of the type parameter.
-        val rawChild = referencedEntity as ReactiveEntity<Any, *>
+        val rawChild = referencedEntity as ReactiveEntity<Comparable<Any>, *>
         return rawChild.subscribe { childEvent ->
             // Type parameters are erased at runtime; the self-referential bound R : ReactiveEntity<K, R>
             // cannot be verified at the wildcard call site. ReactiveEntityBase.emitBubbleUpEvent() is used
