@@ -91,17 +91,17 @@ internal class ReflectionFreeVerificationTest : FunSpec({
     }
 
     test("bindEntityRefs path resolves customer reference after adding order to repository") {
-        val customer = customerRepo.create(id = 1, name = "Alice")!!
-        val order = orderRepo.create(id = 100L, customerId = 1)!!
+        val customer = customerRepo.create(id = 1, name = "Alice")
+        val order = orderRepo.create(id = 100L, customerId = 1)
 
         order.customer.resolve() shouldBePresent { it.name shouldBe "Alice" }
     }
 
     test("wireRefBubbleUp path wires subscription when bubbleUp is true") {
-        val customer = customerRepo.create(id = 2, name = "Bob")!!
+        val customer = customerRepo.create(id = 2, name = "Bob")
 
         val bubbleUpRepo = BubbleUpOrderVolatileRepo(ctx)
-        val order = bubbleUpRepo.create(id = 200L, customerId = 2)!!
+        val order = bubbleUpRepo.create(id = 200L, customerId = 2)
 
         var received = false
         order.subscribe { received = true }
@@ -111,10 +111,10 @@ internal class ReflectionFreeVerificationTest : FunSpec({
     }
 
     test("executeCascadeForEntity path removes referenced entity on CASCADE delete") {
-        val customer = customerRepo.create(id = 3, name = "Charlie")!!
+        val customer = customerRepo.create(id = 3, name = "Charlie")
 
         val cascadeRepo = CascadeOrderVolatileRepo(ctx)
-        val cascadeOrder = cascadeRepo.create(id = 300L, customerId = 3)!!
+        val cascadeOrder = cascadeRepo.create(id = 300L, customerId = 3)
 
         // Removing triggers executeCascadeForEntity via delegateGetter (no findDelegateField)
         cascadeRepo.remove(cascadeOrder)
@@ -124,10 +124,10 @@ internal class ReflectionFreeVerificationTest : FunSpec({
     }
 
     test("detachAllRefs path via close() cancels bubble-up subscriptions without field scan") {
-        val customer = customerRepo.create(id = 4, name = "Dana")!!
+        val customer = customerRepo.create(id = 4, name = "Dana")
 
         val detachRepo = DetachOrderVolatileRepo(ctx)
-        val detachOrder = detachRepo.create(id = 400L, customerId = 4)!!
+        val detachOrder = detachRepo.create(id = 400L, customerId = 4)
 
         var receivedAfterClose = false
         detachOrder.subscribe { receivedAfterClose = true }

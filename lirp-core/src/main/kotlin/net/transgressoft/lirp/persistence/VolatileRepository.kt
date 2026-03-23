@@ -30,19 +30,9 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * In-memory entity repository with reactive event publishing.
  *
- * Extends [RegistryBase] with CRUD operations following the repository-as-factory pattern:
- * entity creation is gated through the protected [add] method, which callers access only
- * via typed factory methods on concrete subclasses. Subclasses expose a domain-specific
- * API (e.g., `create(name: String): MyEntity`) that calls [add] internally:
- *
- * ```kotlin
- * class CustomerRepository : VolatileRepository<Int, Customer>() {
- *     fun create(name: String): Customer {
- *         val entity = Customer(nextId(), name)
- *         return add(entity) ?: error("Duplicate customer id: ${entity.id}")
- *     }
- * }
- * ```
+ * Extends [RegistryBase] with CRUD operations. [add] is a public interface method that can be
+ * called directly through the [Repository] interface (composition pattern) or via typed factory
+ * methods on concrete subclasses (inheritance pattern).
  *
  * [add] emits a CREATE event; [remove]/[removeAll]/[clear] emit DELETE events.
  *
@@ -81,15 +71,12 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
          * Adds [entity] to this repository if no entity with the same ID already exists.
          *
          * On success, discovers indexes and aggregate references, binds the delegate registries,
-         * wires bubble-up subscriptions, and emits a CREATE event. Returns [entity] so that
-         * callers can chain factory construction.
-         *
-         * Returns `null` without modifying state if an entity with the same ID is already present.
+         * wires bubble-up subscriptions, and emits a CREATE event.
          *
          * @param entity The entity to add
-         * @return The added entity on success, or `null` if the ID already exists
+         * @return `true` if the entity was added, `false` if an entity with the same ID is already present
          */
-        protected open fun add(entity: T): T? {
+        open override fun add(entity: T): Boolean {
             val previous = entitiesById.putIfAbsent(entity.id, entity)
             if (previous == null) {
                 discoverIndexes(entity)
@@ -99,10 +86,9 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
                 wireRefBubbleUp(entity)
                 publisher.emitAsync(Create(entity))
                 log.debug { "Entity with id ${entity.id} added to repository: $entity" }
-                return entity
+                return true
             }
-
-            return null
+            return false
         }
 
         override fun remove(entity: T): Boolean {

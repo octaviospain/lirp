@@ -152,21 +152,20 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("Entity subscribe delivers old and new name on mutation")
         void entitySubscribeDeliversOldAndNewNameOnMutation() {
-            var person = new Person(1, "Alice", 0L, true);
+            var customer = new Customer(1, "Alice");
 
-            assertEquals(1, person.getId());
-            assertEquals("Alice", person.getName());
-            assertEquals(0L, person.getMoney());
+            assertEquals(1, customer.getId());
+            assertEquals("Alice", customer.getName());
 
             var oldName = new String[1];
             var newName = new String[1];
 
-            var subscription = person.subscribe(event -> {
+            var subscription = customer.subscribe(event -> {
                 oldName[0] = event.getOldEntity().getName();
                 newName[0] = event.getNewEntity().getName();
             });
 
-            person.setName("John");
+            customer.updateName("John");
             scheduler.advanceUntilIdle();
 
             assertEquals("Alice", oldName[0]);
@@ -183,18 +182,18 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("Flow.Subscriber receives entity mutation events via onNext")
         void flowSubscriberReceivesEntityMutationEventsViaOnNext() {
-            var person = new Person(1, "Alice", 0L, true);
-            List<MutationEvent<Integer, Personly>> receivedEvents = new ArrayList<>();
+            var customer = new Customer(1, "Alice");
+            List<MutationEvent<Integer, Customer>> receivedEvents = new ArrayList<>();
             AtomicReference<Flow.Subscription> subscriptionRef = new AtomicReference<>();
 
-            Flow.Subscriber<MutationEvent<Integer, Personly>> subscriber = new Flow.Subscriber<>() {
+            Flow.Subscriber<MutationEvent<Integer, Customer>> subscriber = new Flow.Subscriber<>() {
                 @Override
                 public void onSubscribe(Flow.Subscription subscription) {
                     subscriptionRef.set(subscription);
                 }
 
                 @Override
-                public void onNext(MutationEvent<Integer, Personly> item) {
+                public void onNext(MutationEvent<Integer, Customer> item) {
                     receivedEvents.add(item);
                 }
 
@@ -209,8 +208,8 @@ class JavaInteroperabilityTest {
                 }
             };
 
-            person.subscribe(subscriber);
-            person.setName("Bob");
+            customer.subscribe(subscriber);
+            customer.updateName("Bob");
             scheduler.advanceUntilIdle();
 
             assertNotNull(subscriptionRef.get(), "onSubscribe must be called");
@@ -222,18 +221,18 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("Flow.Subscriber receives repository CRUD events via onNext")
         void flowSubscriberReceivesRepositoryCrudEventsViaOnNext() {
-            var repository = new PersonVolatileRepo();
-            List<CrudEvent<Integer, ? extends Personly>> receivedEvents = new ArrayList<>();
+            var repository = new CustomerVolatileRepo();
+            List<CrudEvent<Integer, ? extends Customer>> receivedEvents = new ArrayList<>();
             AtomicReference<Flow.Subscription> subscriptionRef = new AtomicReference<>();
 
-            Flow.Subscriber<CrudEvent<Integer, ? extends Personly>> subscriber = new Flow.Subscriber<>() {
+            Flow.Subscriber<CrudEvent<Integer, ? extends Customer>> subscriber = new Flow.Subscriber<>() {
                 @Override
                 public void onSubscribe(Flow.Subscription subscription) {
                     subscriptionRef.set(subscription);
                 }
 
                 @Override
-                public void onNext(CrudEvent<Integer, ? extends Personly> item) {
+                public void onNext(CrudEvent<Integer, ? extends Customer> item) {
                     receivedEvents.add(item);
                 }
 
@@ -249,7 +248,7 @@ class JavaInteroperabilityTest {
             };
 
             repository.subscribe(subscriber);
-            repository.create(new Person(1, "Alice", 100L, true));
+            repository.create(1, "Alice");
             scheduler.advanceUntilIdle();
 
             assertNotNull(subscriptionRef.get(), "onSubscribe must be called");
@@ -263,17 +262,17 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("Calling request() on subscription throws IllegalStateException")
         void callingRequestOnSubscriptionThrowsIllegalStateException() {
-            var person = new Person(1, "Alice", 0L, true);
+            var customer = new Customer(1, "Alice");
             AtomicReference<Flow.Subscription> subscriptionRef = new AtomicReference<>();
 
-            Flow.Subscriber<MutationEvent<Integer, Personly>> subscriber = new Flow.Subscriber<>() {
+            Flow.Subscriber<MutationEvent<Integer, Customer>> subscriber = new Flow.Subscriber<>() {
                 @Override
                 public void onSubscribe(Flow.Subscription subscription) {
                     subscriptionRef.set(subscription);
                 }
 
                 @Override
-                public void onNext(MutationEvent<Integer, Personly> item) {
+                public void onNext(MutationEvent<Integer, Customer> item) {
                     // Not expected in this test scenario
                 }
 
@@ -288,7 +287,7 @@ class JavaInteroperabilityTest {
                 }
             };
 
-            person.subscribe(subscriber);
+            customer.subscribe(subscriber);
             assertNotNull(subscriptionRef.get());
             Flow.Subscription subscription = subscriptionRef.get();
             assertThrows(IllegalStateException.class, () -> subscription.request(1));
@@ -302,17 +301,17 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("Subscribing to closed entity throws IllegalStateException")
         void subscribingToClosedEntityThrowsIllegalStateException() {
-            var person = new Person(1, "Alice", 0L, true);
-            person.close();
+            var customer = new Customer(1, "Alice");
+            customer.close();
 
-            assertTrue(person.isClosed());
-            assertThrows(IllegalStateException.class, () -> person.subscribe(event -> {}));
+            assertTrue(customer.isClosed());
+            assertThrows(IllegalStateException.class, () -> customer.subscribe(event -> {}));
         }
 
         @Test
         @DisplayName("Subscribing to closed repository throws IllegalStateException")
         void subscribingToClosedRepositoryThrowsIllegalStateException() {
-            var repository = new VolatileRepository<Integer, Person>("ClosedRepo");
+            var repository = new CustomerVolatileRepo();
             repository.close();
 
             assertTrue(repository.isClosed());
@@ -327,28 +326,28 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("Entity closes properly via try-with-resources")
         void entityClosesProperlyViaTryWithResources() {
-            Person[] personRef = new Person[1];
+            Customer[] customerRef = new Customer[1];
 
-            try (var person = new Person(1, "Alice", 0L, true)) {
-                personRef[0] = person;
-                var subscription = person.subscribe(event -> {});
-                person.setName("Bob");
+            try (var customer = new Customer(1, "Alice")) {
+                customerRef[0] = customer;
+                var subscription = customer.subscribe(event -> {});
+                customer.updateName("Bob");
                 scheduler.advanceUntilIdle();
                 subscription.cancel();
             }
 
-            assertTrue(personRef[0].isClosed());
-            assertThrows(IllegalStateException.class, () -> personRef[0].subscribe(event -> {}));
+            assertTrue(customerRef[0].isClosed());
+            assertThrows(IllegalStateException.class, () -> customerRef[0].subscribe(event -> {}));
         }
 
         @Test
         @DisplayName("Repository closes properly via try-with-resources")
         void repositoryClosesProperlyViaTryWithResources() {
-            PersonVolatileRepo[] repoRef = new PersonVolatileRepo[1];
+            CustomerVolatileRepo[] repoRef = new CustomerVolatileRepo[1];
 
-            try (var repository = new PersonVolatileRepo()) {
+            try (var repository = new CustomerVolatileRepo()) {
                 repoRef[0] = repository;
-                repository.create(new Person(1, "Alice", 0L, true));
+                repository.create(1, "Alice");
                 scheduler.advanceUntilIdle();
             }
 
@@ -364,12 +363,12 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("search with Predicate returns only matching entities")
         void searchWithPredicateReturnsOnlyMatchingEntities() {
-            var repository = new PersonVolatileRepo();
-            repository.create(new Person(1, "Alice", 100L, true));
-            repository.create(new Person(2, "Bob", 200L, false));
-            repository.create(new Person(3, "Charlie", 300L, true));
+            var repository = new CustomerVolatileRepo();
+            repository.create(1, "Alice");
+            repository.create(2, "Bob");
+            repository.create(3, "Charlie");
 
-            var result = repository.search(person -> person.getName().startsWith("A"));
+            var result = repository.search(customer -> customer.getName().startsWith("A"));
 
             assertEquals(1, result.size());
             assertEquals("Alice", result.iterator().next().getName());
@@ -379,12 +378,12 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("search with size limit returns at most the requested number")
         void searchWithSizeLimitReturnsAtMostTheRequestedNumber() {
-            var repository = new PersonVolatileRepo();
-            repository.create(new Person(1, "Alice", 100L, true));
-            repository.create(new Person(2, "Bob", 200L, false));
-            repository.create(new Person(3, "Charlie", 300L, true));
+            var repository = new CustomerVolatileRepo();
+            repository.create(1, "Alice");
+            repository.create(2, "Bob");
+            repository.create(3, "Charlie");
 
-            var result = repository.search(2, person -> true);
+            var result = repository.search(2, customer -> true);
 
             assertEquals(2, result.size());
             repository.close();
@@ -393,44 +392,41 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("findFirst with Predicate returns a matching entity")
         void findFirstWithPredicateReturnsMatchingEntity() {
-            var repository = new PersonVolatileRepo();
-            repository.create(new Person(1, "Alice", 50L, true));
-            repository.create(new Person(2, "Bob", 200L, false));
-            repository.create(new Person(3, "Charlie", 300L, true));
+            var repository = new CustomerVolatileRepo();
+            repository.create(1, "Alice");
+            repository.create(2, "Bob");
+            repository.create(3, "Charlie");
 
-            var result = repository.findFirst(person -> person.getMoney() > 100L);
+            var result = repository.findFirst(customer -> customer.getName().startsWith("B"));
 
             assertTrue(result.isPresent());
-            assertTrue(result.get().getMoney() > 100L);
+            assertEquals("Bob", result.get().getName());
             repository.close();
         }
 
         @Test
         @DisplayName("contains with Predicate detects existing and non-existing entities")
         void containsWithPredicateDetectsExistingAndNonExistingEntities() {
-            var repository = new PersonVolatileRepo();
-            repository.create(new Person(1, "Alice", 100L, true));
-            repository.create(new Person(2, "Bob", 200L, false));
+            var repository = new CustomerVolatileRepo();
+            repository.create(1, "Alice");
+            repository.create(2, "Bob");
 
-            assertTrue(repository.contains(person -> person.getName().equals("Alice")));
-            assertFalse(repository.contains(person -> person.getName().equals("NonExistent")));
+            assertTrue(repository.contains(customer -> customer.getName().equals("Alice")));
+            assertFalse(repository.contains(customer -> customer.getName().equals("NonExistent")));
             repository.close();
         }
 
         @Test
         @DisplayName("iterator returns all entities in the repository")
         void iteratorReturnsAllEntitiesInRepository() {
-            var repository = new PersonVolatileRepo();
-            var alice = new Person(1, "Alice", 100L, true);
-            var bob = new Person(2, "Bob", 200L, false);
-            var charlie = new Person(3, "Charlie", 300L, true);
-            repository.create(alice);
-            repository.create(bob);
-            repository.create(charlie);
+            var repository = new CustomerVolatileRepo();
+            var alice = repository.create(1, "Alice");
+            var bob = repository.create(2, "Bob");
+            var charlie = repository.create(3, "Charlie");
 
-            var iterated = new ArrayList<Personly>();
-            for (var person : repository) {
-                iterated.add(person);
+            var iterated = new ArrayList<Customer>();
+            for (var customer : repository) {
+                iterated.add(customer);
             }
 
             assertEquals(3, iterated.size());
@@ -441,9 +437,8 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("findByUniqueId returns the entity with the matching unique ID")
         void findByUniqueIdReturnsEntityWithMatchingUniqueId() {
-            var repository = new PersonVolatileRepo();
-            var alice = new Person(1, "Alice", 100L, true);
-            repository.create(alice);
+            var repository = new CustomerVolatileRepo();
+            var alice = repository.create(1, "Alice");
 
             var result = repository.findByUniqueId(alice.getUniqueId());
 
@@ -460,16 +455,16 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("Java Consumer subscriber exception does not prevent other subscribers from receiving events")
         void javaConsumerSubscriberExceptionDoesNotPreventOtherSubscribersFromReceivingEvents() {
-            var person = new Person(1, "Alice", 0L, true);
+            var customer = new Customer(1, "Alice");
 
             // Throwing Consumer — unconditional exception on every event
-            person.subscribe(event -> { throw new RuntimeException("intentional Java exception"); });
+            customer.subscribe(event -> { throw new RuntimeException("intentional Java exception"); });
 
             var healthyCounter = new AtomicInteger(0);
-            person.subscribe(event -> healthyCounter.incrementAndGet());
+            customer.subscribe(event -> healthyCounter.incrementAndGet());
 
-            person.setName("Bob");
-            person.setName("Charlie");
+            customer.updateName("Bob");
+            customer.updateName("Charlie");
             scheduler.advanceUntilIdle();
 
             assertEquals(2, healthyCounter.get());
@@ -558,13 +553,13 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("create publishes CREATE event with the added entity")
         void createPublishesCreateEventWithAddedEntity() {
-            var repository = new PersonVolatileRepo();
-            var eventEntities = new ArrayList<Personly>();
+            var repository = new CustomerVolatileRepo();
+            var eventEntities = new ArrayList<Customer>();
 
             var subscription = repository.subscribe(
                 event -> eventEntities.addAll(event.getEntities().values()));
 
-            repository.create(new Person(1, "Alice", 0L, true));
+            repository.create(1, "Alice");
             scheduler.advanceUntilIdle();
 
             assertEquals(1, eventEntities.size());
@@ -577,11 +572,11 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("remove deletes entity and publishes DELETE event")
         void removeDeletesEntityAndPublishesDeleteEvent() {
-            var repository = new PersonVolatileRepo();
-            var alice = new Person(1, "Alice", 100L, true);
-            repository.create(alice);
+            var repository = new CustomerVolatileRepo();
+            var alice = repository.create(1, "Alice");
+            repository.create(1, "Alice");
 
-            List<CrudEvent<Integer, ? extends Personly>> receivedEvents = new ArrayList<>();
+            List<CrudEvent<Integer, ? extends Customer>> receivedEvents = new ArrayList<>();
             var subscription = repository.subscribe(event -> receivedEvents.add(event));
 
             repository.remove(alice);
@@ -598,13 +593,10 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("removeAll deletes multiple entities at once")
         void removeAllDeletesMultipleEntitiesAtOnce() {
-            var repository = new PersonVolatileRepo();
-            var alice = new Person(1, "Alice", 100L, true);
-            var bob = new Person(2, "Bob", 200L, false);
-            var charlie = new Person(3, "Charlie", 300L, true);
-            repository.create(alice);
-            repository.create(bob);
-            repository.create(charlie);
+            var repository = new CustomerVolatileRepo();
+            var alice = repository.create(1, "Alice");
+            var bob = repository.create(2, "Bob");
+            var charlie = repository.create(3, "Charlie");
 
             repository.removeAll(List.of(alice, bob));
             scheduler.advanceUntilIdle();
@@ -617,12 +609,12 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("clear removes all entities and publishes DELETE event")
         void clearRemovesAllEntitiesAndPublishesDeleteEvent() {
-            var repository = new PersonVolatileRepo();
-            repository.create(new Person(1, "Alice", 100L, true));
-            repository.create(new Person(2, "Bob", 200L, false));
-            repository.create(new Person(3, "Charlie", 300L, true));
+            var repository = new CustomerVolatileRepo();
+            repository.create(1, "Alice");
+            repository.create(2, "Bob");
+            repository.create(3, "Charlie");
 
-            List<CrudEvent<Integer, ? extends Personly>> receivedEvents = new ArrayList<>();
+            List<CrudEvent<Integer, ? extends Customer>> receivedEvents = new ArrayList<>();
             var subscription = repository.subscribe(event -> receivedEvents.add(event));
 
             repository.clear();

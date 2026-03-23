@@ -1,8 +1,5 @@
 package net.transgressoft.lirp.persistence
 
-import net.transgressoft.lirp.Person
-import net.transgressoft.lirp.PersonVolatileRepo
-import net.transgressoft.lirp.arbitraryPerson
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.CrudEvent.Type.READ
 import net.transgressoft.lirp.event.ReactiveScope
@@ -18,13 +15,23 @@ import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 import io.kotest.property.Arb
 import io.kotest.property.arbitrary.next
+import io.kotest.property.arbitrary.positiveInt
 import io.kotest.property.arbitrary.set
+import io.kotest.property.arbitrary.stringPattern
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.stream.Collectors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+
+private fun arbitraryCustomer(id: Int = -1) =
+    io.kotest.property.arbitrary.arbitrary {
+        Customer(
+            id = if (id == -1) Arb.positiveInt(500_000).bind() else id,
+            name = Arb.stringPattern("[a-z]{5} [a-z]{5}").bind()
+        )
+    }
 
 /**
  * A minimal entity with `@Indexed` properties for secondary-index tests.
@@ -47,7 +54,7 @@ data class IndexedProduct(
  * Exposes typed factory and mutation methods for use in index-related tests.
  */
 class IndexedProductVolatileRepo : VolatileRepository<Int, IndexedProduct>("IndexedRepo") {
-    fun create(product: IndexedProduct): IndexedProduct? = add(product)
+    fun create(product: IndexedProduct): IndexedProduct = product.also { add(it) }
 
     fun replace(product: IndexedProduct): Boolean {
         val existing = findById(product.id)
@@ -55,7 +62,9 @@ class IndexedProductVolatileRepo : VolatileRepository<Int, IndexedProduct>("Inde
             if (existing.get() == product) return false
             remove(existing.get())
         }
-        return add(product) != null
+        val sizeBefore = size()
+        add(product)
+        return size() > sizeBefore
     }
 }
 
@@ -70,7 +79,7 @@ class IndexedProductVolatileRepo : VolatileRepository<Int, IndexedProduct>("Inde
 internal class SearchPerformanceTest : StringSpec({
 
     lateinit var ctx: LirpContext
-    lateinit var repository: PersonVolatileRepo
+    lateinit var repository: CustomerVolatileRepo
 
     val testDispatcher = UnconfinedTestDispatcher()
     val testScope = CoroutineScope(testDispatcher)
@@ -83,11 +92,11 @@ internal class SearchPerformanceTest : StringSpec({
     beforeTest {
         ctx = LirpContext()
         repository =
-            PersonVolatileRepo(ctx).apply {
+            CustomerVolatileRepo(ctx).apply {
                 activateEvents(READ)
             }
-        val people = Arb.set(arbitraryPerson(), 10..10).next()
-        people.forEach { repository.create(it) }
+        val customers = Arb.set(arbitraryCustomer(), 10..10).next()
+        customers.forEach { repository.create(it.id, it.name) }
     }
 
     afterTest {
@@ -127,7 +136,7 @@ internal class SearchPerformanceTest : StringSpec({
     }
 
     "VolatileRepository lazySearch on empty repository returns empty Sequence" {
-        val emptyRepository = VolatileRepository<Int, Person>("EmptyRepo")
+        val emptyRepository = VolatileRepository<Int, Customer>("EmptyRepo")
 
         val result = emptyRepository.lazySearch { true }.toSet()
 

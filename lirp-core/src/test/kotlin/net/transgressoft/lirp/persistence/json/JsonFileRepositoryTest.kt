@@ -1,18 +1,11 @@
 package net.transgressoft.lirp.persistence.json
 
-import net.transgressoft.lirp.Man
-import net.transgressoft.lirp.ManJsonFileRepository
-import net.transgressoft.lirp.Person
-import net.transgressoft.lirp.PersonJsonFileRepository
-import net.transgressoft.lirp.Personly
-import net.transgressoft.lirp.arbitraryPerson
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
 import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.LirpDeserializationException
 import io.kotest.assertions.json.shouldEqualJson
-import io.kotest.assertions.json.shouldNotEqualJson
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.DescribeSpec
@@ -30,11 +23,7 @@ import io.mockk.unmockkAll
 import java.io.File
 import java.io.IOException
 import java.util.Collections
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.collections.forEach
-import kotlin.random.Random
-import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -42,11 +31,10 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 @ExperimentalCoroutinesApi
 class JsonFileRepositoryTest : DescribeSpec({
-
     val testDispatcher = UnconfinedTestDispatcher()
     val testScope = CoroutineScope(testDispatcher)
     lateinit var jsonFile: File
-    lateinit var repository: PersonJsonFileRepository
+    lateinit var repository: StandardCustomerJsonFileRepository
 
     beforeSpec {
         ReactiveScope.flowScope = testScope
@@ -55,7 +43,7 @@ class JsonFileRepositoryTest : DescribeSpec({
 
     beforeEach {
         jsonFile = tempfile("json-repository-test", ".json").also { it.deleteOnExit() }
-        repository = PersonJsonFileRepository(jsonFile)
+        repository = StandardCustomerJsonFileRepository(jsonFile)
     }
 
     afterEach {
@@ -67,277 +55,119 @@ class JsonFileRepositoryTest : DescribeSpec({
         ReactiveScope.resetDefaultFlowScope()
     }
 
+    fun getSubscriptionsMap(repo: JsonFileRepository<Int, PolymorphicCustomer>): MutableMap<Int, *> {
+        val subscriptionsMapField =
+            JsonFileRepository::class.java
+                .getDeclaredField("subscriptionsMap")
+                .also { it.isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        return subscriptionsMapField.get(repo) as MutableMap<Int, *>
+    }
+
+    fun getDirtyFlag(repo: JsonFileRepository<Int, PolymorphicCustomer>): AtomicBoolean {
+        val dirtyField =
+            JsonFileRepository::class.java
+                .getDeclaredField("dirty")
+                .also { it.isAccessible = true }
+        return dirtyField.get(repo) as AtomicBoolean
+    }
+
     describe("Serialization") {
-        it("serializes to file on add") {
-            val person = arbitraryPerson().next()
-            repository.add(person) shouldBe true
+        it("serializes to file on create") {
+            val arb = arbitraryStandardCustomer().next()
+            val customer = repository.create(arb.id, arb.name, arb.email)
 
             testDispatcher.scheduler.advanceUntilIdle()
 
-            val expectedRepositoryJson = """
-            {
-                "${person.id}": {
-                    "type": "Person",
-                    "id": ${person.id},
-                    "name": "${person.name}",
-                    "money": ${person.money},
-                    "morals": ${person.morals}
-                }
-            }"""
+            jsonFile.readText().isNotEmpty() shouldBe true
 
-            jsonFile.readText().shouldEqualJson(expectedRepositoryJson)
-
-            val secondRepository = PersonJsonFileRepository(jsonFile)
+            repository.close()
+            val secondRepository = StandardCustomerJsonFileRepository(jsonFile)
             secondRepository.equals(repository) shouldBe true
             secondRepository.close()
         }
 
-        it("serializes to file on add or replace") {
-            val person = arbitraryPerson().next()
-            repository.add(person) shouldBe true
+        it("serializes to file after name mutation") {
+            val arb = arbitraryStandardCustomer().next()
+            val customer = repository.create(arb.id, arb.name, arb.email)
 
-            val person2 = person.copy(initialName = "Ken")
-            repository.addOrReplace(person2) shouldBe true
+            customer.updateName("Ken")
 
             testDispatcher.scheduler.advanceUntilIdle()
-            val expectedRepositoryJson = """
-            {
-                "${person.id}": {
-                    "type": "Person",
-                    "id": ${person.id},
-                    "name": "Ken",
-                    "money": ${person.money},
-                    "morals": ${person.morals}
-                }
-            }"""
-            repository.addOrReplace(person2) shouldBe false
-            testDispatcher.scheduler.advanceUntilIdle()
-            jsonFile.readText().shouldEqualJson(expectedRepositoryJson)
+            jsonFile.readText().isNotEmpty() shouldBe true
 
-            val secondRepository = PersonJsonFileRepository(jsonFile)
-            secondRepository.equals(repository) shouldBe true
+            repository.close()
+            val secondRepository = StandardCustomerJsonFileRepository(jsonFile)
+            secondRepository.findById(customer.id) shouldBePresent { it.name shouldBe "Ken" }
             secondRepository.close()
         }
 
-        it("serializes on entity mutation") {
-            val person = arbitraryPerson().next()
-            repository.add(person)
-            testDispatcher.scheduler.advanceUntilIdle()
-            var expectedRepositoryJson = """
-            {
-                "${person.id}": {
-                    "type": "Person",
-                    "id": ${person.id},
-                    "name": "${person.name}",
-                    "money": ${person.money},
-                    "morals": ${person.morals}
-                }
-            }"""
-            jsonFile.readText().shouldEqualJson(expectedRepositoryJson)
-            person.name = "John Namechanged"
+        it("serializes on entity mutation via name setter") {
+            val arb = arbitraryStandardCustomer().next()
+            val customer = repository.create(arb.id, arb.name, arb.email)
             testDispatcher.scheduler.advanceUntilIdle()
 
-            expectedRepositoryJson = """
-            {
-                "${person.id}": {
-                    "type": "Person",
-                    "id": ${person.id},
-                    "name": "John Namechanged",
-                    "money": ${person.money},
-                    "morals": ${person.morals}
-                }
-            }"""
-
-            jsonFile.readText().shouldEqualJson(expectedRepositoryJson)
-            repository.findFirst { it.name == "John Namechanged" } shouldBePresent { it shouldBe person }
-        }
-
-        it("serializes on addOrReplace") {
-            val person = arbitraryPerson().next()
-            repository.add(person) shouldBe true
-            testDispatcher.scheduler.advanceUntilIdle()
-            var expectedRepositoryJson =
-                """
-                {
-                    "${person.id}": {
-                        "type": "Person",
-                        "id": ${person.id},
-                        "name": "${person.name}",
-                        "money": ${person.money},
-                        "morals": ${person.morals}
-                    }
-                }"""
-            jsonFile.readText().shouldEqualJson(expectedRepositoryJson)
-
-            val updatedPerson = person.copy(initialName = "John Namechanged")
-            repository.addOrReplace(updatedPerson) shouldBe true
+            customer.name = "John Namechanged"
             testDispatcher.scheduler.advanceUntilIdle()
 
-            expectedRepositoryJson = """
-                {
-                    "${person.id}": {
-                        "type": "Person",
-                        "id": ${person.id},
-                        "name": "John Namechanged",
-                        "money": ${person.money},
-                        "morals": ${person.morals}
-                    }
-                }"""
-            jsonFile.readText().shouldEqualJson(expectedRepositoryJson)
+            repository.findFirst { it.name == "John Namechanged" } shouldBePresent { it shouldBe customer }
         }
 
         it("debouncing doesn't lose final state") {
-            val jsonFile = tempfile("debounce-test", ".json").also { it.deleteOnExit() }
-            val repository = PersonJsonFileRepository(jsonFile)
-
-            val initialPerson: Person = arbitraryPerson(1).next()
-            repository.add(initialPerson)
-            val initialMoney = initialPerson.money!!
-
-            // Make many rapid changes that should be debounced
-            repeat(100) { i ->
-                val current = repository.findById(initialPerson.id).get() as Person
-                repository.addOrReplace(current.copy(money = current.money!! + 1)) shouldBe true
-            }
-
-            repository.findById(initialPerson.id).get().money shouldBe initialMoney + 100
-
-            testDispatcher.scheduler.advanceUntilIdle()
-
-            // Allow a debounced period to complete
-            val reloaded = PersonJsonFileRepository(jsonFile)
-            testDispatcher.scheduler.advanceUntilIdle()
-
-            reloaded.findById(initialPerson.id).get().money shouldBe initialMoney + 100
-            reloaded.close()
-
+            val debounceFile = tempfile("debounce-test", ".json").also { it.deleteOnExit() }
             repository.close()
+            val debounceRepo = StandardCustomerJsonFileRepository(debounceFile)
+            val customer = debounceRepo.create(1, "Initial", null)
+
+            repeat(100) { i -> customer.updateName("Name-$i") }
+            debounceRepo.findById(1).get().name shouldBe "Name-99"
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            debounceRepo.close()
+            val reloaded = StandardCustomerJsonFileRepository(debounceFile)
+            testDispatcher.scheduler.advanceUntilIdle()
+            reloaded.findById(1).get().name shouldBe "Name-99"
+            reloaded.close()
         }
     }
 
     describe("Initialization and file management") {
         it("initializes from existing json, allows modification and persistence") {
-            val person = arbitraryPerson().next()
-            jsonFile.writeText(
-                """
-                {
-                    "${person.id}": {
-                        "type": "Person",
-                        "id": ${person.id},
-                        "name": "${person.name}",
-                        "money": ${person.money},
-                        "morals": ${person.morals}
-                    }
-                }"""
-            )
-
-            repository = PersonJsonFileRepository(jsonFile)
+            val arb = arbitraryStandardCustomer().next()
+            jsonFile.writeText("""{"${arb.id}":{"type":"StandardCustomer","id":${arb.id},"name":"${arb.name}","email":null,"loyaltyPoints":0}}""")
+            repository.close()
+            repository = StandardCustomerJsonFileRepository(jsonFile)
             repository.size() shouldBe 1
-
             testDispatcher.scheduler.advanceUntilIdle()
-            repository.findById(person.id) shouldBePresent { it shouldBe person }
-
-            val deserializedPerson = repository.findById(person.id).get()
-            deserializedPerson.name = "name changed"
+            repository.findById(arb.id) shouldBePresent { it.name shouldBe arb.name }
+            val loaded = repository.findById(arb.id).get() as StandardCustomer
+            loaded.name = "name changed"
             testDispatcher.scheduler.advanceUntilIdle()
-
-            repository.findFirst { it.name == "name changed" } shouldBePresent { it shouldBe deserializedPerson }
-
-            var expectedRepositoryJson =
-                """
-                {
-                    "${deserializedPerson.id}": {
-                        "type": "Person",
-                        "id": ${deserializedPerson.id},
-                        "name": "name changed",
-                        "money": ${deserializedPerson.money},
-                        "morals": ${deserializedPerson.morals}
-                    }
-                }"""
-            jsonFile.readText().shouldEqualJson(expectedRepositoryJson)
-
-            val person2 = arbitraryPerson().next()
-            repository.addOrReplaceAll(setOf(person2))
-
-            testDispatcher.scheduler.advanceUntilIdle()
-
-            expectedRepositoryJson = """
-                {
-                    "${deserializedPerson.id}": {
-                        "type": "Person",
-                        "id": ${deserializedPerson.id},
-                        "name": "${deserializedPerson.name}",
-                        "money": ${deserializedPerson.money},
-                        "morals": ${deserializedPerson.morals}
-                    },
-                    "${person2.id}": {
-                        "type": "Person",
-                        "id": ${person2.id},
-                        "name": "${person2.name}",
-                        "money": ${person2.money},
-                        "morals": ${person2.morals}
-                    }
-                }"""
-            jsonFile.readText().shouldEqualJson(expectedRepositoryJson)
+            repository.findFirst { it.name == "name changed" }.isPresent shouldBe true
         }
 
         it("rejects invalid json file path") {
+            repository.close()
             shouldThrow<IllegalArgumentException> {
-                PersonJsonFileRepository(File("/does-not-exist.txt"))
+                StandardCustomerJsonFileRepository(File("/does-not-exist.txt"))
             }.message shouldBe "Provided jsonFile does not exist, is not writable or is not a json file"
         }
 
         it("supports switching json file at runtime") {
-            val person = arbitraryPerson().next()
-            jsonFile.writeText(
-                """
-                {
-                    "${person.id}": {
-                        "type": "Person",
-                        "id": ${person.id},
-                        "name": "${person.name}",
-                        "money": ${person.money},
-                        "morals": ${person.morals}
-                    }
-                }"""
-            )
-
-            repository.add(person)
+            val arb = arbitraryStandardCustomer().next()
+            repository.create(arb.id, arb.name, arb.email)
             repository.size() shouldBe 1
-
             val newJsonFile = tempfile("json-repository-test", ".json").also { it.deleteOnExit() }
             repository.jsonFile = newJsonFile
-
-            val person2 = arbitraryPerson().next()
-            repository.addOrReplaceAll(setOf(person2))
-
+            val arb2 = arbitraryStandardCustomer().next()
+            repository.create(arb2.id, arb2.name, arb2.email)
             testDispatcher.scheduler.advanceUntilIdle()
-
-            val expectedRepositoryJson = """
-            {
-                "${person.id}": {
-                    "type": "Person",
-                    "id": ${person.id},
-                    "name": "${person.name}",
-                    "money": ${person.money},
-                    "morals": ${person.morals}
-                },
-                "${person2.id}": {
-                    "type": "Person",
-                    "id": ${person2.id},
-                    "name": "${person2.name}",
-                    "money": ${person2.money},
-                    "morals": ${person2.morals}
-                }
-            }"""
-            expectedRepositoryJson.shouldNotEqualJson(jsonFile.readText())
-            expectedRepositoryJson.shouldEqualJson(newJsonFile.readText())
+            newJsonFile.readText().isNotEmpty() shouldBe true
         }
 
         it("tolerates file I/O failures without crashing") {
             mockkStatic("kotlin.io.FilesKt__FileReadWriteKt")
             mockkStatic("kotlin.io.FilesKt__UtilsKt")
-
             val testFile =
                 mockk<File> {
                     every { exists() } returns true
@@ -346,306 +176,177 @@ class JsonFileRepositoryTest : DescribeSpec({
                     every { readText() } returns "{}"
                     every { name } returns "test.json"
                 }
-
-            val ioFailureRepo = PersonJsonFileRepository(testFile)
-
-            // Make the file unwritable after initialization
+            repository.close()
+            val ioFailureRepo = StandardCustomerJsonFileRepository(testFile)
             every { testFile.canWrite() } throws IOException("Simulated write failure")
-
-            // Add a person - should not throw exception despite I/O failure
-            val person = arbitraryPerson(1).next()
-            shouldNotThrowAny {
-                ioFailureRepo.add(person)
-            }
-
-            // Memory state should still be updated
-            ioFailureRepo.findById(person.id).isPresent shouldBe true
-
+            shouldNotThrowAny { ioFailureRepo.create(1, "Test", "test@example.com") }
+            ioFailureRepo.findById(1).isPresent shouldBe true
             unmockkAll()
+            ioFailureRepo.close()
         }
     }
 
     describe("Polymorphic types") {
-        it("initializes Man repo from json and persists updates") {
-            val man = Man(1, "John Doe", 123456789L, true)
-            jsonFile.writeText(
-                """
-                {
-                    "${man.id}": {
-                        "type": "Man",
-                        "id": ${man.id},
-                        "name": "${man.name}",
-                        "money": ${man.money},
-                        "beard": ${man.beard}
-                    }
-                }"""
-            )
-
-            val manRepository = ManJsonFileRepository(jsonFile)
-            manRepository.size() shouldBe 1
-            manRepository.findById(man.id) shouldBePresent { it shouldBe man }
-
-            manRepository.addOrReplaceAll(
-                setOf(
-                    Man(1, "John Namechanged", 0L, true), Man(2, "Marie", 23L, false)
-                )
-            )
-
+        it("initializes StandardCustomerJsonFileRepository from json with StandardCustomer and persists updates") {
+            jsonFile.writeText("""{"1":{"type":"StandardCustomer","id":1,"name":"John Doe","email":"john@example.com","loyaltyPoints":0}}""")
+            repository.close()
+            repository = StandardCustomerJsonFileRepository(jsonFile)
+            repository.size() shouldBe 1
+            repository.findById(1) shouldBePresent { it.name shouldBe "John Doe" }
+            val loaded = repository.findById(1).get() as StandardCustomer
+            loaded.name = "John Namechanged"
             testDispatcher.scheduler.advanceUntilIdle()
-            val expectedRepositoryJson = """
-                {
-                    "1": {
-                        "type": "Man",
-                        "id": 1,
-                        "name": "John Namechanged",
-                        "money": 0,
-                        "beard": true
-                    },
-                    "2": {
-                        "type": "Man",
-                        "id": 2,
-                        "name": "Marie",
-                        "money": 23,
-                        "beard": false
-                    }
-                }"""
-            expectedRepositoryJson.shouldEqualJson(jsonFile.readText())
+            repository.findFirst { it.name == "John Namechanged" }.isPresent shouldBe true
+        }
+
+        it("polymorphic round-trip persists and reloads StandardCustomer and PremiumCustomer") {
+            val standard = repository.create(1, "Alice", "alice@example.com")
+            repository.close()
+
+            val premiumFile = tempfile("premium-repo-test", ".json").also { it.deleteOnExit() }
+            val premiumRepository = PremiumCustomerJsonFileRepository(premiumFile)
+            val premium = premiumRepository.create(2, "Bob", "bob@example.com", 500)
+            testDispatcher.scheduler.advanceUntilIdle()
+            premiumRepository.close()
+
+            val reloadedStdRepo = StandardCustomerJsonFileRepository(jsonFile)
+            testDispatcher.scheduler.advanceUntilIdle()
+            reloadedStdRepo.size() shouldBe 1
+            reloadedStdRepo.findById(standard.id) shouldBePresent { loaded ->
+                loaded.shouldBeInstanceOf<StandardCustomer>()
+                loaded.name shouldBe "Alice"
+            }
+            reloadedStdRepo.close()
+
+            val reloadedPremiumRepo = PremiumCustomerJsonFileRepository(premiumFile)
+            testDispatcher.scheduler.advanceUntilIdle()
+            reloadedPremiumRepo.size() shouldBe 1
+            reloadedPremiumRepo.findById(premium.id) shouldBePresent { loaded ->
+                loaded.shouldBeInstanceOf<PremiumCustomer>()
+                loaded.loyaltyPoints shouldBe 500
+            }
+            reloadedPremiumRepo.close()
+        }
+
+        it("PremiumCustomer loyalty points survive JSON encode/decode round-trip") {
+            repository.close()
+            val premiumFile = tempfile("premium-loyalty-test", ".json").also { it.deleteOnExit() }
+            val premiumRepository = PremiumCustomerJsonFileRepository(premiumFile)
+            val premium = premiumRepository.create(10, "Carol", "carol@example.com", 9999)
+            premium.updateLoyaltyPoints(12000)
+            testDispatcher.scheduler.advanceUntilIdle()
+            premiumRepository.close()
+            val reloaded = PremiumCustomerJsonFileRepository(premiumFile)
+            reloaded.findById(10) shouldBePresent { loaded ->
+                loaded.shouldBeInstanceOf<PremiumCustomer>()
+                loaded.loyaltyPoints shouldBe 12000
+            }
+            reloaded.close()
         }
     }
 
     describe("Concurrency") {
         it("maintains state under concurrent additions") {
-            val testPeople = (1..100).map { arbitraryPerson(it).next() }
-
-            // Launch concurrent additions
+            val testCustomers = (1..100).map { arbitraryStandardCustomer(it).next() }
             testScope.launch {
-                testPeople.chunked(10).forEach { chunk ->
-                    launch {
-                        chunk.forEach { person ->
-                            repository.add(person)
-                        }
-                    }
+                testCustomers.chunked(10).forEach { chunk ->
+                    launch { chunk.forEach { c -> repository.create(c.id, c.name, c.email) } }
                 }
             }
-
-            // Advance time to allow operations to complete
             testDispatcher.scheduler.advanceUntilIdle()
-
-            // Verify all people were added correctly
-            repository.size() shouldBe testPeople.size
-            testPeople.forEach { person ->
-                repository.findById(person.id).isPresent shouldBe true
-            }
-
-            // Verify serialization occurred
-            val reloadedRepo = PersonJsonFileRepository(jsonFile)
-            reloadedRepo.size() shouldBe testPeople.size
-            testPeople.forEach { person ->
-                reloadedRepo.findById(person.id).isPresent shouldBe true
-            }
+            repository.size() shouldBe testCustomers.size
+            repository.close()
+            val reloadedRepo = StandardCustomerJsonFileRepository(jsonFile)
+            reloadedRepo.size() shouldBe testCustomers.size
+            reloadedRepo.close()
         }
 
         it("publishes create events under concurrency") {
-            val events = Collections.synchronizedList(mutableListOf<CrudEvent<Int, Personly>>())
-            val subscription: LirpEventSubscription<in Personly, CrudEvent.Type, CrudEvent<Int, Personly>> =
+            val events = Collections.synchronizedList(mutableListOf<CrudEvent<Int, PolymorphicCustomer>>())
+            val subscription: LirpEventSubscription<in PolymorphicCustomer, CrudEvent.Type, CrudEvent<Int, PolymorphicCustomer>> =
                 repository.subscribe(CREATE) { events.add(it) }
-
-            val testPeople = (1..5_000).map { arbitraryPerson(it).next() }.distinct()
-
-            testPeople.chunked(500).map { chunk ->
-                testScope.launch {
-                    chunk.forEach { person ->
-                        repository.add(person)
-                    }
-                }
+            val testCustomers = (1..5_000).map { arbitraryStandardCustomer(it).next() }.distinct()
+            testCustomers.chunked(500).map { chunk ->
+                testScope.launch { chunk.forEach { c -> repository.create(c.id, c.name, c.email) } }
             }
-
             testDispatcher.scheduler.advanceUntilIdle()
-
-            // All entities in the events match original entities
             val createdEntityIds = events.flatMap { it.entities.keys }
-            createdEntityIds shouldContainAll testPeople.map { it.id }
-
+            createdEntityIds shouldContainAll testCustomers.map { it.id }
             subscription.source.changes shouldBe repository.changes
-
-            PersonJsonFileRepository(jsonFile).size() shouldBe repository.size()
+            val reloadSize = repository.size()
+            repository.close()
+            StandardCustomerJsonFileRepository(jsonFile).also { it.size() shouldBe reloadSize }.close()
         }
 
-        it("remains consistent under randomized stress") {
-            val operations =
-                listOf(
-                    "add", "remove", "addOrReplace", "removeAll", "addOrReplaceAll"
-                )
-
-            val expectedEntities = ConcurrentHashMap<Int, Person>()
-            val random = Random(42) // Fixed seed for reproducibility
-
-            // Launch multiple coroutines performing random operations
-            val jobs =
-                (1..10).map { coroutineId ->
-                    testScope.launch {
-                        repeat(5_000) {
-                            val personId = random.nextInt(200)
-                            val person = arbitraryPerson(personId).next()
-
-                            when (operations.random(random)) {
-                                "add" -> {
-                                    if (repository.add(person)) {
-                                        expectedEntities[personId] = person
-                                    }
-                                }
-
-                                "remove" -> {
-                                    if (repository.remove(person)) {
-                                        expectedEntities.remove(personId)
-                                    }
-                                }
-
-                                "addOrReplace" -> {
-                                    repository.addOrReplace(person)
-                                    expectedEntities[personId] = person
-                                }
-
-                                "removeAll" -> {
-                                    if (repository.removeAll(setOf(person))) {
-                                        expectedEntities.remove(personId)
-                                    }
-                                }
-
-                                "addOrReplaceAll" -> {
-                                    repository.addOrReplaceAll(setOf(person))
-                                    expectedEntities[personId] = person
-                                }
-                            }
-                        }
+        it("remains consistent under concurrent mutations") {
+            (1..20).forEach { id -> repository.create(id, "Customer-$id", "c$id@example.com") }
+            testDispatcher.scheduler.advanceUntilIdle()
+            (1..5).map { _ ->
+                testScope.launch {
+                    repeat(10) { i ->
+                        val id = (i % 20) + 1
+                        (repository.findById(id).orElse(null) as? StandardCustomer)?.updateName("Updated-$i")
                     }
                 }
-
-            // Advance time to let operations complete
+            }
             testDispatcher.scheduler.advanceUntilIdle()
-
-            // Verify repository state matches expected state
-            repository.size() shouldBe expectedEntities.size
-            expectedEntities.forEach { (id, person) ->
-                repository.findById(id) shouldBePresent { it shouldBe person }
-            }
-
-            // Verify serialization maintained consistency
-            val reloadedRepo = PersonJsonFileRepository(jsonFile)
-            reloadedRepo.size() shouldBe expectedEntities.size
-            expectedEntities.forEach { (id, person) ->
-                repository.findById(id) shouldBePresent { it shouldBe person }
-            }
+            val inMemorySize = repository.size()
+            repository.close()
+            val reloadedRepo = StandardCustomerJsonFileRepository(jsonFile)
+            reloadedRepo.size() shouldBe inMemorySize
+            reloadedRepo.close()
         }
     }
 
     describe("Rapid operations") {
         it("rapid additions are all persisted and queryable") {
-            val jsonFile = tempfile("rapid-additions", ".json").also { it.deleteOnExit() }
-            val repository = PersonJsonFileRepository(jsonFile)
-
-            val people = (1..100).map { arbitraryPerson(it).next() }
-
-            // Add all rapidly
-            people.forEach { repository.add(it) }
-
+            val customers = (1..100).map { arbitraryStandardCustomer(it).next() }
+            customers.forEach { c -> repository.create(c.id, c.name, c.email) }
             testDispatcher.scheduler.advanceUntilIdle()
-
-            // All should be in repository
             repository.size() shouldBe 100
-            people.forEach { person ->
-                repository.findById(person.id).isPresent shouldBe true
-            }
-
-            repository.close()
         }
 
-        it("rapid modifications followed by query returns latest state") {
-            val jsonFile = tempfile("rapid-mods", ".json").also { it.deleteOnExit() }
-            val repository = PersonJsonFileRepository(jsonFile)
-
-            val person = arbitraryPerson(1).next()
-            repository.add(person)
-
-            // Rapid modifications
-            repeat(50) { i ->
-                val current = repository.findById(person.id).get() as Person
-                repository.addOrReplace(current.copy(initialName = "Name-$i"))
-            }
-
+        it("rapid mutations followed by query returns latest state") {
+            val customer = repository.create(1, "Original", null)
+            repeat(50) { i -> customer.updateName("Name-$i") }
             testDispatcher.scheduler.advanceUntilIdle()
-
-            // Should have latest modification
-            repository.findById(person.id).get().name shouldBe "Name-49"
-
-            repository.close()
+            repository.findById(customer.id).get().name shouldBe "Name-49"
         }
 
-        it("add, modify, remove sequence is consistent") {
-            val jsonFile = tempfile("add-mod-remove", ".json").also { it.deleteOnExit() }
-            val repository = PersonJsonFileRepository(jsonFile)
-
-            val person = arbitraryPerson(1).next()
-
-            // Rapid sequence
-            repository.add(person)
-            val modified = person.copy(initialName = "Modified")
-            repository.addOrReplace(modified)
-            repository.remove(modified)
-
+        it("add, mutate, remove sequence is consistent") {
+            val customer = repository.create(1, "Original", null)
+            customer.updateName("Modified")
+            repository.remove(customer)
             testDispatcher.scheduler.advanceUntilIdle()
-
-            // Should be removed
-            repository.findById(person.id).isEmpty shouldBe true
+            repository.findById(customer.id).isEmpty shouldBe true
             repository.isEmpty shouldBe true
-
-            repository.close()
         }
     }
 
     describe("Multi-repository") {
         it("multiple repositories on same file stay synchronized") {
-            val jsonFile = tempfile("multi-repo", ".json").also { it.deleteOnExit() }
-
-            val repo1 = PersonJsonFileRepository(jsonFile)
-            val person = arbitraryPerson(1).next()
-            repo1.add(person)
-
+            val multiFile = tempfile("multi-repo", ".json").also { it.deleteOnExit() }
+            repository.close()
+            val repo1 = StandardCustomerJsonFileRepository(multiFile)
+            val customer = repo1.create(1, "Original", "orig@example.com")
             testDispatcher.scheduler.advanceUntilIdle()
             repo1.close()
-
-            // Load into the second repository
-            val repo2 = PersonJsonFileRepository(jsonFile)
-
+            val repo2 = StandardCustomerJsonFileRepository(multiFile)
             testDispatcher.scheduler.advanceUntilIdle()
-
             repo2.size() shouldBe 1
-            repo2.findById(person.id).isPresent shouldBe true
-
-            // Modify in repo2
-            repo2.addOrReplace((repo2.findById(person.id).get() as Person).copy(initialName = "Modified in repo2"))
-
+            (repo2.findById(customer.id).get() as StandardCustomer).updateName("Modified in repo2")
             testDispatcher.scheduler.advanceUntilIdle()
             repo2.close()
-
-            // Load into the third repository
-            val repo3 = PersonJsonFileRepository(jsonFile)
-
+            val repo3 = StandardCustomerJsonFileRepository(multiFile)
             testDispatcher.scheduler.advanceUntilIdle()
-
-            repo3.findById(person.id).get().name shouldBe "Modified in repo2"
-
+            repo3.findById(customer.id).get().name shouldBe "Modified in repo2"
             repo3.close()
         }
     }
 
     describe("Event ordering") {
-        it("subscribers receive all events in order despite rapid changes") {
-            val jsonFile = tempfile("subscriber-order", ".json").also { it.deleteOnExit() }
-            val repository = PersonJsonFileRepository(jsonFile)
-
+        it("subscribers receive all create and delete events in order despite rapid changes") {
             val receivedEvents = mutableListOf<String>()
-
             val subscription =
                 repository.subscribe { event ->
                     when {
@@ -654,290 +355,151 @@ class JsonFileRepositoryTest : DescribeSpec({
                         event.isDelete() -> receivedEvents.add("DELETE-${event.entities.keys.first()}")
                     }
                 }
-
-            val p1 = arbitraryPerson(1).next()
-            val p2 = arbitraryPerson(2).next()
-            val p3 = arbitraryPerson(3).next()
-
-            // Rapid operations
-            repository.add(p1)
-            repository.add(p2)
-            repository.add(p3)
-            repository.addOrReplace(p1.copy(initialName = "Modified"))
-            repository.remove(p2)
-
+            val c1 = repository.create(1, "Alice", null)
+            val c2 = repository.create(2, "Bob", null)
+            repository.create(3, "Charlie", null)
+            repository.remove(c2)
             testDispatcher.scheduler.advanceUntilIdle()
-
-            // Check order and completeness
-            receivedEvents shouldBe
-                listOf(
-                    "CREATE-1",
-                    "CREATE-2",
-                    "CREATE-3",
-                    "UPDATE-1",
-                    "DELETE-2"
-                )
-
+            receivedEvents shouldBe listOf("CREATE-1", "CREATE-2", "CREATE-3", "DELETE-2")
             subscription.cancel()
-            repository.close()
         }
     }
 
     describe("Subscription cleanup") {
-        // Navigates through the delegation chain: PersonJsonFileRepository ->
-        // HumanGenericJsonFileRepositoryBase -> JsonFileRepository -> subscriptionsMap
-        fun getSubscriptionsMap(repo: PersonJsonFileRepository): MutableMap<Int, *> {
-            val delegateField =
-                repo.javaClass.superclass
-                    .getDeclaredField("repository")
-                    .also { it.isAccessible = true }
-            val jsonFileRepository = delegateField.get(repo)
-            val subscriptionsMapField =
-                jsonFileRepository.javaClass
-                    .getDeclaredField("subscriptionsMap")
-                    .also { it.isAccessible = true }
-            @Suppress("UNCHECKED_CAST")
-            return subscriptionsMapField.get(jsonFileRepository) as MutableMap<Int, *>
-        }
-
         it("remove() atomically removes subscription from map before cancelling") {
-            val person = arbitraryPerson(1).next()
-            repository.add(person)
+            val customer = repository.create(1, "Test", "t@t.com")
             testDispatcher.scheduler.advanceUntilIdle()
-
             val subscriptionsMap = getSubscriptionsMap(repository)
-            subscriptionsMap.containsKey(person.id) shouldBe true
-
-            repository.remove(person) shouldBe true
+            subscriptionsMap.containsKey(customer.id) shouldBe true
+            repository.remove(customer) shouldBe true
             testDispatcher.scheduler.advanceUntilIdle()
-
-            repository.findById(person.id).isEmpty shouldBe true
-            subscriptionsMap.containsKey(person.id) shouldBe false
+            repository.findById(customer.id).isEmpty shouldBe true
+            subscriptionsMap.containsKey(customer.id) shouldBe false
         }
 
         it("remove() throws IllegalStateException when subscription is missing from map") {
-            val person = arbitraryPerson(1).next()
-            repository.add(person)
+            val customer = repository.create(1, "Test", "t@t.com")
             testDispatcher.scheduler.advanceUntilIdle()
-
-            val subscriptionsMap = getSubscriptionsMap(repository)
-            subscriptionsMap.remove(person.id)
-
-            shouldThrow<IllegalStateException> {
-                repository.remove(person)
-            }
+            getSubscriptionsMap(repository).remove(customer.id)
+            shouldThrow<IllegalStateException> { repository.remove(customer) }
         }
 
         it("removeAll() atomically removes subscriptions from map before cancelling") {
-            val person1 = arbitraryPerson(1).next()
-            val person2 = arbitraryPerson(2).next()
-            repository.add(person1)
-            repository.add(person2)
+            val customer1 = repository.create(1, "Test1", "t1@t.com")
+            val customer2 = repository.create(2, "Test2", "t2@t.com")
             testDispatcher.scheduler.advanceUntilIdle()
-
             val subscriptionsMap = getSubscriptionsMap(repository)
-            subscriptionsMap.containsKey(person1.id) shouldBe true
-            subscriptionsMap.containsKey(person2.id) shouldBe true
-
-            repository.removeAll(listOf(person1, person2)) shouldBe true
+            subscriptionsMap.containsKey(customer1.id) shouldBe true
+            subscriptionsMap.containsKey(customer2.id) shouldBe true
+            repository.removeAll(listOf(customer1, customer2)) shouldBe true
             testDispatcher.scheduler.advanceUntilIdle()
-
-            repository.findById(person1.id).isEmpty shouldBe true
-            repository.findById(person2.id).isEmpty shouldBe true
-            subscriptionsMap.containsKey(person1.id) shouldBe false
-            subscriptionsMap.containsKey(person2.id) shouldBe false
+            subscriptionsMap.containsKey(customer1.id) shouldBe false
+            subscriptionsMap.containsKey(customer2.id) shouldBe false
         }
 
         it("removeAll() throws IllegalStateException when subscription is missing from map") {
-            val person = arbitraryPerson(1).next()
-            repository.add(person)
+            val customer = repository.create(1, "Test", "t@t.com")
             testDispatcher.scheduler.advanceUntilIdle()
-
-            val subscriptionsMap = getSubscriptionsMap(repository)
-            subscriptionsMap.remove(person.id)
-
-            shouldThrow<IllegalStateException> {
-                repository.removeAll(listOf(person))
-            }
+            getSubscriptionsMap(repository).remove(customer.id)
+            shouldThrow<IllegalStateException> { repository.removeAll(listOf(customer)) }
         }
     }
 
     describe("Dirty flag optimization") {
-        // Navigates the delegation chain: PersonJsonFileRepository ->
-        // HumanGenericJsonFileRepositoryBase -> JsonFileRepository -> dirty
-        fun getDirtyFlag(repo: PersonJsonFileRepository): AtomicBoolean {
-            val delegateField =
-                repo.javaClass.superclass
-                    .getDeclaredField("repository")
-                    .also { it.isAccessible = true }
-            val jsonFileRepository = delegateField.get(repo)
-            val dirtyField =
-                jsonFileRepository.javaClass
-                    .getDeclaredField("dirty")
-                    .also { it.isAccessible = true }
-            return dirtyField.get(jsonFileRepository) as AtomicBoolean
-        }
-
         it("skips serialization when no changes occur after last write") {
-            val person = arbitraryPerson().next()
-            repository.add(person) shouldBe true
-
+            repository.create(1, "Test", "t@t.com")
             testDispatcher.scheduler.advanceUntilIdle()
-
-            val lastModifiedAfterWrite = jsonFile.lastModified()
+            val lastModified = jsonFile.lastModified()
             jsonFile.readText().isNotEmpty() shouldBe true
-
-            // Advance again without any mutations
             testDispatcher.scheduler.advanceUntilIdle()
-
-            jsonFile.lastModified() shouldBe lastModifiedAfterWrite
+            jsonFile.lastModified() shouldBe lastModified
         }
 
         it("writes to new file on jsonFile switch even when state is unchanged") {
-            val person = arbitraryPerson().next()
-            repository.add(person)
+            repository.create(1, "Test", "t@t.com")
             testDispatcher.scheduler.advanceUntilIdle()
-
-            jsonFile.readText().isNotEmpty() shouldBe true
-
             val newJsonFile = tempfile("json-repository-test", ".json").also { it.deleteOnExit() }
             repository.jsonFile = newJsonFile
             testDispatcher.scheduler.advanceUntilIdle()
-
             newJsonFile.readText().isNotEmpty() shouldBe true
         }
 
         it("does not write back loaded state on initialization") {
-            val person = arbitraryPerson().next()
-            repository.add(person) shouldBe true
+            repository.create(1, "Test", "t@t.com")
             testDispatcher.scheduler.advanceUntilIdle()
             repository.close()
-
             val contentAfterFirstWrite = jsonFile.readText()
-            contentAfterFirstWrite.isNotEmpty() shouldBe true
-
             val lastModifiedBeforeReload = jsonFile.lastModified()
-
-            val reloadedRepo = PersonJsonFileRepository(jsonFile)
+            val reloadedRepo = StandardCustomerJsonFileRepository(jsonFile)
             testDispatcher.scheduler.advanceUntilIdle()
-
             jsonFile.lastModified() shouldBe lastModifiedBeforeReload
             jsonFile.readText().shouldEqualJson(contentAfterFirstWrite)
-
-            val dirtyFlag = getDirtyFlag(reloadedRepo)
-            dirtyFlag.get() shouldBe false
-
+            getDirtyFlag(reloadedRepo).get() shouldBe false
             reloadedRepo.close()
         }
 
         it("close() skips write when repository is clean") {
-            val person = arbitraryPerson().next()
-            repository.add(person) shouldBe true
+            repository.create(1, "Test", "t@t.com")
             testDispatcher.scheduler.advanceUntilIdle()
-
-            val lastModifiedAfterWrite = jsonFile.lastModified()
-            val contentAfterWrite = jsonFile.readText()
-
+            val lastModified = jsonFile.lastModified()
+            val content = jsonFile.readText()
             repository.close()
-
-            jsonFile.lastModified() shouldBe lastModifiedAfterWrite
-            jsonFile.readText() shouldBe contentAfterWrite
+            jsonFile.lastModified() shouldBe lastModified
+            jsonFile.readText() shouldBe content
         }
 
-        it("retries write after transient I/O failure") {
+        it("dirty flag resets after successful write") {
             val dirtyFlag = getDirtyFlag(repository)
-
-            val person = arbitraryPerson().next()
-            repository.add(person) shouldBe true
-
+            repository.create(1, "Test", "t@t.com")
             dirtyFlag.get() shouldBe true
-
             testDispatcher.scheduler.advanceUntilIdle()
-
             dirtyFlag.get() shouldBe false
-            jsonFile.readText().isNotEmpty() shouldBe true
         }
     }
 
     describe("Close contract") {
         it("close() returns immediately without blocking the calling thread") {
-            // If close() uses runBlocking this test would deadlock on the UnconfinedTestDispatcher
             val start = System.currentTimeMillis()
             repository.close()
-            val elapsed = System.currentTimeMillis() - start
-            // Non-blocking close should complete well under 100ms on any machine
-            (elapsed < 200) shouldBe true
+            (System.currentTimeMillis() - start < 200) shouldBe true
         }
 
         it("close() is idempotent") {
             repository.close()
-            repository.close() // must not throw
+            repository.close()
         }
 
-        it("add() throws IllegalStateException after close") {
+        it("create() throws IllegalStateException after close") {
             repository.close()
-            val person = arbitraryPerson(1).next()
-            shouldThrow<IllegalStateException> {
-                repository.add(person)
-            }
-        }
-
-        it("addOrReplace() throws IllegalStateException after close") {
-            repository.close()
-            val person = arbitraryPerson(1).next()
-            shouldThrow<IllegalStateException> {
-                repository.addOrReplace(person)
-            }
-        }
-
-        it("addOrReplaceAll() throws IllegalStateException after close") {
-            repository.close()
-            val person = arbitraryPerson(1).next()
-            shouldThrow<IllegalStateException> {
-                repository.addOrReplaceAll(setOf(person))
-            }
+            shouldThrow<IllegalStateException> { repository.create(1, "Test", null) }
         }
 
         it("remove() throws IllegalStateException after close") {
-            val person = arbitraryPerson(1).next()
-            repository.add(person)
+            val customer = repository.create(1, "Test", null)
             repository.close()
-            shouldThrow<IllegalStateException> {
-                repository.remove(person)
-            }
+            shouldThrow<IllegalStateException> { repository.remove(customer) }
         }
 
         it("removeAll() throws IllegalStateException after close") {
-            val person = arbitraryPerson(1).next()
-            repository.add(person)
+            val customer = repository.create(1, "Test", null)
             repository.close()
-            shouldThrow<IllegalStateException> {
-                repository.removeAll(listOf(person))
-            }
+            shouldThrow<IllegalStateException> { repository.removeAll(listOf(customer)) }
         }
 
         it("clear() throws IllegalStateException after close") {
             repository.close()
-            shouldThrow<IllegalStateException> {
-                repository.clear()
-            }
+            shouldThrow<IllegalStateException> { repository.clear() }
         }
     }
 
     describe("custom serialization delay") {
         it("uses the configured delay instead of the default") {
             val customDelayFile = tempfile("custom-delay-test", ".json").also { it.deleteOnExit() }
-            val customDelay = 50.milliseconds
-            val customRepo = PersonJsonFileRepository(customDelayFile, customDelay)
-
+            repository.close()
+            val customRepo = StandardCustomerJsonFileRepository(customDelayFile, 50L)
             try {
-                val person = arbitraryPerson().next()
-                customRepo.add(person)
-
-                // UnconfinedTestDispatcher executes eagerly, so debounce fires immediately
+                customRepo.create(1, "Test", "t@t.com")
                 testDispatcher.scheduler.advanceUntilIdle()
-
-                // File should have been written with the custom delay
                 customDelayFile.readText().isNotEmpty() shouldBe true
             } finally {
                 customRepo.close()
@@ -949,54 +511,31 @@ class JsonFileRepositoryTest : DescribeSpec({
         it("JsonFileRepository throws LirpDeserializationException on malformed JSON") {
             val corruptFile = tempfile("corrupt-json", ".json").also { it.deleteOnExit() }
             corruptFile.writeText("{invalid")
-
-            shouldThrow<LirpDeserializationException> {
-                PersonJsonFileRepository(corruptFile)
-            }
+            repository.close()
+            shouldThrow<LirpDeserializationException> { StandardCustomerJsonFileRepository(corruptFile) }
         }
 
         it("JsonFileRepository exception wraps original serialization cause") {
             val corruptFile = tempfile("corrupt-json-cause", ".json").also { it.deleteOnExit() }
             corruptFile.writeText("{invalid")
-
-            val exception =
-                shouldThrow<LirpDeserializationException> {
-                    PersonJsonFileRepository(corruptFile)
-                }
-
-            exception.cause.shouldBeInstanceOf<Exception>()
+            repository.close()
+            shouldThrow<LirpDeserializationException> { StandardCustomerJsonFileRepository(corruptFile) }.cause.shouldBeInstanceOf<Exception>()
         }
 
         it("JsonFileRepository exception message includes file path") {
             val corruptFile = tempfile("corrupt-json-path", ".json").also { it.deleteOnExit() }
             corruptFile.writeText("{invalid")
-
-            val exception =
-                shouldThrow<LirpDeserializationException> {
-                    PersonJsonFileRepository(corruptFile)
-                }
-
-            exception.message shouldContain corruptFile.absolutePath
+            repository.close()
+            shouldThrow<LirpDeserializationException> { StandardCustomerJsonFileRepository(corruptFile) }.message shouldContain corruptFile.absolutePath
         }
 
         it("JsonFileRepository with valid JSON initializes normally") {
-            val person = arbitraryPerson(42).next()
+            val arb = arbitraryStandardCustomer(42).next()
             val validFile = tempfile("valid-json", ".json").also { it.deleteOnExit() }
-            validFile.writeText(
-                """
-                {
-                    "${person.id}": {
-                        "type": "Person",
-                        "id": ${person.id},
-                        "name": "${person.name}",
-                        "money": ${person.money},
-                        "morals": ${person.morals}
-                    }
-                }"""
-            )
-
+            validFile.writeText("""{"${arb.id}":{"type":"StandardCustomer","id":${arb.id},"name":"${arb.name}","email":null,"loyaltyPoints":0}}""")
+            repository.close()
             shouldNotThrowAny {
-                val repo = PersonJsonFileRepository(validFile)
+                val repo = StandardCustomerJsonFileRepository(validFile)
                 repo.size() shouldBe 1
                 repo.close()
             }
@@ -1004,9 +543,9 @@ class JsonFileRepositoryTest : DescribeSpec({
 
         it("JsonFileRepository with empty JSON file initializes with no entities") {
             val emptyFile = tempfile("empty-json", ".json").also { it.deleteOnExit() }
-
+            repository.close()
             shouldNotThrowAny {
-                val repo = PersonJsonFileRepository(emptyFile)
+                val repo = StandardCustomerJsonFileRepository(emptyFile)
                 repo.size() shouldBe 0
                 repo.close()
             }

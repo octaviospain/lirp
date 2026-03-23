@@ -17,7 +17,6 @@
 
 package net.transgressoft.lirp
 
-import net.transgressoft.lirp.PersonVolatileRepo
 import net.transgressoft.lirp.entity.LazyTestEntity
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.FlowEventPublisher
@@ -26,14 +25,17 @@ import net.transgressoft.lirp.event.PublisherConfig
 import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.event.StandardCrudEvent.Create
 import net.transgressoft.lirp.event.TestEntity
+import net.transgressoft.lirp.persistence.Customer
+import net.transgressoft.lirp.persistence.CustomerVolatileRepo
 import net.transgressoft.lirp.persistence.LirpContext
+import net.transgressoft.lirp.persistence.json.PolymorphicCustomer
+import net.transgressoft.lirp.persistence.json.StandardCustomerJsonFileRepository
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.core.spec.style.DescribeSpec
 import io.kotest.engine.spec.tempfile
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
-import io.kotest.property.arbitrary.next
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
@@ -112,26 +114,26 @@ class IntegrationTest : DescribeSpec({
             val entityPoolSize = 100
 
             val ctx = LirpContext()
-            val repository = PersonVolatileRepo(ctx)
-            val personPool = (1..entityPoolSize).map { arbitraryPerson(it).next() }
+            val repository = CustomerVolatileRepo(ctx)
+            val customerPool = (1..entityPoolSize).map { Customer(it, "Customer-$it") }
 
             val jobs =
                 (1..coroutineCount).map { seed ->
                     testScope.launch {
                         val random = kotlin.random.Random(seed)
                         repeat(opsPerCoroutine) {
-                            val person = personPool[random.nextInt(personPool.size)]
+                            val customer = customerPool[random.nextInt(customerPool.size)]
                             when (random.nextInt(5)) {
-                                0 -> repository.create(person)
-                                1 -> repository.remove(person)
+                                0 -> repository.create(customer.id, customer.name)
+                                1 -> repository.remove(customer)
                                 2 -> {
-                                    repository.remove(person)
-                                    repository.create(person)
+                                    repository.remove(customer)
+                                    repository.create(customer.id, customer.name)
                                 }
                                 3 ->
-                                    personPool.shuffled(random).take(10).forEach { p ->
-                                        repository.remove(p)
-                                        repository.create(p)
+                                    customerPool.shuffled(random).take(10).forEach { c ->
+                                        repository.remove(c)
+                                        repository.create(c.id, c.name)
                                     }
                                 4 -> repository.clear()
                             }
@@ -152,18 +154,17 @@ class IntegrationTest : DescribeSpec({
     describe("JSON file corruption recovery") {
         it("survives file deletion mid-operation and continues with in-memory state intact") {
             val jsonFile = tempfile("corruption-test", ".json").also { it.deleteOnExit() }
-            val repository = PersonJsonFileRepository(jsonFile)
+            val ctx = LirpContext()
+            val repository = StandardCustomerJsonFileRepository(ctx, jsonFile)
 
-            val initialBatch = (1..20).map { arbitraryPerson(it).next() }
-            initialBatch.forEach { repository.add(it) }
+            (1..20).forEach { id -> repository.create(id, "Customer-$id", null) }
             testDispatcher.scheduler.advanceUntilIdle()
             repository.size() shouldBe 20
 
             jsonFile.delete()
 
             shouldNotThrowAny {
-                val secondBatch = (21..40).map { arbitraryPerson(it).next() }
-                secondBatch.forEach { repository.add(it) }
+                (21..40).forEach { id -> repository.create(id, "Customer-$id", null) }
             }
             testDispatcher.scheduler.advanceUntilIdle()
             repository.size() shouldBe 40
@@ -172,12 +173,12 @@ class IntegrationTest : DescribeSpec({
             jsonFile.writeText("{invalid json content")
 
             shouldNotThrowAny {
-                (41..50).forEach { repository.add(arbitraryPerson(it).next()) }
+                (41..50).forEach { id -> repository.create(id, "Customer-$id", null) }
             }
             testDispatcher.scheduler.advanceUntilIdle()
             repository.size() shouldBe 50
 
-            shouldNotThrowAny { repository.close() }
+            shouldNotThrowAny { ctx.close() }
         }
     }
 
@@ -228,20 +229,20 @@ class IntegrationTest : DescribeSpec({
     describe("Resource cleanup") {
         it("repository close() with multiple active subscriptions frees resources") {
             val jsonFile = tempfile("cleanup-test", ".json").also { it.deleteOnExit() }
-            val repository = PersonJsonFileRepository(jsonFile)
+            val ctx = LirpContext()
+            val repository = StandardCustomerJsonFileRepository(ctx, jsonFile)
             val entityCount = 20
             val subscribersPerEntity = 3
 
-            val repoEvents = Collections.synchronizedList(mutableListOf<CrudEvent<Int, Personly>>())
+            val repoEvents = Collections.synchronizedList(mutableListOf<CrudEvent<Int, PolymorphicCustomer>>())
             val repoSubscription = repository.subscribe { repoEvents.add(it) }
 
-            val persons = (1..entityCount).map { arbitraryPerson(it).next() }
-            persons.forEach { repository.add(it) }
+            val customers = (1..entityCount).map { id -> repository.create(id, "Customer-$id", null) }
 
             val entitySubscriptions =
-                persons.flatMap { person ->
+                customers.flatMap { customer ->
                     (1..subscribersPerEntity).map {
-                        person.subscribe { }
+                        customer.subscribe { }
                     }
                 }
             testDispatcher.scheduler.advanceUntilIdle()

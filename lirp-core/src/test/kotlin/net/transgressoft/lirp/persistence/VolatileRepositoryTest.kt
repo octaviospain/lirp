@@ -1,9 +1,5 @@
 package net.transgressoft.lirp.persistence
 
-import net.transgressoft.lirp.Person
-import net.transgressoft.lirp.PersonVolatileRepo
-import net.transgressoft.lirp.Personly
-import net.transgressoft.lirp.arbitraryPerson
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
 import net.transgressoft.lirp.event.CrudEvent.Type.DELETE
@@ -20,7 +16,9 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.property.Arb
 import io.kotest.property.arbitrary.next
+import io.kotest.property.arbitrary.positiveInt
 import io.kotest.property.arbitrary.set
+import io.kotest.property.arbitrary.stringPattern
 import io.kotest.property.checkAll
 import java.util.Optional
 import java.util.concurrent.atomic.AtomicInteger
@@ -28,13 +26,21 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
+private fun arbitraryCustomer(id: Int = -1) =
+    io.kotest.property.arbitrary.arbitrary {
+        Customer(
+            id = if (id == -1) Arb.positiveInt(500_000).bind() else id,
+            name = Arb.stringPattern("[a-z]{5} [a-z]{5}").bind()
+        )
+    }
+
 @ExperimentalCoroutinesApi
 internal class VolatileRepositoryTest : StringSpec({
 
-    class SomeClassSubscribedToEvents() : LirpEventSubscriberBase<Personly, CrudEvent.Type, CrudEvent<Int, Personly>>("Some Name") {
+    class SomeClassSubscribedToEvents() : LirpEventSubscriberBase<Customer, CrudEvent.Type, CrudEvent<Int, Customer>>("Some Name") {
         val createEventEntities = AtomicInteger(0)
         val deletedEventEntities = AtomicInteger(0)
-        val receivedEvents = mutableMapOf<EventType, CrudEvent<Int, Personly>>()
+        val receivedEvents = mutableMapOf<EventType, CrudEvent<Int, Customer>>()
 
         init {
             addOnNextEventAction(CREATE, UPDATE) { event ->
@@ -50,7 +56,7 @@ internal class VolatileRepositoryTest : StringSpec({
     }
 
     lateinit var ctx: LirpContext
-    lateinit var repository: PersonVolatileRepo
+    lateinit var repository: CustomerVolatileRepo
     lateinit var subscriber: SomeClassSubscribedToEvents
 
     val testDispatcher = UnconfinedTestDispatcher()
@@ -64,7 +70,7 @@ internal class VolatileRepositoryTest : StringSpec({
     beforeTest {
         ctx = LirpContext()
         repository =
-            PersonVolatileRepo(ctx).apply {
+            CustomerVolatileRepo(ctx).apply {
                 activateEvents(READ)
             }
         subscriber = SomeClassSubscribedToEvents()
@@ -81,40 +87,40 @@ internal class VolatileRepositoryTest : StringSpec({
     }
 
     "Repository reflects addition and deletion of entities" {
-        checkAll(arbitraryPerson()) { person ->
+        checkAll(arbitraryCustomer()) { customer ->
             repository.isEmpty shouldBe true
-            repository.create(person) shouldNotBe null
+            repository.create(customer.id, customer.name) shouldNotBe null
             repository.isEmpty shouldBe false
-            repository.findById(person.id) shouldBe Optional.of(person)
-            repository.findByUniqueId(person.uniqueId) shouldBePresent { it shouldBe person }
-            repository.search { it.money == person.money }.shouldContainOnly(person)
-            repository.contains(person.id) shouldBe true
-            repository.contains { it == person } shouldBe true
+            repository.findById(customer.id) shouldBe Optional.of(customer)
+            repository.findByUniqueId(customer.uniqueId) shouldBePresent { it shouldBe customer }
+            repository.search { it.name == customer.name }.shouldContainOnly(customer)
+            repository.contains(customer.id) shouldBe true
+            repository.contains { it == customer } shouldBe true
 
             repository.size() shouldBe 1
 
-            repository.remove(person) shouldBe true
+            repository.remove(customer) shouldBe true
             repository.isEmpty shouldBe true
         }
     }
 
     "Registry iterates over all entities via Iterable" {
-        val people = Arb.set(arbitraryPerson(), 3..3).next()
-        people.forEach(repository::create)
+        val customers = Arb.set(arbitraryCustomer(), 3..3).next()
+        customers.forEach { repository.create(it.id, it.name) }
 
-        val iterated = mutableSetOf<Person>()
+        val iterated = mutableSetOf<Customer>()
         for (entity in repository) {
-            iterated.add(entity as Person)
+            iterated.add(entity as Customer)
         }
 
-        iterated shouldContainOnly people
+        iterated shouldContainOnly customers
     }
 
     "Repository publishes CRUD events received by a subscriber" {
-        val person = arbitraryPerson().next()
-        val person2 = arbitraryPerson().next()
-        repository.create(person)
-        repository.create(person2)
+        val customer = arbitraryCustomer().next()
+        val customer2 = arbitraryCustomer().next()
+        repository.create(customer.id, customer.name)
+        repository.create(customer2.id, customer2.name)
 
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -124,25 +130,25 @@ internal class VolatileRepositoryTest : StringSpec({
         subscriber.createEventEntities.get() shouldBe 2
         subscriber.deletedEventEntities.get() shouldBe 0
 
-        repository.removeAll(setOf(person, person2)) shouldBe true
+        repository.removeAll(setOf(customer, customer2)) shouldBe true
 
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertSoftly(subscriber.receivedEvents[DELETE]) {
             this?.isDelete() shouldBe true
-            this?.entities?.values shouldContainOnly setOf(person, person2)
+            this?.entities?.values shouldContainOnly setOf(customer, customer2)
         }
         subscriber.createEventEntities.get() shouldBe 2
         subscriber.deletedEventEntities.get() shouldBe 2
 
-        repository.create(person)
-        repository.findById(person.id) shouldBePresent { it shouldBe person }
+        repository.create(customer.id, customer.name)
+        repository.findById(customer.id) shouldBePresent { it shouldBe customer }
 
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertSoftly(subscriber.receivedEvents[READ]) {
             this?.isRead() shouldBe true
-            this?.entities?.values shouldContainOnly setOf(person)
+            this?.entities?.values shouldContainOnly setOf(customer)
         }
         subscriber.createEventEntities.get() shouldBe 3
         subscriber.deletedEventEntities.get() shouldBe 2
@@ -153,16 +159,16 @@ internal class VolatileRepositoryTest : StringSpec({
 
         assertSoftly(subscriber.receivedEvents[DELETE]) {
             this?.isDelete() shouldBe true
-            this?.entities?.values.shouldContainOnly(person)
+            this?.entities?.values.shouldContainOnly(customer)
         }
         subscriber.createEventEntities.get() shouldBe 3
         subscriber.deletedEventEntities.get() shouldBe 3
     }
 
     "Repository disableEvents method prevents events from being published" {
-        val person = arbitraryPerson().next()
+        val customer = arbitraryCustomer().next()
 
-        repository.create(person)
+        repository.create(customer.id, customer.name)
 
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -174,8 +180,8 @@ internal class VolatileRepositoryTest : StringSpec({
 
         repository.disableEvents(CREATE)
 
-        val person2 = arbitraryPerson().next()
-        repository.create(person2)
+        val customer2 = arbitraryCustomer().next()
+        repository.create(customer2.id, customer2.name)
 
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -183,8 +189,8 @@ internal class VolatileRepositoryTest : StringSpec({
         subscriber.createEventEntities.get() shouldBe 0
 
         repository.activateEvents(CREATE)
-        val person3 = arbitraryPerson().next()
-        repository.create(person3)
+        val customer3 = arbitraryCustomer().next()
+        repository.create(customer3.id, customer3.name)
 
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -198,7 +204,7 @@ internal class VolatileRepositoryTest : StringSpec({
         val errorMsg = mutableListOf<String>()
 
         val testSubscriber =
-            object : LirpEventSubscriberBase<Personly, CrudEvent.Type, CrudEvent<Int, Personly>>("ErrorCompleteSubscriber") {
+            object : LirpEventSubscriberBase<Customer, CrudEvent.Type, CrudEvent<Int, Customer>>("ErrorCompleteSubscriber") {
                 init {
                     addOnNextEventAction(CREATE) { /* Just observe */ }
 
@@ -237,12 +243,12 @@ internal class VolatileRepositoryTest : StringSpec({
     "Anonymous subscription test" {
         val createEventsReceived = AtomicInteger(0)
         val updateEventsReceived = AtomicInteger(0)
-        val receivedPersonIds = mutableSetOf<Int>()
+        val receivedCustomerIds = mutableSetOf<Int>()
 
         val createSubscription =
             repository.subscribe(CREATE) { event ->
                 createEventsReceived.incrementAndGet()
-                event.entities.keys.forEach { receivedPersonIds.add(it) }
+                event.entities.keys.forEach { receivedCustomerIds.add(it) }
             }
 
         val updateSubscription =
@@ -250,24 +256,24 @@ internal class VolatileRepositoryTest : StringSpec({
                 updateEventsReceived.incrementAndGet()
             }
 
-        val person = arbitraryPerson().next()
-        repository.create(person) shouldNotBe null
+        val customer = arbitraryCustomer().next()
+        repository.create(customer.id, customer.name) shouldNotBe null
 
         testDispatcher.scheduler.advanceUntilIdle()
 
         createEventsReceived.get() shouldBe 1
-        receivedPersonIds shouldContainOnly setOf(person.id)
+        receivedCustomerIds shouldContainOnly setOf(customer.id)
         updateEventsReceived.get() shouldBe 0
 
         createSubscription.cancel()
 
-        val person2 = arbitraryPerson().next()
-        repository.create(person2)
+        val customer2 = arbitraryCustomer().next()
+        repository.create(customer2.id, customer2.name)
 
         testDispatcher.scheduler.advanceUntilIdle()
 
         createEventsReceived.get() shouldBe 1
-        receivedPersonIds shouldContainOnly setOf(person.id)
+        receivedCustomerIds shouldContainOnly setOf(customer.id)
 
         updateSubscription.cancel()
     }
@@ -280,11 +286,11 @@ internal class VolatileRepositoryTest : StringSpec({
 
     "RegistryBase hashCode is consistent with equals" {
         val ctx2 = LirpContext()
-        val repository2 = PersonVolatileRepo(ctx2)
-        val person = arbitraryPerson(1).next()
+        val repository2 = CustomerVolatileRepo(ctx2)
+        val customer = arbitraryCustomer(1).next()
 
-        repository.create(person)
-        repository2.create(person)
+        repository.create(customer.id, customer.name)
+        repository2.create(customer.id, customer.name)
 
         repository.hashCode() shouldBe repository2.hashCode()
         ctx2.close()

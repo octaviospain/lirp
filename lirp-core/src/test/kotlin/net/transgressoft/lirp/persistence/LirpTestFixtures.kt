@@ -200,7 +200,7 @@ class CustomerVolatileRepo internal constructor(
 ) : VolatileRepository<Int, Customer>(context, "Customers") {
     constructor() : this(LirpContext.default)
 
-    fun create(id: Int, name: String): Customer? = add(Customer(id, name))
+    fun create(id: Int, name: String): Customer = Customer(id, name).also { add(it) }
 }
 
 /**
@@ -212,7 +212,7 @@ class OrderVolatileRepo internal constructor(
 ) : VolatileRepository<Long, Order>(context, "Orders") {
     constructor() : this(LirpContext.default)
 
-    fun create(id: Long, customerId: Int): Order? = add(Order(id, customerId))
+    fun create(id: Long, customerId: Int): Order = Order(id, customerId).also { add(it) }
 }
 
 /**
@@ -224,7 +224,7 @@ class BubbleUpOrderVolatileRepo internal constructor(
 ) : VolatileRepository<Long, BubbleUpOrder>(context, "BubbleUpOrders") {
     constructor() : this(LirpContext.default)
 
-    fun create(id: Long, customerId: Int): BubbleUpOrder? = add(BubbleUpOrder(id, customerId))
+    fun create(id: Long, customerId: Int): BubbleUpOrder = BubbleUpOrder(id, customerId).also { add(it) }
 }
 
 /**
@@ -236,7 +236,7 @@ class CascadeOrderVolatileRepo internal constructor(
 ) : VolatileRepository<Long, CascadeOrder>(context, "CascadeOrders") {
     constructor() : this(LirpContext.default)
 
-    fun create(id: Long, customerId: Int): CascadeOrder? = add(CascadeOrder(id, customerId))
+    fun create(id: Long, customerId: Int): CascadeOrder = CascadeOrder(id, customerId).also { add(it) }
 }
 
 /**
@@ -248,7 +248,7 @@ class DetachOrderVolatileRepo internal constructor(
 ) : VolatileRepository<Long, DetachOrder>(context, "DetachOrders") {
     constructor() : this(LirpContext.default)
 
-    fun create(id: Long, customerId: Int): DetachOrder? = add(DetachOrder(id, customerId))
+    fun create(id: Long, customerId: Int): DetachOrder = DetachOrder(id, customerId).also { add(it) }
 }
 
 /**
@@ -260,7 +260,7 @@ class NoneOrderVolatileRepo internal constructor(
 ) : VolatileRepository<Long, NoneOrder>(context, "NoneOrders") {
     constructor() : this(LirpContext.default)
 
-    fun create(id: Long, customerId: Int): NoneOrder? = add(NoneOrder(id, customerId))
+    fun create(id: Long, customerId: Int): NoneOrder = NoneOrder(id, customerId).also { add(it) }
 }
 
 /**
@@ -272,7 +272,7 @@ class EntityAVolatileRepo internal constructor(
 ) : VolatileRepository<Int, EntityA>(context, "EntityAs") {
     constructor() : this(LirpContext.default)
 
-    fun create(id: Int, value: String): EntityA? = add(EntityA(id, value))
+    fun create(id: Int, value: String): EntityA = EntityA(id, value).also { add(it) }
 }
 
 /**
@@ -284,7 +284,7 @@ class EntityBVolatileRepo internal constructor(
 ) : VolatileRepository<Int, EntityB>(context, "EntityBs") {
     constructor() : this(LirpContext.default)
 
-    fun create(id: Int, entityAId: Int): EntityB? = add(EntityB(id, entityAId))
+    fun create(id: Int, entityAId: Int): EntityB = EntityB(id, entityAId).also { add(it) }
 }
 
 /**
@@ -296,7 +296,7 @@ class EntityCVolatileRepo internal constructor(
 ) : VolatileRepository<Int, EntityC>(context, "EntityCs") {
     constructor() : this(LirpContext.default)
 
-    fun create(id: Int, entityBId: Int): EntityC? = add(EntityC(id, entityBId))
+    fun create(id: Int, entityBId: Int): EntityC = EntityC(id, entityBId).also { add(it) }
 }
 
 /**
@@ -360,7 +360,7 @@ class RestrictOrderVolatileRepo internal constructor(
 ) : VolatileRepository<Long, RestrictOrder>(context, "RestrictOrders") {
     constructor() : this(LirpContext.default)
 
-    fun create(id: Long, customerId: Int): RestrictOrder? = add(RestrictOrder(id, customerId))
+    fun create(id: Long, customerId: Int): RestrictOrder = RestrictOrder(id, customerId).also { add(it) }
 }
 
 /**
@@ -372,7 +372,7 @@ class CyclicParentVolatileRepo internal constructor(
 ) : VolatileRepository<Long, CyclicParent>(context, "CyclicParents") {
     constructor() : this(LirpContext.default)
 
-    fun create(id: Long, childId: Long): CyclicParent? = add(CyclicParent(id, childId))
+    fun create(id: Long, childId: Long): CyclicParent = CyclicParent(id, childId).also { add(it) }
 }
 
 /**
@@ -384,7 +384,7 @@ class CyclicChildVolatileRepo internal constructor(
 ) : VolatileRepository<Long, CyclicChild>(context, "CyclicChildren") {
     constructor() : this(LirpContext.default)
 
-    fun create(id: Long, parentId: Long): CyclicChild? = add(CyclicChild(id, parentId))
+    fun create(id: Long, parentId: Long): CyclicChild = CyclicChild(id, parentId).also { add(it) }
 }
 
 /**
@@ -417,5 +417,5 @@ class MutableRefOrderVolatileRepo internal constructor(
 ) : VolatileRepository<Long, MutableRefOrder>(context, "MutableRefOrders") {
     constructor() : this(LirpContext.default)
 
-    fun create(id: Long, customerId: Int): MutableRefOrder? = add(MutableRefOrder(id, customerId))
+    fun create(id: Long, customerId: Int): MutableRefOrder = MutableRefOrder(id, customerId).also { add(it) }
 }
