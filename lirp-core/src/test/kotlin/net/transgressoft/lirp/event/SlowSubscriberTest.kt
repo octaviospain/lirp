@@ -17,8 +17,7 @@
 
 package net.transgressoft.lirp.event
 
-import net.transgressoft.lirp.Person
-import net.transgressoft.lirp.PersonVolatileRepo
+import net.transgressoft.lirp.persistence.CustomerVolatileRepo
 import io.kotest.core.spec.style.DescribeSpec
 import io.kotest.matchers.comparables.shouldBeGreaterThan
 import io.kotest.matchers.longs.shouldBeLessThan
@@ -215,7 +214,7 @@ class SlowSubscriberTest : DescribeSpec({
             val fastCounter = AtomicInteger(0)
             val slowCounter = AtomicInteger(0)
 
-            val repository = PersonVolatileRepo()
+            val repository = CustomerVolatileRepo()
 
             val fastSub = repository.subscribe { fastCounter.incrementAndGet() }
             val slowSub =
@@ -227,7 +226,7 @@ class SlowSubscriberTest : DescribeSpec({
             // create() triggers CrudEvent emission via trySend — non-blocking
             val start = System.currentTimeMillis()
             repeat(EVENT_COUNT) { i ->
-                repository.create(Person(id = i, money = i.toLong(), morals = true))
+                repository.create(i, "customer-$i")
             }
             val emissionMs = System.currentTimeMillis() - start
 
@@ -249,7 +248,7 @@ class SlowSubscriberTest : DescribeSpec({
             val fastLatch = CountDownLatch(EVENT_COUNT)
             val slowLatch = CountDownLatch(EVENT_COUNT)
 
-            val repository = PersonVolatileRepo()
+            val repository = CustomerVolatileRepo()
 
             val fastSub = repository.subscribe { fastLatch.countDown() }
             val slowSub =
@@ -261,7 +260,7 @@ class SlowSubscriberTest : DescribeSpec({
             val pacedIntervalMs = SLOW_DELAY_MS + 10L
             dedicatedScope.launch {
                 repeat(EVENT_COUNT) { i ->
-                    repository.create(Person(id = i, money = i.toLong(), morals = true))
+                    repository.create(i, "customer-$i")
                     delay(pacedIntervalMs.milliseconds)
                 }
             }.join()

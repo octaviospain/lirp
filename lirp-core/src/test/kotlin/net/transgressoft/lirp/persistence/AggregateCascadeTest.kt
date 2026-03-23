@@ -66,7 +66,7 @@ internal class AggregateCascadeTest : FunSpec({
 
     test("CASCADE remove() deletes the referenced Customer from its repository") {
         val customerRepo = CustomerVolatileRepo(ctx)
-        val customer = customerRepo.create(id = 1, name = "Alice")!!
+        val customer = customerRepo.create(id = 1, name = "Alice")
 
         val cascadeOrderRepo = CascadeOrderVolatileRepo(ctx)
         cascadeOrderRepo.create(id = 100L, customerId = 1)
@@ -100,10 +100,10 @@ internal class AggregateCascadeTest : FunSpec({
 
     test("DETACH remove() cancels the bubble-up subscription but referenced Customer remains in repository") {
         val customerRepo = CustomerVolatileRepo(ctx)
-        val customer = customerRepo.create(id = 1, name = "Alice")!!
+        val customer = customerRepo.create(id = 1, name = "Alice")
 
         val detachOrderRepo = DetachOrderVolatileRepo(ctx)
-        val order = detachOrderRepo.create(id = 100L, customerId = 1)!!
+        val order = detachOrderRepo.create(id = 100L, customerId = 1)
 
         // Subscribe to order events (to check bubble-up is active before detach)
         val eventCountBefore = AtomicInteger(0)
@@ -140,7 +140,7 @@ internal class AggregateCascadeTest : FunSpec({
         customerRepo.create(id = 1, name = "Alice")
 
         val noneOrderRepo = NoneOrderVolatileRepo(ctx)
-        val order = noneOrderRepo.create(id = 100L, customerId = 1)!!
+        val order = noneOrderRepo.create(id = 100L, customerId = 1)
 
         // Remove the parent with NONE cascade action
         noneOrderRepo.remove(order)
@@ -154,7 +154,7 @@ internal class AggregateCascadeTest : FunSpec({
         customerRepo.create(id = 1, name = "Alice")
 
         val restrictOrderRepo = RestrictOrderVolatileRepo(ctx)
-        val order1 = restrictOrderRepo.create(id = 100L, customerId = 1)!!
+        val order1 = restrictOrderRepo.create(id = 100L, customerId = 1)
         restrictOrderRepo.create(id = 101L, customerId = 1)
 
         // order1 references customer; order2 also references customer
@@ -171,7 +171,7 @@ internal class AggregateCascadeTest : FunSpec({
         customerRepo.create(id = 1, name = "Alice")
 
         val restrictOrderRepo = RestrictOrderVolatileRepo(ctx)
-        val order = restrictOrderRepo.create(id = 100L, customerId = 1)!!
+        val order = restrictOrderRepo.create(id = 100L, customerId = 1)
 
         // Only order references customer — removal proceeds without error
         restrictOrderRepo.remove(order)
@@ -184,7 +184,7 @@ internal class AggregateCascadeTest : FunSpec({
         val cyclicParentRepo = CyclicParentVolatileRepo(ctx)
         val cyclicChildRepo = CyclicChildVolatileRepo(ctx)
 
-        val parent = cyclicParentRepo.create(id = 1L, childId = 2L)!!
+        val parent = cyclicParentRepo.create(id = 1L, childId = 2L)
         cyclicChildRepo.create(id = 2L, parentId = 1L)
 
         val exception =
@@ -199,8 +199,8 @@ internal class AggregateCascadeTest : FunSpec({
         customerRepo.create(id = 1, name = "Alice")
 
         val cascadeOrderRepo = CascadeOrderVolatileRepo(ctx)
-        val order1 = cascadeOrderRepo.create(id = 100L, customerId = 1)!!
-        val order2 = cascadeOrderRepo.create(id = 101L, customerId = 1)!!
+        val order1 = cascadeOrderRepo.create(id = 100L, customerId = 1)
+        val order2 = cascadeOrderRepo.create(id = 101L, customerId = 1)
 
         // Remove order1 — customer gets cascade-deleted
         cascadeOrderRepo.remove(order1)
@@ -213,10 +213,10 @@ internal class AggregateCascadeTest : FunSpec({
 
     test("Concurrent wireBubbleUp and cancelBubbleUp do not leak subscriptions") {
         val customerRepo = CustomerVolatileRepo(ctx)
-        val customer = customerRepo.create(id = 1, name = "Alice")!!
+        val customer = customerRepo.create(id = 1, name = "Alice")
 
         val bubbleUpOrderRepo = BubbleUpOrderVolatileRepo(ctx)
-        val order = bubbleUpOrderRepo.create(id = 100L, customerId = 1)!!
+        val order = bubbleUpOrderRepo.create(id = 100L, customerId = 1)
 
         // Cast to AggregateRefDelegate to access wireBubbleUp/cancelBubbleUp directly.
         // order.customer returns this (the delegate itself) via getValue().
@@ -253,10 +253,10 @@ internal class AggregateCascadeTest : FunSpec({
 
     test("ReactiveEntityBase close() always executes DETACH cleanup regardless of cascade config") {
         val customerRepo = CustomerVolatileRepo(ctx)
-        val customer = customerRepo.create(id = 1, name = "Alice")!!
+        val customer = customerRepo.create(id = 1, name = "Alice")
 
         val detachOrderRepo = DetachOrderVolatileRepo(ctx)
-        val order = detachOrderRepo.create(id = 100L, customerId = 1)!!
+        val order = detachOrderRepo.create(id = 100L, customerId = 1)
 
         val eventCount = AtomicInteger(0)
         val initialLatch = CountDownLatch(1)

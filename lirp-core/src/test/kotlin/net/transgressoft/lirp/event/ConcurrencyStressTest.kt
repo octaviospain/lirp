@@ -17,9 +17,8 @@
 
 package net.transgressoft.lirp.event
 
-import net.transgressoft.lirp.Person
-import net.transgressoft.lirp.PersonVolatileRepo
-import net.transgressoft.lirp.Personly
+import net.transgressoft.lirp.persistence.Customer
+import net.transgressoft.lirp.persistence.CustomerVolatileRepo
 import io.kotest.core.spec.style.DescribeSpec
 import io.kotest.matchers.shouldBe
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -43,7 +42,7 @@ private const val TOTAL_EVENTS = WRITER_COUNT * EVENTS_PER_WRITER
  * writers start. Only completeness is verified — no ordering assertions are made.
  *
  * Tests cover:
- * - CrudEvent delivery under 120 concurrent writers via [VolatileRepository.add]
+ * - CrudEvent delivery under 120 concurrent writers via [net.transgressoft.lirp.persistence.VolatileRepository.add]
  * - MutationEvent delivery under 120 concurrent emitters via a standalone [FlowEventPublisher]
  * - Interleaved CRUD and mutation operations from truly concurrent coroutines
  * - Repository state consistency (correct size, no duplicate IDs) after concurrent stress
@@ -58,12 +57,12 @@ class ConcurrencyStressTest : DescribeSpec({
     describe("FlowEventPublisher under concurrent CrudEvent load") {
 
         it("delivers all CrudEvents to all subscribers without loss").config(timeout = 30.seconds) {
-            val repository = PersonVolatileRepo()
+            val repository = CustomerVolatileRepo()
 
             // Each subscriber collects events and counts down a latch per received event
-            val queue1 = ConcurrentLinkedQueue<CrudEvent<Int, Personly>>()
-            val queue2 = ConcurrentLinkedQueue<CrudEvent<Int, Personly>>()
-            val queue3 = ConcurrentLinkedQueue<CrudEvent<Int, Personly>>()
+            val queue1 = ConcurrentLinkedQueue<CrudEvent<Int, Customer>>()
+            val queue2 = ConcurrentLinkedQueue<CrudEvent<Int, Customer>>()
+            val queue3 = ConcurrentLinkedQueue<CrudEvent<Int, Customer>>()
 
             val latch1 = CountDownLatch(TOTAL_EVENTS)
             val latch2 = CountDownLatch(TOTAL_EVENTS)
@@ -86,13 +85,13 @@ class ConcurrencyStressTest : DescribeSpec({
                     latch3.countDown()
                 }
 
-            // 120 writer coroutines each adding 10 Person entities with unique IDs
+            // 120 writer coroutines each adding 10 Customer entities with unique IDs
             val writers =
                 (0 until WRITER_COUNT).map { writerIndex ->
                     launch(Dispatchers.Default) {
                         repeat(EVENTS_PER_WRITER) { eventIndex ->
                             val id = writerIndex * EVENTS_PER_WRITER + eventIndex
-                            repository.create(Person(id = id, money = id.toLong(), morals = true))
+                            repository.create(id, "customer-$id")
                         }
                     }
                 }
@@ -188,7 +187,7 @@ class ConcurrencyStressTest : DescribeSpec({
     describe("FlowEventPublisher under interleaved CRUD and mutation load") {
 
         it("delivers all events under interleaved CRUD and mutation operations").config(timeout = 30.seconds) {
-            val repository = PersonVolatileRepo()
+            val repository = CustomerVolatileRepo()
 
             // Standalone mutation publisher, separate from repository publisher
             val mutationPublisher =
@@ -204,8 +203,8 @@ class ConcurrencyStressTest : DescribeSpec({
             val expectedMutationEvents = mutationWriterCount * EVENTS_PER_WRITER
 
             // Separate queues and latches per event type per subscriber
-            val crudQueue1 = ConcurrentLinkedQueue<CrudEvent<Int, Personly>>()
-            val crudQueue2 = ConcurrentLinkedQueue<CrudEvent<Int, Personly>>()
+            val crudQueue1 = ConcurrentLinkedQueue<CrudEvent<Int, Customer>>()
+            val crudQueue2 = ConcurrentLinkedQueue<CrudEvent<Int, Customer>>()
             val mutQueue1 = ConcurrentLinkedQueue<MutationEvent<String, TestEntity>>()
             val mutQueue2 = ConcurrentLinkedQueue<MutationEvent<String, TestEntity>>()
 
@@ -242,7 +241,7 @@ class ConcurrencyStressTest : DescribeSpec({
                     launch(Dispatchers.Default) {
                         repeat(EVENTS_PER_WRITER) { eventIndex ->
                             val id = writerIndex * EVENTS_PER_WRITER + eventIndex
-                            repository.create(Person(id = id, money = id.toLong(), morals = true))
+                            repository.create(id, "customer-$id")
                         }
                     }
                 }

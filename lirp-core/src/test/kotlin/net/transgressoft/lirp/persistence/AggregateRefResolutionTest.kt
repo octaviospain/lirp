@@ -63,23 +63,23 @@ internal class AggregateRefResolutionTest : FunSpec({
     test("resolve returns the referenced customer entity when it exists in the repository") {
         customerRepo.create(id = 1, name = "Alice")
 
-        val order = orderRepo.create(id = 100L, customerId = 1)!!
+        val order = orderRepo.create(id = 100L, customerId = 1)
 
         val resolved = order.customer.resolve()
         resolved.shouldBePresent { it shouldBe customerRepo.findById(1).get() }
     }
 
     test("resolve returns Optional.empty when the referenced customer does not exist in the repository") {
-        val order = orderRepo.create(id = 100L, customerId = 999)!!
+        val order = orderRepo.create(id = 100L, customerId = 999)
 
         order.customer.resolve().shouldBeEmpty()
     }
 
     test("resolve returns updated entity after the referenced customerId field changes") {
-        val customer1 = customerRepo.create(id = 1, name = "Alice")!!
-        val customer2 = customerRepo.create(id = 2, name = "Bob")!!
+        val customer1 = customerRepo.create(id = 1, name = "Alice")
+        val customer2 = customerRepo.create(id = 2, name = "Bob")
 
-        val order = orderRepo.create(id = 100L, customerId = 1)!!
+        val order = orderRepo.create(id = 100L, customerId = 1)
 
         order.customer.resolve().shouldBePresent { it shouldBe customer1 }
 
@@ -90,9 +90,9 @@ internal class AggregateRefResolutionTest : FunSpec({
     }
 
     test("resolve returns Optional.empty after referenced customer is removed from repository") {
-        val customer = customerRepo.create(id = 1, name = "Alice")!!
+        val customer = customerRepo.create(id = 1, name = "Alice")
 
-        val order = orderRepo.create(id = 100L, customerId = 1)!!
+        val order = orderRepo.create(id = 100L, customerId = 1)
 
         // Confirm initial resolution works
         order.customer.resolve().shouldBePresent()
@@ -113,7 +113,7 @@ internal class AggregateRefResolutionTest : FunSpec({
             customerRepoA.create(id = 1, name = "Alice")
 
             val orderRepoB = OrderVolatileRepo(ctxB)
-            val order = orderRepoB.create(id = 100L, customerId = 1)!!
+            val order = orderRepoB.create(id = 100L, customerId = 1)
 
             // Context B has no customer repo — resolution should return empty
             order.customer.resolve().shouldBeEmpty()

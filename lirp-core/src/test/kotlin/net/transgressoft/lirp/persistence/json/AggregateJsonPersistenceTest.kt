@@ -117,8 +117,8 @@ class AggregateJsonPersistenceTest : FunSpec({
         val customerRepo = CustomerVolatileRepo(ctx)
         val orderRepo = BubbleUpOrderJsonFileRepository(ctx, orderFile, 50)
 
-        val customer = customerRepo.create(1, "Carol")!!
-        val order = orderRepo.create(10L, 1)!!
+        val customer = customerRepo.create(1, "Carol")
+        val order = orderRepo.create(10L, 1)
 
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -211,5 +211,5 @@ class BubbleUpOrderJsonFileRepository internal constructor(
     ) {
     constructor(file: java.io.File, serializationDelayMs: Long = 300L) : this(LirpContext.default, file, serializationDelayMs)
 
-    fun create(id: Long, customerId: Int): BubbleUpOrder? = add(BubbleUpOrder(id, customerId))
+    fun create(id: Long, customerId: Int): BubbleUpOrder = BubbleUpOrder(id, customerId).also { add(it) }
 }
