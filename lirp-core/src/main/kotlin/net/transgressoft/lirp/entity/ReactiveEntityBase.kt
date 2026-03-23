@@ -41,10 +41,7 @@ import kotlinx.coroutines.flow.SharedFlow
  * When properties of the entity change, all subscribers are automatically notified with both the updated
  * entity state and the previous state.
  *
- * This implementation uses lock-free lazy initialization for the event publisher via AtomicReference CAS -
- * the publisher infrastructure (channels, flows, and coroutines) is only created when the first subscriber
- * registers. This significantly reduces memory overhead for entities that are never observed, which is
- * especially beneficial in applications with thousands of reactive entities.
+ * The event publisher is lazily initialized on first subscription, minimizing overhead for unobserved entities.
  *
  * Lifecycle states:
  * - **Created**: No publisher allocated; zero overhead.
@@ -239,13 +236,6 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
 
     /**
      * Sets a property value and notifies all subscribers if the value has changed.
-     *
-     * This method implements the reactive pattern - it:
-     * 1. Compares the new value with the old value
-     * 2. If different, captures the entity state before the change
-     * 3. Applies the new value using the provided property setter
-     * 4. Updates the last modified timestamp
-     * 5. Notifies all subscribers with both the updated and previous entity states (only if the publisher is initialized)
      *
      * @param T The type of the property being modified
      * @param newValue The new value to set

@@ -18,7 +18,7 @@
 package net.transgressoft.lirp.persistence
 
 /**
- * Marks a repository subclass for zero-config auto-registration in the global registry map.
+ * Marks a repository subclass for zero-config auto-registration in the [LirpContext].
  *
  * At compile time, the LIRP KSP processor scans for `@LirpRepository` annotations and generates a
  * [LirpRegistryInfo] implementation per annotated class. The generated class is named
@@ -26,7 +26,7 @@ package net.transgressoft.lirp.persistence
  *
  * At runtime, when the repository is constructed, the generated class is loaded via a
  * convention-based class lookup (`{ClassName}_LirpRegistryInfo`) and its [LirpRegistryInfo.entityClass]
- * is used to register the repository in the global registry map. The registration is automatic —
+ * is used to register the repository in the owning [LirpContext]. The registration is automatic —
  * no manual registration call is needed.
  *
  * Uses [AnnotationRetention.BINARY] retention — the annotation is stored in the class file but is
