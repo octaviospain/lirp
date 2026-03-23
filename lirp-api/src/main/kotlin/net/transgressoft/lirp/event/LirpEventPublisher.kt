@@ -52,9 +52,6 @@ interface LirpEventPublisher<ET : EventType, out E : LirpEvent<ET>> : Flow.Publi
 
     /**
      * The current number of active subscribers.
-     *
-     * Tracked via atomic operations for thread safety. Incremented when a subscriber registers
-     * and decremented when the subscriber's coroutine job completes (cancellation or normal completion).
      */
     val subscriberCount: Int
 
@@ -63,6 +60,12 @@ interface LirpEventPublisher<ET : EventType, out E : LirpEvent<ET>> : Flow.Publi
      */
     fun emitAsync(event: @UnsafeVariance E)
 
+    /**
+     * Subscribes to all events emitted by this publisher.
+     *
+     * @param action The suspend function invoked for each emitted event
+     * @return A subscription handle that can be cancelled to stop receiving events
+     */
     fun subscribe(action: suspend (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, @UnsafeVariance E>
 
     /**
@@ -71,10 +74,27 @@ interface LirpEventPublisher<ET : EventType, out E : LirpEvent<ET>> : Flow.Publi
      */
     fun subscribe(action: Consumer<in E>): LirpEventSubscription<in LirpEntity, ET, @UnsafeVariance E> = subscribe(action::accept)
 
+    /**
+     * Subscribes to events of the specified types only.
+     *
+     * @param eventTypes The event types to filter on; events of other types are ignored
+     * @param action The suspend function invoked for each matching event
+     * @return A subscription handle that can be cancelled to stop receiving events
+     */
     fun subscribe(vararg eventTypes: ET, action: suspend (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, @UnsafeVariance E>
 
+    /**
+     * Activates emission for the given event types. Events of non-activated types are silently dropped.
+     *
+     * @param types The event types to activate
+     */
     fun activateEvents(vararg types: @UnsafeVariance ET)
 
+    /**
+     * Disables emission for the given event types. Events of disabled types are silently dropped until re-activated.
+     *
+     * @param types The event types to disable
+     */
     fun disableEvents(vararg types: @UnsafeVariance ET)
 
     /**

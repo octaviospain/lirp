@@ -42,6 +42,9 @@ interface ReactiveEntity<K, R : ReactiveEntity<K, R>> :
     Flow.Publisher<MutationEvent<K, R>>,
     AutoCloseable where K : Comparable<K> {
 
+    /**
+     * The date and time of the most recent property mutation on this entity.
+     */
     val lastDateModified: LocalDateTime
 
     /**
@@ -60,14 +63,29 @@ interface ReactiveEntity<K, R : ReactiveEntity<K, R>> :
     fun emitAsync(event: MutationEvent<K, R>)
 
     /**
-     * Legacy compatibility method for Java-style Consumer subscriptions.
-     * Consider migrating to the Kotlin Flow-based subscription method instead.
+     * Subscribes to all mutation events on this entity.
+     *
+     * @param action The suspend function invoked for each mutation event
+     * @return A subscription handle that can be cancelled to stop receiving events
      */
     fun subscribe(action: suspend (MutationEvent<K, R>) -> Unit): LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>
 
+    /**
+     * Subscribes to all mutation events on this entity using a Java [Consumer].
+     *
+     * @param action The consumer invoked for each mutation event
+     * @return A subscription handle that can be cancelled to stop receiving events
+     */
     fun subscribe(action: Consumer<in MutationEvent<K, R>>): LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>> =
         subscribe(action::accept)
 
+    /**
+     * Subscribes to mutation events of the specified types, using a Java [Consumer].
+     *
+     * @param eventTypes The mutation event types to filter on
+     * @param action The consumer invoked for each matching event
+     * @return A subscription handle that can be cancelled to stop receiving events
+     */
     fun subscribe(vararg eventTypes: MutationEvent.Type, action: Consumer<in MutationEvent<K, R>>):
         LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>
 
@@ -78,5 +96,8 @@ interface ReactiveEntity<K, R : ReactiveEntity<K, R>> :
      */
     override fun close()
 
+    /**
+     * Creates a deep copy of this entity. Used internally to capture pre-mutation state for event payloads.
+     */
     override fun clone(): ReactiveEntity<K, R>
 }

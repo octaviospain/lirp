@@ -230,11 +230,8 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
     }
 
     /**
-     * Binds each [AggregateRefDelegate] on [entity] to the [Registry] that holds its referenced
-     * entity type. For each [RefEntry] discovered via [discoverRefs], this method:
-     *
-     * 1. Looks up the [Registry] for [RefEntry.referencedClass] in the companion-level registry map.
-     * 2. If found, calls [AggregateRefDelegate.bindRegistry] on the delegate obtained via [RefEntry.delegateGetter].
+     * Binds each [AggregateRefDelegate] on [entity] to the [Registry] that holds its referenced entity type,
+     * using the [RefEntry] descriptors discovered via [discoverRefs].
      *
      * The unchecked cast consolidates type erasure at one call site. It is safe because
      * [RefEntry.referencedClass] and the delegate's K type are consistent — the KSP processor

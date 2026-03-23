@@ -70,9 +70,6 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
         /**
          * Adds [entity] to this repository if no entity with the same ID already exists.
          *
-         * On success, discovers indexes and aggregate references, binds the delegate registries,
-         * wires bubble-up subscriptions, and emits a CREATE event.
-         *
          * @param entity The entity to add
          * @return `true` if the entity was added, `false` if an entity with the same ID is already present
          */
