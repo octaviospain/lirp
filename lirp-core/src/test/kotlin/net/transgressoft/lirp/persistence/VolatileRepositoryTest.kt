@@ -6,6 +6,7 @@ import net.transgressoft.lirp.event.CrudEvent.Type.DELETE
 import net.transgressoft.lirp.event.CrudEvent.Type.READ
 import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
 import net.transgressoft.lirp.event.EventType
+import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.LirpEventSubscriberBase
 import net.transgressoft.lirp.event.ReactiveScope
 import io.kotest.assertions.assertSoftly
@@ -21,6 +22,7 @@ import io.kotest.property.arbitrary.set
 import io.kotest.property.arbitrary.stringPattern
 import io.kotest.property.checkAll
 import java.util.Optional
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -294,5 +296,54 @@ internal class VolatileRepositoryTest : StringSpec({
 
         repository.hashCode() shouldBe repository2.hashCode()
         ctx2.close()
+    }
+
+    "VolatileRepository secondary constructor with name and initialEntities populates the repository" {
+        val customer = Customer(1, "Alice")
+        val repo = VolatileRepository<Int, Customer>("TestRepo", ConcurrentHashMap(mapOf(1 to customer)))
+
+        repo.contains(1) shouldBe true
+        repo.size() shouldBe 1
+
+        repo.close()
+        LirpContext.resetDefault()
+    }
+
+    "VolatileRepository equals returns false for null and different type" {
+        repository.equals(null) shouldBe false
+        repository.equals("not a repository") shouldBe false
+        repository.equals(repository) shouldBe true
+    }
+
+    "VolatileRepository equals and hashCode are consistent for two repos with the same entities" {
+        val ctx2 = LirpContext()
+        val repo2 = CustomerVolatileRepo(ctx2)
+
+        repository.create(42, "Bob")
+        repo2.create(42, "Bob")
+
+        repository.equals(repo2) shouldBe true
+        repository.hashCode() shouldBe repo2.hashCode()
+
+        ctx2.close()
+    }
+
+    "VolatileRepository removeAll returns false when no entity in the collection is present" {
+        val absent = Customer(99, "Ghost")
+
+        val result = repository.removeAll(listOf(absent))
+
+        result shouldBe false
+    }
+
+    "RegistryBase secondary constructor with default context and publisher initializes correctly" {
+        val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<Int, Customer>>("TestRegistry")
+        val registry = object : RegistryBase<Int, Customer>(ConcurrentHashMap(), publisher) {}
+
+        registry shouldNotBe null
+        registry.isEmpty shouldBe true
+
+        registry.close()
+        LirpContext.resetDefault()
     }
 })

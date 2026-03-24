@@ -4,6 +4,7 @@ import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
 import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.ReactiveScope
+import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpDeserializationException
 import io.kotest.assertions.json.shouldEqualJson
 import io.kotest.assertions.throwables.shouldNotThrowAny
@@ -549,6 +550,80 @@ class JsonFileRepositoryTest : DescribeSpec({
                 repo.size() shouldBe 0
                 repo.close()
             }
+        }
+    }
+
+    describe("Coverage gaps") {
+
+        it("JsonFileRepository clear removes all entities and cancels their subscriptions") {
+            val ctx = LirpContext()
+            val file = tempfile("clear-test", ".json").also { it.deleteOnExit() }
+            val repo = StandardCustomerJsonFileRepository(ctx, file)
+
+            repo.create(1, "Alice", null)
+            repo.create(2, "Bob", null)
+            repo.size() shouldBe 2
+
+            repo.clear()
+
+            repo.isEmpty shouldBe true
+
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            repo.close()
+            ctx.close()
+        }
+
+        it("JsonFileRepository equals returns true when both repos point to the same file") {
+            val ctx1 = LirpContext()
+            val ctx2 = LirpContext()
+            val ctx3 = LirpContext()
+            val file = tempfile("equals-test", ".json").also { it.deleteOnExit() }
+
+            val repo1 = StandardCustomerJsonFileRepository(ctx1, file)
+            val repo2 = StandardCustomerJsonFileRepository(ctx2, file)
+            val repo3 = StandardCustomerJsonFileRepository(ctx3, tempfile("other-file", ".json").also { it.deleteOnExit() })
+
+            repo1.equals(repo2) shouldBe true
+            repo1.hashCode() shouldBe repo2.hashCode()
+            repo1.equals(repo3) shouldBe false
+            repo1.equals("not a repo") shouldBe false
+
+            repo1.close()
+            repo2.close()
+            repo3.close()
+            ctx1.close()
+            ctx2.close()
+            ctx3.close()
+        }
+
+        it("JsonFileRepository jsonFile setter rejects a non-empty target file") {
+            val ctx = LirpContext()
+            val file = tempfile("setter-test", ".json").also { it.deleteOnExit() }
+            val nonEmptyFile =
+                tempfile("non-empty", ".json").also {
+                    it.writeText("{}")
+                    it.deleteOnExit()
+                }
+            val repo = StandardCustomerJsonFileRepository(ctx, file)
+
+            shouldThrow<IllegalArgumentException> {
+                repo.jsonFile = nonEmptyFile
+            }.message shouldContain "not empty"
+
+            repo.close()
+            ctx.close()
+        }
+
+        it("JsonFileRepository secondary constructor uses the default LirpContext") {
+            val file = tempfile("secondary-ctor-test", ".json").also { it.deleteOnExit() }
+            repository.close()
+            val repo = StandardCustomerJsonFileRepository(file)
+
+            repo.isEmpty shouldBe true
+
+            repo.close()
+            LirpContext.resetDefault()
         }
     }
 })

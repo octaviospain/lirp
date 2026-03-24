@@ -293,4 +293,16 @@ internal class AggregateBubbleUpTest : FunSpec({
         Thread.sleep(300)
         cReceivedCount.get() shouldBe 0
     }
+
+    test("BubbleUpOrder added before its Customer exists completes wireBubbleUp without throwing") {
+        val customerRepo = CustomerVolatileRepo(ctx)
+        val bubbleUpOrderRepo = BubbleUpOrderVolatileRepo(ctx)
+
+        val order = bubbleUpOrderRepo.create(id = 1L, customerId = 999)
+
+        order.customer.resolve().isPresent shouldBe false
+
+        customerRepo.create(id = 999, name = "LateCustomer")
+        order.customer.resolve().isPresent shouldBe true
+    }
 })

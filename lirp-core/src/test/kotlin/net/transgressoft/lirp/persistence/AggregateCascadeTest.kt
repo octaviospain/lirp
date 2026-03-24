@@ -18,6 +18,7 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.event.AggregateMutationEvent
+import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.ReactiveScope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
@@ -280,5 +281,28 @@ internal class AggregateCascadeTest : FunSpec({
         customer.updateName("Alice Updated Again")
         Thread.sleep(300)
         eventCount.get() shouldBe 1 // still 1, no new events
+    }
+
+    test("DetachOrder bubble-up subscription is cancelled when the order is removed from its repository") {
+        val customerRepo = CustomerVolatileRepo(ctx)
+        val detachOrderRepo = DetachOrderVolatileRepo(ctx)
+
+        val customer = customerRepo.create(id = 1, name = "Alice")
+        val order = detachOrderRepo.create(id = 100L, customerId = 1)
+
+        val received = mutableListOf<MutationEvent<Long, DetachOrder>>()
+        order.subscribe { received.add(it) }
+
+        customer.updateName("Bob")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        received.size shouldBe 1
+
+        detachOrderRepo.remove(order)
+
+        customer.updateName("Charlie")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        received.size shouldBe 1
     }
 })
