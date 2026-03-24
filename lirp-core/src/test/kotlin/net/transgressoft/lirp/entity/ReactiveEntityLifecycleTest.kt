@@ -18,14 +18,17 @@
 package net.transgressoft.lirp.entity
 
 import net.transgressoft.lirp.event.MutationEvent
+import net.transgressoft.lirp.event.MutationEvent.Type.MUTATE
 import net.transgressoft.lirp.event.ReactiveMutationEvent
 import net.transgressoft.lirp.event.ReactiveScope
+import net.transgressoft.lirp.persistence.Customer
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import java.util.concurrent.Flow
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.function.Consumer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -253,5 +256,41 @@ class ReactiveEntityLifecycleTest : StringSpec({
         shouldThrow<IllegalStateException> {
             entity.subscribe { }
         }
+    }
+
+    "ReactiveEntityBase emitAsync throws IllegalStateException when entity is closed" {
+        val customer = Customer(1, "Alice")
+        val sub = customer.subscribe { }
+        customer.close()
+
+        shouldThrow<IllegalStateException> {
+            customer.emitAsync(ReactiveMutationEvent(customer, customer))
+        }.message shouldContain "Customer"
+
+        sub.cancel()
+    }
+
+    "ReactiveEntityBase subscribe with vararg eventTypes throws IllegalArgumentException when MUTATE is absent" {
+        val customer = Customer(1, "Alice")
+
+        shouldThrow<IllegalArgumentException> {
+            customer.subscribe(*emptyArray<MutationEvent.Type>(), action = Consumer { _ -> })
+        }
+
+        customer.close()
+    }
+
+    "ReactiveEntityBase subscribe with MUTATE type succeeds and delivers events" {
+        val customer = Customer(1, "Alice")
+        val received = mutableListOf<MutationEvent<Int, Customer>>()
+
+        val subscription = customer.subscribe(MUTATE) { event -> received.add(event) }
+
+        customer.updateName("Bob")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        received.size shouldBe 1
+        subscription.cancel()
+        customer.close()
     }
 })

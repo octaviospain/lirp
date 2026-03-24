@@ -11,15 +11,12 @@ import net.transgressoft.lirp.event.AggregateMutationEvent;
 import net.transgressoft.lirp.event.CrudEvent;
 import net.transgressoft.lirp.event.MutationEvent;
 import net.transgressoft.lirp.event.ReactiveScope;
-import net.transgressoft.lirp.persistence.BubbleUpOrder;
 import net.transgressoft.lirp.persistence.BubbleUpOrderVolatileRepo;
 import net.transgressoft.lirp.persistence.Customer;
 import net.transgressoft.lirp.persistence.CustomerVolatileRepo;
 import net.transgressoft.lirp.persistence.LirpContext;
-import net.transgressoft.lirp.persistence.Order;
 import net.transgressoft.lirp.persistence.OrderVolatileRepo;
 import net.transgressoft.lirp.persistence.ReactiveEntityReference;
-import net.transgressoft.lirp.persistence.VolatileRepository;
 import net.transgressoft.lirp.persistence.json.FlexibleJsonFileRepository;
 import net.transgressoft.lirp.persistence.json.primitives.ReactiveString;
 import org.junit.jupiter.api.AfterAll;
@@ -603,6 +600,7 @@ class JavaInteroperabilityTest {
 
             assertEquals(1, repository.size());
             assertTrue(repository.findById(3).isPresent());
+            assertEquals(charlie, repository.findById(3).get());
             repository.close();
         }
 

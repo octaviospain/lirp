@@ -25,7 +25,6 @@ import net.transgressoft.lirp.event.AggregateMutationEvent
 import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.MutationEvent
 import mu.KotlinLogging
-import java.util.Collections
 import java.util.Optional
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.properties.ReadOnlyProperty
@@ -313,7 +312,7 @@ class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
     @Suppress("UNCHECKED_CAST")
     private fun checkForCascadeCycle(referencedEntity: IdentifiableEntity<*>) {
         val ctx = context ?: return
-        val visited = Collections.unmodifiableSet(ctx.cascadeVisited.get())
+        val visited = ctx.cascadeVisited.get().toSet()
         if (visited.isEmpty()) return
         val accessor = RegistryBase.refAccessorFor(referencedEntity.javaClass) ?: return
         for (entry in accessor.entries) {

@@ -107,4 +107,28 @@ internal class LirpRepositoryDiscoveryTest : FunSpec({
         ctx.close()
         ctx.close() // must not throw
     }
+
+    test("LirpContext reset clears registry map without closing repositories") {
+        val repo = CustomerVolatileRepo(ctx)
+
+        ctx.registries().size shouldBe 1
+
+        ctx.reset()
+
+        ctx.registries().isEmpty() shouldBe true
+        repo.create(1, "Alice")
+        repo.contains(1) shouldBe true
+    }
+
+    test("LirpContext resetDefault clears registries from the default context") {
+        val repo = CustomerVolatileRepo()
+
+        LirpContext.default.registries().size shouldBe 1
+
+        LirpContext.resetDefault()
+
+        LirpContext.default.registries().isEmpty() shouldBe true
+
+        repo.close()
+    }
 })
