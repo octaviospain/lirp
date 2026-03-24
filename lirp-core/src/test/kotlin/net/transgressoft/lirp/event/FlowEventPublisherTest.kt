@@ -1033,17 +1033,11 @@ class TestEntity(override val id: String) : ReactiveEntityBase<String, TestEntit
 
     private val nonManagedProperty = mutableMapOf<String, String>()
 
-    var name: String = "Initial Name"
-        set(value) {
-            mutateAndPublish(value, field) { field = it }
-        }
+    var name: String by reactiveProperty("Initial Name")
 
     override val uniqueId = "$id-$name"
 
-    var description: String = "Initial Description"
-        set(value) {
-            mutateAndPublish(value, field) { field = it }
-        }
+    var description: String by reactiveProperty("Initial Description")
 
     fun addFriendAddress(name: String, address: String) {
         mutateAndPublish {

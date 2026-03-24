@@ -35,7 +35,7 @@ private fun arbitraryCustomer(id: Int = -1) =
     io.kotest.property.arbitrary.arbitrary {
         Customer(
             id = if (id == -1) Arb.positiveInt(500_000).bind() else id,
-            name = Arb.stringPattern("[a-z]{5} [a-z]{5}").bind()
+            initialName = Arb.stringPattern("[a-z]{5} [a-z]{5}").bind()
         )
     }
 

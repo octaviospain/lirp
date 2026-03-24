@@ -249,10 +249,7 @@ class LazyTestEntity(
     override val uniqueId: String
         get() = id
 
-    var value: String = "initial"
-        set(newValue) {
-            mutateAndPublish(newValue, field) { field = it }
-        }
+    var value: String by reactiveProperty("initial")
 
     override fun clone(): LazyTestEntity {
         val clone = LazyTestEntity(id, creationCounter)
@@ -287,10 +284,7 @@ class CustomPublisherEntity(
     override val uniqueId: String
         get() = id
 
-    var value: String = "initial"
-        set(newValue) {
-            mutateAndPublish(newValue, field) { field = it }
-        }
+    var value: String by reactiveProperty("initial")
 
     override fun clone(): CustomPublisherEntity {
         val clone = CustomPublisherEntity(id) { _ -> FlowEventPublisher(id, closeOnEmpty = true) }

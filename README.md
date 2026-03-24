@@ -18,7 +18,7 @@ A Kotlin/Java library where domain entities own their reactivity — property ch
 
 lirp is built around a single idea: **domain entities should not be passive data containers**. Inspired by Domain-Driven Design, entities in lirp carry identity and behavior, and they publish their own state changes without external wiring.
 
-Unlike general-purpose reactive toolkits (Kotlin Flow, RxJava, EventBus) where you wire streams yourself, lirp operates at the domain level — **your domain objects _are_ the reactive infrastructure**. A property setter calls `mutateAndPublish` and every subscriber is notified automatically, with zero overhead for unobserved entities thanks to lazy publisher initialization.
+Unlike general-purpose reactive toolkits (Kotlin Flow, RxJava, EventBus) where you wire streams yourself, lirp operates at the domain level — **your domain objects _are_ the reactive infrastructure**. A property declared with `reactiveProperty()` automatically notifies every subscriber on assignment, with zero overhead for unobserved entities thanks to lazy publisher initialization.
 
 Repositories are event publishers too: they emit `CrudEvent`s on add/remove and serve as entity factories through typed `create()` methods. JSON repositories add automatic, debounced persistence — no manual save calls needed.
 
@@ -27,12 +27,11 @@ Built on Kotlin Coroutines and Kotlin Serialization. Targets **JVM 17+, Kotlin 2
 ## Quick Example
 
 ```kotlin
-data class Product(override val id: Int, var name: String) : ReactiveEntityBase<Int, Product>() {
-    var price: Double = 0.0
-        set(value) { mutateAndPublish(value, field) { field = it } }
+data class Product(override val id: Int, var name: String, initialPrice: Double = 0.0) : ReactiveEntityBase<Int, Product>() {
+    var price: Double by reactiveProperty(initialPrice)
 
     override val uniqueId = "product-$id"
-    override fun clone() = copy()
+    override fun clone() = Product(id, name, price)
 }
 
 val product = Product(1, "Widget")
@@ -54,7 +53,7 @@ Repositories manage entity lifecycles and register automatically via `@LirpRepos
 @LirpRepository
 class ProductRepository(name: String = "Products") : VolatileRepository<Int, Product>(name) {
     fun create(id: Int, name: String, price: Double = 0.0): Product {
-        val product = Product(id, name).also { it.price = price }
+        val product = Product(id, name, price)
         add(product)
         return product
     }
@@ -105,7 +104,7 @@ The KSP plugin enables `@LirpRepository` and `@ReactiveEntityRef` annotations fo
 
 ## Key Features
 
-- Entity-first reactivity with `mutateAndPublish` — property setters notify subscribers with one call
+- Entity-first reactivity with `reactiveProperty()` — declare an observable property with `var x by reactiveProperty(init)` and assignment automatically notifies subscribers
 - Two subscription patterns: repository-level (`CrudEvent`) and entity-level (`MutationEvent`)
 - DDD aggregate references with `@ReactiveEntityRef` and configurable cascade (DETACH/CASCADE/RESTRICT)
 - Repository-as-factory pattern with typed `create()` methods
