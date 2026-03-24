@@ -193,7 +193,7 @@ class ReactiveEntityRefProcessor(
                 appendLine(" * Provides direct ID getter and delegate getter lambdas — no runtime reflection.")
                 appendLine(" */")
                 appendLine("public class $accessorName : LirpRefAccessor<$className> {")
-                appendLine("    override val entries: List<RefEntry<$className, *>> = listOf(")
+                appendLine("    override val entries: List<RefEntry<*, $className>> = listOf(")
                 appendLine("        $entriesCode")
                 appendLine("    )")
                 appendLine()

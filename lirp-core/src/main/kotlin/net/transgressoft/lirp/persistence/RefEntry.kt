@@ -28,9 +28,9 @@ import net.transgressoft.lirp.entity.CascadeAction
  * for both ID value access and delegate access. Mirrors [IndexEntry] but extends it with
  * aggregate-reference-specific fields.
  *
- * @param T The entity type that declares the reference
  * @param K The referenced entity's ID type — must be [Comparable]. Null IDs are prohibited at the
  *   type level; all referenced entity IDs must be non-null.
+ * @param T The entity type that declares the reference
  * @property refName The name of the reference (defaults to the property name)
  * @property idGetter Direct accessor function for the referenced entity's ID — compiled to a
  *   regular method call accessing the backing field's [AggregateRefDelegate.referenceId], not reflection.
@@ -47,7 +47,7 @@ import net.transgressoft.lirp.entity.CascadeAction
  *   entity's subscribers as [net.transgressoft.lirp.event.AggregateMutationEvent]
  * @property cascadeAction The [CascadeAction] to execute when the referencing entity is deleted
  */
-data class RefEntry<T, K : Comparable<K>>(
+data class RefEntry<K : Comparable<K>, T>(
     val refName: String,
     val idGetter: (T) -> K,
     val delegateGetter: (T) -> AggregateRefDelegate<*, *>,

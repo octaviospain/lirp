@@ -82,7 +82,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
      * Null until discovery runs; an empty list means no generated accessor was found.
      */
     @Volatile
-    private var refEntries: List<RefEntry<T, *>>? = null
+    private var refEntries: List<RefEntry<*, T>>? = null
 
     init {
         // A registry can't create or delete entities,
