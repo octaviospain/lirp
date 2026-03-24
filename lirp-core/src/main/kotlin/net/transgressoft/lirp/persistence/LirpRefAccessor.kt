@@ -44,7 +44,7 @@ interface LirpRefAccessor<T> {
      *
      * Star-projected K since references on the same entity may point to differently-typed IDs.
      */
-    val entries: List<RefEntry<T, *>>
+    val entries: List<RefEntry<*, T>>
 
     /**
      * Cancels all active bubble-up subscriptions on the given [entity] by calling
