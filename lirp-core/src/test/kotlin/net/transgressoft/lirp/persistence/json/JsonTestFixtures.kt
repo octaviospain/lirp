@@ -74,7 +74,7 @@ interface PremiumCustomerContract : PolymorphicCustomer {
 /**
  * Concrete implementation of [PolymorphicCustomer] for standard (non-premium) customers.
  *
- * The [name] property uses a `@Transient` backed-field pattern to support [mutateAndPublish]
+ * The [name] property uses a `@Transient` backed-field delegate pattern to emit events
  * while keeping [initialName] as the serialized field name.
  */
 @Serializable
@@ -86,17 +86,15 @@ data class StandardCustomer(
 ) : PolymorphicCustomer, ReactiveEntityBase<Int, PolymorphicCustomer>() {
 
     @Transient
-    override var name: String? = initialName
-        get() = initialName
-        set(value) {
-            mutateAndPublish(value, field) { initialName = value }
-        }
+    override var name: String? by reactiveProperty({ initialName }, { initialName = it })
 
     override val uniqueId: String get() = "standard-customer-$id"
 
     override fun clone(): StandardCustomer = copy()
 
-    fun updateName(newName: String) = mutateAndPublish(newName, name) { name = newName }
+    fun updateName(newName: String) {
+        name = newName
+    }
 }
 
 /**
@@ -111,23 +109,26 @@ data class PremiumCustomer(
     override val id: Int,
     @SerialName("name") private var initialName: String? = null,
     override val email: String? = null,
-    override var loyaltyPoints: Int = 0
+    @SerialName("loyaltyPoints") private var _loyaltyPoints: Int = 0
 ) : PremiumCustomerContract, ReactiveEntityBase<Int, PolymorphicCustomer>() {
 
     @Transient
-    override var name: String? = initialName
-        get() = initialName
-        set(value) {
-            mutateAndPublish(value, field) { initialName = value }
-        }
+    override var name: String? by reactiveProperty({ initialName }, { initialName = it })
+
+    @Transient
+    override var loyaltyPoints: Int by reactiveProperty({ _loyaltyPoints }, { _loyaltyPoints = it })
 
     override val uniqueId: String get() = "premium-customer-$id"
 
     override fun clone(): PremiumCustomer = copy()
 
-    fun updateName(newName: String) = mutateAndPublish(newName, name) { name = newName }
+    fun updateName(newName: String) {
+        name = newName
+    }
 
-    fun updateLoyaltyPoints(newPoints: Int) = mutateAndPublish(newPoints, loyaltyPoints) { loyaltyPoints = it }
+    fun updateLoyaltyPoints(newPoints: Int) {
+        loyaltyPoints = newPoints
+    }
 }
 
 /**
@@ -363,6 +364,6 @@ fun arbitraryPremiumCustomer(id: Int = defaultCustomerId) =
             id = if (id == defaultCustomerId) Arb.positiveInt(500_000).bind() else id,
             initialName = Arb.stringPattern("[a-z]{5} [a-z]{5}").bind(),
             email = Arb.stringPattern("[a-z]{5}@[a-z]{4}\\.[a-z]{3}").bind(),
-            loyaltyPoints = Arb.int(0, 100_000).bind()
+            _loyaltyPoints = Arb.int(0, 100_000).bind()
         )
     }

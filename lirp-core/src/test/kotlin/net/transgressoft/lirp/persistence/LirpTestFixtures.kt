@@ -30,13 +30,17 @@ import kotlinx.serialization.Transient
 @Serializable
 data class Customer(
     override val id: Int,
-    var name: String
+    val initialName: String
 ) : ReactiveEntityBase<Int, Customer>() {
+    var name: String by reactiveProperty(initialName)
+
     override val uniqueId: String get() = "customer-$id"
 
-    override fun clone(): Customer = copy()
+    override fun clone(): Customer = Customer(id, name)
 
-    fun updateName(newName: String) = mutateAndPublish(newName, name) { name = it }
+    fun updateName(newName: String) {
+        name = newName
+    }
 }
 
 /**
@@ -93,13 +97,17 @@ data class BubbleUpOrder(
 @Serializable
 data class EntityA(
     override val id: Int,
-    var value: String
+    val initialValue: String
 ) : ReactiveEntityBase<Int, EntityA>() {
+    var value: String by reactiveProperty(initialValue)
+
     override val uniqueId: String get() = "entity-a-$id"
 
-    override fun clone(): EntityA = copy()
+    override fun clone(): EntityA = EntityA(id, value)
 
-    fun updateValue(newValue: String) = mutateAndPublish(newValue, value) { value = it }
+    fun updateValue(newValue: String) {
+        value = newValue
+    }
 }
 
 /**
@@ -396,16 +404,20 @@ class CyclicChildVolatileRepo internal constructor(
 @Serializable
 data class MutableRefOrder(
     override val id: Long,
-    var customerId: Int
+    val initialCustomerId: Int
 ) : ReactiveEntityBase<Long, MutableRefOrder>() {
+    var customerId: Int by reactiveProperty(initialCustomerId)
+
     override val uniqueId: String get() = "mutable-ref-order-$id"
 
     @ReactiveEntityRef(bubbleUp = true)
     val customer by aggregateRef<Customer, Int> { customerId }
 
-    override fun clone(): MutableRefOrder = copy()
+    override fun clone(): MutableRefOrder = MutableRefOrder(id, customerId)
 
-    fun changeCustomer(newId: Int) = mutateAndPublish(newId, customerId) { customerId = it }
+    fun changeCustomer(newId: Int) {
+        customerId = newId
+    }
 }
 
 /**

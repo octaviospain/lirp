@@ -31,6 +31,8 @@ import java.time.LocalDateTime
 import java.util.concurrent.Flow
 import java.util.concurrent.atomic.AtomicReference
 import java.util.function.Consumer
+import kotlin.properties.ReadWriteProperty
+import kotlin.reflect.KProperty
 import kotlinx.coroutines.flow.SharedFlow
 
 /**
@@ -42,6 +44,17 @@ import kotlinx.coroutines.flow.SharedFlow
  * entity state and the previous state.
  *
  * The event publisher is lazily initialized on first subscription, minimizing overhead for unobserved entities.
+ *
+ * Observable properties are declared with the [reactiveProperty] delegate factory. Assigning a new value
+ * to a delegate-backed property emits a [ReactiveMutationEvent] automatically — no boilerplate setters needed:
+ * ```
+ * var name: String by reactiveProperty("default")
+ * ```
+ * For `@Transient` properties in `@Serializable` entities, use the getter/setter overload:
+ * ```
+ * @Transient override var name: String? by reactiveProperty({ _name }, { _name = it })
+ * ```
+ * The block-level [mutateAndPublish] overload remains available for multi-field atomic mutations.
  *
  * Lifecycle states:
  * - **Created**: No publisher allocated; zero overhead.
@@ -235,27 +248,34 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     }
 
     /**
-     * Sets a property value and notifies all subscribers if the value has changed.
+     * Creates a reactive property delegate that emits a [ReactiveMutationEvent] on value change.
      *
-     * @param T The type of the property being modified
-     * @param newValue The new value to set
-     * @param oldValue The current value of the property
-     * @param propertySetAction A consumer that actually sets the property's value
+     * Usage: `var name: String by reactiveProperty(initialName)`
+     *
+     * @param T The type of the property value
+     * @param initialValue The initial value for the property
+     * @return A [ReadWriteProperty] delegate that tracks mutations and emits events
      */
-    @Suppress("UNCHECKED_CAST")
-    @JvmOverloads
-    protected fun <T> mutateAndPublish(newValue: T, oldValue: T, propertySetAction: (T) -> Unit = {}) {
-        check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
-        if (newValue != oldValue) {
-            val entityBeforeChange = clone()
-            propertySetAction(newValue)
-            lastDateModified = LocalDateTime.now()
-            if (shouldEmit) {
-                log.trace { "Firing entity update event from $entityBeforeChange to $this" }
-                publisher.emitAsync(ReactiveMutationEvent(this as R, entityBeforeChange as R))
-            }
-        }
-    }
+    protected fun <T> reactiveProperty(initialValue: T): ReadWriteProperty<ReactiveEntityBase<K, R>, T> =
+        ReactivePropertyDelegate(initialValue)
+
+    /**
+     * Creates a reactive property delegate backed by external getter/setter lambdas.
+     *
+     * Designed for `@Transient` properties in `@Serializable` entities where the actual
+     * value is stored in a constructor parameter annotated with `@SerialName`:
+     * ```
+     * @Transient
+     * override var name: String? by reactiveProperty({ _name }, { _name = it })
+     * ```
+     *
+     * @param T The type of the property value
+     * @param getter Lambda that reads the current value
+     * @param setter Lambda that writes the new value
+     * @return A [ReadWriteProperty] delegate that tracks mutations and emits events
+     */
+    protected fun <T> reactiveProperty(getter: () -> T, setter: (T) -> Unit): ReadWriteProperty<ReactiveEntityBase<K, R>, T> =
+        ReactivePropertyDelegateWithAccessors(getter, setter)
 
     @Suppress("UNCHECKED_CAST")
     protected fun <T> mutateAndPublish(mutationAction: () -> T): T {
@@ -275,5 +295,48 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
             }
         }
         return result
+    }
+
+    private inner class ReactivePropertyDelegate<T>(private var storedValue: T) :
+        ReadWriteProperty<ReactiveEntityBase<K, R>, T> {
+
+        override fun getValue(thisRef: ReactiveEntityBase<K, R>, property: KProperty<*>): T = storedValue
+
+        @Suppress("UNCHECKED_CAST")
+        override fun setValue(thisRef: ReactiveEntityBase<K, R>, property: KProperty<*>, value: T) {
+            check(!isClosed) { "Entity '${this@ReactiveEntityBase::class.java.simpleName}' is closed" }
+            if (value != storedValue) {
+                val entityBeforeChange = clone()
+                storedValue = value
+                lastDateModified = LocalDateTime.now()
+                if (shouldEmit) {
+                    log.trace { "Firing entity update event from $entityBeforeChange to ${this@ReactiveEntityBase}" }
+                    publisher.emitAsync(ReactiveMutationEvent(this@ReactiveEntityBase as R, entityBeforeChange as R))
+                }
+            }
+        }
+    }
+
+    private inner class ReactivePropertyDelegateWithAccessors<T>(
+        private val getter: () -> T,
+        private val setter: (T) -> Unit
+    ) : ReadWriteProperty<ReactiveEntityBase<K, R>, T> {
+
+        override fun getValue(thisRef: ReactiveEntityBase<K, R>, property: KProperty<*>): T = getter()
+
+        @Suppress("UNCHECKED_CAST")
+        override fun setValue(thisRef: ReactiveEntityBase<K, R>, property: KProperty<*>, value: T) {
+            check(!isClosed) { "Entity '${this@ReactiveEntityBase::class.java.simpleName}' is closed" }
+            val oldValue = getter()
+            if (value != oldValue) {
+                val entityBeforeChange = clone()
+                setter(value)
+                lastDateModified = LocalDateTime.now()
+                if (shouldEmit) {
+                    log.trace { "Firing entity update event from $entityBeforeChange to ${this@ReactiveEntityBase}" }
+                    publisher.emitAsync(ReactiveMutationEvent(this@ReactiveEntityBase as R, entityBeforeChange as R))
+                }
+            }
+        }
     }
 }
