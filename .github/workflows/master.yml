@@ -10,7 +10,7 @@ on:
             - 'docs/**'
 
 jobs:
-    build:
+    build-analyze:
         runs-on: ubuntu-latest
 
         steps:
