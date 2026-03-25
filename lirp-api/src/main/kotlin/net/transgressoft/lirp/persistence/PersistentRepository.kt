@@ -15,27 +15,20 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>. *
  ******************************************************************************/
 
-package net.transgressoft.lirp.persistence.json
+package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.ReactiveEntity
-import net.transgressoft.lirp.persistence.PersistentRepository
-import java.io.File
+import java.io.Closeable
 
 /**
- * A specialized persistent repository that stores entities in JSON format.
+ * Marker interface for repositories that persist entity state beyond the JVM lifetime.
  *
- * This interface extends [PersistentRepository] to provide JSON-specific persistence capabilities
- * for reactive entities using a JSON file as the storage medium. It manages the serialization
- * and deserialization of entities to and from the JSON format.
+ * Extends [Repository] with [Closeable] lifecycle management. Concrete implementations such as
+ * [net.transgressoft.lirp.persistence.json.JsonRepository] and future SQL-backed repositories
+ * extend this interface to signal that they operate on a durable storage medium and must be
+ * explicitly closed to release underlying resources.
  *
- * @param K The type of the entity's identifier, which must be [Comparable]
- * @param R The type of reactive entity this repository manages
+ * @param K The type of entity identifier, must be [Comparable]
+ * @param R The type of reactive entity stored in this repository
  */
-interface JsonRepository<K : Comparable<K>, R : ReactiveEntity<K, R>> : PersistentRepository<K, R> {
-    /**
-     * The JSON file where entity data is persisted.
-     *
-     * This property can be changed to redirect storage to a different file.
-     */
-    var jsonFile: File
-}
+interface PersistentRepository<K : Comparable<K>, R : ReactiveEntity<K, R>> : Repository<K, R>, Closeable
