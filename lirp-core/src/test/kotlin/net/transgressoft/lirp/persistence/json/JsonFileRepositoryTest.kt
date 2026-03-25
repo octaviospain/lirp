@@ -6,6 +6,7 @@ import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpDeserializationException
+import net.transgressoft.lirp.persistence.PersistentRepositoryBase
 import io.kotest.assertions.json.shouldEqualJson
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.assertions.throwables.shouldThrow
@@ -58,7 +59,7 @@ class JsonFileRepositoryTest : DescribeSpec({
 
     fun getSubscriptionsMap(repo: JsonFileRepository<Int, PolymorphicCustomer>): MutableMap<Int, *> {
         val subscriptionsMapField =
-            JsonFileRepository::class.java
+            PersistentRepositoryBase::class.java
                 .getDeclaredField("subscriptionsMap")
                 .also { it.isAccessible = true }
         @Suppress("UNCHECKED_CAST")
@@ -67,7 +68,7 @@ class JsonFileRepositoryTest : DescribeSpec({
 
     fun getDirtyFlag(repo: JsonFileRepository<Int, PolymorphicCustomer>): AtomicBoolean {
         val dirtyField =
-            JsonFileRepository::class.java
+            PersistentRepositoryBase::class.java
                 .getDeclaredField("dirty")
                 .also { it.isAccessible = true }
         return dirtyField.get(repo) as AtomicBoolean

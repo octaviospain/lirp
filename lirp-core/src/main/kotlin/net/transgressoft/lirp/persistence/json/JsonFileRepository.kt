@@ -20,17 +20,14 @@ package net.transgressoft.lirp.persistence.json
 import net.transgressoft.lirp.entity.ReactiveEntity
 import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
 import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
-import net.transgressoft.lirp.event.LirpEventSubscription
-import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpDeserializationException
-import net.transgressoft.lirp.persistence.VolatileRepository
+import net.transgressoft.lirp.persistence.PersistentRepositoryBase
 import mu.KotlinLogging
 import java.io.File
 import java.util.Objects
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineScope
@@ -45,13 +42,11 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.modules.SerializersModule
 
-private const val JSON_FILE_REPOSITORY_IS_CLOSED = "JsonFileRepository is closed"
-
 /**
  * Base class for repositories that store entities in a JSON file.
  *
  * This class handles the serialization and deserialization of entities to/from a JSON file,
- * providing persistent storage with asynchronous write operations. It extends [VolatileRepository]
+ * providing persistent storage with asynchronous write operations. It extends [PersistentRepositoryBase]
  * with file I/O capabilities, ensuring that repository operations are automatically persisted.
  *
  * Key features:
@@ -59,7 +54,7 @@ private const val JSON_FILE_REPOSITORY_IS_CLOSED = "JsonFileRepository is closed
  * - Automatic persistence of all repository operations
  * - Thread-safe operations using ConcurrentHashMap by the upstream [net.transgressoft.lirp.persistence.Repository]
  * - Error handling with logging
- * - Subscription management for entity lifecycle
+ * - Subscription management for entity lifecycle (delegated to [PersistentRepositoryBase])
  *
  * ## Performance Characteristics
  *
@@ -96,7 +91,7 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
         private val mapSerializer: KSerializer<Map<K, R>>,
         private val repositorySerializersModule: SerializersModule = SerializersModule {},
         private val serializationDelay: Duration = 300.milliseconds
-    ) : VolatileRepository<K, R>(context, "JsonFileRepository-${file.name}", ConcurrentHashMap()), JsonRepository<K, R> {
+    ) : PersistentRepositoryBase<K, R>(context, "JsonFileRepository-${file.name}", ConcurrentHashMap()), JsonRepository<K, R> {
 
         @JvmOverloads
         constructor(
@@ -114,7 +109,8 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
                     "Provided jsonFile does not exist, is not writable, is not a json file, or is not empty"
                 }
                 field = value
-                markDirtyAndTrigger()
+                dirty.set(true)
+                onDirty()
                 log.info { "jsonFile set to $value" }
             }
 
@@ -147,17 +143,6 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
          * excessive serialization operations when multiple changes occur in a short period.
          */
         private val serializationTrigger = MutableSharedFlow<Unit>(replay = 1, extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
-
-        /**
-         * Subscriptions map for each entity in the repository are needed to unsubscribe
-         * from their changes once they are removed.
-         */
-        private val subscriptionsMap: MutableMap<K, LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>> = ConcurrentHashMap()
-
-        private val dirty = AtomicBoolean(false)
-
-        @Volatile
-        private var closed = false
 
         init {
             try {
@@ -201,14 +186,7 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
             }
         }
 
-        private fun subscribeEntity(entity: R) {
-            val subscription = entity.subscribe { markDirtyAndTrigger() }
-            subscriptionsMap[entity.id] = subscription
-        }
-
-        private fun markDirtyAndTrigger() {
-            check(!closed) { JSON_FILE_REPOSITORY_IS_CLOSED }
-            dirty.set(true)
+        override fun onDirty() {
             serializationEventChannel.trySend(Unit)
         }
 
@@ -270,7 +248,6 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
          */
         override fun close() {
             if (closed) return
-            closed = true
             serializationEventChannel.close()
             // Fire-and-forget: flush any pending dirty state without blocking the caller
             ioScope.launch {
@@ -278,54 +255,6 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
             }
             serializationJob.cancel()
             super.close()
-        }
-
-        override fun add(entity: R): Boolean {
-            check(!closed) { JSON_FILE_REPOSITORY_IS_CLOSED }
-            val added = super.add(entity)
-            if (added) {
-                markDirtyAndTrigger()
-                subscribeEntity(entity)
-            }
-            return added
-        }
-
-        override fun remove(entity: R): Boolean {
-            check(!closed) { JSON_FILE_REPOSITORY_IS_CLOSED }
-            return super.remove(entity).also { removed ->
-                if (removed) {
-                    markDirtyAndTrigger()
-                    val subscription =
-                        subscriptionsMap.remove(entity.id)
-                            ?: error("Repository should contain a subscription for $entity")
-                    subscription.cancel()
-                }
-            }
-        }
-
-        override fun removeAll(entities: Collection<R>): Boolean {
-            check(!closed) { JSON_FILE_REPOSITORY_IS_CLOSED }
-            return super.removeAll(entities).also { removed ->
-                if (removed) {
-                    markDirtyAndTrigger()
-                    entities.forEach {
-                        val subscription =
-                            subscriptionsMap.remove(it.id)
-                                ?: error("Repository should contain a subscription for $it")
-                        subscription.cancel()
-                    }
-                }
-            }
-        }
-
-        override fun clear() {
-            check(!closed) { JSON_FILE_REPOSITORY_IS_CLOSED }
-            super.clear()
-            markDirtyAndTrigger()
-            subscriptionsMap.forEach { (_, subscription) ->
-                subscription.cancel()
-            }
-            subscriptionsMap.clear()
         }
 
         override fun hashCode() = Objects.hashCode(jsonFile)

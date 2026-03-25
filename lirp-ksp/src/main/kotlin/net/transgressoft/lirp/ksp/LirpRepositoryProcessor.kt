@@ -31,6 +31,7 @@ private const val LIRP_REPOSITORY_ANNOTATION_FQN = "net.transgressoft.lirp.persi
 private val REPOSITORY_BASE_FQN_SET =
     setOf(
         "net.transgressoft.lirp.persistence.VolatileRepository",
+        "net.transgressoft.lirp.persistence.PersistentRepositoryBase",
         "net.transgressoft.lirp.persistence.json.JsonFileRepository",
         "net.transgressoft.lirp.persistence.json.FlexibleJsonFileRepository"
     )
@@ -71,8 +72,8 @@ class LirpRepositoryProcessor(
 
     /**
      * Walks the supertype chain of [classDecl] recursively to find a known repository base class
-     * ([VolatileRepository], [JsonFileRepository], or [FlexibleJsonFileRepository]) and extract
-     * its second type argument (index 1) as the entity class FQN.
+     * ([VolatileRepository], [PersistentRepositoryBase], [JsonFileRepository], or [FlexibleJsonFileRepository])
+     * and extract its second type argument (index 1) as the entity class FQN.
      */
     private fun findEntityClassFqn(classDecl: KSClassDeclaration): String? {
         for (superTypeRef in classDecl.superTypes) {

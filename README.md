@@ -102,12 +102,29 @@ dependencies {
 
 The KSP plugin enables `@LirpRepository` and `@ReactiveEntityRef` annotations for zero-config repository registration and aggregate reference wiring.
 
+## Persistence Hierarchy
+
+lirp provides a layered persistence abstraction:
+
+```
+Repository (interface, lirp-api)
+  └── PersistentRepository (interface, lirp-api)       — marker for durable backends
+        └── JsonRepository (interface, lirp-api)        — JSON-specific contract
+
+VolatileRepository (class, lirp-core)                   — in-memory
+  └── PersistentRepositoryBase (abstract, lirp-core)    — subscription mgmt, lifecycle, dirty tracking
+        └── JsonFileRepository (class, lirp-core)       — debounced JSON file writes
+```
+
+`PersistentRepository` is the marker interface for repositories that survive JVM lifetime. `PersistentRepositoryBase` provides the shared foundation for all durable backends: it auto-subscribes entities on add, cancels subscriptions on remove, guards mutating operations after close, and calls `onDirty()` when the state changes. Subclasses implement `onDirty()` to trigger their storage mechanism — `JsonFileRepository` sends to its serialization channel, a future `SqlRepository` would schedule a DB write.
+
 ## Key Features
 
 - Entity-first reactivity with `reactiveProperty()` — declare an observable property with `var x by reactiveProperty(init)` and assignment automatically notifies subscribers
 - Two subscription patterns: repository-level (`CrudEvent`) and entity-level (`MutationEvent`)
 - DDD aggregate references with `@ReactiveEntityRef` and configurable cascade (DETACH/CASCADE/RESTRICT)
 - Repository-as-factory pattern with typed `create()` methods
+- Layered persistence abstraction: `PersistentRepository` / `PersistentRepositoryBase` as extensible foundation for JSON and future SQL backends
 - Automatic JSON persistence with debounced writes via `JsonFileRepository`
 - Secondary indexes for O(1) lookups via `@Indexed`
 - Full Java interoperability
