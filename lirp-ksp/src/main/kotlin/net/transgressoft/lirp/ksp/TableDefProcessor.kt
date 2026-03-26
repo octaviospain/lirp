@@ -29,6 +29,7 @@ import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSAnnotation
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
+import com.google.devtools.ksp.symbol.Modifier
 import com.google.devtools.ksp.validate
 
 private const val PERSISTENCE_MAPPING_FQN = "net.transgressoft.lirp.persistence.PersistenceMapping"
@@ -36,15 +37,20 @@ private const val PERSISTENCE_PROPERTY_FQN = "net.transgressoft.lirp.persistence
 private const val PERSISTENCE_IGNORE_FQN = "net.transgressoft.lirp.persistence.PersistenceIgnore"
 private const val REACTIVE_ENTITY_REF_FQN = "net.transgressoft.lirp.persistence.ReactiveEntityRef"
 private const val TRANSIENT_FQN = "kotlin.jvm.Transient"
+private const val SQL_TABLE_DEF_FQN = "net.transgressoft.lirp.persistence.sql.SqlTableDef"
 
 /**
  * KSP processor that generates `_LirpTableDef` descriptor objects for entity classes annotated with
  * [@PersistenceMapping][net.transgressoft.lirp.persistence.PersistenceMapping] or containing
  * properties annotated with [@PersistenceProperty][net.transgressoft.lirp.persistence.PersistenceProperty].
  *
- * The generated objects implement [LirpTableDef][net.transgressoft.lirp.persistence.LirpTableDef]
- * and carry only lirp-api types — no JetBrains Exposed or other SQL dependency is referenced in
- * generated code. The `lirp-sql` module interprets these descriptors at runtime.
+ * The generated objects conditionally implement either [SqlTableDef][net.transgressoft.lirp.persistence.sql.SqlTableDef]
+ * (when `lirp-sql` is on the KSP classpath) or [LirpTableDef][net.transgressoft.lirp.persistence.LirpTableDef]
+ * (descriptor-only, when `lirp-sql` is absent). Per D-06, this check uses
+ * `resolver.getClassDeclarationByName` at KSP compile time.
+ *
+ * When generating `SqlTableDef` implementations, the processor emits typed `fromRow` and `toParams`
+ * methods with correct Java↔Kotlin type conversions for UUID, Date, DateTime, and Enum properties.
  *
  * Both annotation entry points are supported: a class-level `@PersistenceMapping` and a property-level
  * `@PersistenceProperty` on a class without `@PersistenceMapping` both trigger generation.
@@ -79,20 +85,31 @@ class TableDefProcessor(
             classes.add(parent)
         }
 
+        // Per D-06: detect SqlTableDef availability at KSP compile time via resolver
+        val sqlTableDefAvailable =
+            resolver.getClassDeclarationByName(
+                resolver.getKSNameFromString(SQL_TABLE_DEF_FQN)
+            ) != null
+
         for (classDecl in classes) {
-            generateTableDef(classDecl)
+            generateTableDef(classDecl, sqlTableDefAvailable)
         }
 
         return unableToProcess
     }
 
-    private fun generateTableDef(classDecl: KSClassDeclaration) {
+    private fun generateTableDef(classDecl: KSClassDeclaration, sqlTableDefAvailable: Boolean) {
         val packageName = classDecl.packageName.asString()
         val className = classDecl.simpleName.asString()
         val tableDefName = "${className}_LirpTableDef"
 
         val tableName = resolveTableName(classDecl, className)
         val columns = collectColumns(classDecl)
+
+        // Generate SqlTableDef only when all non-PK columns are mutable (settable via property setter).
+        // Entities with immutable (val) non-PK properties require a full constructor call that
+        // the id-only construction pattern cannot satisfy; fall back to descriptor-only LirpTableDef.
+        val canGenerateSqlMapping = sqlTableDefAvailable && columns.filter { !it.isPrimaryKey }.all { it.isMutable }
 
         val file =
             codeGenerator.createNewFile(
@@ -114,22 +131,100 @@ class TableDefProcessor(
                 }
                 appendLine("import net.transgressoft.lirp.persistence.ColumnDef")
                 appendLine("import net.transgressoft.lirp.persistence.ColumnType")
-                appendLine("import net.transgressoft.lirp.persistence.LirpTableDef")
+                if (canGenerateSqlMapping) {
+                    appendLine("import net.transgressoft.lirp.persistence.LirpTableDef")
+                    appendLine("import net.transgressoft.lirp.persistence.sql.SqlTableDef")
+                    appendLine("import org.jetbrains.exposed.v1.core.Column")
+                    appendLine("import org.jetbrains.exposed.v1.core.ResultRow")
+                    appendLine("import org.jetbrains.exposed.v1.core.Table")
+                } else {
+                    appendLine("import net.transgressoft.lirp.persistence.LirpTableDef")
+                }
                 appendLine()
                 appendLine("/** KSP-generated table descriptor for [$className]. */")
-                appendLine("public object $tableDefName : LirpTableDef<$className> {")
+                if (canGenerateSqlMapping) {
+                    appendLine("public object $tableDefName : SqlTableDef<$className> {")
+                } else {
+                    appendLine("public object $tableDefName : LirpTableDef<$className> {")
+                }
                 appendLine("    override val tableName: String = \"$tableName\"")
                 appendLine("    override val columns: List<ColumnDef> = listOf(")
                 if (columns.isNotEmpty()) {
                     appendLine("        $columnsCode")
                 }
                 appendLine("    )")
+                if (canGenerateSqlMapping) {
+                    appendLine()
+                    appendFromRow(className, columns)
+                    appendLine()
+                    appendToParams(className, columns)
+                }
                 appendLine("}")
             }.toByteArray()
         )
         file.close()
 
-        logger.info("Generated $packageName.$tableDefName for $className")
+        logger.info("Generated $packageName.$tableDefName for $className (sqlTableDef=$canGenerateSqlMapping)")
+    }
+
+    private fun StringBuilder.appendFromRow(className: String, columns: List<ColumnMeta>) {
+        val pkCol = columns.firstOrNull { it.isPrimaryKey }
+        val nonPkCols = columns.filter { !it.isPrimaryKey }
+
+        appendLine("    override fun fromRow(row: ResultRow, table: Table): $className {")
+        if (pkCol != null) {
+            val pkAccess = buildRowAccess(pkCol)
+            appendLine("        val entity = $className($pkAccess)")
+            for (col in nonPkCols) {
+                val rowAccess = buildRowAccess(col)
+                appendLine("        entity.${col.propertyName} = $rowAccess")
+            }
+        } else {
+            // No PK found — generate a best-effort construction using first column
+            appendLine("        val entity = $className(row[table.columns.first()])")
+        }
+        appendLine("        return entity")
+        appendLine("    }")
+    }
+
+    private fun buildRowAccess(col: ColumnMeta): String {
+        val rawAccess = "row[table.columns.first { it.name == \"${col.name}\" }]"
+        return when {
+            col.typeFqn == "java.util.UUID" -> "$rawAccess as kotlin.uuid.Uuid"
+            col.typeFqn == "java.time.LocalDate" -> "($rawAccess as kotlinx.datetime.LocalDate).toJavaLocalDate()"
+            col.typeFqn == "java.time.LocalDateTime" -> "($rawAccess as kotlinx.datetime.LocalDateTime).toJavaLocalDateTime()"
+            col.isEnum -> {
+                val enumSimpleName = col.typeFqn.substringAfterLast(".")
+                "enumValueOf<$enumSimpleName>($rawAccess as String)"
+            }
+            col.nullable -> "$rawAccess as? ${col.typeFqn.substringAfterLast(".")}"
+            else -> "$rawAccess as ${col.typeFqn.substringAfterLast(".")}"
+        }
+    }
+
+    private fun StringBuilder.appendToParams(className: String, columns: List<ColumnMeta>) {
+        appendLine("    override fun toParams(entity: $className, table: Table): Map<Column<*>, Any?> {")
+        appendLine("        val cols = table.columns.associateBy { it.name }")
+        appendLine("        return mapOf(")
+        val paramEntries =
+            columns.joinToString(",\n            ") { col ->
+                val valueAccess = buildEntityAccess(col)
+                "cols[\"${col.name}\"]!! to $valueAccess"
+            }
+        appendLine("            $paramEntries")
+        appendLine("        )")
+        appendLine("    }")
+    }
+
+    private fun buildEntityAccess(col: ColumnMeta): String {
+        val prop = "entity.${col.propertyName}"
+        return when {
+            col.typeFqn == "java.util.UUID" -> "$prop.toKotlinUuid()"
+            col.typeFqn == "java.time.LocalDate" -> "$prop.toKotlinLocalDate()"
+            col.typeFqn == "java.time.LocalDateTime" -> "$prop.toKotlinLocalDateTime()"
+            col.isEnum -> "$prop.name"
+            else -> prop
+        }
     }
 
     private fun resolveTableName(classDecl: KSClassDeclaration, className: String): String {
@@ -168,10 +263,20 @@ class TableDefProcessor(
                     propName.toSnakeCase()
                 }
 
-            val nullable = prop.type.resolve().isMarkedNullable
+            val resolvedType = prop.type.resolve()
+            val nullable = resolvedType.isMarkedNullable
+            val notNullableType = resolvedType.makeNotNullable()
+            val typeFqn = notNullableType.declaration.qualifiedName?.asString() ?: "kotlin.Any"
+            val isEnum = (notNullableType.declaration as? KSClassDeclaration)?.classKind == ClassKind.ENUM_CLASS
+            // Mutable for SqlTableDef fromRow purposes means: var property with a public setter
+            val setterIsPublic =
+                prop.setter?.modifiers?.none {
+                    it == Modifier.PROTECTED || it == Modifier.PRIVATE || it == Modifier.INTERNAL
+                } ?: true
+            val isMutable = prop.isMutable && setterIsPublic
             val typeExpression = mapToColumnTypeExpression(prop, persistenceAnnotation) ?: continue
 
-            columns.add(ColumnMeta(columnName, typeExpression, nullable, isPrimaryKey))
+            columns.add(ColumnMeta(columnName, propName, typeExpression, typeFqn, nullable, isPrimaryKey, isEnum, isMutable))
         }
 
         return columns
@@ -264,7 +369,11 @@ private fun String.toSnakeCase(): String =
 
 private data class ColumnMeta(
     val name: String,
+    val propertyName: String,
     val typeExpression: String,
+    val typeFqn: String,
     val nullable: Boolean,
-    val isPrimaryKey: Boolean
+    val isPrimaryKey: Boolean,
+    val isEnum: Boolean = false,
+    val isMutable: Boolean = false
 )

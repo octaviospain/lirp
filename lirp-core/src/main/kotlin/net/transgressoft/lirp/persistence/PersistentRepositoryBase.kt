@@ -48,6 +48,17 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         initialEntities: MutableMap<K, R>
     ) : VolatileRepository<K, R>(context, name, initialEntities), PersistentRepository<K, R> {
 
+        /**
+         * Public constructor for external subclasses (e.g. in separate modules) that do not
+         * have direct access to [LirpContext].
+         *
+         * Uses [LirpContext.default] for registration and a [java.util.concurrent.ConcurrentHashMap]
+         * for in-memory storage.
+         *
+         * @param name A descriptive name for this repository, used in logging and identification.
+         */
+        constructor(name: String) : this(LirpContext.default, name, ConcurrentHashMap())
+
         private val log = KotlinLogging.logger(javaClass.name)
 
         private val subscriptionsMap: MutableMap<K, LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>> = ConcurrentHashMap()
