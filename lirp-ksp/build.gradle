@@ -1,7 +1,21 @@
-description = 'LIRP KSP Processor - Compile-time index accessor generation'
+description = 'LIRP KSP Processor - Compile-time code generation for entity accessors and table definitions'
 
 dependencies {
     api project(path: ':lirp-api')
 
     implementation libs.ksp.api
+
+    testImplementation(project(path: ':lirp-core')) {
+        exclude group: 'org.jetbrains.kotlin', module: 'kotlin-gradle-plugin'
+        exclude group: 'org.jetbrains.kotlin', module: 'kotlin-gradle-plugin-api'
+    }
+    testImplementation(libs.kctfork.ksp)
+    testImplementation platform(libs.junit.bom)
+    testImplementation libs.bundles.kotest
+    testImplementation libs.junit.jupiter
+    testRuntimeOnly libs.junit.platform.launcher
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
 }

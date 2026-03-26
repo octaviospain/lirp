@@ -6,6 +6,7 @@ kotest = "6.1.7"
 exposed = "1.1.1"
 hikari = "6.3.0"
 testcontainers = "1.21.3"
+kctfork = "0.12.1"
 
 [libraries]
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
@@ -34,6 +35,8 @@ exposed-kotlin-datetime = { module = "org.jetbrains.exposed:exposed-kotlin-datet
 hikari = { module = "com.zaxxer:HikariCP", version.ref = "hikari" }
 
 testcontainers-postgresql = { module = "org.testcontainers:postgresql", version.ref = "testcontainers" }
+
+kctfork-ksp = { module = "dev.zacsweers.kctfork:ksp", version.ref = "kctfork" }
 
 mockk = { module = "io.mockk:mockk", version = "1.14.9" }
 logback-core = { module = "ch.qos.logback:logback-core", version = "1.5.32" }
