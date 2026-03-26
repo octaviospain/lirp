@@ -100,7 +100,7 @@ dependencies {
 
 **Requirements:** JVM 17+, Kotlin 2.3.10
 
-The KSP plugin enables `@LirpRepository` and `@ReactiveEntityRef` annotations for zero-config repository registration and aggregate reference wiring.
+The KSP plugin enables `@LirpRepository` and `@ReactiveEntityRef` annotations for zero-config repository registration and aggregate reference wiring, and `@PersistenceMapping`, `@PersistenceProperty`, `@PersistenceIgnore` annotations for SQL schema generation (v2.0.0).
 
 ## Persistence Hierarchy
 
@@ -129,6 +129,7 @@ VolatileRepository (class, lirp-core)                   — in-memory
 - Secondary indexes for O(1) lookups via `@Indexed`
 - Full Java interoperability
 - KSP-powered zero-config registration via `@LirpRepository`
+- SQL persistence annotations: `@PersistenceMapping` (table name), `@PersistenceProperty` (column config), `@PersistenceIgnore` (exclude from persistence)
 
 ## Documentation
 
