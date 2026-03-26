@@ -102,6 +102,76 @@ dependencies {
 
 The KSP plugin enables `@LirpRepository` and `@ReactiveEntityRef` annotations for zero-config repository registration and aggregate reference wiring, and `@PersistenceMapping`, `@PersistenceProperty`, `@PersistenceIgnore` annotations for SQL schema generation (v2.0.0).
 
+## KSP Table Generation
+
+When `lirp-ksp` is on your KSP classpath, entities annotated with `@PersistenceMapping` or properties annotated with `@PersistenceProperty` cause the `TableDefProcessor` to generate a `{ClassName}_LirpTableDef` object at compile time. These descriptors are persistence-agnostic — they carry only `ColumnType` and `ColumnDef` information, and the `lirp-sql` module interprets them at runtime.
+
+### Annotations
+
+| Annotation | Target | Purpose |
+|------------|--------|---------|
+| `@PersistenceMapping(name = "")` | Class | Declares the table. `name` overrides the default snake_case class name. |
+| `@PersistenceProperty(name, length, precision, scale, type)` | Property | Configures a column. All parameters are optional and default to convention. |
+| `@PersistenceIgnore` | Property | Excludes the property from the generated descriptor. |
+
+### Convention defaults
+
+- **Table name:** snake_case of the class name (`CustomerOrder` → `customer_order`). Overridden by `@PersistenceMapping(name = "...")`.
+- **Column name:** snake_case of the property name. Overridden by `@PersistenceProperty(name = "...")`.
+- **Primary key:** the `id` property (from `TransEntity`) is automatically marked as `primaryKey = true`.
+- **String length:** `String` without `length` → `ColumnType.TextType`; with `length = N` → `ColumnType.VarcharType(N)`.
+- **Nullability:** inferred from the Kotlin type — `String?` → `nullable = true`.
+
+### Dual-trigger generation
+
+The processor triggers on either annotation entry point:
+
+```kotlin
+@PersistenceMapping                      // triggers on the class
+data class Product(
+    override val id: Int,
+    @PersistenceProperty(name = "full_name", length = 255) val name: String,
+    @PersistenceIgnore val displayLabel: String = ""
+) : ReactiveEntityBase<Int, Product>() {
+    var price: Double by reactiveProperty(0.0)  // delegate properties are included
+    override val uniqueId = "product-$id"
+    override fun clone() = copy()
+}
+```
+
+Generates at compile time:
+
+```kotlin
+public object Product_LirpTableDef : LirpTableDef<Product> {
+    override val tableName: String = "product"
+    override val columns: List<ColumnDef> = listOf(
+        ColumnDef(name = "id",        type = ColumnType.IntType,    nullable = false, primaryKey = true),
+        ColumnDef(name = "full_name", type = ColumnType.VarcharType(255), nullable = false, primaryKey = false),
+        ColumnDef(name = "price",     type = ColumnType.DoubleType, nullable = false, primaryKey = false)
+        // displayLabel excluded by @PersistenceIgnore
+    )
+}
+```
+
+### Supported ColumnType hierarchy
+
+| Kotlin type | ColumnType |
+|------------|------------|
+| `Int` | `IntType` |
+| `Long` | `LongType` |
+| `String` (no length) | `TextType` |
+| `String` (with `length = N`) | `VarcharType(N)` |
+| `Boolean` | `BooleanType` |
+| `Double` | `DoubleType` |
+| `Float` | `FloatType` |
+| `java.util.UUID` | `UuidType` |
+| `java.time.LocalDate` | `DateType` |
+| `java.time.LocalDateTime` | `DateTimeType` |
+| `java.math.BigDecimal` | `DecimalType(precision, scale)` |
+| Any `enum class` | `EnumType(fqn)` |
+
+Properties with types not in this table cause a KSP error at compile time.
+
 ## Persistence Hierarchy
 
 lirp provides a layered persistence abstraction:
@@ -129,7 +199,7 @@ VolatileRepository (class, lirp-core)                   — in-memory
 - Secondary indexes for O(1) lookups via `@Indexed`
 - Full Java interoperability
 - KSP-powered zero-config registration via `@LirpRepository`
-- SQL persistence annotations: `@PersistenceMapping` (table name), `@PersistenceProperty` (column config), `@PersistenceIgnore` (exclude from persistence)
+- SQL persistence annotations: `@PersistenceMapping` (table name), `@PersistenceProperty` (column config), `@PersistenceIgnore` (exclude from persistence); KSP-generated `_LirpTableDef` objects expose a `ColumnType` sealed hierarchy and `ColumnDef` descriptors for persistence-agnostic schema generation
 
 ## Documentation
 

@@ -37,20 +37,20 @@ import io.kotest.matchers.shouldBe
  * types, and parameter defaults are correct.
  */
 @PersistenceMapping
-private data class DefaultMappedEntity(override val id: Int) : ReactiveEntityBase<Int, DefaultMappedEntity>() {
+internal data class DefaultMappedEntity(override val id: Int) : ReactiveEntityBase<Int, DefaultMappedEntity>() {
     override val uniqueId: String get() = "default-$id"
 
     override fun clone() = DefaultMappedEntity(id)
 }
 
 @PersistenceMapping(name = "custom_table")
-private data class CustomMappedEntity(override val id: Int) : ReactiveEntityBase<Int, CustomMappedEntity>() {
+internal data class CustomMappedEntity(override val id: Int) : ReactiveEntityBase<Int, CustomMappedEntity>() {
     override val uniqueId: String get() = "custom-$id"
 
     override fun clone() = CustomMappedEntity(id)
 }
 
-private data class PropertyAnnotatedEntity(
+internal data class PropertyAnnotatedEntity(
     override val id: Int,
     @PersistenceProperty val defaultProp: String = "",
     @PersistenceProperty(name = "col_name", length = 255, precision = 10, scale = 2, type = "DECIMAL") val customProp: String = "",
