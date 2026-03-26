@@ -1,0 +1,47 @@
+description = 'LIRP SQL - SQL Persistence via JetBrains Exposed'
+
+ktlint {
+    filter {
+        exclude { it.file.path.contains("/generated/") }
+    }
+}
+
+sourceSets {
+    integrationTest {
+        kotlin.srcDirs = ['src/integrationTest/kotlin']
+        resources.srcDirs = ['src/integrationTest/resources']
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+configurations {
+    integrationTestImplementation.extendsFrom implementation
+    integrationTestRuntimeOnly.extendsFrom runtimeOnly
+}
+
+dependencies {
+    api project(path: ':lirp-api')
+    api project(path: ':lirp-core')
+
+    implementation platform(libs.exposed.bom)
+    implementation libs.bundles.exposed
+    implementation libs.hikari
+
+    integrationTestImplementation platform(libs.junit.bom)
+    integrationTestImplementation libs.bundles.kotest
+    integrationTestImplementation libs.kotest.extensions.testcontainers
+    integrationTestImplementation libs.testcontainers.postgresql
+    integrationTestImplementation libs.coroutines.test
+    integrationTestImplementation libs.junit.jupiter
+    integrationTestRuntimeOnly libs.junit.platform.launcher
+}
+
+task integrationTest(type: Test) {
+    description = 'Runs integration tests.'
+    group = 'verification'
+    testClassesDirs = sourceSets.integrationTest.output.classesDirs
+    classpath = sourceSets.integrationTest.runtimeClasspath
+    useJUnitPlatform()
+    shouldRunAfter test
+}
