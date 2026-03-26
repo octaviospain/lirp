@@ -28,6 +28,12 @@ dependencies {
     implementation libs.bundles.exposed
     implementation libs.hikari
 
+    testImplementation platform(libs.junit.bom)
+    testImplementation libs.bundles.kotest
+    testImplementation libs.h2
+    testImplementation libs.junit.jupiter
+    testRuntimeOnly libs.junit.platform.launcher
+
     integrationTestImplementation platform(libs.junit.bom)
     integrationTestImplementation libs.bundles.kotest
     integrationTestImplementation libs.kotest.extensions.testcontainers

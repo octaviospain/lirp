@@ -206,6 +206,159 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "name = \"label\""
     }
 
+    test("TableDefProcessor generates SqlTableDef implementation for entity with all-mutable non-PK properties") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "MutableEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class MutableEntity(val id: Int) {
+                    var name: String = ""
+                    var score: Int = 0
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("MutableEntity_LirpTableDef.kt")
+        content shouldContain "object MutableEntity_LirpTableDef : SqlTableDef<MutableEntity>"
+        content shouldContain "import net.transgressoft.lirp.persistence.sql.SqlTableDef"
+        content shouldContain "import org.jetbrains.exposed.v1.core.ResultRow"
+        content shouldContain "import org.jetbrains.exposed.v1.core.Table"
+    }
+
+    test("TableDefProcessor generates fromRow that constructs entity with id and sets mutable properties") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "EntityWithFromRow.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class EntityWithFromRow(val id: Int) {
+                    var name: String = ""
+                    var active: Boolean = false
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("EntityWithFromRow_LirpTableDef.kt")
+        content shouldContain "override fun fromRow(row: ResultRow, table: Table): EntityWithFromRow"
+        content shouldContain "val entity = EntityWithFromRow("
+        content shouldContain "entity.name ="
+        content shouldContain "entity.active ="
+        content shouldContain "return entity"
+    }
+
+    test("TableDefProcessor generates toParams that returns all column-value pairs including PK") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "EntityWithToParams.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class EntityWithToParams(val id: Long) {
+                    var description: String = ""
+                    var count: Int = 0
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("EntityWithToParams_LirpTableDef.kt")
+        content shouldContain "override fun toParams(entity: EntityWithToParams, table: Table): Map<Column<*>, Any?>"
+        content shouldContain "cols[\"id\"]!! to entity.id"
+        content shouldContain "cols[\"description\"]!! to entity.description"
+        content shouldContain "cols[\"count\"]!! to entity.count"
+    }
+
+    test("TableDefProcessor generates descriptor-only LirpTableDef when entity has immutable non-PK properties") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "ImmutableEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class ImmutableEntity(val id: Int, val name: String)
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("ImmutableEntity_LirpTableDef.kt")
+        content shouldContain "object ImmutableEntity_LirpTableDef : LirpTableDef<ImmutableEntity>"
+        content shouldNotContain "SqlTableDef"
+        content shouldNotContain "fromRow"
+        content shouldNotContain "toParams"
+    }
+
+    test("TableDefProcessor generates correct Exposed v1 imports in SqlTableDef generated code") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "ImportCheckEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class ImportCheckEntity(val id: Int) {
+                    var label: String = ""
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("ImportCheckEntity_LirpTableDef.kt")
+        content shouldContain "import net.transgressoft.lirp.persistence.sql.SqlTableDef"
+        content shouldContain "import org.jetbrains.exposed.v1.core.Column"
+        content shouldContain "import org.jetbrains.exposed.v1.core.ResultRow"
+        content shouldContain "import org.jetbrains.exposed.v1.core.Table"
+    }
+
+    test("TableDefProcessor generates correct enum handling as String in fromRow and toParams") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "EntityWithEnum.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                enum class Status { ACTIVE, INACTIVE }
+
+                @PersistenceMapping
+                class EntityWithEnum(val id: Int) {
+                    var status: Status = Status.ACTIVE
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("EntityWithEnum_LirpTableDef.kt")
+        content shouldContain "ColumnType.EnumType"
+        content shouldContain "enumValueOf<Status>"
+        content shouldContain "entity.status.name"
+    }
+
     test("TableDefProcessor reports KSP error for unsupported property type") {
         val result =
             compileWithProcessor(
