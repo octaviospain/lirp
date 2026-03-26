@@ -12,25 +12,22 @@ ktlint {
 
 dependencies {
     api project(path: ':lirp-api')
-    api "org.jetbrains.kotlin:kotlin-stdlib:$kotlinVersion"
+    api libs.kotlin.stdlib
 
-    implementation 'com.google.code.findbugs:jsr305:3.0.2'
-    implementation 'io.github.microutils:kotlin-logging-jvm:3.0.5'
-    implementation "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion"
-    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0'
+    implementation libs.jsr305
+    implementation libs.kotlin.logging
+    implementation libs.kotlin.gradle.plugin
+    implementation libs.serialization.json
 
     ksp project(path: ':lirp-ksp')
     kspTest project(path: ':lirp-ksp')
 
-    testImplementation(platform('org.junit:junit-bom:6.0.3'))
-    testImplementation 'ch.qos.logback:logback-core:1.5.32'
-    testImplementation "io.kotest:kotest-assertions-core:$kotestVersion"
-    testImplementation "io.kotest:kotest-assertions-json:$kotestVersion"
-    testImplementation "io.kotest:kotest-runner-junit6:$kotestVersion"
-    testImplementation "io.kotest:kotest-property:$kotestVersion"
-    testImplementation 'io.mockk:mockk:1.14.9'
-    testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2'
-    testImplementation 'org.junit.jupiter:junit-jupiter'
-    testRuntimeOnly 'ch.qos.logback:logback-classic:1.5.32'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testImplementation platform(libs.junit.bom)
+    testImplementation libs.logback.core
+    testImplementation libs.bundles.kotest
+    testImplementation libs.mockk
+    testImplementation libs.coroutines.test
+    testImplementation libs.junit.jupiter
+    testRuntimeOnly libs.logback.classic
+    testRuntimeOnly libs.junit.platform.launcher
 }

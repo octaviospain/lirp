@@ -1,0 +1,56 @@
+[versions]
+kotlin = "2.3.10"
+ksp = "2.3.6"
+coroutines = "1.10.2"
+kotest = "6.1.7"
+exposed = "1.1.1"
+hikari = "6.3.0"
+testcontainers = "1.21.3"
+
+[libraries]
+kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
+kotlin-bom = { module = "org.jetbrains.kotlin:kotlin-bom", version.ref = "kotlin" }
+kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+
+coroutines-bom = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-bom", version.ref = "coroutines" }
+coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core" }
+coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test" }
+
+ksp-api = { module = "com.google.devtools.ksp:symbol-processing-api", version.ref = "ksp" }
+
+serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version = "1.10.0" }
+
+kotest-runner-junit6 = { module = "io.kotest:kotest-runner-junit6", version.ref = "kotest" }
+kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
+kotest-assertions-json = { module = "io.kotest:kotest-assertions-json", version.ref = "kotest" }
+kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotest" }
+kotest-extensions-testcontainers = { module = "io.kotest:kotest-extensions-testcontainers", version.ref = "kotest" }
+
+exposed-bom = { module = "org.jetbrains.exposed:exposed-bom", version.ref = "exposed" }
+exposed-core = { module = "org.jetbrains.exposed:exposed-core" }
+exposed-jdbc = { module = "org.jetbrains.exposed:exposed-jdbc" }
+exposed-kotlin-datetime = { module = "org.jetbrains.exposed:exposed-kotlin-datetime" }
+
+hikari = { module = "com.zaxxer:HikariCP", version.ref = "hikari" }
+
+testcontainers-postgresql = { module = "org.testcontainers:postgresql", version.ref = "testcontainers" }
+
+mockk = { module = "io.mockk:mockk", version = "1.14.9" }
+logback-core = { module = "ch.qos.logback:logback-core", version = "1.5.32" }
+logback-classic = { module = "ch.qos.logback:logback-classic", version = "1.5.32" }
+jsr305 = { module = "com.google.code.findbugs:jsr305", version = "3.0.2" }
+kotlin-logging = { module = "io.github.microutils:kotlin-logging-jvm", version = "3.0.5" }
+
+junit-bom = { module = "org.junit:junit-bom", version = "6.0.3" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+
+[bundles]
+kotest = ["kotest-runner-junit6", "kotest-assertions-core", "kotest-assertions-json", "kotest-property"]
+exposed = ["exposed-core", "exposed-jdbc", "exposed-kotlin-datetime"]
+logback = ["logback-core", "logback-classic"]
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

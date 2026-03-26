@@ -18,17 +18,10 @@ repositories {
     mavenCentral()
 }
 
-ext {
-    kotlinVersion = '2.3.10'
-    kspVersion = '2.3.6'
-    coroutinesVersion = '1.10.2'
-    kotestVersion = '6.1.7'
-}
-
 dependencies {
     implementation project(':lirp-api')
     implementation project(':lirp-core')
-    api "org.jetbrains.kotlin:kotlin-stdlib:$kotlinVersion"
+    api libs.kotlin.stdlib
 }
 
 kotlin {
@@ -87,9 +80,9 @@ subprojects {
     project.version = rootProject.version
 
     dependencies {
-        implementation platform("org.jetbrains.kotlin:kotlin-bom:$kotlinVersion")
-        api platform("org.jetbrains.kotlinx:kotlinx-coroutines-bom:$coroutinesVersion")
-        api 'org.jetbrains.kotlinx:kotlinx-coroutines-core'
+        implementation platform(libs.kotlin.bom)
+        api platform(libs.coroutines.bom)
+        api libs.coroutines.core
     }
 
     repositories {
