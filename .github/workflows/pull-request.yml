@@ -1,13 +1,6 @@
 name: non-master build
 
 on:
-    push:
-        branches-ignore:
-            - master
-        paths-ignore:
-            - "**.md"
-            - '.gitignore'
-            - 'docs/**'
     pull_request:
         branches:
             - master
