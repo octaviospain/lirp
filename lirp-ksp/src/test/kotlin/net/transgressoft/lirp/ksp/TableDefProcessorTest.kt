@@ -385,4 +385,118 @@ internal class TableDefProcessorTest : FunSpec({
         result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
         result.messages shouldContain "Unsupported column type"
     }
+
+    test("TableDefProcessor generates UUID primary key column for entity with UUID id") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "UuidKeyEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import java.util.UUID
+
+                @PersistenceMapping
+                data class UuidKeyEntity(override val id: UUID) : ReactiveEntityBase<UUID, UuidKeyEntity>() {
+                    var label: String by reactiveProperty("")
+                    override val uniqueId: String get() = id.toString()
+                    override fun clone() = UuidKeyEntity(id).also { it.label = label }
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("UuidKeyEntity_LirpTableDef.kt")
+        content shouldContain "ColumnType.UuidType"
+        content shouldContain "primaryKey = true"
+        content shouldContain "tableName: String = \"uuid_key_entity\""
+    }
+
+    test("TableDefProcessor generates nullable columns for entity with all nullable non-PK properties") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "NullableEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class NullableEntity(val id: Int) {
+                    var name: String? = null
+                    var score: Int? = null
+                    var active: Boolean? = null
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("NullableEntity_LirpTableDef.kt")
+        content shouldContain "name = \"name\""
+        content shouldContain "nullable = true"
+        content shouldContain "name = \"score\""
+        content shouldContain "name = \"active\""
+    }
+
+    test("TableDefProcessor generates descriptor-only LirpTableDef for entity with mixed val/var non-PK properties") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "MixedEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class MixedEntity(val id: Int, val readOnly: String) {
+                    var mutable: String = ""
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("MixedEntity_LirpTableDef.kt")
+        content shouldContain "object MixedEntity_LirpTableDef : LirpTableDef<MixedEntity>"
+        content shouldNotContain "SqlTableDef"
+        content shouldNotContain "fromRow"
+        content shouldNotContain "toParams"
+        content shouldContain "name = \"read_only\""
+        content shouldContain "name = \"mutable\""
+    }
+
+    test("TableDefProcessor generates correct descriptor for UUID PK entity with @PersistenceIgnore field") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "UuidIgnoreEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.PersistenceIgnore
+                import java.util.UUID
+
+                @PersistenceMapping
+                data class UuidIgnoreEntity(override val id: UUID) : ReactiveEntityBase<UUID, UuidIgnoreEntity>() {
+                    var name: String by reactiveProperty("")
+                    @PersistenceIgnore var transientField: String = "ignored"
+                    override val uniqueId: String get() = id.toString()
+                    override fun clone() = UuidIgnoreEntity(id).also { it.name = name }
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("UuidIgnoreEntity_LirpTableDef.kt")
+        content shouldContain "ColumnType.UuidType"
+        content shouldContain "primaryKey = true"
+        content shouldContain "name = \"name\""
+        content shouldNotContain "transient_field"
+        content shouldNotContain "transientField"
+    }
 })

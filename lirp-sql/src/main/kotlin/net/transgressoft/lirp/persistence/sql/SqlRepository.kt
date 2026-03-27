@@ -20,6 +20,8 @@ package net.transgressoft.lirp.persistence.sql
 import net.transgressoft.lirp.entity.ReactiveEntity
 import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
 import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
+import net.transgressoft.lirp.event.MutationEvent
+import net.transgressoft.lirp.event.StandardCrudEvent
 import net.transgressoft.lirp.persistence.PersistentRepositoryBase
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
@@ -229,6 +231,18 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Emits a [CrudEvent.Type.UPDATE] event to repository subscribers when an entity mutation is detected.
+     *
+     * Called by [PersistentRepositoryBase] after [onDirty] completes. The [MutationEvent] carries
+     * both the previous and current entity state, allowing subscribers to observe what changed.
+     */
+    override fun onEntityMutated(event: MutationEvent<K, R>) {
+        if (!initializing) {
+            publisher.emitAsync(StandardCrudEvent.Update(event.newEntity, event.oldEntity))
         }
     }
 
