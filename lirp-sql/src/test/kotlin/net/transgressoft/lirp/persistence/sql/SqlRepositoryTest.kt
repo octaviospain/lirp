@@ -21,7 +21,7 @@ import net.transgressoft.lirp.event.CrudEvent
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.throwables.shouldThrow
-import io.kotest.core.spec.style.FunSpec
+import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicReference
  * event emission, lifecycle management, and entity loading on initialization.
  */
 @DisplayName("SqlRepository")
-internal class SqlRepositoryTest : FunSpec({
+internal class SqlRepositoryTest : StringSpec({
 
     /** Returns a unique JDBC URL for an isolated H2 in-memory database per test. */
     fun freshJdbcUrl() = "jdbc:h2:mem:${UUID.randomUUID()};DB_CLOSE_DELAY=-1"
@@ -48,7 +48,7 @@ internal class SqlRepositoryTest : FunSpec({
         return HikariDataSource(config)
     }
 
-    test("adds entity and persists to database") {
+    "adds entity and persists to database" {
         val jdbcUrl = freshJdbcUrl()
         val repo = SqlRepository(jdbcUrl, TestPersonTableDef)
         val person =
@@ -71,7 +71,7 @@ internal class SqlRepositoryTest : FunSpec({
         repo2.close()
     }
 
-    test("emits CREATE event on add") {
+    "emits CREATE event on add" {
         val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef)
         val received = AtomicReference<CrudEvent.Type?>()
         repo.subscribe { event -> received.set(event.type) }
@@ -85,7 +85,7 @@ internal class SqlRepositoryTest : FunSpec({
         repo.close()
     }
 
-    test("removes entity and deletes from database") {
+    "removes entity and deletes from database" {
         val jdbcUrl = freshJdbcUrl()
         val repo = SqlRepository(jdbcUrl, TestPersonTableDef)
         val person =
@@ -108,7 +108,7 @@ internal class SqlRepositoryTest : FunSpec({
         repo2.close()
     }
 
-    test("emits DELETE event on remove") {
+    "emits DELETE event on remove" {
         val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef)
         val person = TestPerson(3).apply { firstName = "Dave" }
         repo.add(person)
@@ -123,7 +123,7 @@ internal class SqlRepositoryTest : FunSpec({
         repo.close()
     }
 
-    test("loads existing rows from database on initialization") {
+    "loads existing rows from database on initialization" {
         val jdbcUrl = freshJdbcUrl()
         // First repository inserts a row
         val repo1 = SqlRepository(jdbcUrl, TestPersonTableDef)
@@ -144,14 +144,14 @@ internal class SqlRepositoryTest : FunSpec({
         repo2.close()
     }
 
-    test("auto-creates table on initialization") {
+    "auto-creates table on initialization" {
         // Creating the repository on a fresh DB should not throw; table is created automatically
         val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef)
         repo.size() shouldBe 0
         repo.close()
     }
 
-    test("throws IllegalStateException on add after close") {
+    "throws IllegalStateException on add after close" {
         val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef)
         repo.close()
 
@@ -160,7 +160,7 @@ internal class SqlRepositoryTest : FunSpec({
         }
     }
 
-    test("closes HikariCP pool when owning the datasource") {
+    "closes HikariCP pool when owning the datasource" {
         val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef)
         // Access the HikariDataSource to verify it is shut down after repo.close()
         val dataSourceField = SqlRepository::class.java.getDeclaredField("dataSource")
@@ -172,7 +172,7 @@ internal class SqlRepositoryTest : FunSpec({
         hikariDs.isClosed.shouldBeTrue()
     }
 
-    test("does not close user-provided datasource on close") {
+    "does not close user-provided datasource on close" {
         val jdbcUrl = freshJdbcUrl()
         val externalDs = buildExternalDataSource(jdbcUrl)
         val repo = SqlRepository(externalDs, TestPersonTableDef)
@@ -183,7 +183,7 @@ internal class SqlRepositoryTest : FunSpec({
         externalDs.close()
     }
 
-    test("persists entity mutation to database via onDirty") {
+    "persists entity mutation to database via flush" {
         val jdbcUrl = freshJdbcUrl()
         val repo = SqlRepository(jdbcUrl, TestPersonTableDef)
         val person =
@@ -194,10 +194,10 @@ internal class SqlRepositoryTest : FunSpec({
             }
         repo.add(person)
 
-        // Mutate the entity — triggers the subscription callback and synchronous onDirty
+        // Mutate the entity — triggers the subscription callback and synchronous flush
         person.firstName = "Franklin"
 
-        // Allow the synchronous onDirty to complete and any async event propagation to settle
+        // Allow the synchronous flush to complete and any async event propagation to settle
         Thread.sleep(200)
 
         // Second repository reads from DB; should see the updated value
@@ -208,7 +208,7 @@ internal class SqlRepositoryTest : FunSpec({
         repo2.close()
     }
 
-    test("clears all entities from database and in-memory") {
+    "clears all entities from database and in-memory" {
         val jdbcUrl = freshJdbcUrl()
         val repo = SqlRepository(jdbcUrl, TestPersonTableDef)
         repo.add(TestPerson(20).apply { firstName = "Grace" })
@@ -225,7 +225,7 @@ internal class SqlRepositoryTest : FunSpec({
         repo2.close()
     }
 
-    test("removeAll deletes specified entities from database") {
+    "removeAll deletes specified entities from database" {
         val jdbcUrl = freshJdbcUrl()
         val repo = SqlRepository(jdbcUrl, TestPersonTableDef)
         val p1 = TestPerson(30).apply { firstName = "Iris" }

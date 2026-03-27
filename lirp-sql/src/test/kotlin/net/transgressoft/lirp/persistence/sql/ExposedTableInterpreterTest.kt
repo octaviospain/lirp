@@ -20,7 +20,7 @@ package net.transgressoft.lirp.persistence.sql
 import net.transgressoft.lirp.persistence.ColumnDef
 import net.transgressoft.lirp.persistence.ColumnType
 import net.transgressoft.lirp.persistence.LirpTableDef
-import io.kotest.core.spec.style.FunSpec
+import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.maps.shouldContainKey
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -45,7 +45,7 @@ import kotlin.uuid.ExperimentalUuidApi
  */
 @OptIn(ExperimentalUuidApi::class)
 @DisplayName("ExposedTableInterpreter")
-internal class ExposedTableInterpreterTest : FunSpec({
+internal class ExposedTableInterpreterTest : StringSpec({
 
     val interpreter = ExposedTableInterpreter()
 
@@ -58,7 +58,7 @@ internal class ExposedTableInterpreterTest : FunSpec({
         return interpreter.interpret(tableDef)
     }
 
-    test("creates table with correct table name from LirpTableDef") {
+    "creates table with correct table name from LirpTableDef" {
         val def =
             object : LirpTableDef<Any> {
                 override val tableName = "my_entities"
@@ -68,78 +68,78 @@ internal class ExposedTableInterpreterTest : FunSpec({
         result.table.tableName shouldBe "my_entities"
     }
 
-    test("maps IntType column to Exposed integer column") {
+    "maps IntType column to Exposed integer column" {
         val result = singleColumnDef(ColumnDef("count", ColumnType.IntType, nullable = false, primaryKey = false))
         result.columnsByName shouldContainKey "count"
         result.columnsByName["count"]!!.columnType.shouldBeInstanceOf<IntegerColumnType>()
     }
 
-    test("maps LongType column to Exposed long column") {
+    "maps LongType column to Exposed long column" {
         val result = singleColumnDef(ColumnDef("big_num", ColumnType.LongType, nullable = false, primaryKey = false))
         result.columnsByName shouldContainKey "big_num"
         result.columnsByName["big_num"]!!.columnType.shouldBeInstanceOf<LongColumnType>()
     }
 
-    test("maps TextType column to Exposed text column") {
+    "maps TextType column to Exposed text column" {
         val result = singleColumnDef(ColumnDef("description", ColumnType.TextType, nullable = false, primaryKey = false))
         result.columnsByName shouldContainKey "description"
         result.columnsByName["description"]!!.columnType.shouldBeInstanceOf<TextColumnType>()
     }
 
-    test("maps VarcharType column to Exposed varchar column with correct length") {
+    "maps VarcharType column to Exposed varchar column with correct length" {
         val result = singleColumnDef(ColumnDef("name", ColumnType.VarcharType(100), nullable = false, primaryKey = false))
         result.columnsByName shouldContainKey "name"
         val colType = result.columnsByName["name"]!!.columnType
         colType.shouldBeInstanceOf<VarCharColumnType>()
-        (colType as VarCharColumnType).colLength shouldBe 100
+        colType.colLength shouldBe 100
     }
 
-    test("maps BooleanType column to Exposed bool column") {
+    "maps BooleanType column to Exposed bool column" {
         val result = singleColumnDef(ColumnDef("active", ColumnType.BooleanType, nullable = false, primaryKey = false))
         result.columnsByName shouldContainKey "active"
         result.columnsByName["active"]!!.columnType.shouldBeInstanceOf<BooleanColumnType>()
     }
 
-    test("maps DoubleType column to Exposed double column") {
+    "maps DoubleType column to Exposed double column" {
         val result = singleColumnDef(ColumnDef("ratio", ColumnType.DoubleType, nullable = false, primaryKey = false))
         result.columnsByName shouldContainKey "ratio"
         result.columnsByName["ratio"]!!.columnType.shouldBeInstanceOf<DoubleColumnType>()
     }
 
-    test("maps FloatType column to Exposed float column") {
+    "maps FloatType column to Exposed float column" {
         val result = singleColumnDef(ColumnDef("weight", ColumnType.FloatType, nullable = false, primaryKey = false))
         result.columnsByName shouldContainKey "weight"
         result.columnsByName["weight"]!!.columnType.shouldBeInstanceOf<FloatColumnType>()
     }
 
-    test("maps UuidType column to Exposed uuid column") {
+    "maps UuidType column to Exposed uuid column" {
         val result = singleColumnDef(ColumnDef("external_id", ColumnType.UuidType, nullable = false, primaryKey = false))
         result.columnsByName shouldContainKey "external_id"
         result.columnsByName["external_id"]!!.columnType.shouldBeInstanceOf<UuidColumnType>()
     }
 
-    test("maps DateType column to Exposed date column") {
+    "maps DateType column to Exposed date column" {
         val result = singleColumnDef(ColumnDef("birth_date", ColumnType.DateType, nullable = false, primaryKey = false))
         result.columnsByName shouldContainKey "birth_date"
         result.columnsByName["birth_date"]!!.columnType.shouldBeInstanceOf<KotlinLocalDateColumnType>()
     }
 
-    test("maps DateTimeType column to Exposed datetime column") {
+    "maps DateTimeType column to Exposed datetime column" {
         val result = singleColumnDef(ColumnDef("created_at", ColumnType.DateTimeType, nullable = false, primaryKey = false))
         result.columnsByName shouldContainKey "created_at"
         result.columnsByName["created_at"]!!.columnType.shouldBeInstanceOf<KotlinLocalDateTimeColumnType>()
     }
 
-    test("maps DecimalType column to Exposed decimal column with correct precision and scale") {
+    "maps DecimalType column to Exposed decimal column with correct precision and scale" {
         val result = singleColumnDef(ColumnDef("price", ColumnType.DecimalType(10, 2), nullable = false, primaryKey = false))
         result.columnsByName shouldContainKey "price"
         val colType = result.columnsByName["price"]!!.columnType
         colType.shouldBeInstanceOf<DecimalColumnType>()
-        (colType as DecimalColumnType).precision shouldBe 10
+        colType.precision shouldBe 10
         colType.scale shouldBe 2
     }
 
-    test("maps EnumType column to Exposed varchar column") {
+    "maps EnumType column to Exposed varchar column" {
         val result =
             singleColumnDef(
                 ColumnDef("status", ColumnType.EnumType("com.example.Status"), nullable = false, primaryKey = false)
@@ -147,16 +147,16 @@ internal class ExposedTableInterpreterTest : FunSpec({
         result.columnsByName shouldContainKey "status"
         val colType = result.columnsByName["status"]!!.columnType
         colType.shouldBeInstanceOf<VarCharColumnType>()
-        (colType as VarCharColumnType).colLength shouldBe 255
+        colType.colLength shouldBe 255
     }
 
-    test("marks nullable columns with nullable modifier") {
+    "marks nullable columns with nullable modifier" {
         val result = singleColumnDef(ColumnDef("optional_text", ColumnType.TextType, nullable = true, primaryKey = false))
         result.columnsByName shouldContainKey "optional_text"
         result.columnsByName["optional_text"]!!.columnType.nullable shouldBe true
     }
 
-    test("sets primary key on the correct column") {
+    "sets primary key on the correct column" {
         val def =
             object : LirpTableDef<Any> {
                 override val tableName = "entities"
@@ -172,7 +172,7 @@ internal class ExposedTableInterpreterTest : FunSpec({
         pk.columns.map { it.name } shouldBe listOf("id")
     }
 
-    test("provides column lookup by name") {
+    "provides column lookup by name" {
         val def =
             object : LirpTableDef<Any> {
                 override val tableName = "things"

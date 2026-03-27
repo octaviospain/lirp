@@ -18,7 +18,7 @@
 package net.transgressoft.lirp.persistence.sql
 
 import com.zaxxer.hikari.HikariDataSource
-import io.kotest.core.spec.style.FunSpec
+import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
@@ -35,7 +35,7 @@ import org.junit.jupiter.api.DisplayName
  * Each test drops its table afterwards to maintain isolation within the shared container schema.
  */
 @DisplayName("SqlRepository DDL Integration")
-internal class SqlRepositoryDdlIntegrationTest : FunSpec({
+internal class SqlRepositoryDdlIntegrationTest : StringSpec({
 
     var dataSource: HikariDataSource? = null
 
@@ -53,11 +53,11 @@ internal class SqlRepositoryDdlIntegrationTest : FunSpec({
         runCatching { transaction(db) { SchemaUtils.drop(t.table) } }
     }
 
-    test("auto-creates table with correct PostgreSQL column types for all 12 ColumnType variants") {
+    "auto-creates table with correct PostgreSQL column types for all 12 ColumnType variants" {
         val repo = SqlRepository(dataSource!!, AllTypesTableDef)
 
         val columnTypes = mutableMapOf<String, String>()
-        dataSource!!.connection.use { conn ->
+        dataSource.connection.use { conn ->
             conn.prepareStatement(
                 "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ? AND table_schema = 'public'"
             ).use { stmt ->
@@ -87,19 +87,19 @@ internal class SqlRepositoryDdlIntegrationTest : FunSpec({
         dropTable(AllTypesTableDef)
     }
 
-    test("auto-creates table idempotently on re-initialization") {
+    "auto-creates table idempotently on re-initialization" {
         val repo1 = SqlRepository(dataSource!!, TestPersonTableDef)
         repo1.close()
 
         // Creating a second repository on the same DataSource must not throw
-        val repo2 = SqlRepository(dataSource!!, TestPersonTableDef)
+        val repo2 = SqlRepository(dataSource, TestPersonTableDef)
         repo2.size() shouldBe 0
         repo2.close()
 
         dropTable(TestPersonTableDef)
     }
 
-    test("detects PostgreSQL dialect automatically from DataSource") {
+    "detects PostgreSQL dialect automatically from DataSource" {
         val db = Database.connect(dataSource!!)
         val dialectName = transaction(db) { db.dialect.name }
         dialectName shouldBe "PostgreSQL"

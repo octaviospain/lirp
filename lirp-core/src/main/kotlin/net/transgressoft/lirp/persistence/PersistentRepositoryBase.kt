@@ -26,10 +26,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Abstract foundation for persistent repositories providing entity mutation subscription management,
- * closeable lifecycle, and dirty tracking via the [onDirty] hook.
+ * closeable lifecycle, and dirty tracking via the [flush] hook.
  *
  * Extends [VolatileRepository] and implements [PersistentRepository], sitting between the in-memory
- * base and concrete storage implementations (JSON, SQL, etc.). Subclasses implement [onDirty] to
+ * base and concrete storage implementations (JSON, SQL, etc.). Subclasses implement [flush] to
  * trigger their specific persistence mechanism whenever the repository state changes.
  *
  * Lifecycle guarantees:
@@ -75,7 +75,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
          * Implementations use this hook to schedule or perform the appropriate storage operation,
          * such as writing to a JSON file or queuing a SQL transaction.
          */
-        protected abstract fun onDirty()
+        protected abstract fun flush()
 
         /**
          * Subscribes to mutation events from [entity] and registers the subscription for lifecycle management.
@@ -88,7 +88,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
                 entity.subscribe { mutationEvent ->
                     if (!closed) {
                         dirty.set(true)
-                        onDirty()
+                        flush()
                         onEntityMutated(mutationEvent)
                     }
                 }
@@ -96,7 +96,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         }
 
         /**
-         * Called after [onDirty] whenever an entity mutation is detected.
+         * Called after [flush] whenever an entity mutation is detected.
          *
          * Subclasses may override this method to react to entity-level mutations with additional
          * logic, such as emitting repository-level [CrudEvent] UPDATE events. The default
@@ -114,7 +114,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
             if (added) {
                 subscribeEntity(entity)
                 dirty.set(true)
-                onDirty()
+                flush()
             }
             return added
         }
@@ -124,7 +124,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
             return super.remove(entity).also { removed ->
                 if (removed) {
                     dirty.set(true)
-                    onDirty()
+                    flush()
                     val subscription =
                         subscriptionsMap.remove(entity.id)
                             ?: error("Repository should contain a subscription for $entity")
@@ -138,7 +138,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
             return super.removeAll(entities).also { removed ->
                 if (removed) {
                     dirty.set(true)
-                    onDirty()
+                    flush()
                     entities.forEach {
                         val subscription =
                             subscriptionsMap.remove(it.id)
@@ -153,7 +153,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
             check(!closed) { "PersistentRepositoryBase is closed" }
             super.clear()
             dirty.set(true)
-            onDirty()
+            flush()
             subscriptionsMap.forEach { (_, sub) -> sub.cancel() }
             subscriptionsMap.clear()
         }

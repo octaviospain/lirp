@@ -28,7 +28,7 @@ import org.testcontainers.containers.PostgreSQLContainer
  * the same JVM process for efficiency.
  */
 object PostgresContainerSupport {
-    val container: PostgreSQLContainer<Nothing> = PostgreSQLContainer<Nothing>("postgres:16-alpine")
+    val container: PostgreSQLContainer<Nothing> = PostgreSQLContainer("postgres:18-alpine")
 
     /**
      * Returns a new [HikariDataSource] connected to the shared PostgreSQL container,

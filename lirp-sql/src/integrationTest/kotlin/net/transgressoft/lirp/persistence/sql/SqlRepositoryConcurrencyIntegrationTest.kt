@@ -19,12 +19,8 @@ package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.event.CrudEvent
 import com.zaxxer.hikari.HikariDataSource
-import io.kotest.core.spec.style.FunSpec
+import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
@@ -32,17 +28,22 @@ import org.junit.jupiter.api.DisplayName
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 
 /**
  * Integration tests for [SqlRepository] under concurrent access using a real PostgreSQL database.
  *
- * Per D-03, the primary stress test runs 50 coroutines performing mixed CRUD operations concurrently.
- * Per D-04, four failure modes are asserted: data corruption, lost updates, deadlocks, and event count mismatch.
+ * The primary stress test runs 50 coroutines performing mixed CRUD operations concurrently.
+ * Four failure modes are asserted: data corruption, lost updates, deadlocks, and event count mismatch.
  *
  * Each test drops the table before execution to maintain isolation within the shared container schema.
  */
 @DisplayName("SqlRepository Concurrency Integration")
-internal class SqlRepositoryConcurrencyIntegrationTest : FunSpec({
+internal class SqlRepositoryConcurrencyIntegrationTest : StringSpec({
 
     var dataSource: HikariDataSource? = null
 
@@ -60,7 +61,7 @@ internal class SqlRepositoryConcurrencyIntegrationTest : FunSpec({
         runCatching { transaction(db) { SchemaUtils.drop(t.table) } }
     }
 
-    test("concurrent coroutines perform mixed CRUD without data corruption, lost updates, deadlocks, or event count mismatch") {
+    "concurrent coroutines perform mixed CRUD without data corruption, lost updates, deadlocks, or event count mismatch" {
         val repo = SqlRepository(dataSource!!, TestPersonTableDef)
         val events = Collections.synchronizedList(mutableListOf<CrudEvent.Type>())
         repo.subscribe { event -> events.add(event.type) }
@@ -70,49 +71,54 @@ internal class SqlRepositoryConcurrencyIntegrationTest : FunSpec({
         val successfulRemoves = AtomicInteger(0)
         val barrier = CountDownLatch(1)
 
-        runBlocking {
+        run {
             val jobs =
                 (1..workerCount).map { i ->
                     launch(Dispatchers.IO) {
                         barrier.await()
-                        val person = TestPerson(i).apply { firstName = "Worker$i"; lastName = "Test"; age = i }
+                        val person =
+                            TestPerson(i).apply {
+                                firstName = "Worker$i"
+                                lastName = "Test"
+                                age = i
+                            }
                         if (repo.add(person)) successfulAdds.incrementAndGet()
                         repo.findById(i)
-                        // Single mutation per coroutine to avoid onDirty pool exhaustion
+                        // Single mutation per coroutine to avoid flush pool exhaustion
                         repo.findById(i).ifPresent { it.firstName = "Mutated$i" }
                         Thread.sleep(100)
                         repo.findById(i).ifPresent { if (repo.remove(it)) successfulRemoves.incrementAndGet() }
                     }
                 }
             barrier.countDown()
-            // D-04 assertion 3: no deadlocks — all coroutines complete within 30s
-            withTimeout(30_000) { jobs.forEach { it.join() } }
+            // no deadlocks — all coroutines complete within 30s
+            withTimeout(30.seconds) { jobs.joinAll() }
         }
 
         Thread.sleep(500)
 
-        // D-04 assertion 1: no data corruption — all removes completed, repo is empty
+        // no data corruption — all removes completed, repo is empty
         repo.size() shouldBe 0
 
-        // D-04 assertion 2: no lost updates — verified by close/reopen on same DataSource
+        // no lost updates — verified by close/reopen on same DataSource
         repo.close()
-        val repo2 = SqlRepository(dataSource!!, TestPersonTableDef)
+        val repo2 = SqlRepository(dataSource, TestPersonTableDef)
         repo2.size() shouldBe 0
         repo2.close()
 
-        // D-04 assertion 4: event count matches successful operations
+        // event count matches successful operations
         val creates = events.count { it == CrudEvent.Type.CREATE }
         val deletes = events.count { it == CrudEvent.Type.DELETE }
         creates shouldBe successfulAdds.get()
         deletes shouldBe successfulRemoves.get()
     }
 
-    test("concurrent read operations do not interfere with writes") {
+    "concurrent read operations do not interfere with writes" {
         val repo = SqlRepository(dataSource!!, TestPersonTableDef)
         val successfulAdds = AtomicInteger(0)
         val barrier = CountDownLatch(1)
 
-        runBlocking {
+        run {
             val writers =
                 (1..10).map { i ->
                     launch(Dispatchers.IO) {
@@ -130,9 +136,9 @@ internal class SqlRepositoryConcurrencyIntegrationTest : FunSpec({
                     }
                 }
             barrier.countDown()
-            withTimeout(15_000) {
-                writers.forEach { it.join() }
-                readers.forEach { it.join() }
+            withTimeout(15.seconds) {
+                writers.joinAll()
+                readers.joinAll()
             }
         }
 

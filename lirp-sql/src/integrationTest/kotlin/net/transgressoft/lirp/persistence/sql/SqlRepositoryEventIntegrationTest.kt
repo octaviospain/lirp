@@ -18,10 +18,10 @@
 package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.event.CrudEvent
+import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
 import com.zaxxer.hikari.HikariDataSource
-import io.kotest.core.spec.style.FunSpec
+import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.booleans.shouldBeTrue
-import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
@@ -41,7 +41,7 @@ import java.util.concurrent.atomic.AtomicReference
  * Each test drops the table before execution to maintain isolation within the shared container schema.
  */
 @DisplayName("SqlRepository Event Integration")
-internal class SqlRepositoryEventIntegrationTest : FunSpec({
+internal class SqlRepositoryEventIntegrationTest : StringSpec({
 
     var dataSource: HikariDataSource? = null
 
@@ -59,7 +59,7 @@ internal class SqlRepositoryEventIntegrationTest : FunSpec({
         runCatching { transaction(db) { SchemaUtils.drop(t.table) } }
     }
 
-    test("emits CREATE CrudEvent on add") {
+    "emits CREATE CrudEvent on add" {
         val repo = SqlRepository(dataSource!!, TestPersonTableDef)
         val received = AtomicReference<CrudEvent.Type?>()
         repo.subscribe { event -> received.set(event.type) }
@@ -72,7 +72,7 @@ internal class SqlRepositoryEventIntegrationTest : FunSpec({
         repo.close()
     }
 
-    test("emits DELETE CrudEvent on remove") {
+    "emits DELETE CrudEvent on remove" {
         val repo = SqlRepository(dataSource!!, TestPersonTableDef)
         val person = TestPerson(2).apply { firstName = "Bob" }
         repo.add(person)
@@ -88,7 +88,7 @@ internal class SqlRepositoryEventIntegrationTest : FunSpec({
         repo.close()
     }
 
-    test("emits DELETE CrudEvent on clear") {
+    "emits DELETE CrudEvent on clear" {
         val repo = SqlRepository(dataSource!!, TestPersonTableDef)
         repo.add(TestPerson(3).apply { firstName = "Carol" })
 
@@ -103,7 +103,7 @@ internal class SqlRepositoryEventIntegrationTest : FunSpec({
         repo.close()
     }
 
-    test("entity MutationEvent fires on property change") {
+    "entity MutationEvent fires on property change" {
         val repo = SqlRepository(dataSource!!, TestPersonTableDef)
         repo.add(TestPerson(4).apply { firstName = "Dave" })
 
@@ -121,7 +121,7 @@ internal class SqlRepositoryEventIntegrationTest : FunSpec({
         repo.close()
     }
 
-    test("CrudEvent and MutationEvent both fire on mutation-triggered persist") {
+    "CrudEvent and MutationEvent both fire on mutation-triggered persist" {
         val repo = SqlRepository(dataSource!!, TestPersonTableDef)
         val crudEventTypes = Collections.synchronizedList(mutableListOf<CrudEvent.Type>())
         repo.subscribe { event -> crudEventTypes.add(event.type) }
@@ -139,7 +139,7 @@ internal class SqlRepositoryEventIntegrationTest : FunSpec({
         Thread.sleep(300)
 
         mutationReceived.get().shouldBeTrue()
-        (CrudEvent.Type.UPDATE in crudEventTypes).shouldBeTrue()
+        (UPDATE in crudEventTypes).shouldBeTrue()
 
         repo.close()
     }
