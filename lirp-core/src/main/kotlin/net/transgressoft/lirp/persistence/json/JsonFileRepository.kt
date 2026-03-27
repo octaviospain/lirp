@@ -110,7 +110,7 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
                 }
                 field = value
                 dirty.set(true)
-                onDirty()
+                flush()
                 log.info { "jsonFile set to $value" }
             }
 
@@ -186,7 +186,7 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
             }
         }
 
-        override fun onDirty() {
+        override fun flush() {
             serializationEventChannel.trySend(Unit)
         }
 

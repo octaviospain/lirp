@@ -43,7 +43,7 @@ import javax.sql.DataSource
  *
  * Extends [PersistentRepositoryBase] with SQL-first write semantics: every [add], [remove],
  * [removeAll], and [clear] operation performs the corresponding SQL statement synchronously
- * before updating the in-memory state. Entity mutations observed via the [onDirty] hook trigger
+ * before updating the in-memory state. Entity mutations observed via the [flush] hook trigger
  * a full-table SQL UPDATE of all current entities.
  *
  * On initialization, this repository:
@@ -73,10 +73,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      * @param dataSource The JDBC data source to use for all SQL operations.
      * @param tableDef The SQL table definition describing the entity's column mapping.
      */
-    constructor(
-        dataSource: DataSource,
-        tableDef: SqlTableDef<R>
-    ) : this(dataSource, tableDef, false)
+    constructor(dataSource: DataSource, tableDef: SqlTableDef<R>): this(dataSource, tableDef, false)
 
     /**
      * Creates a [SqlRepository] with a HikariCP connection pool configured from the given JDBC URL.
@@ -101,7 +98,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     private val table: Table = exposedTable.table
     private val db: Database = Database.connect(dataSource)
 
-    // Guards onDirty() during the init block to prevent SQL UPDATEs while loading rows from the DB.
+    // Guards flush() during the init block to prevent SQL UPDATEs while loading rows from the DB.
     private var initializing = true
 
     init {
@@ -113,10 +110,10 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                 SchemaUtils.createMissingTablesAndColumns(table)
             }
 
-            // Load all existing rows into in-memory state (SQL-08).
+            // Load all existing rows into in-memory state
             // super.add() routes through PersistentRepositoryBase.add(), which handles
-            // in-memory insertion, entity subscription, and the dirty/onDirty cycle.
-            // The initializing flag prevents onDirty() from issuing redundant SQL UPDATEs here.
+            // in-memory insertion, entity subscription, and the dirty/flush cycle.
+            // The initializing flag prevents flush() from issuing redundant SQL UPDATEs here.
             val loaded =
                 transaction(db = db) {
                     table.selectAll().map { row -> tableDef.fromRow(row, table) }
@@ -216,7 +213,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      * class does not pass the specific mutated entity to this hook, a full scan is used here.
      * Optimising to track individual dirty entities is deferred to a future caching layer.
      */
-    override fun onDirty() {
+    override fun flush() {
         if (initializing) return
         val pkCol = primaryKeyColumn()
         transaction(db = db) {
@@ -237,7 +234,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     /**
      * Emits a [CrudEvent.Type.UPDATE] event to repository subscribers when an entity mutation is detected.
      *
-     * Called by [PersistentRepositoryBase] after [onDirty] completes. The [MutationEvent] carries
+     * Called by [PersistentRepositoryBase] after [flush] completes. The [MutationEvent] carries
      * both the previous and current entity state, allowing subscribers to observe what changed.
      */
     override fun onEntityMutated(event: MutationEvent<K, R>) {

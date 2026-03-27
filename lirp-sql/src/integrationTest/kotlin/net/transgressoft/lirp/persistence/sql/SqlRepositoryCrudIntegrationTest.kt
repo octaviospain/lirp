@@ -18,7 +18,7 @@
 package net.transgressoft.lirp.persistence.sql
 
 import com.zaxxer.hikari.HikariDataSource
-import io.kotest.core.spec.style.FunSpec
+import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 import org.jetbrains.exposed.v1.jdbc.Database
@@ -33,7 +33,7 @@ import org.junit.jupiter.api.DisplayName
  * Each test drops the table before execution to guarantee isolation within the shared container schema.
  */
 @DisplayName("SqlRepository CRUD Integration")
-internal class SqlRepositoryCrudIntegrationTest : FunSpec({
+internal class SqlRepositoryCrudIntegrationTest : StringSpec({
 
     var dataSource: HikariDataSource? = null
 
@@ -51,9 +51,15 @@ internal class SqlRepositoryCrudIntegrationTest : FunSpec({
         runCatching { transaction(db) { SchemaUtils.drop(t.table) } }
     }
 
-    test("adds entity and reads it back from PostgreSQL") {
+    "adds entity and reads it back from PostgreSQL" {
         val repo = SqlRepository(dataSource!!, TestPersonTableDef)
-        repo.add(TestPerson(1).apply { firstName = "Alice"; lastName = "Smith"; age = 30 })
+        repo.add(
+            TestPerson(1).apply {
+                firstName = "Alice"
+                lastName = "Smith"
+                age = 30
+            }
+        )
 
         repo.findById(1).shouldBePresent {
             it.firstName shouldBe "Alice"
@@ -63,49 +69,54 @@ internal class SqlRepositoryCrudIntegrationTest : FunSpec({
         repo.close()
     }
 
-    test("persists entity mutation to PostgreSQL via onDirty") {
+    "persists entity mutation to PostgreSQL via flush" {
         val repo = SqlRepository(dataSource!!, TestPersonTableDef)
-        repo.add(TestPerson(5).apply { firstName = "Frank"; lastName = "Lee"; age = 20 })
+        val person =
+            TestPerson(5).apply {
+                firstName = "Frank"
+                lastName = "Lee"
+                age = 20
+            }.also(repo::add)
 
-        repo.findById(5).shouldBePresent { it.firstName = "Franklin" }
+        person.firstName = "Franklin"
         Thread.sleep(200)
 
-        val repo2 = SqlRepository(dataSource!!, TestPersonTableDef)
+        val repo2 = SqlRepository(dataSource, TestPersonTableDef)
         repo2.findById(5).shouldBePresent { it.firstName shouldBe "Franklin" }
 
         repo.close()
         repo2.close()
     }
 
-    test("removes entity from PostgreSQL") {
+    "removes entity from PostgreSQL" {
         val repo = SqlRepository(dataSource!!, TestPersonTableDef)
         val person = TestPerson(10).apply { firstName = "Grace" }
         repo.add(person)
 
         repo.remove(person)
 
-        val repo2 = SqlRepository(dataSource!!, TestPersonTableDef)
+        val repo2 = SqlRepository(dataSource, TestPersonTableDef)
         repo2.size() shouldBe 0
 
         repo.close()
         repo2.close()
     }
 
-    test("clears all entities from PostgreSQL") {
+    "clears all entities from PostgreSQL" {
         val repo = SqlRepository(dataSource!!, TestPersonTableDef)
         repo.add(TestPerson(20).apply { firstName = "Alice" })
         repo.add(TestPerson(21).apply { firstName = "Bob" })
 
         repo.clear()
 
-        val repo2 = SqlRepository(dataSource!!, TestPersonTableDef)
+        val repo2 = SqlRepository(dataSource, TestPersonTableDef)
         repo2.size() shouldBe 0
 
         repo.close()
         repo2.close()
     }
 
-    test("removeAll deletes specified entities from PostgreSQL") {
+    "removeAll deletes specified entities from PostgreSQL" {
         val repo = SqlRepository(dataSource!!, TestPersonTableDef)
         val p1 = TestPerson(30).apply { firstName = "Iris" }
         val p2 = TestPerson(31).apply { firstName = "Jack" }
@@ -116,7 +127,7 @@ internal class SqlRepositoryCrudIntegrationTest : FunSpec({
 
         repo.removeAll(listOf(p1, p2))
 
-        val repo2 = SqlRepository(dataSource!!, TestPersonTableDef)
+        val repo2 = SqlRepository(dataSource, TestPersonTableDef)
         repo2.size() shouldBe 1
         repo2.findById(32).shouldBePresent { it.firstName shouldBe "Kate" }
 
@@ -124,30 +135,31 @@ internal class SqlRepositoryCrudIntegrationTest : FunSpec({
         repo2.close()
     }
 
-    test("full CRUD lifecycle: create, read, update, delete") {
+    "full CRUD lifecycle: create, read, update, delete" {
         val repo = SqlRepository(dataSource!!, TestPersonTableDef)
-        val person = TestPerson(100).apply { firstName = "Lifecycle"; lastName = "Test"; age = 42 }
+        val person =
+            TestPerson(100).apply {
+                firstName = "Lifecycle"
+                lastName = "Test"
+                age = 42
+            }
 
-        // Create
         repo.add(person)
 
-        // Read
-        repo.findById(100).shouldBePresent {
-            it.firstName shouldBe "Lifecycle"
-        }
+        repo.findById(100).shouldBePresent { it.firstName shouldBe "Lifecycle" }
 
         // Update via mutation
         repo.findById(100).shouldBePresent { it.firstName = "Updated" }
         Thread.sleep(200)
 
         // Verify mutation persisted via new repo instance
-        val repo2 = SqlRepository(dataSource!!, TestPersonTableDef)
+        val repo2 = SqlRepository(dataSource, TestPersonTableDef)
         repo2.findById(100).shouldBePresent { it.firstName shouldBe "Updated" }
 
         // Delete
         repo2.findById(100).shouldBePresent { repo2.remove(it) }
 
-        val repo3 = SqlRepository(dataSource!!, TestPersonTableDef)
+        val repo3 = SqlRepository(dataSource, TestPersonTableDef)
         repo3.size() shouldBe 0
 
         repo.close()

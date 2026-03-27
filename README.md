@@ -186,7 +186,7 @@ VolatileRepository (class, lirp-core)                   — in-memory
         └── JsonFileRepository (class, lirp-core)       — debounced JSON file writes
 ```
 
-`PersistentRepository` is the marker interface for repositories that survive JVM lifetime. `PersistentRepositoryBase` provides the shared foundation for all durable backends: it auto-subscribes entities on add, cancels subscriptions on remove, guards mutating operations after close, and calls `onDirty()` when the state changes. Subclasses implement `onDirty()` to trigger their storage mechanism — `JsonFileRepository` sends to its serialization channel, a future `SqlRepository` would schedule a DB write.
+`PersistentRepository` is the marker interface for repositories that survive JVM lifetime. `PersistentRepositoryBase` provides the shared foundation for all durable backends: it auto-subscribes entities on add, cancels subscriptions on remove, guards mutating operations after close, and calls `flush()` when the state changes. Subclasses implement `flush()` to trigger their storage mechanism — `JsonFileRepository` sends to its serialization channel, `SqlRepository` performs a synchronous SQL UPDATE.
 
 ## Key Features
 

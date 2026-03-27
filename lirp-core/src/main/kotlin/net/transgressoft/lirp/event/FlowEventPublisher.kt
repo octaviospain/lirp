@@ -273,11 +273,14 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
          * Consider migrating to the Kotlin Flow-based subscription method instead.
          */
         override fun subscribe(subscriber: Flow.Subscriber<in E>) {
-            check(!isClosed) { "Publisher '$id' is closed" }
+            _inFlightSubscribes.incrementAndGet()
+            if (isClosed) {
+                _inFlightSubscribes.decrementAndGet()
+                error("Publisher '$id' is closed")
+            }
             log.trace { "Subscription registered to $subscriber" }
 
             _subscriberCount.incrementAndGet()
-            _inFlightSubscribes.incrementAndGet()
 
             val job =
                 flowScope.launch {
@@ -299,11 +302,14 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
          * @return A subscription that can be used to unsubscribe
          */
         override fun subscribe(action: suspend (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, E> {
-            check(!isClosed) { "Publisher '$id' is closed" }
+            _inFlightSubscribes.incrementAndGet()
+            if (isClosed) {
+                _inFlightSubscribes.decrementAndGet()
+                error("Publisher '$id' is closed")
+            }
             log.trace { "Anonymous subscription registered to $id" }
 
             _subscriberCount.incrementAndGet()
-            _inFlightSubscribes.incrementAndGet()
 
             // Each subscription requires its own collection coroutine to handle events independently
             // This is a deliberate design pattern for reactive subscriptions
@@ -322,11 +328,14 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
         }
 
         override fun subscribe(vararg eventTypes: ET, action: suspend (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, E> {
-            check(!isClosed) { "Publisher '$id' is closed" }
+            _inFlightSubscribes.incrementAndGet()
+            if (isClosed) {
+                _inFlightSubscribes.decrementAndGet()
+                error("Publisher '$id' is closed")
+            }
             log.trace { "Subscription registered to $id for event types: ${eventTypes.joinToString()}" }
 
             _subscriberCount.incrementAndGet()
-            _inFlightSubscribes.incrementAndGet()
 
             // Each subscription requires its own collection coroutine to handle events independently
             // This is a deliberate design pattern for reactive subscriptions

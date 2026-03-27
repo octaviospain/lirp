@@ -21,7 +21,6 @@ import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.persistence.ColumnType
 import java.math.BigDecimal
 import java.util.UUID
-import kotlin.uuid.ExperimentalUuidApi
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 
@@ -34,7 +33,6 @@ import kotlinx.datetime.LocalDateTime
  * The `uuid_val` field uses [java.util.UUID] because Exposed's `uuid()` column operates on that type.
  * The `enum_val` field uses [String] because [ColumnType.EnumType] is stored as `VARCHAR(255)`.
  */
-@OptIn(ExperimentalUuidApi::class)
 class AllTypesEntity(override val id: Int) : ReactiveEntityBase<Int, AllTypesEntity>() {
     var longVal: Long by reactiveProperty(0L)
     var textVal: String by reactiveProperty("")

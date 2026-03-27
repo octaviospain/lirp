@@ -37,16 +37,13 @@ object TestPersonTableDef : SqlTableDef<TestPerson> {
             ColumnDef("age", ColumnType.IntType, nullable = false, primaryKey = false)
         )
 
+    @Suppress("UNCHECKED_CAST")
     override fun fromRow(row: ResultRow, table: Table): TestPerson {
         val cols = table.columns.associateBy { it.name }
 
-        @Suppress("UNCHECKED_CAST")
         val entity = TestPerson(row[cols["id"]!! as Column<Int>])
-        @Suppress("UNCHECKED_CAST")
         entity.firstName = row[cols["first_name"]!! as Column<String>]
-        @Suppress("UNCHECKED_CAST")
         entity.lastName = row[cols["last_name"]!! as Column<String>]
-        @Suppress("UNCHECKED_CAST")
         entity.age = row[cols["age"]!! as Column<Int>]
         return entity
     }

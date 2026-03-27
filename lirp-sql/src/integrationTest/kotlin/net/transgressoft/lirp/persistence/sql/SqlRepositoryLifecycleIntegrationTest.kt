@@ -19,7 +19,7 @@ package net.transgressoft.lirp.persistence.sql
 
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.throwables.shouldThrow
-import io.kotest.core.spec.style.FunSpec
+import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.optional.shouldBePresent
@@ -32,12 +32,12 @@ import org.junit.jupiter.api.DisplayName
 /**
  * Integration tests for [SqlRepository] lifecycle management against a real PostgreSQL database.
  *
- * Covers container connectivity (TEST-01), data persistence across close/reopen (TEST-06),
+ * Covers container connectivity, data persistence across close/reopen,
  * closed-repository semantics, DataSource ownership, and multi-instance data sharing.
  * Each test drops the table before execution to guarantee isolation within the shared container schema.
  */
 @DisplayName("SqlRepository Lifecycle Integration")
-internal class SqlRepositoryLifecycleIntegrationTest : FunSpec({
+internal class SqlRepositoryLifecycleIntegrationTest : StringSpec({
 
     var dataSource: HikariDataSource? = null
 
@@ -55,7 +55,7 @@ internal class SqlRepositoryLifecycleIntegrationTest : FunSpec({
         runCatching { transaction(db) { SchemaUtils.drop(t.table) } }
     }
 
-    test("PostgreSQL Testcontainer starts and connects via HikariCP") {
+    "PostgreSQL Testcontainer starts and connects via HikariCP" {
         PostgresContainerSupport.container.isRunning.shouldBeTrue()
 
         val repo = SqlRepository(dataSource!!, TestPersonTableDef)
@@ -65,12 +65,18 @@ internal class SqlRepositoryLifecycleIntegrationTest : FunSpec({
         repo.close()
     }
 
-    test("data persists across repository close and reopen") {
+    "data persists across repository close and reopen" {
         val repo1 = SqlRepository(dataSource!!, TestPersonTableDef)
-        repo1.add(TestPerson(42).apply { firstName = "Persistent"; lastName = "Data"; age = 7 })
+        repo1.add(
+            TestPerson(42).apply {
+                firstName = "Persistent"
+                lastName = "Data"
+                age = 7
+            }
+        )
         repo1.close()
 
-        val repo2 = SqlRepository(dataSource!!, TestPersonTableDef)
+        val repo2 = SqlRepository(dataSource, TestPersonTableDef)
         repo2.findById(42).shouldBePresent {
             it.firstName shouldBe "Persistent"
             it.lastName shouldBe "Data"
@@ -80,7 +86,7 @@ internal class SqlRepositoryLifecycleIntegrationTest : FunSpec({
         repo2.close()
     }
 
-    test("closed repository throws IllegalStateException on add") {
+    "closed repository throws IllegalStateException on add" {
         val repo = SqlRepository(dataSource!!, TestPersonTableDef)
         repo.close()
 
@@ -89,14 +95,14 @@ internal class SqlRepositoryLifecycleIntegrationTest : FunSpec({
         }
     }
 
-    test("does not close user-provided datasource on repository close") {
+    "does not close user-provided datasource on repository close" {
         val repo = SqlRepository(dataSource!!, TestPersonTableDef)
         repo.close()
 
-        dataSource!!.isClosed.shouldBeFalse()
+        dataSource.isClosed.shouldBeFalse()
     }
 
-    test("multiple repository instances share same PostgreSQL data") {
+    "multiple repository instances share same PostgreSQL data" {
         val repo1 = SqlRepository(dataSource!!, TestPersonTableDef)
         repo1.add(TestPerson(77).apply { firstName = "Shared" })
 
