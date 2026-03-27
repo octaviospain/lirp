@@ -20,11 +20,82 @@ lirp is built around a single idea: **domain entities should not be passive data
 
 Unlike general-purpose reactive toolkits (Kotlin Flow, RxJava, EventBus) where you wire streams yourself, lirp operates at the domain level — **your domain objects _are_ the reactive infrastructure**. A property declared with `reactiveProperty()` automatically notifies every subscriber on assignment, with zero overhead for unobserved entities thanks to lazy publisher initialization.
 
-Repositories are event publishers too: they emit `CrudEvent`s on add/remove and serve as entity factories through typed `create()` methods. JSON repositories add automatic, debounced persistence — no manual save calls needed.
+Repositories are event publishers too: they emit `CrudEvent`s on add/remove and serve as entity factories through typed `create()` methods. SQL repositories persist directly to relational databases via JetBrains Exposed, while JSON repositories handle debounced file writes — both share the same `Repository` API and entity mutation semantics.
 
 Built on Kotlin Coroutines and Kotlin Serialization. Targets **JVM 17+, Kotlin 2.3.10**.
 
-## Quick Example
+## SQL Persistence
+
+`SqlRepository` persists entities to a relational database — automatically. Add an entity: it's INSERTed. Change a property: the UPDATE happens in the background. Subscribe to the repository: you get `CrudEvent`s for every operation. Tables are created on first use; existing rows are loaded on initialization.
+
+```kotlin
+@PersistenceMapping
+data class Product(
+    override val id: Int,
+    var name: String,
+    initialPrice: Double = 0.0
+) : ReactiveEntityBase<Int, Product>() {
+    var price: Double by reactiveProperty(initialPrice)
+    override val uniqueId = "product-$id"
+    override fun clone() = Product(id, name, price)
+}
+
+// KSP generates Product_LirpTableDef at compile time
+
+val repo = SqlRepository<Int, Product>(
+    jdbcUrl = "jdbc:postgresql://localhost:5432/mydb",
+    tableDef = Product_LirpTableDef
+)
+
+repo.subscribe { event ->
+    println("${event.type}: ${event.entities.values}")
+}
+
+val widget = Product(1, "Widget", 29.99)
+repo.add(widget)          // INSERT → CrudEvent.CREATE emitted
+
+widget.price = 39.99      // UPDATE happens automatically → CrudEvent.UPDATE emitted
+
+repo.remove(widget)       // DELETE → CrudEvent.DELETE emitted
+
+repo.close()              // closes the connection pool
+```
+
+No manual saves. No ORM session flushing. Property assignment _is_ persistence.
+
+Annotations are optional — convention-over-configuration infers table and column names from the class. Use `@PersistenceMapping` and `@PersistenceProperty` when you need to customize names, lengths, or precision. See the [wiki](https://github.com/octaviospain/lirp/wiki/SQL-Persistence) for full annotation reference.
+
+### Supported Persistence Targets
+
+| Target | Module | Status |
+|--------|--------|--------|
+| PostgreSQL | `lirp-sql` | Supported |
+| H2 (testing) | `lirp-sql` | Supported |
+| JSON file | `lirp-core` | Supported |
+| MySQL | `lirp-sql` | Planned |
+| MS SQL Server | `lirp-sql` | Planned |
+| Oracle | `lirp-sql` | Planned |
+
+## Secondary Indexes
+
+Annotate properties with `@Indexed` for O(1) equality lookups — no collection scan:
+
+```kotlin
+data class Product(
+    override val id: Int,
+    var name: String,
+    @Indexed(name = "cat") val category: String
+) : ReactiveEntityBase<Int, Product>() {
+    // ...
+}
+
+val electronics: Set<Product> = repo.findByIndex("category", "electronics")
+val bySku: Optional<Product> = repo.findFirstByIndex("sku", "SKU-001")
+```
+
+## Entity Reactivity
+
+Entities are reactive by default — no event bus, no manual Flow collection. A property declared with `reactiveProperty()` automatically notifies every subscriber on assignment:
 
 ```kotlin
 data class Product(override val id: Int, var name: String, initialPrice: Double = 0.0) : ReactiveEntityBase<Int, Product>() {
@@ -43,7 +114,7 @@ product.subscribe { event ->
 product.price = 29.99  // prints: 0.0 -> 29.99
 ```
 
-No event bus. No manual Flow collection. The entity notifies its subscribers directly.
+Zero overhead for unobserved entities thanks to lazy publisher initialization.
 
 ## Repository as Factory
 
@@ -67,22 +138,23 @@ repo.subscribe(CrudEvent.Type.CREATE) { event ->
 }
 ```
 
-## Secondary Indexes
+## JSON Persistence
 
-Annotate properties with `@Indexed` for O(1) equality lookups — no collection scan:
+`JsonFileRepository` persists entities to a JSON file with debounced writes — multiple rapid mutations are batched into a single file write. No manual save calls needed:
 
 ```kotlin
-data class Product(
-    override val id: Int,
-    var name: String,
-    @Indexed(name = "cat") val category: String
-) : ReactiveEntityBase<Int, Product>() {
-    // ...
-}
+val repo = JsonFileRepository<Int, Product>(
+    file = File("products.json"),
+    serializer = Product.serializer()
+)
 
-val electronics: Set<Product> = repo.findByIndex("category", "electronics")
-val bySku: Optional<Product> = repo.findFirstByIndex("sku", "SKU-001")
+val widget = Product(1, "Widget", 29.99)
+repo.add(widget)       // entity is tracked and file write is scheduled
+
+widget.price = 39.99   // debounced write triggered; no extra code needed
 ```
+
+The `@Serializable` annotation (from Kotlin Serialization) is required on the entity class. For polymorphic entity hierarchies, use `TransEntityPolymorphicSerializer`.
 
 ## Installation
 
@@ -95,82 +167,14 @@ dependencies {
     implementation("net.transgressoft:lirp-api:<version>")
     implementation("net.transgressoft:lirp-core:<version>")
     ksp("net.transgressoft:lirp-ksp:<version>")
+
+    // For SQL persistence (PostgreSQL, H2, etc.)
+    implementation("net.transgressoft:lirp-sql:<version>")
+    runtimeOnly("org.postgresql:postgresql:<version>")  // your JDBC driver
 }
 ```
 
 **Requirements:** JVM 17+, Kotlin 2.3.10
-
-The KSP plugin enables `@LirpRepository` and `@ReactiveEntityRef` annotations for zero-config repository registration and aggregate reference wiring, and `@PersistenceMapping`, `@PersistenceProperty`, `@PersistenceIgnore` annotations for SQL schema generation (v2.0.0).
-
-## KSP Table Generation
-
-When `lirp-ksp` is on your KSP classpath, entities annotated with `@PersistenceMapping` or properties annotated with `@PersistenceProperty` cause the `TableDefProcessor` to generate a `{ClassName}_LirpTableDef` object at compile time. These descriptors are persistence-agnostic — they carry only `ColumnType` and `ColumnDef` information, and the `lirp-sql` module interprets them at runtime.
-
-### Annotations
-
-| Annotation | Target | Purpose |
-|------------|--------|---------|
-| `@PersistenceMapping(name = "")` | Class | Declares the table. `name` overrides the default snake_case class name. |
-| `@PersistenceProperty(name, length, precision, scale, type)` | Property | Configures a column. All parameters are optional and default to convention. |
-| `@PersistenceIgnore` | Property | Excludes the property from the generated descriptor. |
-
-### Convention defaults
-
-- **Table name:** snake_case of the class name (`CustomerOrder` → `customer_order`). Overridden by `@PersistenceMapping(name = "...")`.
-- **Column name:** snake_case of the property name. Overridden by `@PersistenceProperty(name = "...")`.
-- **Primary key:** the `id` property (from `TransEntity`) is automatically marked as `primaryKey = true`.
-- **String length:** `String` without `length` → `ColumnType.TextType`; with `length = N` → `ColumnType.VarcharType(N)`.
-- **Nullability:** inferred from the Kotlin type — `String?` → `nullable = true`.
-
-### Dual-trigger generation
-
-The processor triggers on either annotation entry point:
-
-```kotlin
-@PersistenceMapping                      // triggers on the class
-data class Product(
-    override val id: Int,
-    @PersistenceProperty(name = "full_name", length = 255) val name: String,
-    @PersistenceIgnore val displayLabel: String = ""
-) : ReactiveEntityBase<Int, Product>() {
-    var price: Double by reactiveProperty(0.0)  // delegate properties are included
-    override val uniqueId = "product-$id"
-    override fun clone() = copy()
-}
-```
-
-Generates at compile time:
-
-```kotlin
-public object Product_LirpTableDef : LirpTableDef<Product> {
-    override val tableName: String = "product"
-    override val columns: List<ColumnDef> = listOf(
-        ColumnDef(name = "id",        type = ColumnType.IntType,    nullable = false, primaryKey = true),
-        ColumnDef(name = "full_name", type = ColumnType.VarcharType(255), nullable = false, primaryKey = false),
-        ColumnDef(name = "price",     type = ColumnType.DoubleType, nullable = false, primaryKey = false)
-        // displayLabel excluded by @PersistenceIgnore
-    )
-}
-```
-
-### Supported ColumnType hierarchy
-
-| Kotlin type | ColumnType |
-|------------|------------|
-| `Int` | `IntType` |
-| `Long` | `LongType` |
-| `String` (no length) | `TextType` |
-| `String` (with `length = N`) | `VarcharType(N)` |
-| `Boolean` | `BooleanType` |
-| `Double` | `DoubleType` |
-| `Float` | `FloatType` |
-| `java.util.UUID` | `UuidType` |
-| `java.time.LocalDate` | `DateType` |
-| `java.time.LocalDateTime` | `DateTimeType` |
-| `java.math.BigDecimal` | `DecimalType(precision, scale)` |
-| Any `enum class` | `EnumType(fqn)` |
-
-Properties with types not in this table cause a KSP error at compile time.
 
 ## Persistence Hierarchy
 
@@ -183,23 +187,23 @@ Repository (interface, lirp-api)
 
 VolatileRepository (class, lirp-core)                   — in-memory
   └── PersistentRepositoryBase (abstract, lirp-core)    — subscription mgmt, lifecycle, dirty tracking
-        └── JsonFileRepository (class, lirp-core)       — debounced JSON file writes
+        ├── JsonFileRepository (class, lirp-core)       — debounced JSON file writes
+        └── SqlRepository (class, lirp-sql)             — synchronous SQL writes via Exposed
 ```
 
 `PersistentRepository` is the marker interface for repositories that survive JVM lifetime. `PersistentRepositoryBase` provides the shared foundation for all durable backends: it auto-subscribes entities on add, cancels subscriptions on remove, guards mutating operations after close, and calls `flush()` when the state changes. Subclasses implement `flush()` to trigger their storage mechanism — `JsonFileRepository` sends to its serialization channel, `SqlRepository` performs a synchronous SQL UPDATE.
 
 ## Key Features
 
-- Entity-first reactivity with `reactiveProperty()` — declare an observable property with `var x by reactiveProperty(init)` and assignment automatically notifies subscribers
-- Two subscription patterns: repository-level (`CrudEvent`) and entity-level (`MutationEvent`)
-- DDD aggregate references with `@ReactiveEntityRef` and configurable cascade (DETACH/CASCADE/RESTRICT)
-- Repository-as-factory pattern with typed `create()` methods
-- Layered persistence abstraction: `PersistentRepository` / `PersistentRepositoryBase` as extensible foundation for JSON and future SQL backends
-- Automatic JSON persistence with debounced writes via `JsonFileRepository`
-- Secondary indexes for O(1) lookups via `@Indexed`
-- Full Java interoperability
-- KSP-powered zero-config registration via `@LirpRepository`
-- SQL persistence annotations: `@PersistenceMapping` (table name), `@PersistenceProperty` (column config), `@PersistenceIgnore` (exclude from persistence); KSP-generated `_LirpTableDef` objects expose a `ColumnType` sealed hierarchy and `ColumnDef` descriptors for persistence-agnostic schema generation
+- **Transparent SQL persistence** — add an entity, change a property, and the database stays in sync automatically
+- **Entity-first reactivity** — `var x by reactiveProperty(init)` notifies subscribers on assignment, zero overhead when unobserved
+- **Two subscription levels** — repository-level `CrudEvent`s and entity-level `MutationEvent`s
+- **DDD aggregate references** — `@ReactiveEntityRef` with configurable cascade (DETACH/CASCADE/RESTRICT)
+- **Secondary indexes** — `@Indexed` for O(1) equality lookups without collection scans
+- **Convention-over-configuration** — KSP generates table definitions from entity classes; annotations only when you need customization
+- **JSON persistence** — debounced file writes via `JsonFileRepository`
+- **Repository-as-factory** — typed `create()` methods with automatic `@LirpRepository` registration
+- **Full Java interoperability**
 
 ## Documentation
 
@@ -218,6 +222,8 @@ lirp is free software under GNU GPL version 3 license and is available [here](ht
 This project uses:
 - [Kotlin Coroutines](https://github.com/Kotlin/kotlinx.coroutines) for asynchronous programming
 - [Kotlin Serialization](https://github.com/Kotlin/kotlinx.serialization) for JSON processing
+- [JetBrains Exposed](https://github.com/JetBrains/Exposed) for SQL generation and type-safe query building
+- [HikariCP](https://github.com/brettwooldridge/HikariCP) for JDBC connection pooling
 - [Kotest](https://kotest.io/) for testing
 
 The approach is inspired by books including [Object Thinking by David West](https://www.goodreads.com/book/show/43940.Object_Thinking), [Domain-Driven Design: Aligning Software Architecture and Business Strategy by Vladik Khonon](https://www.goodreads.com/book/show/57573212-learning-domain-driven-design) and [Elegant Objects by Yegor Bugayenko](https://www.yegor256.com/elegant-objects.html).
