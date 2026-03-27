@@ -7,6 +7,7 @@ exposed = "1.1.1"
 hikari = "6.3.0"
 testcontainers = "1.21.3"
 kctfork = "0.12.1"
+postgresql = "42.7.6"
 
 [libraries]
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
@@ -39,6 +40,7 @@ testcontainers-postgresql = { module = "org.testcontainers:postgresql", version.
 kctfork-ksp = { module = "dev.zacsweers.kctfork:ksp", version.ref = "kctfork" }
 
 h2 = { module = "com.h2database:h2", version = "2.3.232" }
+postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
 mockk = { module = "io.mockk:mockk", version = "1.14.9" }
 logback-core = { module = "ch.qos.logback:logback-core", version = "1.5.32" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version = "1.5.32" }
