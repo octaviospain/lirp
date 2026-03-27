@@ -21,6 +21,7 @@ repositories {
 dependencies {
     implementation project(':lirp-api')
     implementation project(':lirp-core')
+    implementation project(':lirp-sql')
     api libs.kotlin.stdlib
 }
 
