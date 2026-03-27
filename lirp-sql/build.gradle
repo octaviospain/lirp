@@ -1,5 +1,7 @@
 description = 'LIRP SQL - SQL Persistence via JetBrains Exposed'
 
+apply plugin: 'java-test-fixtures'
+
 ktlint {
     filter {
         exclude { it.file.path.contains("/generated/") }
@@ -43,6 +45,18 @@ dependencies {
     integrationTestImplementation libs.junit.jupiter
     integrationTestRuntimeOnly libs.junit.platform.launcher
     integrationTestRuntimeOnly libs.postgresql
+
+    // testFixtures infrastructure — shared entities, table defs, container support
+    testFixturesImplementation project(path: ':lirp-api')
+    testFixturesImplementation project(path: ':lirp-core')
+    testFixturesImplementation platform(libs.exposed.bom)
+    testFixturesImplementation libs.bundles.exposed
+    testFixturesImplementation libs.hikari
+    testFixturesImplementation libs.testcontainers.postgresql
+
+    // Consume testFixtures from both test and integrationTest
+    testImplementation testFixtures(project(':lirp-sql'))
+    integrationTestImplementation testFixtures(project(':lirp-sql'))
 }
 
 task integrationTest(type: Test) {

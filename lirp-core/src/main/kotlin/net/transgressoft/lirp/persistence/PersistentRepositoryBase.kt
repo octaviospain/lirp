@@ -85,13 +85,27 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
          */
         protected fun subscribeEntity(entity: R) {
             val subscription =
-                entity.subscribe {
+                entity.subscribe { mutationEvent ->
                     if (!closed) {
                         dirty.set(true)
                         onDirty()
+                        onEntityMutated(mutationEvent)
                     }
                 }
             subscriptionsMap[entity.id] = subscription
+        }
+
+        /**
+         * Called after [onDirty] whenever an entity mutation is detected.
+         *
+         * Subclasses may override this method to react to entity-level mutations with additional
+         * logic, such as emitting repository-level [CrudEvent] UPDATE events. The default
+         * implementation is a no-op.
+         *
+         * @param event The [MutationEvent] carrying the entity's previous and current state.
+         */
+        protected open fun onEntityMutated(event: MutationEvent<K, R>) {
+            // Default: no-op. Override to emit repository-level UPDATE events.
         }
 
         override fun add(entity: R): Boolean {

@@ -1,0 +1,63 @@
+/******************************************************************************
+ *     Copyright (C) 2025  Octavio Calleya Garcia                             *
+ *                                                                            *
+ *     This program is free software: you can redistribute it and/or modify   *
+ *     it under the terms of the GNU General Public License as published by   *
+ *     the Free Software Foundation, either version 3 of the License, or      *
+ *     (at your option) any later version.                                    *
+ *                                                                            *
+ *     This program is distributed in the hope that it will be useful,        *
+ *     but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+ *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+ *     GNU General Public License for more details.                           *
+ *                                                                            *
+ *     You should have received a copy of the GNU General Public License      *
+ *     along with this program.  If not, see <https://www.gnu.org/licenses/>. *
+ ******************************************************************************/
+
+package net.transgressoft.lirp.persistence.sql
+
+import net.transgressoft.lirp.persistence.ColumnDef
+import net.transgressoft.lirp.persistence.ColumnType
+import org.jetbrains.exposed.v1.core.Column
+import org.jetbrains.exposed.v1.core.ResultRow
+import org.jetbrains.exposed.v1.core.Table
+
+/**
+ * Manual [SqlTableDef] for [TestPerson], providing column descriptors and Exposed row mapping
+ * without KSP generation. Shared across test and integrationTest source sets via testFixtures.
+ */
+object TestPersonTableDef : SqlTableDef<TestPerson> {
+    override val tableName = "test_persons"
+    override val columns =
+        listOf(
+            ColumnDef("id", ColumnType.IntType, nullable = false, primaryKey = true),
+            ColumnDef("first_name", ColumnType.VarcharType(100), nullable = false, primaryKey = false),
+            ColumnDef("last_name", ColumnType.VarcharType(100), nullable = false, primaryKey = false),
+            ColumnDef("age", ColumnType.IntType, nullable = false, primaryKey = false)
+        )
+
+    override fun fromRow(row: ResultRow, table: Table): TestPerson {
+        val cols = table.columns.associateBy { it.name }
+
+        @Suppress("UNCHECKED_CAST")
+        val entity = TestPerson(row[cols["id"]!! as Column<Int>])
+        @Suppress("UNCHECKED_CAST")
+        entity.firstName = row[cols["first_name"]!! as Column<String>]
+        @Suppress("UNCHECKED_CAST")
+        entity.lastName = row[cols["last_name"]!! as Column<String>]
+        @Suppress("UNCHECKED_CAST")
+        entity.age = row[cols["age"]!! as Column<Int>]
+        return entity
+    }
+
+    override fun toParams(entity: TestPerson, table: Table): Map<Column<*>, Any?> {
+        val cols = table.columns.associateBy { it.name }
+        return mapOf(
+            cols["id"]!! to entity.id,
+            cols["first_name"]!! to entity.firstName,
+            cols["last_name"]!! to entity.lastName,
+            cols["age"]!! to entity.age
+        )
+    }
+}

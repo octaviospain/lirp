@@ -17,10 +17,7 @@
 
 package net.transgressoft.lirp.persistence.sql
 
-import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.event.CrudEvent
-import net.transgressoft.lirp.persistence.ColumnDef
-import net.transgressoft.lirp.persistence.ColumnType
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.throwables.shouldThrow
@@ -28,69 +25,9 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
-import org.jetbrains.exposed.v1.core.Column
-import org.jetbrains.exposed.v1.core.ResultRow
-import org.jetbrains.exposed.v1.core.Table
 import org.junit.jupiter.api.DisplayName
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
-
-/**
- * A simple test entity backed by [ReactiveEntityBase] with three publicly mutable properties
- * suitable for SQL column mapping.
- */
-internal class TestPerson(override val id: Int) : ReactiveEntityBase<Int, TestPerson>() {
-    var firstName: String by reactiveProperty("")
-    var lastName: String by reactiveProperty("")
-    var age: Int by reactiveProperty(0)
-    override val uniqueId: String get() = id.toString()
-
-    override fun clone(): TestPerson =
-        TestPerson(id).also {
-            it.firstName = firstName
-            it.lastName = lastName
-            it.age = age
-        }
-}
-
-/**
- * Manual [SqlTableDef] for [TestPerson], providing column descriptors and Exposed row mapping
- * without KSP generation.
- */
-internal object TestPersonTableDef : SqlTableDef<TestPerson> {
-    override val tableName = "test_persons"
-    override val columns =
-        listOf(
-            ColumnDef("id", ColumnType.IntType, nullable = false, primaryKey = true),
-            ColumnDef("first_name", ColumnType.VarcharType(100), nullable = false, primaryKey = false),
-            ColumnDef("last_name", ColumnType.VarcharType(100), nullable = false, primaryKey = false),
-            ColumnDef("age", ColumnType.IntType, nullable = false, primaryKey = false)
-        )
-
-    override fun fromRow(row: ResultRow, table: Table): TestPerson {
-        val cols = table.columns.associateBy { it.name }
-
-        @Suppress("UNCHECKED_CAST")
-        val entity = TestPerson(row[cols["id"]!! as Column<Int>])
-        @Suppress("UNCHECKED_CAST")
-        entity.firstName = row[cols["first_name"]!! as Column<String>]
-        @Suppress("UNCHECKED_CAST")
-        entity.lastName = row[cols["last_name"]!! as Column<String>]
-        @Suppress("UNCHECKED_CAST")
-        entity.age = row[cols["age"]!! as Column<Int>]
-        return entity
-    }
-
-    override fun toParams(entity: TestPerson, table: Table): Map<Column<*>, Any?> {
-        val cols = table.columns.associateBy { it.name }
-        return mapOf(
-            cols["id"]!! to entity.id,
-            cols["first_name"]!! to entity.firstName,
-            cols["last_name"]!! to entity.lastName,
-            cols["age"]!! to entity.age
-        )
-    }
-}
 
 /**
  * Unit tests for [SqlRepository] using H2 in-memory databases to verify SQL-first CRUD semantics,
