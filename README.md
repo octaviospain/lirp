@@ -180,7 +180,7 @@ dependencies {
 
 lirp provides a layered persistence abstraction:
 
-```
+```text
 Repository (interface, lirp-api)
   └── PersistentRepository (interface, lirp-api)       — marker for durable backends
         └── JsonRepository (interface, lirp-api)        — JSON-specific contract

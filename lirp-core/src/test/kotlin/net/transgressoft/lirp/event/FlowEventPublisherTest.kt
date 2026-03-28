@@ -930,7 +930,7 @@ class FlowEventPublisherTest : DescribeSpec({
             publisher.isClosed shouldBe true
         }
 
-        it("subscribe on closed publisher with closeOnEmpty throws IllegalStateException") {
+        it("subscribe on closed closeOnEmpty publisher returns a cancelled no-op subscription") {
             val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("ClosedOnEmptyPublisher", closeOnEmpty = true)
             publisher.activateEvents(CREATE)
 
@@ -938,9 +938,9 @@ class FlowEventPublisherTest : DescribeSpec({
             sub.cancel()
             testDispatcher.scheduler.advanceUntilIdle()
 
-            shouldThrow<IllegalStateException> {
-                publisher.subscribe { }
-            }
+            // closeOnEmpty close is automatic — subscribe returns a no-op instead of throwing
+            val noOpSub = publisher.subscribe { }
+            noOpSub.cancel() // should not throw
         }
 
         it("emitAsync on closeOnEmpty publisher closed after empty throws IllegalStateException") {

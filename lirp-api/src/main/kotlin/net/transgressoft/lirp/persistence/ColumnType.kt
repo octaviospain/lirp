@@ -49,16 +49,30 @@ sealed class ColumnType {
     /**
      * @param length The maximum number of characters for the VARCHAR column.
      */
-    data class VarcharType(val length: Int) : ColumnType()
+    data class VarcharType(val length: Int) : ColumnType() {
+        init {
+            require(length > 0) { "Varchar length must be > 0" }
+        }
+    }
 
     /**
      * @param precision The total number of significant digits.
      * @param scale The number of digits to the right of the decimal point.
      */
-    data class DecimalType(val precision: Int, val scale: Int) : ColumnType()
+    data class DecimalType(val precision: Int, val scale: Int) : ColumnType() {
+        init {
+            require(precision > 0) { "Decimal precision must be > 0" }
+            require(scale >= 0) { "Decimal scale must be >= 0" }
+            require(scale <= precision) { "Decimal scale must be <= precision" }
+        }
+    }
 
     /**
      * @param enumClassFqn The fully qualified name of the Kotlin enum class.
      */
-    data class EnumType(val enumClassFqn: String) : ColumnType()
+    data class EnumType(val enumClassFqn: String) : ColumnType() {
+        init {
+            require(enumClassFqn.isNotBlank()) { "Enum FQN must not be blank" }
+        }
+    }
 }

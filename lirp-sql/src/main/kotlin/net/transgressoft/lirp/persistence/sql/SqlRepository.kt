@@ -99,6 +99,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     private val db: Database = Database.connect(dataSource)
 
     // Guards flush() during the init block to prevent SQL UPDATEs while loading rows from the DB.
+    @Volatile
     private var initializing = true
 
     init {
@@ -107,7 +108,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
 
             // Auto-create the table if it does not yet exist (SQL-04)
             transaction(db = db) {
-                SchemaUtils.createMissingTablesAndColumns(table)
+                SchemaUtils.create(table)
             }
 
             // Load all existing rows into in-memory state
@@ -124,6 +125,9 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
             initializing = false
             activateEvents(CREATE, UPDATE)
         } catch (e: Exception) {
+            if (ownsDataSource) {
+                (dataSource as? HikariDataSource)?.close()
+            }
             throw e
         }
     }
@@ -139,7 +143,10 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      * @throws IllegalStateException if the repository has been closed.
      */
     override fun add(entity: R): Boolean {
-        check(!closed) { "SqlRepository is closed" }
+        check(!closed) { CLOSED_MESSAGE }
+        if (entitiesById.containsKey(entity.id))
+            return false
+
         transaction(db = db) {
             table.insert { stmt ->
                 tableDef.toParams(entity, table).forEach { (col, value) ->
@@ -159,7 +166,8 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      * @throws IllegalStateException if the repository has been closed.
      */
     override fun remove(entity: R): Boolean {
-        check(!closed) { "SqlRepository is closed" }
+        check(!closed) { CLOSED_MESSAGE }
+
         val pkCol = primaryKeyColumn()
         transaction(db = db) {
             table.deleteWhere {
@@ -179,7 +187,8 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      * @throws IllegalStateException if the repository has been closed.
      */
     override fun removeAll(entities: Collection<R>): Boolean {
-        check(!closed) { "SqlRepository is closed" }
+        check(!closed) { CLOSED_MESSAGE }
+
         val pkCol = primaryKeyColumn()
         val ids = entities.map { it.id }
         transaction(db = db) {
@@ -199,7 +208,8 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      * @throws IllegalStateException if the repository has been closed.
      */
     override fun clear() {
-        check(!closed) { "SqlRepository is closed" }
+        check(!closed) { CLOSED_MESSAGE }
+
         transaction(db = db) {
             table.deleteAll()
         }
@@ -214,7 +224,9 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      * Optimising to track individual dirty entities is deferred to a future caching layer.
      */
     override fun flush() {
-        if (initializing) return
+        if (initializing)
+            return
+
         val pkCol = primaryKeyColumn()
         transaction(db = db) {
             entitiesById.values.forEach { entity ->
@@ -250,7 +262,10 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      * Idempotent: subsequent calls are safe no-ops.
      */
     override fun close() {
-        if (closed) return
+        if (closed)
+            return
+
+        flush()
         super.close()
         if (ownsDataSource) {
             (dataSource as? HikariDataSource)?.close()
@@ -259,10 +274,12 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
 
     private fun primaryKeyColumn(): Column<*> {
         val pkColName = tableDef.columns.first { it.primaryKey }.name
-        return exposedTable.columnsByName[pkColName]!!
+        return exposedTable.columnsByName.getValue(pkColName)
     }
 
     companion object {
+        private const val CLOSED_MESSAGE = "SqlRepository is closed"
+
         private fun buildDataSource(jdbcUrl: String, poolSize: Int, schema: String?): HikariDataSource {
             val config =
                 HikariConfig().apply {

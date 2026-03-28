@@ -47,7 +47,9 @@ class ExposedTableInterpreter {
      */
     fun interpret(def: LirpTableDef<*>): ExposedTable {
         val columnsByName = mutableMapOf<String, Column<*>>()
-        val pkDef = def.columns.firstOrNull { it.primaryKey }
+        val pkDefs = def.columns.filter { it.primaryKey }
+        require(pkDefs.size <= 1) { "Composite primary keys are not supported by SqlRepository" }
+        val pkDef = pkDefs.singleOrNull()
 
         val table = LirpDynamicTable(def.tableName, def.columns, columnsByName, pkDef)
 

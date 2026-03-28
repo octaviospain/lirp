@@ -48,6 +48,10 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         initialEntities: MutableMap<K, R>
     ) : VolatileRepository<K, R>(context, name, initialEntities), PersistentRepository<K, R> {
 
+        companion object {
+            private const val CLOSED_MESSAGE = "PersistentRepositoryBase is closed"
+        }
+
         /**
          * Public constructor for external subclasses (e.g. in separate modules) that do not
          * have direct access to [LirpContext].
@@ -108,8 +112,10 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
             // Default: no-op. Override to emit repository-level UPDATE events.
         }
 
+        private fun checkNotClosed() = check(!closed) { CLOSED_MESSAGE }
+
         override fun add(entity: R): Boolean {
-            check(!closed) { "PersistentRepositoryBase is closed" }
+            checkNotClosed()
             val added = super.add(entity)
             if (added) {
                 subscribeEntity(entity)
@@ -120,7 +126,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         }
 
         override fun remove(entity: R): Boolean {
-            check(!closed) { "PersistentRepositoryBase is closed" }
+            checkNotClosed()
             return super.remove(entity).also { removed ->
                 if (removed) {
                     dirty.set(true)
@@ -134,23 +140,21 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         }
 
         override fun removeAll(entities: Collection<R>): Boolean {
-            check(!closed) { "PersistentRepositoryBase is closed" }
+            checkNotClosed()
+            val presentEntities = entities.filter { contains(it) }
             return super.removeAll(entities).also { removed ->
                 if (removed) {
                     dirty.set(true)
                     flush()
-                    entities.forEach {
-                        val subscription =
-                            subscriptionsMap.remove(it.id)
-                                ?: error("Repository should contain a subscription for $it")
-                        subscription.cancel()
+                    presentEntities.forEach {
+                        subscriptionsMap.remove(it.id)?.cancel()
                     }
                 }
             }
         }
 
         override fun clear() {
-            check(!closed) { "PersistentRepositoryBase is closed" }
+            checkNotClosed()
             super.clear()
             dirty.set(true)
             flush()

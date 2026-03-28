@@ -72,3 +72,11 @@ tasks.register('integrationTest', Test) {
 }
 
 check.dependsOn integrationTest
+
+jacocoTestReport {
+    dependsOn test, integrationTest
+    executionData.from(
+        tasks.named('test').map { it.extensions.getByType(JacocoTaskExtension).destinationFile },
+        tasks.named('integrationTest').map { it.extensions.getByType(JacocoTaskExtension).destinationFile }
+    )
+}

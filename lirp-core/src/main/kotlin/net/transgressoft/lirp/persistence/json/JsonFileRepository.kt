@@ -169,12 +169,8 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
                 decodeFromJson()?.let { loadedEntities ->
                     log.info { "${loadedEntities.size} objects deserialized from file $jsonFile" }
 
-                    loadedEntities.values.forEach { entity -> add(entity) }
+                    loadedEntities.values.forEach(::add)
                     dirty.set(false)
-
-                    flowScope.launch {
-                        forEach { entity -> subscribeEntity(entity) }
-                    }
                 }
 
                 activateEvents(CREATE, UPDATE)
@@ -224,10 +220,7 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
             return try {
                 json.decodeFromString(mapSerializer, content)
             } catch (exception: Exception) {
-                throw LirpDeserializationException(
-                    "Failed to deserialize entities from file: ${jsonFile.absolutePath}",
-                    exception
-                )
+                throw LirpDeserializationException("Failed to deserialize entities from file: ${jsonFile.absolutePath}", exception)
             }
         }
 
@@ -247,7 +240,8 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
          * throw [IllegalStateException].
          */
         override fun close() {
-            if (closed) return
+            if (closed)
+                return
             serializationEventChannel.close()
             // Fire-and-forget: flush any pending dirty state without blocking the caller
             ioScope.launch {

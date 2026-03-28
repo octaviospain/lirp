@@ -399,11 +399,13 @@ class JsonFileRepositoryTest : DescribeSpec({
             subscriptionsMap.containsKey(customer2.id) shouldBe false
         }
 
-        it("removeAll() throws IllegalStateException when subscription is missing from map") {
-            val customer = repository.create(1, "Test", "t@t.com")
+        it("removeAll() gracefully handles entities not present in the repository") {
+            val customer1 = repository.create(1, "Test1", "t1@t.com")
+            val customer2 = repository.create(2, "Test2", "t2@t.com")
             testDispatcher.scheduler.advanceUntilIdle()
-            getSubscriptionsMap(repository).remove(customer.id)
-            shouldThrow<IllegalStateException> { repository.removeAll(listOf(customer)) }
+            getSubscriptionsMap(repository).remove(customer2.id)
+            shouldNotThrowAny { repository.removeAll(listOf(customer1, customer2)) }
+            repository.findById(customer1.id).isEmpty shouldBe true
         }
     }
 

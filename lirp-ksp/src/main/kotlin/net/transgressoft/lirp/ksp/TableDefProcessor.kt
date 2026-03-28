@@ -38,6 +38,9 @@ private const val PERSISTENCE_IGNORE_FQN = "net.transgressoft.lirp.persistence.P
 private const val REACTIVE_ENTITY_REF_FQN = "net.transgressoft.lirp.persistence.ReactiveEntityRef"
 private const val TRANSIENT_FQN = "kotlin.jvm.Transient"
 private const val SQL_TABLE_DEF_FQN = "net.transgressoft.lirp.persistence.sql.SqlTableDef"
+private const val UUID_FQN = "java.util.UUID"
+private const val LOCAL_DATE_FQN = "java.time.LocalDate"
+private const val LOCAL_DATE_TIME_FQN = "java.time.LocalDateTime"
 
 /**
  * KSP processor that generates `_LirpTableDef` descriptor objects for entity classes annotated with
@@ -118,53 +121,85 @@ class TableDefProcessor(
                 fileName = tableDefName
             )
 
-        val columnsCode =
-            columns.joinToString(",\n        ") { col ->
-                "ColumnDef(name = \"${col.name}\", type = ${col.typeExpression}, nullable = ${col.nullable}, primaryKey = ${col.isPrimaryKey})"
-            }
-
         file.write(
             buildString {
-                if (packageName.isNotEmpty()) {
-                    appendLine("package $packageName")
-                    appendLine()
-                }
-                appendLine("import net.transgressoft.lirp.persistence.ColumnDef")
-                appendLine("import net.transgressoft.lirp.persistence.ColumnType")
-                if (canGenerateSqlMapping) {
-                    appendLine("import net.transgressoft.lirp.persistence.LirpTableDef")
-                    appendLine("import net.transgressoft.lirp.persistence.sql.SqlTableDef")
-                    appendLine("import org.jetbrains.exposed.v1.core.Column")
-                    appendLine("import org.jetbrains.exposed.v1.core.ResultRow")
-                    appendLine("import org.jetbrains.exposed.v1.core.Table")
-                } else {
-                    appendLine("import net.transgressoft.lirp.persistence.LirpTableDef")
-                }
-                appendLine()
-                appendLine("/** KSP-generated table descriptor for [$className]. */")
-                if (canGenerateSqlMapping) {
-                    appendLine("public object $tableDefName : SqlTableDef<$className> {")
-                } else {
-                    appendLine("public object $tableDefName : LirpTableDef<$className> {")
-                }
-                appendLine("    override val tableName: String = \"$tableName\"")
-                appendLine("    override val columns: List<ColumnDef> = listOf(")
-                if (columns.isNotEmpty()) {
-                    appendLine("        $columnsCode")
-                }
-                appendLine("    )")
-                if (canGenerateSqlMapping) {
-                    appendLine()
-                    appendFromRow(className, columns)
-                    appendLine()
-                    appendToParams(className, columns)
-                }
-                appendLine("}")
+                appendPackageAndImports(packageName, canGenerateSqlMapping, columns)
+                appendObjectBody(tableDefName, className, tableName, canGenerateSqlMapping, columns)
             }.toByteArray()
         )
         file.close()
 
         logger.info("Generated $packageName.$tableDefName for $className (sqlTableDef=$canGenerateSqlMapping)")
+    }
+
+    private fun StringBuilder.appendPackageAndImports(
+        packageName: String,
+        canGenerateSqlMapping: Boolean,
+        columns: List<ColumnMeta>
+    ) {
+        if (packageName.isNotEmpty()) {
+            appendLine("package $packageName")
+            appendLine()
+        }
+        appendLine("import net.transgressoft.lirp.persistence.ColumnDef")
+        appendLine("import net.transgressoft.lirp.persistence.ColumnType")
+        if (canGenerateSqlMapping) {
+            appendLine("import net.transgressoft.lirp.persistence.LirpTableDef")
+            appendLine("import net.transgressoft.lirp.persistence.sql.SqlTableDef")
+            appendLine("import org.jetbrains.exposed.v1.core.Column")
+            appendLine("import org.jetbrains.exposed.v1.core.ResultRow")
+            appendLine("import org.jetbrains.exposed.v1.core.Table")
+            appendConditionalTypeImports(columns)
+        } else {
+            appendLine("import net.transgressoft.lirp.persistence.LirpTableDef")
+        }
+        appendLine()
+    }
+
+    private fun StringBuilder.appendConditionalTypeImports(columns: List<ColumnMeta>) {
+        if (columns.any { it.typeFqn == UUID_FQN }) {
+            appendLine("import kotlin.uuid.toKotlinUuid")
+        }
+        if (columns.any { it.typeFqn == LOCAL_DATE_FQN }) {
+            appendLine("import kotlinx.datetime.toJavaLocalDate")
+            appendLine("import kotlinx.datetime.toKotlinLocalDate")
+        }
+        if (columns.any { it.typeFqn == LOCAL_DATE_TIME_FQN }) {
+            appendLine("import kotlinx.datetime.toJavaLocalDateTime")
+            appendLine("import kotlinx.datetime.toKotlinLocalDateTime")
+        }
+        columns.filter { it.isEnum }.map { it.typeFqn }.distinct().forEach { fqn ->
+            appendLine("import $fqn")
+        }
+    }
+
+    private fun StringBuilder.appendObjectBody(
+        tableDefName: String,
+        className: String,
+        tableName: String,
+        canGenerateSqlMapping: Boolean,
+        columns: List<ColumnMeta>
+    ) {
+        appendLine("/** KSP-generated table descriptor for [$className]. */")
+        val superType = if (canGenerateSqlMapping) "SqlTableDef<$className>" else "LirpTableDef<$className>"
+        appendLine("public object $tableDefName : $superType {")
+        appendLine("    override val tableName: String = \"$tableName\"")
+        appendLine("    override val columns: List<ColumnDef> = listOf(")
+        if (columns.isNotEmpty()) {
+            val columnsCode =
+                columns.joinToString(",\n        ") { col ->
+                    "ColumnDef(name = \"${col.name}\", type = ${col.typeExpression}, nullable = ${col.nullable}, primaryKey = ${col.isPrimaryKey})"
+                }
+            appendLine("        $columnsCode")
+        }
+        appendLine("    )")
+        if (canGenerateSqlMapping) {
+            appendLine()
+            appendFromRow(className, columns)
+            appendLine()
+            appendToParams(className, columns)
+        }
+        appendLine("}")
     }
 
     private fun StringBuilder.appendFromRow(className: String, columns: List<ColumnMeta>) {
@@ -180,8 +215,8 @@ class TableDefProcessor(
                 appendLine("        entity.${col.propertyName} = $rowAccess")
             }
         } else {
-            // No PK found — generate a best-effort construction using first column
-            appendLine("        val entity = $className(row[table.columns.first()])")
+            logger.error("Entity $className has no primary key 'id' property; cannot generate fromRow")
+            appendLine("        error(\"Entity $className missing primary key\")")
         }
         appendLine("        return entity")
         appendLine("    }")
@@ -190,9 +225,9 @@ class TableDefProcessor(
     private fun buildRowAccess(col: ColumnMeta): String {
         val rawAccess = "row[table.columns.first { it.name == \"${col.name}\" }]"
         return when {
-            col.typeFqn == "java.util.UUID" -> "$rawAccess as kotlin.uuid.Uuid"
-            col.typeFqn == "java.time.LocalDate" -> "($rawAccess as kotlinx.datetime.LocalDate).toJavaLocalDate()"
-            col.typeFqn == "java.time.LocalDateTime" -> "($rawAccess as kotlinx.datetime.LocalDateTime).toJavaLocalDateTime()"
+            col.typeFqn == UUID_FQN -> "$rawAccess as kotlin.uuid.Uuid"
+            col.typeFqn == LOCAL_DATE_FQN -> "($rawAccess as kotlinx.datetime.LocalDate).toJavaLocalDate()"
+            col.typeFqn == LOCAL_DATE_TIME_FQN -> "($rawAccess as kotlinx.datetime.LocalDateTime).toJavaLocalDateTime()"
             col.isEnum -> {
                 val enumSimpleName = col.typeFqn.substringAfterLast(".")
                 "enumValueOf<$enumSimpleName>($rawAccess as String)"
@@ -219,9 +254,9 @@ class TableDefProcessor(
     private fun buildEntityAccess(col: ColumnMeta): String {
         val prop = "entity.${col.propertyName}"
         return when {
-            col.typeFqn == "java.util.UUID" -> "$prop.toKotlinUuid()"
-            col.typeFqn == "java.time.LocalDate" -> "$prop.toKotlinLocalDate()"
-            col.typeFqn == "java.time.LocalDateTime" -> "$prop.toKotlinLocalDateTime()"
+            col.typeFqn == UUID_FQN -> "$prop.toKotlinUuid()"
+            col.typeFqn == LOCAL_DATE_FQN -> "$prop.toKotlinLocalDate()"
+            col.typeFqn == LOCAL_DATE_TIME_FQN -> "$prop.toKotlinLocalDateTime()"
             col.isEnum -> "$prop.name"
             else -> prop
         }
@@ -320,10 +355,14 @@ class TableDefProcessor(
             "kotlin.Boolean" -> "ColumnType.BooleanType"
             "kotlin.Double" -> "ColumnType.DoubleType"
             "kotlin.Float" -> "ColumnType.FloatType"
-            "java.util.UUID" -> "ColumnType.UuidType"
-            "java.time.LocalDateTime" -> "ColumnType.DateTimeType"
-            "java.time.LocalDate" -> "ColumnType.DateType"
-            "java.math.BigDecimal" -> "ColumnType.DecimalType($precision, $scale)"
+            UUID_FQN -> "ColumnType.UuidType"
+            LOCAL_DATE_TIME_FQN -> "ColumnType.DateTimeType"
+            LOCAL_DATE_FQN -> "ColumnType.DateType"
+            "java.math.BigDecimal" -> {
+                val p = if (precision > 0) precision else 19
+                val s = if (scale >= 0) scale else 2
+                "ColumnType.DecimalType($p, $s)"
+            }
             else -> {
                 val declaration = notNullableType.declaration
                 if ((declaration as? KSClassDeclaration)?.classKind == ClassKind.ENUM_CLASS) {
@@ -345,7 +384,13 @@ class TableDefProcessor(
     ): String? =
         when (hint.uppercase()) {
             "TEXT" -> "ColumnType.TextType"
-            "VARCHAR" -> "ColumnType.VarcharType($length)"
+            "VARCHAR" -> {
+                if (length <= 0) {
+                    logger.error("@PersistenceProperty(type=\"VARCHAR\") requires length > 0 on property '$propName'")
+                    return null
+                }
+                "ColumnType.VarcharType($length)"
+            }
             "INT" -> "ColumnType.IntType"
             "BIGINT" -> "ColumnType.LongType"
             "BOOLEAN" -> "ColumnType.BooleanType"
@@ -354,7 +399,11 @@ class TableDefProcessor(
             "UUID" -> "ColumnType.UuidType"
             "DATE" -> "ColumnType.DateType"
             "DATETIME" -> "ColumnType.DateTimeType"
-            "DECIMAL" -> "ColumnType.DecimalType($precision, $scale)"
+            "DECIMAL" -> {
+                val p = if (precision > 0) precision else 19
+                val s = if (scale >= 0) scale else 2
+                "ColumnType.DecimalType($p, $s)"
+            }
             else -> {
                 logger.error("Unknown @PersistenceProperty type hint '$hint' on property '$propName'")
                 null
