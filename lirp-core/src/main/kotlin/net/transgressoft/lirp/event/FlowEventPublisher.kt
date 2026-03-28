@@ -276,6 +276,8 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
             _inFlightSubscribes.incrementAndGet()
             if (isClosed) {
                 _inFlightSubscribes.decrementAndGet()
+                if (closeOnEmpty)
+                    return
                 error("Publisher '$id' is closed")
             }
             log.trace { "Subscription registered to $subscriber" }
@@ -305,6 +307,8 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
             _inFlightSubscribes.incrementAndGet()
             if (isClosed) {
                 _inFlightSubscribes.decrementAndGet()
+                if (closeOnEmpty)
+                    return cancelledSubscription()
                 error("Publisher '$id' is closed")
             }
             log.trace { "Anonymous subscription registered to $id" }
@@ -331,6 +335,7 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
             _inFlightSubscribes.incrementAndGet()
             if (isClosed) {
                 _inFlightSubscribes.decrementAndGet()
+                if (closeOnEmpty) return cancelledSubscription()
                 error("Publisher '$id' is closed")
             }
             log.trace { "Subscription registered to $id for event types: ${eventTypes.joinToString()}" }
@@ -366,6 +371,9 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
         }
 
         override fun toString() = "FlowEventPublisher(id=$id, activatedEventTypes=$activatedEventTypes)"
+
+        private fun cancelledSubscription(): LirpEventSubscription<in LirpEntity, ET, E> =
+            ReactiveSubscription(this, Job().apply { cancel() })
 
         inner class ReactiveSubscription<T: LirpEntity>(override val source: LirpEventPublisher<ET, E>, private val job: Job)
         : LirpEventSubscription<T, ET, E> {
