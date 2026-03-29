@@ -26,12 +26,12 @@ import io.kotest.matchers.types.shouldBeInstanceOf
 /**
  * Tests for DDD-01: aggregate reference declaration compiles and delegate returns correct values.
  *
- * These tests verify that [aggregateRef] delegates work in isolation — no repository binding required.
+ * These tests verify that [aggregate] delegates work in isolation — no repository binding required.
  */
 @DisplayName("AggregateRefDelegate")
 internal class AggregateRefDeclarationTest : FunSpec({
 
-    test("returns non-null ReactiveEntityReference when declared via aggregateRef delegate") {
+    test("returns non-null ReactiveEntityReference when declared via aggregate delegate") {
         val order = Order(id = 1L, customerId = 42)
 
         order.customer.shouldNotBeNull()
@@ -53,6 +53,6 @@ internal class AggregateRefDeclarationTest : FunSpec({
     test("delegate is an instance of ReactiveEntityReference") {
         val order = Order(id = 2L, customerId = 5)
 
-        order.customer.shouldBeInstanceOf<ReactiveEntityReference<Customer, Int>>()
+        order.customer.shouldBeInstanceOf<ReactiveEntityReference<Int, Customer>>()
     }
 })

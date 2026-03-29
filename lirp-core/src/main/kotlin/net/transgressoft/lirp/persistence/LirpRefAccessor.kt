@@ -18,16 +18,18 @@
 package net.transgressoft.lirp.persistence
 
 /**
- * Contract for KSP-generated aggregate reference accessors.
+ * Contract for KSP-generated aggregate reference accessors, covering both single-entity
+ * references ([@Aggregate][Aggregate]) and collection-typed references
+ * (`@Aggregate` with `aggregateList`/`aggregateSet` delegates).
  *
- * Each entity class with [@ReactiveEntityRef][ReactiveEntityRef] properties gets a compile-time
+ * Each entity class with [@Aggregate][Aggregate] properties gets a compile-time
  * generated implementation of this interface. The generated class is named
  * `{EntityName}_LirpRefAccessor` and lives in the same package as the entity, discovered at
  * runtime via a convention-based [Class.forName] lookup.
  *
- * The generated [entries] contain direct property getter and delegate getter lambdas for retrieving
- * referenced entity IDs and [AggregateRefDelegate] instances, completely avoiding `kotlin-reflect`
- * or `java.lang.reflect` overhead.
+ * The generated [entries] and [collectionEntries] contain direct property getter and delegate
+ * getter lambdas for retrieving referenced entity IDs and delegate instances, completely avoiding
+ * `kotlin-reflect` or `java.lang.reflect` overhead.
  *
  * The generated [cancelAllBubbleUp] iterates all [entries] and calls
  * [AggregateRefDelegate.cancelBubbleUp] on each delegate. If the KSP processor does not generate
@@ -40,11 +42,23 @@ interface LirpRefAccessor<T> {
 
     /**
      * Pre-built reference entries with direct ID getter and delegate getter lambdas for all
-     * [@ReactiveEntityRef][ReactiveEntityRef] properties.
+     * [@Aggregate][Aggregate] properties.
      *
      * Star-projected K since references on the same entity may point to differently-typed IDs.
      */
     val entries: List<RefEntry<*, T>>
+
+    /**
+     * Pre-built collection reference entries with direct IDs getter and delegate getter lambdas
+     * for all collection-typed `@Aggregate` properties.
+     *
+     * Returns an empty list by default for backward compatibility with existing generated accessors
+     * that do not yet declare collection-typed references.
+     *
+     * Star-projected K since collection references on the same entity may point to differently-typed IDs.
+     */
+    val collectionEntries: List<CollectionRefEntry<*, T>>
+        get() = emptyList()
 
     /**
      * Cancels all active bubble-up subscriptions on the given [entity] by calling

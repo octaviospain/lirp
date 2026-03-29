@@ -54,7 +54,7 @@ data class Customer(
 /**
  * Test entity representing an order that holds a typed reference to a [Customer].
  *
- * The [customer] property demonstrates KSP-generated reference wiring: the [ReactiveEntityRef]
+ * The [customer] property demonstrates KSP-generated reference wiring: the [Aggregate]
  * annotation triggers generation of [Order_LirpRefAccessor] at compile time. The [Transient]
  * annotation prevents kotlinx-serialization from attempting to serialize the delegate object.
  *
@@ -70,8 +70,8 @@ data class Order(
 ) : ReactiveEntityBase<Long, Order>() {
     override val uniqueId: String get() = "order-$id"
 
-    @ReactiveEntityRef(bubbleUp = false)
-    val customer by aggregateRef<Customer, Int> { customerId }
+    @Aggregate(bubbleUp = false)
+    val customer by aggregate<Int, Customer> { customerId }
 
     override fun clone(): Order = copy()
 }
@@ -89,8 +89,8 @@ data class BubbleUpOrder(
 ) : ReactiveEntityBase<Long, BubbleUpOrder>() {
     override val uniqueId: String get() = "bubble-up-order-$id"
 
-    @ReactiveEntityRef(bubbleUp = true)
-    val customer by aggregateRef<Customer, Int> { customerId }
+    @Aggregate(bubbleUp = true)
+    val customer by aggregate<Int, Customer> { customerId }
 
     override fun clone(): BubbleUpOrder = copy()
 }
@@ -128,8 +128,8 @@ data class EntityB(
 ) : ReactiveEntityBase<Int, EntityB>() {
     override val uniqueId: String get() = "entity-b-$id"
 
-    @ReactiveEntityRef(bubbleUp = true)
-    val refA by aggregateRef<EntityA, Int> { entityAId }
+    @Aggregate(bubbleUp = true)
+    val refA by aggregate<Int, EntityA> { entityAId }
 
     override fun clone(): EntityB = copy()
 }
@@ -147,8 +147,8 @@ data class EntityC(
 ) : ReactiveEntityBase<Int, EntityC>() {
     override val uniqueId: String get() = "entity-c-$id"
 
-    @ReactiveEntityRef(bubbleUp = true)
-    val refB by aggregateRef<EntityB, Int> { entityBId }
+    @Aggregate(bubbleUp = true)
+    val refB by aggregate<Int, EntityB> { entityBId }
 
     override fun clone(): EntityC = copy()
 }
@@ -164,8 +164,8 @@ data class CascadeOrder(
 ) : ReactiveEntityBase<Long, CascadeOrder>() {
     override val uniqueId: String get() = "cascade-order-$id"
 
-    @ReactiveEntityRef(onDelete = CascadeAction.CASCADE)
-    val customer by aggregateRef<Customer, Int> { customerId }
+    @Aggregate(onDelete = CascadeAction.CASCADE)
+    val customer by aggregate<Int, Customer> { customerId }
 
     override fun clone(): CascadeOrder = copy()
 }
@@ -181,8 +181,8 @@ data class DetachOrder(
 ) : ReactiveEntityBase<Long, DetachOrder>() {
     override val uniqueId: String get() = "detach-order-$id"
 
-    @ReactiveEntityRef(bubbleUp = true, onDelete = CascadeAction.DETACH)
-    val customer by aggregateRef<Customer, Int> { customerId }
+    @Aggregate(bubbleUp = true, onDelete = CascadeAction.DETACH)
+    val customer by aggregate<Int, Customer> { customerId }
 
     override fun clone(): DetachOrder = copy()
 }
@@ -197,8 +197,8 @@ data class NoneOrder(
 ) : ReactiveEntityBase<Long, NoneOrder>() {
     override val uniqueId: String get() = "none-order-$id"
 
-    @ReactiveEntityRef(onDelete = CascadeAction.NONE)
-    val customer by aggregateRef<Customer, Int> { customerId }
+    @Aggregate(onDelete = CascadeAction.NONE)
+    val customer by aggregate<Int, Customer> { customerId }
 
     override fun clone(): NoneOrder = copy()
 }
@@ -327,8 +327,8 @@ data class RestrictOrder(
 ) : ReactiveEntityBase<Long, RestrictOrder>() {
     override val uniqueId: String get() = "restrict-order-$id"
 
-    @ReactiveEntityRef(onDelete = CascadeAction.RESTRICT)
-    val customer by aggregateRef<Customer, Int> { customerId }
+    @Aggregate(onDelete = CascadeAction.RESTRICT)
+    val customer by aggregate<Int, Customer> { customerId }
 
     override fun clone(): RestrictOrder = copy()
 }
@@ -344,8 +344,8 @@ data class CyclicParent(
 ) : ReactiveEntityBase<Long, CyclicParent>() {
     override val uniqueId: String get() = "cyclic-parent-$id"
 
-    @ReactiveEntityRef(onDelete = CascadeAction.CASCADE)
-    val child by aggregateRef<CyclicChild, Long> { childId }
+    @Aggregate(onDelete = CascadeAction.CASCADE)
+    val child by aggregate<Long, CyclicChild> { childId }
 
     override fun clone(): CyclicParent = copy()
 }
@@ -361,8 +361,8 @@ data class CyclicChild(
 ) : ReactiveEntityBase<Long, CyclicChild>() {
     override val uniqueId: String get() = "cyclic-child-$id"
 
-    @ReactiveEntityRef(onDelete = CascadeAction.CASCADE)
-    val parent by aggregateRef<CyclicParent, Long> { parentId }
+    @Aggregate(onDelete = CascadeAction.CASCADE)
+    val parent by aggregate<Long, CyclicParent> { parentId }
 
     override fun clone(): CyclicChild = copy()
 }
@@ -418,8 +418,8 @@ data class MutableRefOrder(
 
     override val uniqueId: String get() = "mutable-ref-order-$id"
 
-    @ReactiveEntityRef(bubbleUp = true)
-    val customer by aggregateRef<Customer, Int> { customerId }
+    @Aggregate(bubbleUp = true)
+    val customer by aggregate<Int, Customer> { customerId }
 
     override fun clone(): MutableRefOrder = MutableRefOrder(id, customerId)
 
@@ -438,4 +438,340 @@ class MutableRefOrderVolatileRepo internal constructor(
     constructor() : this(LirpContext.default)
 
     fun create(id: Long, customerId: Int): MutableRefOrder = MutableRefOrder(id, customerId).also { add(it) }
+}
+
+/**
+ * Minimal test entity representing a track in a playlist.
+ *
+ * Used as the referenced entity type in [Playlist] collection reference tests.
+ */
+@Serializable
+data class TestTrack(
+    override val id: Int,
+    val title: String
+) : ReactiveEntityBase<Int, TestTrack>() {
+    override val uniqueId: String get() = "track-$id"
+
+    override fun clone(): TestTrack = copy()
+}
+
+/**
+ * Test entity representing a playlist with an ordered list of track references.
+ *
+ * The [items] property demonstrates a collection aggregate reference using [aggregateList]:
+ * the accessor for collection entries is provided by [Playlist_LirpRefAccessor].
+ */
+@Serializable
+data class Playlist(
+    override val id: Long,
+    val name: String,
+    val itemIds: List<Int>
+) : ReactiveEntityBase<Long, Playlist>() {
+    override val uniqueId: String get() = "playlist-$id"
+
+    @Aggregate
+    @Transient
+    val items by aggregateList<Int, TestTrack> { itemIds }
+
+    override fun clone(): Playlist = copy()
+}
+
+/**
+ * Test entity representing a group of playlists using a set of playlist references.
+ *
+ * The [playlists] property demonstrates a collection aggregate reference using [aggregateSet]:
+ * the accessor for collection entries is provided by [PlaylistGroup_LirpRefAccessor].
+ */
+@Serializable
+data class PlaylistGroup(
+    override val id: Long,
+    val playlistIds: Set<Long>
+) : ReactiveEntityBase<Long, PlaylistGroup>() {
+    override val uniqueId: String get() = "playlist-group-$id"
+
+    @Aggregate
+    @Transient
+    val playlists by aggregateSet<Long, Playlist> { playlistIds }
+
+    override fun clone(): PlaylistGroup = copy()
+}
+
+/**
+ * Test entity with CASCADE delete action on a collection: removing this entity from its repository
+ * also removes all referenced [TestTrack] entities.
+ */
+@Serializable
+data class CascadePlaylist(
+    override val id: Long,
+    val name: String,
+    val itemIds: List<Int>
+) : ReactiveEntityBase<Long, CascadePlaylist>() {
+    override val uniqueId: String get() = "cascade-playlist-$id"
+
+    @Aggregate(onDelete = CascadeAction.CASCADE)
+    @Transient
+    val items by aggregateList<Int, TestTrack> { itemIds }
+
+    override fun clone(): CascadePlaylist = copy()
+}
+
+/**
+ * Test entity with RESTRICT delete action on a collection: removing this entity is blocked
+ * if any of the referenced [TestTrack] entities are still referenced by other entities.
+ */
+@Serializable
+data class RestrictPlaylist(
+    override val id: Long,
+    val name: String,
+    val itemIds: List<Int>
+) : ReactiveEntityBase<Long, RestrictPlaylist>() {
+    override val uniqueId: String get() = "restrict-playlist-$id"
+
+    @Aggregate(onDelete = CascadeAction.RESTRICT)
+    @Transient
+    val items by aggregateList<Int, TestTrack> { itemIds }
+
+    override fun clone(): RestrictPlaylist = copy()
+}
+
+/**
+ * Test entity with DETACH delete action on a collection: removing this entity does nothing
+ * to the referenced [TestTrack] entities (no bubble-up to cancel, just a no-op).
+ */
+@Serializable
+data class DetachPlaylist(
+    override val id: Long,
+    val name: String,
+    val itemIds: List<Int>
+) : ReactiveEntityBase<Long, DetachPlaylist>() {
+    override val uniqueId: String get() = "detach-playlist-$id"
+
+    @Aggregate(onDelete = CascadeAction.DETACH)
+    @Transient
+    val items by aggregateList<Int, TestTrack> { itemIds }
+
+    override fun clone(): DetachPlaylist = copy()
+}
+
+/**
+ * Test entity with NONE delete action on a collection (default): removing this entity does nothing
+ * to the referenced [TestTrack] entities.
+ */
+@Serializable
+data class NonePlaylist(
+    override val id: Long,
+    val name: String,
+    val itemIds: List<Int>
+) : ReactiveEntityBase<Long, NonePlaylist>() {
+    override val uniqueId: String get() = "none-playlist-$id"
+
+    @Aggregate(onDelete = CascadeAction.NONE)
+    @Transient
+    val items by aggregateList<Int, TestTrack> { itemIds }
+
+    override fun clone(): NonePlaylist = copy()
+}
+
+/**
+ * Test repository for [TestTrack] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class TestTrackVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Int, TestTrack>(context, "TestTracks") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Int, title: String): TestTrack = TestTrack(id, title).also { add(it) }
+}
+
+/**
+ * Test repository for [Playlist] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class PlaylistVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Long, Playlist>(context, "Playlists") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Long, name: String, itemIds: List<Int>): Playlist = Playlist(id, name, itemIds).also { add(it) }
+}
+
+/**
+ * Test repository for [PlaylistGroup] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class PlaylistGroupVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Long, PlaylistGroup>(context, "PlaylistGroups") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Long, playlistIds: Set<Long>): PlaylistGroup = PlaylistGroup(id, playlistIds).also { add(it) }
+}
+
+/**
+ * Test repository for [CascadePlaylist] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class CascadePlaylistVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Long, CascadePlaylist>(context, "CascadePlaylists") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Long, name: String, itemIds: List<Int>): CascadePlaylist = CascadePlaylist(id, name, itemIds).also { add(it) }
+}
+
+/**
+ * Test repository for [RestrictPlaylist] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class RestrictPlaylistVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Long, RestrictPlaylist>(context, "RestrictPlaylists") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Long, name: String, itemIds: List<Int>): RestrictPlaylist = RestrictPlaylist(id, name, itemIds).also { add(it) }
+}
+
+/**
+ * Test repository for [DetachPlaylist] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class DetachPlaylistVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Long, DetachPlaylist>(context, "DetachPlaylists") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Long, name: String, itemIds: List<Int>): DetachPlaylist = DetachPlaylist(id, name, itemIds).also { add(it) }
+}
+
+/**
+ * Test repository for [NonePlaylist] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class NonePlaylistVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Long, NonePlaylist>(context, "NonePlaylists") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Long, name: String, itemIds: List<Int>): NonePlaylist = NonePlaylist(id, name, itemIds).also { add(it) }
+}
+
+// --- Set-based cascade entities ---
+
+/**
+ * Test entity with CASCADE delete action on a set reference: removing this entity also
+ * removes all referenced [Playlist] entities.
+ */
+@Serializable
+data class CascadePlaylistGroup(
+    override val id: Long,
+    val playlistIds: Set<Long>
+) : ReactiveEntityBase<Long, CascadePlaylistGroup>() {
+    override val uniqueId: String get() = "cascade-group-$id"
+
+    @Aggregate(onDelete = CascadeAction.CASCADE)
+    @Transient
+    val playlists by aggregateSet<Long, Playlist> { playlistIds }
+
+    override fun clone(): CascadePlaylistGroup = copy()
+}
+
+/**
+ * Test entity with RESTRICT delete action on a set reference: removing this entity is blocked
+ * if any referenced [Playlist] is still referenced by other entities.
+ */
+@Serializable
+data class RestrictPlaylistGroup(
+    override val id: Long,
+    val playlistIds: Set<Long>
+) : ReactiveEntityBase<Long, RestrictPlaylistGroup>() {
+    override val uniqueId: String get() = "restrict-group-$id"
+
+    @Aggregate(onDelete = CascadeAction.RESTRICT)
+    @Transient
+    val playlists by aggregateSet<Long, Playlist> { playlistIds }
+
+    override fun clone(): RestrictPlaylistGroup = copy()
+}
+
+/**
+ * Test entity with DETACH delete action on a set reference.
+ */
+@Serializable
+data class DetachPlaylistGroup(
+    override val id: Long,
+    val playlistIds: Set<Long>
+) : ReactiveEntityBase<Long, DetachPlaylistGroup>() {
+    override val uniqueId: String get() = "detach-group-$id"
+
+    @Aggregate(onDelete = CascadeAction.DETACH)
+    @Transient
+    val playlists by aggregateSet<Long, Playlist> { playlistIds }
+
+    override fun clone(): DetachPlaylistGroup = copy()
+}
+
+/**
+ * Test entity with NONE delete action on a set reference (default).
+ */
+@Serializable
+data class NonePlaylistGroup(
+    override val id: Long,
+    val playlistIds: Set<Long>
+) : ReactiveEntityBase<Long, NonePlaylistGroup>() {
+    override val uniqueId: String get() = "none-group-$id"
+
+    @Aggregate(onDelete = CascadeAction.NONE)
+    @Transient
+    val playlists by aggregateSet<Long, Playlist> { playlistIds }
+
+    override fun clone(): NonePlaylistGroup = copy()
+}
+
+/**
+ * Test repository for [CascadePlaylistGroup] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class CascadePlaylistGroupVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Long, CascadePlaylistGroup>(context, "CascadePlaylistGroups") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Long, playlistIds: Set<Long>): CascadePlaylistGroup = CascadePlaylistGroup(id, playlistIds).also { add(it) }
+}
+
+/**
+ * Test repository for [RestrictPlaylistGroup] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class RestrictPlaylistGroupVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Long, RestrictPlaylistGroup>(context, "RestrictPlaylistGroups") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Long, playlistIds: Set<Long>): RestrictPlaylistGroup = RestrictPlaylistGroup(id, playlistIds).also { add(it) }
+}
+
+/**
+ * Test repository for [DetachPlaylistGroup] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class DetachPlaylistGroupVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Long, DetachPlaylistGroup>(context, "DetachPlaylistGroups") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Long, playlistIds: Set<Long>): DetachPlaylistGroup = DetachPlaylistGroup(id, playlistIds).also { add(it) }
+}
+
+/**
+ * Test repository for [NonePlaylistGroup] entities, auto-registered via [@LirpRepository][LirpRepository].
+ */
+@LirpRepository
+class NonePlaylistGroupVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Long, NonePlaylistGroup>(context, "NonePlaylistGroups") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Long, playlistIds: Set<Long>): NonePlaylistGroup = NonePlaylistGroup(id, playlistIds).also { add(it) }
 }

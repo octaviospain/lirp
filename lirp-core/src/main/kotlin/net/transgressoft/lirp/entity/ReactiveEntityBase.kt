@@ -90,7 +90,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
 
     /**
      * Cached KSP-generated [LirpRefAccessor] for this entity's class, discovered lazily on first [close].
-     * Null if no accessor was found (entity has no [@ReactiveEntityRef][net.transgressoft.lirp.persistence.ReactiveEntityRef] properties).
+     * Null if no accessor was found (entity has no [@Aggregate][net.transgressoft.lirp.persistence.Aggregate] properties).
      */
     @Volatile
     private var _refAccessor: LirpRefAccessor<*>? = null
@@ -185,7 +185,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
      * double-checked locking so the lookup runs at most once per entity instance and the result
      * is visible to all threads.
      *
-     * Returns `null` if no accessor was found (entity has no [@ReactiveEntityRef][net.transgressoft.lirp.persistence.ReactiveEntityRef]
+     * Returns `null` if no accessor was found (entity has no [@Aggregate][net.transgressoft.lirp.persistence.Aggregate]
      * properties or KSP was not applied). Entities GC'd without [close] never incur this cost —
      * consistent with the lazy publisher pattern.
      */
@@ -218,7 +218,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
      * direct access to the correctly-typed `R` parameter, avoiding the type erasure problem
      * that arises when emitting from external (wildcard-typed) call sites.
      *
-     * @param refName the property name of the [@ReactiveEntityRef][net.transgressoft.lirp.persistence.ReactiveEntityRef]
+     * @param refName the property name of the [@Aggregate][net.transgressoft.lirp.persistence.Aggregate]
      *   annotated property that triggered the bubble-up
      * @param childEvent the original [MutationEvent] from the referenced child entity
      */

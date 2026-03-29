@@ -20,7 +20,7 @@ package net.transgressoft.lirp.persistence
 import net.transgressoft.lirp.entity.CascadeAction
 
 /**
- * Compile-time resolved descriptor for a [@ReactiveEntityRef][ReactiveEntityRef] property, pairing
+ * Compile-time resolved descriptor for a [@Aggregate][Aggregate] property, pairing
  * the reference name with a direct ID getter function, a direct delegate getter function, and
  * metadata about the reference's behavior.
  *

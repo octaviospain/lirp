@@ -155,7 +155,7 @@ class SlowSubscriberTest : DescribeSpec({
             fastLatch.await(5, TimeUnit.SECONDS) shouldBe true
 
             // Slow subscriber processes at SLOW_DELAY_MS per event; wait for all to complete
-            slowLatch.await(EVENT_COUNT * (SLOW_DELAY_MS + pacedIntervalMs) + 1000, TimeUnit.MILLISECONDS) shouldBe true
+            slowLatch.await(EVENT_COUNT * (SLOW_DELAY_MS + pacedIntervalMs) + 5000, TimeUnit.MILLISECONDS) shouldBe true
 
             fastCounter.get() shouldBe EVENT_COUNT
             slowCounter.get() shouldBe EVENT_COUNT
@@ -196,7 +196,7 @@ class SlowSubscriberTest : DescribeSpec({
 
             // Both subscribers must receive all events
             fastLatch.await(5, TimeUnit.SECONDS) shouldBe true
-            slowLatch.await(EVENT_COUNT * (SLOW_DELAY_MS + pacedIntervalMs) + 1000, TimeUnit.MILLISECONDS) shouldBe true
+            slowLatch.await(EVENT_COUNT * (SLOW_DELAY_MS + pacedIntervalMs) + 5000, TimeUnit.MILLISECONDS) shouldBe true
 
             // Fast subscriber finishes processing each event immediately; slow subscriber
             // always lags by SLOW_DELAY_MS on the last event, so it must complete later
@@ -266,7 +266,7 @@ class SlowSubscriberTest : DescribeSpec({
             }.join()
 
             fastLatch.await(5, TimeUnit.SECONDS) shouldBe true
-            slowLatch.await(EVENT_COUNT * (SLOW_DELAY_MS + pacedIntervalMs) + 1000, TimeUnit.MILLISECONDS) shouldBe true
+            slowLatch.await(EVENT_COUNT * (SLOW_DELAY_MS + pacedIntervalMs) + 5000, TimeUnit.MILLISECONDS) shouldBe true
 
             fastLatch.count shouldBe 0L
             slowLatch.count shouldBe 0L

@@ -84,6 +84,14 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
     @Volatile
     private var refEntries: List<RefEntry<*, T>>? = null
 
+    /**
+     * Cached collection reference entries loaded from the KSP-generated [LirpRefAccessor] for this entity type.
+     * Each entry holds the reference name, an IDs getter lambda, the referenced class, and metadata.
+     * Null until discovery runs; an empty list means no collection references were declared.
+     */
+    @Volatile
+    private var collectionRefEntries: List<CollectionRefEntry<*, T>>? = null
+
     init {
         // A registry can't create or delete entities,
         // so the CREATE and DELETE events are disabled by default.
@@ -176,7 +184,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
      *
      * The generated accessor provides [RefEntry] descriptors with direct ID getter lambdas,
      * completely avoiding `kotlin-reflect` or `java.lang.reflect` overhead. If no generated
-     * accessor is found (KSP not applied or no [@ReactiveEntityRef][ReactiveEntityRef] annotations),
+     * accessor is found (KSP not applied or no [@Aggregate][Aggregate] annotations),
      * the reference entry list remains empty.
      */
     @Suppress("UNCHECKED_CAST")
@@ -184,15 +192,19 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
         if (refEntries != null) return
         synchronized(this) {
             if (refEntries != null) return
-            refEntries =
-                try {
-                    val accessorClass = Class.forName("${entity.javaClass.name}_LirpRefAccessor")
-                    val accessor = accessorClass.getDeclaredConstructor().newInstance() as LirpRefAccessor<T>
-                    accessor.entries
-                } catch (_: ClassNotFoundException) {
-                    failFastIfDelegatePresent(entity.javaClass, AggregateRefDelegate::class.java, "LirpRefAccessor")
-                    emptyList()
-                }
+            try {
+                val accessorClass = Class.forName("${entity.javaClass.name}_LirpRefAccessor")
+                val accessor = accessorClass.getDeclaredConstructor().newInstance() as LirpRefAccessor<T>
+                val discoveredEntries = accessor.entries
+                val discoveredCollectionEntries = accessor.collectionEntries
+                collectionRefEntries = discoveredCollectionEntries
+                refEntries = discoveredEntries
+            } catch (_: ClassNotFoundException) {
+                failFastIfDelegatePresent(entity.javaClass, AggregateRefDelegate::class.java, "LirpRefAccessor")
+                failFastIfDelegatePresent(entity.javaClass, AbstractAggregateCollectionRefDelegate::class.java, "LirpRefAccessor")
+                collectionRefEntries = emptyList()
+                refEntries = emptyList()
+            }
         }
     }
 
@@ -202,7 +214,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
      * accessor class was not found.
      *
      * LIRP annotations use [AnnotationRetention.BINARY] which is invisible to runtime reflection.
-     * Instead, the check inspects the JVM backing fields: Kotlin stores `by aggregateRef { ... }`
+     * Instead, the check inspects the JVM backing fields: Kotlin stores `by aggregate { ... }`
      * delegate properties as `<propName>${'$'}delegate` fields of type [AggregateRefDelegate]. If such
      * fields exist but no [LirpRefAccessor] was generated, the entity was not processed by KSP.
      *
@@ -233,7 +245,10 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
      * Binds each [AggregateRefDelegate] on [entity] to the [Registry] that holds its referenced entity type,
      * using the [RefEntry] descriptors discovered via [discoverRefs].
      *
-     * The unchecked cast consolidates type erasure at one call site. It is safe because
+     * Also binds each collection reference delegate ([AbstractAggregateCollectionRefDelegate] subclass)
+     * discovered via [CollectionRefEntry] descriptors.
+     *
+     * The unchecked casts consolidate type erasure at one call site. They are safe because
      * [RefEntry.referencedClass] and the delegate's K type are consistent — the KSP processor
      * generates both from the same referenced entity class declaration.
      */
@@ -242,8 +257,18 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
         val entries = refEntries ?: return
         for (entry in entries) {
             val registry = context.registryFor(entry.referencedClass) ?: continue
-            val typed = entry.delegateGetter(entity) as AggregateRefDelegate<IdentifiableEntity<Comparable<Any>>, Comparable<Any>>
+            val typed = entry.delegateGetter(entity) as AggregateRefDelegate<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>
             typed.bindRegistry(registry as Registry<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>, context)
+        }
+        val collEntries = collectionRefEntries ?: return
+        for (entry in collEntries) {
+            val registry = context.registryFor(entry.referencedClass) ?: continue
+            val delegate = entry.delegateGetter(entity)
+            if (delegate is AbstractAggregateCollectionRefDelegate<*, *>) {
+                @Suppress("UNCHECKED_CAST")
+                (delegate as AbstractAggregateCollectionRefDelegate<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>)
+                    .bindRegistry(registry as Registry<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>, context)
+            }
         }
     }
 
@@ -264,11 +289,13 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
     }
 
     /**
-     * Executes cascade actions for all aggregate references declared on [entity].
+     * Executes cascade actions for all aggregate references declared on [entity], including both
+     * single-entity references and collection-typed references.
      *
      * Called by [VolatileRepository] during [net.transgressoft.lirp.persistence.VolatileRepository.remove]
      * and [net.transgressoft.lirp.persistence.VolatileRepository.clear]. Each reference delegate's
-     * [AggregateRefDelegate.executeCascade] is invoked with its configured [net.transgressoft.lirp.entity.CascadeAction].
+     * [AggregateRefDelegate.executeCascade] (for single refs) or collection delegate's
+     * `executeCascade` (for collection refs) is invoked with its configured [net.transgressoft.lirp.entity.CascadeAction].
      *
      * Uses a [ThreadLocal] visited set to detect and reject cyclic cascade graphs. If [entity] is
      * already being cascaded on the current thread, an [IllegalStateException] is thrown immediately.
@@ -285,6 +312,15 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
             }
             for (entry in entries) {
                 entry.delegateGetter(entity).executeCascade(entry.cascadeAction, entity)
+            }
+            val collEntries = collectionRefEntries
+            if (collEntries != null) {
+                for (entry in collEntries) {
+                    val delegate = entry.delegateGetter(entity)
+                    if (delegate is AbstractAggregateCollectionRefDelegate<*, *>) {
+                        delegate.executeCascade(entry.cascadeAction, entity)
+                    }
+                }
             }
         } finally {
             if (isTopLevel) visited.clear()
