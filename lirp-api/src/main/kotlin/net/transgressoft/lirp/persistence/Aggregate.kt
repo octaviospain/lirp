@@ -22,7 +22,7 @@ import net.transgressoft.lirp.entity.CascadeAction
 /**
  * Marks a property as an aggregate reference to another [net.transgressoft.lirp.entity.ReactiveEntity].
  *
- * At compile time, the LIRP KSP processor scans for `@ReactiveEntityRef` annotations and generates a
+ * At compile time, the LIRP KSP processor scans for `@Aggregate` annotations and generates a
  * [LirpRefAccessor] implementation per entity class. The generated accessor contains direct
  * property getter lambdas that retrieve the referenced entity's ID — no runtime reflection.
  *
@@ -35,15 +35,15 @@ import net.transgressoft.lirp.entity.CascadeAction
  * at compile time, so runtime retention is unnecessary.
  *
  * **Requires the `lirp-ksp` processor** to be applied via the KSP Gradle plugin. Without it,
- * `@ReactiveEntityRef` annotations have no effect.
+ * `@Aggregate` annotations have no effect.
  *
  * Example:
  * ```kotlin
  * // build.gradle.kts: ksp(project(":lirp-ksp"))
  *
  * class Invoice(override val id: Int, val orderId: Long) : ReactiveEntityBase<Int, Invoice>() {
- *     @ReactiveEntityRef(bubbleUp = true, onDelete = CascadeAction.DETACH)
- *     val order by aggregateRef<Order, Long> { orderId }
+ *     @Aggregate(bubbleUp = true, onDelete = CascadeAction.DETACH)
+ *     val order by aggregate<Long, Order> { orderId }
  * }
  *
  * // Resolution
@@ -57,4 +57,4 @@ import net.transgressoft.lirp.entity.CascadeAction
  */
 @Target(AnnotationTarget.PROPERTY)
 @Retention(AnnotationRetention.BINARY)
-annotation class ReactiveEntityRef(val bubbleUp: Boolean = false, val onDelete: CascadeAction = CascadeAction.DETACH)
+annotation class Aggregate(val bubbleUp: Boolean = false, val onDelete: CascadeAction = CascadeAction.DETACH)

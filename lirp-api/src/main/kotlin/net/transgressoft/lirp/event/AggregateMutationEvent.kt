@@ -24,7 +24,7 @@ import net.transgressoft.lirp.entity.ReactiveEntity
  * and bubble-up propagation is enabled for that reference.
  *
  * Bubble-up is opt-in per reference via
- * [@ReactiveEntityRef(bubbleUp = true)][net.transgressoft.lirp.persistence.ReactiveEntityRef].
+ * [@Aggregate(bubbleUp = true)][net.transgressoft.lirp.persistence.Aggregate].
  * When active, a child mutation causes the parent entity to emit this event on its own publisher,
  * allowing parent subscribers to react to descendant state changes without subscribing to each child
  * individually.
@@ -56,7 +56,7 @@ interface AggregateMutationEvent<K, R : ReactiveEntity<K, R>> : MutationEvent<K,
     /**
      * The name of the reference that triggered the bubble-up propagation.
      *
-     * Corresponds to the property name of the [@ReactiveEntityRef][net.transgressoft.lirp.persistence.ReactiveEntityRef]
+     * Corresponds to the property name of the [@Aggregate][net.transgressoft.lirp.persistence.Aggregate]
      * annotated property on the parent entity.
      */
     val refName: String

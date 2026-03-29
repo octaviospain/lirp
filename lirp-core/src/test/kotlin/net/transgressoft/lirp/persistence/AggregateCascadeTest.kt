@@ -221,7 +221,7 @@ internal class AggregateCascadeTest : FunSpec({
 
         // Cast to AggregateRefDelegate to access wireBubbleUp/cancelBubbleUp directly.
         // order.customer returns this (the delegate itself) via getValue().
-        val delegate = order.customer as AggregateRefDelegate<Customer, Int>
+        val delegate = order.customer as AggregateRefDelegate<Int, Customer>
 
         // Launch 50 coroutines: even-indexed wire, odd-indexed cancel
         runBlocking {

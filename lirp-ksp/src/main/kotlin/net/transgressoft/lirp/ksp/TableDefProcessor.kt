@@ -35,7 +35,7 @@ import com.google.devtools.ksp.validate
 private const val PERSISTENCE_MAPPING_FQN = "net.transgressoft.lirp.persistence.PersistenceMapping"
 private const val PERSISTENCE_PROPERTY_FQN = "net.transgressoft.lirp.persistence.PersistenceProperty"
 private const val PERSISTENCE_IGNORE_FQN = "net.transgressoft.lirp.persistence.PersistenceIgnore"
-private const val REACTIVE_ENTITY_REF_FQN = "net.transgressoft.lirp.persistence.ReactiveEntityRef"
+private const val AGGREGATE_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.Aggregate"
 private const val TRANSIENT_FQN = "kotlin.jvm.Transient"
 private const val SQL_TABLE_DEF_FQN = "net.transgressoft.lirp.persistence.sql.SqlTableDef"
 private const val UUID_FQN = "java.util.UUID"
@@ -323,7 +323,7 @@ class TableDefProcessor(
                 .map { it.annotationType.resolve().declaration.qualifiedName?.asString() }
                 .toSet()
         if (PERSISTENCE_IGNORE_FQN in annotationFqns) return true
-        if (REACTIVE_ENTITY_REF_FQN in annotationFqns) return true
+        if (AGGREGATE_ANNOTATION_FQN in annotationFqns) return true
         if (TRANSIENT_FQN in annotationFqns) return true
         // Exclude computed properties (no backing field, not delegated), but include delegate-backed properties
         if (!hasBackingField && !isDelegated()) return true

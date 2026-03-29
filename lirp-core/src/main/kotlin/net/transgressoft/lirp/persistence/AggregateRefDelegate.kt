@@ -34,7 +34,7 @@ import kotlin.reflect.KProperty
  * Property delegate that implements a lazily-resolved aggregate reference with optional bubble-up
  * event propagation and configurable cascade behavior on parent entity deletion.
  *
- * Returned by [aggregateRef] factory function for use with Kotlin property delegation.
+ * Returned by [aggregate] factory function for use with Kotlin property delegation.
  * Implements both [ReactiveEntityReference] and [ReadOnlyProperty] so that the delegate
  * object itself is the reference handle — callers access `entity.refProp.resolve()` directly.
  *
@@ -42,7 +42,7 @@ import kotlin.reflect.KProperty
  * This ensures that resolutions correctly reflect live registry state: removed entities return
  * `Optional.empty()` and ID changes on the owning entity return the new entity on the next call.
  *
- * **Bubble-up propagation:** When enabled via `@ReactiveEntityRef(bubbleUp = true)`, the delegate
+ * **Bubble-up propagation:** When enabled via `@Aggregate(bubbleUp = true)`, the delegate
  * subscribes to the referenced entity's `changes` flow after [wireBubbleUp] is called. Each child
  * [MutationEvent] is forwarded to the parent entity's publisher as a
  * [net.transgressoft.lirp.event.StandardAggregateMutationEvent], allowing parent subscribers to
@@ -68,22 +68,22 @@ import kotlin.reflect.KProperty
  * Example:
  * ```kotlin
  * class Order(override val id: Long, var customerId: Int) : ReactiveEntityBase<Long, Order>() {
- *     @ReactiveEntityRef(bubbleUp = true, onDelete = CascadeAction.DETACH)
+ *     @Aggregate(bubbleUp = true, onDelete = CascadeAction.DETACH)
  *     @Transient
- *     val customer by aggregateRef<Customer, Int> { customerId }
+ *     val customer by aggregate<Int, Customer> { customerId }
  * }
  *
  * // After adding the order to its repository:
  * val resolved: Optional<Customer> = order.customer.resolve()
  * ```
  *
- * @param E the referenced entity type
  * @param K the type of the referenced entity's ID
+ * @param E the referenced entity type
  * @param idProvider lambda that returns the current referenced entity ID from the owning entity
  */
-class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
+class AggregateRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
     private val idProvider: () -> K
-) : ReactiveEntityReference<E, K>, ReadOnlyProperty<Any?, ReactiveEntityReference<E, K>> {
+) : ReactiveEntityReference<K, E>, ReadOnlyProperty<Any?, ReactiveEntityReference<K, E>> {
 
     private val log = KotlinLogging.logger {}
 
@@ -387,7 +387,7 @@ class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
      * Returns `this` so that the delegate object itself serves as the [ReactiveEntityReference]
      * handle — callers write `entity.refProp.resolve()` with no extra unwrapping.
      */
-    override fun getValue(thisRef: Any?, property: KProperty<*>): ReactiveEntityReference<E, K> = this
+    override fun getValue(thisRef: Any?, property: KProperty<*>): ReactiveEntityReference<K, E> = this
 }
 
 /**
@@ -397,21 +397,21 @@ class AggregateRefDelegate<E : IdentifiableEntity<K>, K : Comparable<K>>(
  * [ReactiveEntityReference.resolve] call to obtain the current referenced entity ID.
  * Resolution always queries the bound registry fresh — no caching is applied.
  *
- * **Requires KSP** — annotate the delegated property with [@ReactiveEntityRef][ReactiveEntityRef]
+ * **Requires KSP** — annotate the delegated property with [@Aggregate][Aggregate]
  * so the KSP processor generates the required `{ClassName}_LirpRefAccessor` class.
  *
  * Example:
  * ```kotlin
- * @ReactiveEntityRef(bubbleUp = true, onDelete = CascadeAction.DETACH)
+ * @Aggregate(bubbleUp = true, onDelete = CascadeAction.DETACH)
  * @Transient
- * val customer by aggregateRef<Customer, Int> { customerId }
+ * val customer by aggregate<Int, Customer> { customerId }
  * ```
  *
- * @param E the referenced entity type, must extend [IdentifiableEntity]
  * @param K the type of the referenced entity's ID, must be [Comparable]
+ * @param E the referenced entity type, must extend [IdentifiableEntity]
  * @param idProvider lambda returning the current ID of the referenced entity
  * @return an [AggregateRefDelegate] implementing both [ReactiveEntityReference] and [ReadOnlyProperty]
  */
-fun <E : IdentifiableEntity<K>, K : Comparable<K>> aggregateRef(
+fun <K : Comparable<K>, E : IdentifiableEntity<K>> aggregate(
     idProvider: () -> K
-): AggregateRefDelegate<E, K> = AggregateRefDelegate(idProvider)
+): AggregateRefDelegate<K, E> = AggregateRefDelegate(idProvider)

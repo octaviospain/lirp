@@ -496,7 +496,7 @@ class JavaInteroperabilityTest {
             scheduler.advanceUntilIdle();
 
             var order = orderRepo.findById(10L).get();
-            ReactiveEntityReference<Customer, Integer> ref = order.getCustomer();
+            ReactiveEntityReference<Integer, Customer> ref = order.getCustomer();
             assertNotNull(ref);
             assertTrue(ref.resolve().isPresent());
             assertEquals("Alice", ref.resolve().get().getName());
@@ -509,7 +509,7 @@ class JavaInteroperabilityTest {
             scheduler.advanceUntilIdle();
 
             var order = orderRepo.findById(10L).get();
-            ReactiveEntityReference<Customer, Integer> ref = order.getCustomer();
+            ReactiveEntityReference<Integer, Customer> ref = order.getCustomer();
             assertNotNull(ref);
             assertFalse(ref.resolve().isPresent());
         }

@@ -37,7 +37,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * (narrowest scope) but its contract is critical: it must distinguish entities with aggregate ref
  * delegates from those without, so that legitimate plain entities are never rejected.
  *
- * Note: [@ReactiveEntityRef][ReactiveEntityRef] uses [AnnotationRetention.BINARY] — invisible to
+ * Note: [@Aggregate][Aggregate] uses [AnnotationRetention.BINARY] — invisible to
  * runtime reflection. The detection therefore inspects JVM backing fields (named `${'$'}delegate`
  * of type [AggregateRefDelegate]) which are always visible regardless of annotation retention.
  */
@@ -74,11 +74,31 @@ internal class AccessorDiscoveryTest : FunSpec({
             )
         method.isAccessible = true
 
-        // EntityWithDelegate has an aggregateRef() delegate field — it would normally have a KSP accessor,
+        // EntityWithDelegate has an aggregate() delegate field — it would normally have a KSP accessor,
         // but we simulate the "accessor missing" case by calling failFastIfDelegatePresent directly
         val ex =
             shouldThrow<java.lang.reflect.InvocationTargetException> {
                 method.invoke(repo, EntityWithDelegate::class.java, AggregateRefDelegate::class.java, "LirpRefAccessor")
+            }
+
+        ex.cause.shouldBeInstanceOf<IllegalStateException>()
+        (ex.cause as IllegalStateException).message shouldContain "KSP-generated"
+        (ex.cause as IllegalStateException).message shouldContain "LirpRefAccessor"
+    }
+
+    test("RegistryBase fails fast with IllegalStateException when entity has collection delegate field but no KSP accessor") {
+        val method =
+            RegistryBase::class.java.getDeclaredMethod(
+                "failFastIfDelegatePresent",
+                Class::class.java,
+                Class::class.java,
+                String::class.java
+            )
+        method.isAccessible = true
+
+        val ex =
+            shouldThrow<java.lang.reflect.InvocationTargetException> {
+                method.invoke(repo, EntityWithCollectionDelegate::class.java, AbstractAggregateCollectionRefDelegate::class.java, "LirpRefAccessor")
             }
 
         ex.cause.shouldBeInstanceOf<IllegalStateException>()
@@ -117,8 +137,22 @@ internal class PlainEntity(override val id: Int) : ReactiveEntityBase<Int, Plain
 class EntityWithDelegate(override val id: Int, val customerId: Int) : ReactiveEntityBase<Int, EntityWithDelegate>() {
     override val uniqueId: String get() = "delegate-$id"
 
-    @ReactiveEntityRef
-    val customer by aggregateRef<Customer, Int> { customerId }
+    @Aggregate
+    val customer by aggregate<Int, Customer> { customerId }
 
     override fun clone() = EntityWithDelegate(id, customerId)
+}
+
+/**
+ * Entity with an [AbstractAggregateCollectionRefDelegate] backing field — tests the collection-delegate
+ * branch of [RegistryBase.failFastIfDelegatePresent].
+ */
+@LirpRepository
+class EntityWithCollectionDelegate(override val id: Int, val itemIds: List<Int>) : ReactiveEntityBase<Int, EntityWithCollectionDelegate>() {
+    override val uniqueId: String get() = "coll-delegate-$id"
+
+    @Aggregate
+    val items by aggregateList<Int, Customer> { itemIds }
+
+    override fun clone() = EntityWithCollectionDelegate(id, itemIds)
 }

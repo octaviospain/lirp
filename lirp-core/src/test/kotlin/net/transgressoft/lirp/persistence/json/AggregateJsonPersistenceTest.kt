@@ -41,7 +41,7 @@ import kotlinx.serialization.builtins.serializer
 
 /**
  * Tests verifying that [JsonFileRepository] works correctly with entities that declare aggregate
- * references via [@ReactiveEntityRef][net.transgressoft.lirp.persistence.ReactiveEntityRef].
+ * references via [@Aggregate][net.transgressoft.lirp.persistence.Aggregate].
  *
  * Covers:
  * - ID-only serialization (delegate fields marked `@Transient` are not written)

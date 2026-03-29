@@ -93,6 +93,49 @@ val electronics: Set<Product> = repo.findByIndex("category", "electronics")
 val bySku: Optional<Product> = repo.findFirstByIndex("sku", "SKU-001")
 ```
 
+## Aggregate References
+
+Model DDD aggregate root relationships with the `@Aggregate` annotation and the `aggregate()`, `aggregateList()`, or `aggregateSet()` property delegates. A reference holds only the referenced entity's ID and resolves it lazily from the registered repository:
+
+```kotlin
+data class Product(override val id: Int, var name: String, val categoryId: Int) :
+    ReactiveEntityBase<Int, Product>() {
+
+    @Aggregate(bubbleUp = true, onDelete = CascadeAction.DETACH)
+    val category by aggregate<Int, Category> { categoryId }
+
+    override val uniqueId = "product-$id"
+    override fun clone() = copy()
+}
+
+// Resolution — always live, no cache
+val resolved: Optional<Category> = product.category.resolve()
+```
+
+### Collection References
+
+Use `aggregateList` (ordered, allows duplicates) or `aggregateSet` (unique elements) when an entity holds a collection of related IDs:
+
+```kotlin
+class Playlist(override val id: Long, val name: String, val trackIds: List<Int>) :
+    ReactiveEntityBase<Long, Playlist>() {
+
+    @Aggregate(onDelete = CascadeAction.CASCADE)
+    @Transient
+    val tracks by aggregateList<Int, Track> { trackIds }
+
+    override val uniqueId = "playlist-$id"
+    override fun clone() = Playlist(id, name, trackIds)
+}
+
+// Resolution returns List<Track> or Set<Track>
+val tracks: List<Track> = playlist.tracks.resolveAll()
+```
+
+Cascade defaults for collection references are `NONE` (unlike `DETACH` for single references). Bubble-up propagation is not supported for collection references. KSP generates `collectionEntries` in the accessor to wire the delegates automatically.
+
+**Cascade options:** `DETACH` (default for single refs), `CASCADE`, `RESTRICT`, `NONE` (default for collection refs).
+
 ## Entity Reactivity
 
 Entities are reactive by default — no event bus, no manual Flow collection. A property declared with `reactiveProperty()` automatically notifies every subscriber on assignment:
@@ -198,7 +241,7 @@ VolatileRepository (class, lirp-core)                   — in-memory
 - **Transparent SQL persistence** — add an entity, change a property, and the database stays in sync automatically
 - **Entity-first reactivity** — `var x by reactiveProperty(init)` notifies subscribers on assignment, zero overhead when unobserved
 - **Two subscription levels** — repository-level `CrudEvent`s and entity-level `MutationEvent`s
-- **DDD aggregate references** — `@ReactiveEntityRef` with configurable cascade (DETACH/CASCADE/RESTRICT)
+- **DDD aggregate references** — `@Aggregate` with single-entity (`aggregate`) and collection (`aggregateList`, `aggregateSet`) references, configurable cascade (DETACH/CASCADE/RESTRICT/NONE)
 - **Secondary indexes** — `@Indexed` for O(1) equality lookups without collection scans
 - **Convention-over-configuration** — KSP generates table definitions from entity classes; annotations only when you need customization
 - **JSON persistence** — debounced file writes via `JsonFileRepository`

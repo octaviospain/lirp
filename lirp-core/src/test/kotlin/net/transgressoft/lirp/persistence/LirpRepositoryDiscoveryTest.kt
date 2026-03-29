@@ -121,6 +121,7 @@ internal class LirpRepositoryDiscoveryTest : FunSpec({
     }
 
     test("LirpContext resetDefault clears registries from the default context") {
+        LirpContext.resetDefault()
         val repo = CustomerVolatileRepo()
 
         LirpContext.default.registries().size shouldBe 1

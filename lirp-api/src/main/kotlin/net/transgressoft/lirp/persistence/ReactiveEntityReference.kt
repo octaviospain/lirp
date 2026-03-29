@@ -24,7 +24,7 @@ import java.util.Optional
  * A lazily-resolved reference to another aggregate entity stored in a [Registry].
  *
  * Instances are returned by property delegates declared with
- * [@ReactiveEntityRef][ReactiveEntityRef] in entity classes. The delegate holds only the raw ID
+ * [@Aggregate][Aggregate] in entity classes. The delegate holds only the raw ID
  * of the referenced entity; the actual entity lookup is deferred to the first [resolve] call.
  *
  * [resolve] returns [Optional] for Java interoperability — callers do not need Kotlin-specific
@@ -37,15 +37,15 @@ import java.util.Optional
  *
  * Example:
  * ```kotlin
- * val orderRef: ReactiveEntityReference<Order, Long> = invoice.order
+ * val orderRef: ReactiveEntityReference<Long, Order> = invoice.order
  * val order: Optional<Order> = orderRef.resolve()
  * order.ifPresent { println(it.id) }
  * ```
  *
- * @param E the type of the referenced entity
  * @param K the type of the referenced entity's ID, which must be [Comparable]
+ * @param E the type of the referenced entity
  */
-interface ReactiveEntityReference<E : IdentifiableEntity<K>, K : Comparable<K>> {
+interface ReactiveEntityReference<K : Comparable<K>, E : IdentifiableEntity<K>> {
 
     /**
      * The raw ID of the referenced entity.
