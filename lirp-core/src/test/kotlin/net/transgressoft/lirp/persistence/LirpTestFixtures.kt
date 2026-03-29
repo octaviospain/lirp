@@ -41,6 +41,14 @@ data class Customer(
     fun updateName(newName: String) {
         name = newName
     }
+
+    fun bulkUpdate(newName: String) = mutateAndPublish { name = newName }
+
+    fun suppressEvents() = disableEvents()
+
+    fun restoreEvents() = enableEvents()
+
+    fun <T> silently(action: () -> T): T = withEventsDisabled(action)
 }
 
 /**

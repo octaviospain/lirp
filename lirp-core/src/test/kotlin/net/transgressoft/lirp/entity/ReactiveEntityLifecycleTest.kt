@@ -293,4 +293,83 @@ class ReactiveEntityLifecycleTest : StringSpec({
         subscription.cancel()
         customer.close()
     }
+
+    "disableEvents suppresses mutation events from reactiveProperty setters" {
+        val customer = Customer(1, "Alice")
+        val received = mutableListOf<MutationEvent<Int, Customer>>()
+        val subscription = customer.subscribe { event -> received.add(event) }
+
+        customer.suppressEvents()
+        customer.updateName("Bob")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        received.size shouldBe 0
+        customer.name shouldBe "Bob"
+
+        customer.restoreEvents()
+        customer.updateName("Charlie")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        received.size shouldBe 1
+        received[0].newEntity.name shouldBe "Charlie"
+
+        subscription.cancel()
+        customer.close()
+    }
+
+    "withEventsDisabled suppresses events and restores emission afterward" {
+        val customer = Customer(1, "Alice")
+        val received = mutableListOf<MutationEvent<Int, Customer>>()
+        val subscription = customer.subscribe { event -> received.add(event) }
+
+        customer.silently {
+            customer.updateName("Silent")
+        }
+        testDispatcher.scheduler.advanceUntilIdle()
+        received.size shouldBe 0
+        customer.name shouldBe "Silent"
+
+        customer.updateName("Loud")
+        testDispatcher.scheduler.advanceUntilIdle()
+        received.size shouldBe 1
+
+        subscription.cancel()
+        customer.close()
+    }
+
+    "withEventsDisabled restores state even if action throws" {
+        val customer = Customer(1, "Alice")
+        val received = mutableListOf<MutationEvent<Int, Customer>>()
+        val subscription = customer.subscribe { event -> received.add(event) }
+
+        shouldThrow<RuntimeException> {
+            customer.silently {
+                customer.updateName("BeforeError")
+                throw RuntimeException("test error")
+            }
+        }
+
+        customer.updateName("AfterError")
+        testDispatcher.scheduler.advanceUntilIdle()
+        received.size shouldBe 1
+
+        subscription.cancel()
+        customer.close()
+    }
+
+    "disableEvents suppresses mutateAndPublish block emission" {
+        val customer = Customer(1, "Alice")
+        val received = mutableListOf<MutationEvent<Int, Customer>>()
+        val subscription = customer.subscribe { event -> received.add(event) }
+
+        customer.suppressEvents()
+        customer.bulkUpdate("Silent")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        received.size shouldBe 0
+        customer.name shouldBe "Silent"
+
+        subscription.cancel()
+        customer.close()
+    }
 })
