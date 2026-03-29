@@ -82,6 +82,10 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     @Volatile
     private var closed = false
 
+    @Volatile
+    @PublishedApi
+    internal var eventsDisabled = false
+
     override val isClosed: Boolean get() = closed
 
     /**
@@ -111,8 +115,10 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
         get() {
             while (true) {
                 val current = publisherRef.get()
-                if (current != null && !current.isClosed) return current
+                if (current != null && !current.isClosed)
+                    return current
                 check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
+
                 val newPublisher = publisherFactory(this::class.java.simpleName)
                 newPublisher.activateEvents(MUTATE)
                 if (publisherRef.compareAndSet(current, newPublisher)) {
@@ -166,7 +172,8 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
      */
     @Suppress("UNCHECKED_CAST")
     override fun close() {
-        if (closed) return
+        if (closed)
+            return
         closed = true
         (loadRefAccessor() as? LirpRefAccessor<R>)?.cancelAllBubbleUp(this as R)
         publisherRef.getAndSet(null)?.close()
@@ -248,6 +255,62 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     }
 
     /**
+     * Suppresses event emission from [mutateAndPublish] and reactive property delegates.
+     * Mutations still execute, but no [ReactiveMutationEvent] is published.
+     *
+     * Pair with [enableEvents] to restore normal emission. Designed for use in [clone]
+     * implementations where property setters would otherwise trigger infinite recursion
+     * through the clone-compare change detection.
+     *
+     * @see enableEvents
+     * @see withEventsDisabled
+     */
+    protected fun disableEvents() {
+        eventsDisabled = true
+    }
+
+    /**
+     * Restores event emission after a prior [disableEvents] call.
+     *
+     * @see disableEvents
+     * @see withEventsDisabled
+     */
+    protected fun enableEvents() {
+        eventsDisabled = false
+    }
+
+    /**
+     * Executes [action] with event emission suppressed, restoring the previous state afterward.
+     *
+     * Equivalent to wrapping the action between [disableEvents] and [enableEvents], but
+     * guarantees restoration even if the action throws.
+     *
+     * ```
+     * override fun clone(): MyEntity = MyEntity(id).apply {
+     *     withEventsDisabled {
+     *         name = this@MyEntity.name
+     *         price = this@MyEntity.price
+     *     }
+     * }
+     * ```
+     *
+     * @param T The return type of the action
+     * @param action The block to execute with events disabled
+     * @return The result of the action
+     * @see disableEvents
+     * @see enableEvents
+     */
+    protected inline fun <T> withEventsDisabled(action: () -> T): T {
+        val wasDisabled = eventsDisabled
+        eventsDisabled = true
+        try {
+            return action()
+        } finally {
+            eventsDisabled = wasDisabled
+        }
+    }
+
+    /**
      * Creates a reactive property delegate that emits a [ReactiveMutationEvent] on value change.
      *
      * Usage: `var name: String by reactiveProperty(initialName)`
@@ -280,6 +343,9 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     @Suppress("UNCHECKED_CAST")
     protected fun <T> mutateAndPublish(mutationAction: () -> T): T {
         check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
+        if (eventsDisabled)
+            return mutationAction()
+
         val entityBeforeChange = clone()
         val result = mutationAction()
         if (entityBeforeChange == this) {
@@ -305,7 +371,13 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
         @Suppress("UNCHECKED_CAST")
         override fun setValue(thisRef: ReactiveEntityBase<K, R>, property: KProperty<*>, value: T) {
             check(!isClosed) { "Entity '${this@ReactiveEntityBase::class.java.simpleName}' is closed" }
+
             if (value != storedValue) {
+                if (eventsDisabled) {
+                    storedValue = value
+                    return
+                }
+
                 val entityBeforeChange = clone()
                 storedValue = value
                 lastDateModified = LocalDateTime.now()
@@ -327,8 +399,13 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
         @Suppress("UNCHECKED_CAST")
         override fun setValue(thisRef: ReactiveEntityBase<K, R>, property: KProperty<*>, value: T) {
             check(!isClosed) { "Entity '${this@ReactiveEntityBase::class.java.simpleName}' is closed" }
+
             val oldValue = getter()
             if (value != oldValue) {
+                if (eventsDisabled) {
+                    setter(value)
+                    return
+                }
                 val entityBeforeChange = clone()
                 setter(value)
                 lastDateModified = LocalDateTime.now()
