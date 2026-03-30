@@ -24,6 +24,8 @@ import com.tschuchort.compiletesting.configureKsp
 import com.tschuchort.compiletesting.sourcesGeneratedBySymbolProcessor
 import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.datatest.withTests
+import io.kotest.engine.names.WithDataTestName
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -274,70 +276,51 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
         content shouldContain "cascadeAction = CascadeAction.CASCADE"
     }
 
-    test("ReactiveEntityRefProcessor emits compile error when bubbleUp=true on aggregateList property") {
-        val result =
-            compileWithProcessor(
-                collectionDelegateStubs,
-                SourceFile.kotlin(
-                    "BubbleUpListEntity.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.Aggregate
-                    import net.transgressoft.lirp.persistence.aggregateList
-
-                    data class ItemEntity(override val id: Int) : ReactiveEntityBase<Int, ItemEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = copy()
-                    }
-
-                    data class BubbleUpListEntity(override val id: Int, val itemIds: List<Int>) : ReactiveEntityBase<Int, BubbleUpListEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = copy()
-
-                        @Aggregate(bubbleUp = true)
-                        val items by aggregateList<Int, ItemEntity> { itemIds }
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "bubbleUp"
-        result.messages shouldContain "not supported"
+    data class BubbleUpCase(
+        val delegateFn: String,
+        val idsType: String,
+        val entityName: String,
+        val refEntityName: String
+    ) : WithDataTestName {
+        override fun dataTestName() = delegateFn
     }
 
-    test("ReactiveEntityRefProcessor emits compile error when bubbleUp=true on aggregateSet property") {
-        val result =
-            compileWithProcessor(
-                collectionDelegateStubs,
-                SourceFile.kotlin(
-                    "BubbleUpSetEntity.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.Aggregate
-                    import net.transgressoft.lirp.persistence.aggregateSet
+    context("ReactiveEntityRefProcessor emits compile error when bubbleUp=true on collection property") {
+        withTests(
+            BubbleUpCase("aggregateList", "List<Int>", "BubbleUpListEntity", "ItemEntity"),
+            BubbleUpCase("aggregateSet", "Set<Int>", "BubbleUpSetEntity", "TagEntity")
+        ) { case ->
+            val result =
+                compileWithProcessor(
+                    collectionDelegateStubs,
+                    SourceFile.kotlin(
+                        "${case.entityName}.kt",
+                        """
+                        package test
+                        import net.transgressoft.lirp.entity.ReactiveEntityBase
+                        import net.transgressoft.lirp.persistence.Aggregate
+                        import net.transgressoft.lirp.persistence.${case.delegateFn}
 
-                    data class TagEntity(override val id: Int) : ReactiveEntityBase<Int, TagEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = copy()
-                    }
+                        data class ${case.refEntityName}(override val id: Int) : ReactiveEntityBase<Int, ${case.refEntityName}>() {
+                            override val uniqueId: String get() = "${'$'}id"
+                            override fun clone() = copy()
+                        }
 
-                    data class BubbleUpSetEntity(override val id: Int, val tagIds: Set<Int>) : ReactiveEntityBase<Int, BubbleUpSetEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = copy()
+                        data class ${case.entityName}(override val id: Int, val refIds: ${case.idsType}) : ReactiveEntityBase<Int, ${case.entityName}>() {
+                            override val uniqueId: String get() = "${'$'}id"
+                            override fun clone() = copy()
 
-                        @Aggregate(bubbleUp = true)
-                        val tags by aggregateSet<Int, TagEntity> { tagIds }
-                    }
-                    """
+                            @Aggregate(bubbleUp = true)
+                            val refs by ${case.delegateFn}<Int, ${case.refEntityName}> { refIds }
+                        }
+                        """
+                    )
                 )
-            )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "bubbleUp"
-        result.messages shouldContain "not supported"
+            result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
+            result.messages shouldContain "bubbleUp"
+            result.messages shouldContain "not supported"
+        }
     }
 
     test("ReactiveEntityRefProcessor generates isOrdered=true for aggregateList and isOrdered=false for aggregateSet") {

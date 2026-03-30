@@ -23,15 +23,15 @@ import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.Table
 import java.math.BigDecimal
-import java.util.UUID
 import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 
 /**
  * Manual [SqlTableDef] for [AllTypesEntity] covering all 12 [ColumnType] variants.
  *
- * The `uuid` column uses [ColumnType.UuidType] which Exposed translates to the native PostgreSQL UUID type.
+ * The `uuid` column uses [ColumnType.UuidType] which Exposed translates to the native UUID type per dialect.
  * The `enum_val` column uses [ColumnType.EnumType] which is stored as `VARCHAR(255)` for portability.
  */
 @OptIn(ExperimentalUuidApi::class)
@@ -63,7 +63,7 @@ object AllTypesTableDef : SqlTableDef<AllTypesEntity> {
             e.boolVal = row[cols["bool_val"]!! as Column<Boolean>]
             e.doubleVal = row[cols["double_val"]!! as Column<Double>]
             e.floatVal = row[cols["float_val"]!! as Column<Float>]
-            e.uuidVal = row[cols["uuid_val"]!! as Column<UUID>]
+            e.uuidVal = row[cols["uuid_val"]!! as Column<Uuid>]
             e.dateVal = row[cols["date_val"]!! as Column<LocalDate>]
             e.dateTimeVal = row[cols["date_time_val"]!! as Column<LocalDateTime>]
             e.varcharVal = row[cols["varchar_val"]!! as Column<String>]

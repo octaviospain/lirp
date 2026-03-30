@@ -19,21 +19,21 @@ package net.transgressoft.lirp.persistence.sql
 
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
-import org.testcontainers.containers.PostgreSQLContainer
+import org.testcontainers.containers.MariaDBContainer
 
 /**
- * Shared Testcontainers PostgreSQL container and [HikariDataSource] factory for integration tests.
+ * Shared Testcontainers MariaDB 11 container and [HikariDataSource] factory for integration tests.
  *
  * The container is started lazily and thread-safely on first [buildDataSource] call
  * and reused across tests within the same JVM process.
  */
-object PostgresContainerSupport {
+object MariaDbContainerSupport {
     private val container by lazy {
-        PostgreSQLContainer("postgres:18-alpine").apply { start() }
+        MariaDBContainer("mariadb:11").apply { start() }
     }
 
     /**
-     * Returns a new [HikariDataSource] connected to the shared PostgreSQL container.
+     * Returns a new [HikariDataSource] connected to the shared MariaDB container.
      */
     fun buildDataSource(): HikariDataSource =
         HikariDataSource(

@@ -17,100 +17,103 @@
 
 package net.transgressoft.lirp.persistence.sql
 
-import com.zaxxer.hikari.HikariDataSource
+import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.databases
+import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.withDatabaseTest
 import io.kotest.assertions.throwables.shouldThrow
-import io.kotest.core.spec.style.StringSpec
+import io.kotest.core.spec.style.FunSpec
+import io.kotest.datatest.withTests
 import io.kotest.matchers.booleans.shouldBeFalse
-import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
-import org.jetbrains.exposed.v1.jdbc.Database
-import org.jetbrains.exposed.v1.jdbc.SchemaUtils
-import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.junit.jupiter.api.DisplayName
 
 /**
- * Integration tests for [SqlRepository] lifecycle management against a real PostgreSQL database.
+ * Integration tests for [SqlRepository] lifecycle management against PostgreSQL, MySQL 8.0, and MariaDB 11.
  *
  * Covers container connectivity, data persistence across close/reopen,
  * closed-repository semantics, DataSource ownership, and multi-instance data sharing.
- * Each test drops the table before execution to guarantee isolation within the shared container schema.
  */
 @DisplayName("SqlRepository Lifecycle Integration")
-internal class SqlRepositoryLifecycleIntegrationTest : StringSpec({
+internal class SqlRepositoryLifecycleIntegrationTest : FunSpec({
 
-    var dataSource: HikariDataSource? = null
+    context("Testcontainer starts and connects via HikariCP") {
+        withTests(databases) { db ->
+            withDatabaseTest(db, TestPersonTableDef) { dataSource ->
+                dataSource.isClosed.shouldBeFalse()
 
-    beforeSpec {
-        dataSource = PostgresContainerSupport.buildDataSource()
-    }
+                val repo = SqlRepository(dataSource, TestPersonTableDef)
+                repo.add(TestPerson(1).apply { firstName = "Alice" })
+                repo.size() shouldBe 1
 
-    afterSpec {
-        dataSource?.close()
-    }
-
-    beforeTest {
-        val db = Database.connect(dataSource!!)
-        val t = ExposedTableInterpreter().interpret(TestPersonTableDef)
-        runCatching { transaction(db) { SchemaUtils.drop(t.table) } }
-    }
-
-    "PostgreSQL Testcontainer starts and connects via HikariCP" {
-        PostgresContainerSupport.container.isRunning.shouldBeTrue()
-
-        val repo = SqlRepository(dataSource!!, TestPersonTableDef)
-        repo.add(TestPerson(1).apply { firstName = "Alice" })
-        repo.size() shouldBe 1
-
-        repo.close()
-    }
-
-    "data persists across repository close and reopen" {
-        val repo1 = SqlRepository(dataSource!!, TestPersonTableDef)
-        repo1.add(
-            TestPerson(42).apply {
-                firstName = "Persistent"
-                lastName = "Data"
-                age = 7
+                repo.close()
             }
-        )
-        repo1.close()
-
-        val repo2 = SqlRepository(dataSource, TestPersonTableDef)
-        repo2.findById(42).shouldBePresent {
-            it.firstName shouldBe "Persistent"
-            it.lastName shouldBe "Data"
-            it.age shouldBe 7
-        }
-        repo2.size() shouldBe 1
-        repo2.close()
-    }
-
-    "closed repository throws IllegalStateException on add" {
-        val repo = SqlRepository(dataSource!!, TestPersonTableDef)
-        repo.close()
-
-        shouldThrow<IllegalStateException> {
-            repo.add(TestPerson(99))
         }
     }
 
-    "does not close user-provided datasource on repository close" {
-        val repo = SqlRepository(dataSource!!, TestPersonTableDef)
-        repo.close()
+    context("data persists across repository close and reopen") {
+        withTests(databases) { db ->
+            withDatabaseTest(db, TestPersonTableDef) { dataSource ->
+                val repo1 = SqlRepository(dataSource, TestPersonTableDef)
+                repo1.add(
+                    TestPerson(42).apply {
+                        firstName = "Persistent"
+                        lastName = "Data"
+                        age = 7
+                    }
+                )
+                repo1.close()
 
-        dataSource.isClosed.shouldBeFalse()
+                val repo2 = SqlRepository(dataSource, TestPersonTableDef)
+                repo2.findById(42).shouldBePresent {
+                    it.firstName shouldBe "Persistent"
+                    it.lastName shouldBe "Data"
+                    it.age shouldBe 7
+                }
+                repo2.size() shouldBe 1
+                repo2.close()
+            }
+        }
     }
 
-    "multiple repository instances share same PostgreSQL data" {
-        val repo1 = SqlRepository(dataSource!!, TestPersonTableDef)
-        repo1.add(TestPerson(77).apply { firstName = "Shared" })
+    context("closed repository throws IllegalStateException on add") {
+        withTests(databases) { db ->
+            withDatabaseTest(db, TestPersonTableDef) { dataSource ->
+                val repo = SqlRepository(dataSource, TestPersonTableDef)
+                repo.close()
 
-        // A second repository on the same DataSource must see the data on initialization
-        val repo2 = SqlRepository(dataSource!!, TestPersonTableDef)
-        repo2.findById(77).shouldBePresent { it.firstName shouldBe "Shared" }
+                shouldThrow<IllegalStateException> {
+                    repo.add(TestPerson(99))
+                }
+            }
+        }
+    }
 
-        repo1.close()
-        repo2.close()
+    context("does not close user-provided datasource on repository close") {
+        withTests(databases) { db ->
+            val dataSource = db.buildDataSource()
+            try {
+                val repo = SqlRepository(dataSource, TestPersonTableDef)
+                repo.close()
+
+                dataSource.isClosed.shouldBeFalse()
+            } finally {
+                dataSource.close()
+            }
+        }
+    }
+
+    context("multiple repository instances share same data") {
+        withTests(databases) { db ->
+            withDatabaseTest(db, TestPersonTableDef) { dataSource ->
+                val repo1 = SqlRepository(dataSource, TestPersonTableDef)
+                repo1.add(TestPerson(77).apply { firstName = "Shared" })
+
+                val repo2 = SqlRepository(dataSource, TestPersonTableDef)
+                repo2.findById(77).shouldBePresent { it.firstName shouldBe "Shared" }
+
+                repo1.close()
+                repo2.close()
+            }
+        }
     }
 })

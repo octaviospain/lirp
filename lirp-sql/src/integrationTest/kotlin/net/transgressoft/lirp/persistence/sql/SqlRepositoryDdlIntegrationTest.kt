@@ -17,91 +17,102 @@
 
 package net.transgressoft.lirp.persistence.sql
 
-import com.zaxxer.hikari.HikariDataSource
-import io.kotest.core.spec.style.StringSpec
+import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.databases
+import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.withDatabaseTest
+import io.kotest.core.spec.style.FunSpec
+import io.kotest.datatest.withTests
+import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 import org.jetbrains.exposed.v1.jdbc.Database
-import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.junit.jupiter.api.DisplayName
+import java.math.BigDecimal
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
 
 /**
- * Integration tests for [SqlRepository] DDL behaviour against a real PostgreSQL database.
+ * Integration tests for [SqlRepository] DDL behaviour against PostgreSQL, MySQL 8.0, and MariaDB 11.
  *
- * Verifies that tables are auto-created with the correct column types for all 12 [ColumnType]
- * variants, that re-initialization is idempotent, and that the PostgreSQL dialect is detected
- * automatically from the provided [javax.sql.DataSource].
- *
- * Each test drops its table afterwards to maintain isolation within the shared container schema.
+ * Verifies that tables are auto-created and all 12 [net.transgressoft.lirp.persistence.ColumnType]
+ * variants round-trip correctly via CRUD operations, that re-initialization is idempotent, and that
+ * the dialect is detected automatically from the provided [javax.sql.DataSource].
  */
+@OptIn(ExperimentalUuidApi::class)
 @DisplayName("SqlRepository DDL Integration")
-internal class SqlRepositoryDdlIntegrationTest : StringSpec({
+internal class SqlRepositoryDdlIntegrationTest : FunSpec({
 
-    var dataSource: HikariDataSource? = null
+    context("all 12 ColumnType variants round-trip correctly via CRUD") {
+        withTests(databases) { db ->
+            withDatabaseTest(db, AllTypesTableDef) { dataSource ->
+                val repo = SqlRepository(dataSource, AllTypesTableDef)
 
-    beforeSpec {
-        dataSource = PostgresContainerSupport.buildDataSource()
-    }
+                val uuid = Uuid.random()
+                val date = LocalDate(2025, 6, 15)
+                val dateTime = LocalDateTime(2025, 6, 15, 12, 30, 0)
 
-    afterSpec {
-        dataSource?.close()
-    }
-
-    fun dropTable(tableDef: SqlTableDef<*>) {
-        val db = Database.connect(dataSource!!)
-        val t = ExposedTableInterpreter().interpret(tableDef)
-        runCatching { transaction(db) { SchemaUtils.drop(t.table) } }
-    }
-
-    "auto-creates table with correct PostgreSQL column types for all 12 ColumnType variants" {
-        val repo = SqlRepository(dataSource!!, AllTypesTableDef)
-
-        val columnTypes = mutableMapOf<String, String>()
-        dataSource.connection.use { conn ->
-            conn.prepareStatement(
-                "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ? AND table_schema = 'public'"
-            ).use { stmt ->
-                stmt.setString(1, "all_types")
-                stmt.executeQuery().use { rs ->
-                    while (rs.next()) {
-                        columnTypes[rs.getString("column_name")] = rs.getString("data_type")
+                val entity =
+                    AllTypesEntity(1).apply {
+                        longVal = 123456789L
+                        textVal = "hello text"
+                        boolVal = true
+                        doubleVal = 3.14
+                        floatVal = 2.71f
+                        uuidVal = uuid
+                        dateVal = date
+                        dateTimeVal = dateTime
+                        varcharVal = "varchar value"
+                        decimalVal = BigDecimal("99.99")
+                        enumVal = "ACTIVE"
                     }
+
+                repo.add(entity)
+
+                repo.findById(1).shouldBePresent {
+                    it.longVal shouldBe 123456789L
+                    it.textVal shouldBe "hello text"
+                    it.boolVal shouldBe true
+                    it.doubleVal shouldBe 3.14
+                    it.floatVal shouldBe 2.71f
+                    it.uuidVal shouldBe uuid
+                    it.dateVal shouldBe date
+                    it.dateTimeVal shouldBe dateTime
+                    it.varcharVal shouldBe "varchar value"
+                    it.decimalVal shouldBe BigDecimal("99.99")
+                    it.enumVal shouldBe "ACTIVE"
                 }
+
+                repo.close()
             }
         }
-
-        columnTypes["id"] shouldBe "integer"
-        columnTypes["long_val"] shouldBe "bigint"
-        columnTypes["text_val"] shouldBe "text"
-        columnTypes["bool_val"] shouldBe "boolean"
-        columnTypes["double_val"] shouldBe "double precision"
-        columnTypes["float_val"] shouldBe "real"
-        columnTypes["uuid_val"] shouldBe "uuid"
-        columnTypes["date_val"] shouldBe "date"
-        columnTypes["date_time_val"] shouldBe "timestamp without time zone"
-        columnTypes["varchar_val"] shouldBe "character varying"
-        columnTypes["decimal_val"] shouldBe "numeric"
-        columnTypes["enum_val"] shouldBe "character varying"
-
-        repo.close()
-        dropTable(AllTypesTableDef)
     }
 
-    "auto-creates table idempotently on re-initialization" {
-        val repo1 = SqlRepository(dataSource!!, TestPersonTableDef)
-        repo1.close()
+    context("auto-creates table idempotently on re-initialization") {
+        withTests(databases) { db ->
+            withDatabaseTest(db, TestPersonTableDef) { dataSource ->
+                val repo1 = SqlRepository(dataSource, TestPersonTableDef)
+                repo1.close()
 
-        // Creating a second repository on the same DataSource must not throw
-        val repo2 = SqlRepository(dataSource, TestPersonTableDef)
-        repo2.size() shouldBe 0
-        repo2.close()
-
-        dropTable(TestPersonTableDef)
+                val repo2 = SqlRepository(dataSource, TestPersonTableDef)
+                repo2.size() shouldBe 0
+                repo2.close()
+            }
+        }
     }
 
-    "detects PostgreSQL dialect automatically from DataSource" {
-        val db = Database.connect(dataSource!!)
-        val dialectName = transaction(db) { db.dialect.name }
-        dialectName shouldBe "PostgreSQL"
+    context("detects dialect automatically from DataSource") {
+        withTests(databases) { db ->
+            val dataSource = db.buildDataSource()
+            try {
+                val exposedDb = Database.connect(dataSource)
+                val dialectName = transaction(exposedDb) { exposedDb.dialect.name }
+
+                val expectedDialects = mapOf("PostgreSQL" to "PostgreSQL", "MySQL" to "MySQL", "MariaDB" to "MariaDB")
+                dialectName shouldBe expectedDialects[db.name]
+            } finally {
+                dataSource.close()
+            }
+        }
     }
 })
