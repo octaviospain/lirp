@@ -29,7 +29,9 @@ import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.DisplayName
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.delay
 
 /**
  * Unit tests for [SqlRepository] using H2 in-memory databases to verify SQL-first CRUD semantics,
@@ -64,12 +66,13 @@ internal class SqlRepositoryTest : StringSpec({
 
         repo.size() shouldBe 1
 
-        // A second repository on the same DB URL verifies the row was persisted
+        // close() triggers a synchronous flush so the pending insert is written to the DB
+        // before the second repository reads it
+        repo.close()
         val repo2 = SqlRepository(jdbcUrl, TestPersonTableDef)
         repo2.size() shouldBe 1
         repo2.findById(1).shouldBePresent { it.firstName shouldBe "Alice" }
 
-        repo.close()
         repo2.close()
     }
 
@@ -77,6 +80,7 @@ internal class SqlRepositoryTest : StringSpec({
         val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef)
         val received = AtomicReference<CrudEvent.Type?>()
         repo.subscribe { event -> received.set(event.type) }
+        delay(50.milliseconds) // let SharedFlow collector coroutine start
 
         repo.add(TestPerson(1).apply { firstName = "Bob" })
 
@@ -113,10 +117,12 @@ internal class SqlRepositoryTest : StringSpec({
     "emits DELETE event on remove" {
         val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef)
         val person = TestPerson(3).apply { firstName = "Dave" }
-        repo.add(person)
         val received = AtomicReference<CrudEvent.Type?>()
+        // Subscribe before add so the subscriber coroutine is active before events are emitted
         repo.subscribe { event -> received.set(event.type) }
+        delay(50.milliseconds) // let SharedFlow collector coroutine start
 
+        repo.add(person)
         repo.remove(person)
 
         eventually(5.seconds) {
@@ -240,11 +246,13 @@ internal class SqlRepositoryTest : StringSpec({
 
         repo.size() shouldBe 1
 
+        // close() triggers a synchronous flush so pending ops are written to the DB
+        // before the second repository reads it
+        repo.close()
         val repo2 = SqlRepository(jdbcUrl, TestPersonTableDef)
         repo2.size() shouldBe 1
         repo2.findById(32).shouldBePresent { it.firstName shouldBe "Kate" }
 
-        repo.close()
         repo2.close()
     }
 })

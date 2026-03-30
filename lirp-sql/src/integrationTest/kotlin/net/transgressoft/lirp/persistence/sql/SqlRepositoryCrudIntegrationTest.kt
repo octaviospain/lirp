@@ -88,13 +88,12 @@ internal class SqlRepositoryCrudIntegrationTest : FunSpec({
                 val repo = SqlRepository(dataSource, TestPersonTableDef)
                 val person = TestPerson(10).apply { firstName = "Grace" }
                 repo.add(person)
-
                 repo.remove(person)
+                // close() flushes pending ops so the second repo reads a consistent DB state
+                repo.close()
 
                 val repo2 = SqlRepository(dataSource, TestPersonTableDef)
                 repo2.size() shouldBe 0
-
-                repo.close()
                 repo2.close()
             }
         }
@@ -106,13 +105,12 @@ internal class SqlRepositoryCrudIntegrationTest : FunSpec({
                 val repo = SqlRepository(dataSource, TestPersonTableDef)
                 repo.add(TestPerson(20).apply { firstName = "Alice" })
                 repo.add(TestPerson(21).apply { firstName = "Bob" })
-
                 repo.clear()
+                // close() flushes pending ops so the second repo reads a consistent DB state
+                repo.close()
 
                 val repo2 = SqlRepository(dataSource, TestPersonTableDef)
                 repo2.size() shouldBe 0
-
-                repo.close()
                 repo2.close()
             }
         }
@@ -128,14 +126,13 @@ internal class SqlRepositoryCrudIntegrationTest : FunSpec({
                 repo.add(p1)
                 repo.add(p2)
                 repo.add(p3)
-
                 repo.removeAll(listOf(p1, p2))
+                // close() flushes pending ops so the second repo reads a consistent DB state
+                repo.close()
 
                 val repo2 = SqlRepository(dataSource, TestPersonTableDef)
                 repo2.size() shouldBe 1
                 repo2.findById(32).shouldBePresent { it.firstName shouldBe "Kate" }
-
-                repo.close()
                 repo2.close()
             }
         }
@@ -154,24 +151,22 @@ internal class SqlRepositoryCrudIntegrationTest : FunSpec({
 
                 repo.add(person)
 
+                // In-memory read works immediately
                 repo.findById(100).shouldBePresent { it.firstName shouldBe "Lifecycle" }
 
                 repo.findById(100).shouldBePresent { it.firstName = "Updated" }
 
-                eventually(5.seconds) {
-                    val repo2 = SqlRepository(dataSource, TestPersonTableDef)
-                    repo2.findById(100).shouldBePresent { it.firstName shouldBe "Updated" }
-                    repo2.close()
-                }
-
+                // close() flushes the pending UPDATE; a fresh repo verifies DB persistence
+                repo.close()
                 val repo2 = SqlRepository(dataSource, TestPersonTableDef)
+                repo2.findById(100).shouldBePresent { it.firstName shouldBe "Updated" }
+
                 repo2.findById(100).shouldBePresent { repo2.remove(it) }
+                // close() flushes the pending DELETE before opening repo3
+                repo2.close()
 
                 val repo3 = SqlRepository(dataSource, TestPersonTableDef)
                 repo3.size() shouldBe 0
-
-                repo.close()
-                repo2.close()
                 repo3.close()
             }
         }

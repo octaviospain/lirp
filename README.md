@@ -26,7 +26,18 @@ Built on Kotlin Coroutines and Kotlin Serialization. Targets **JVM 17+, Kotlin 2
 
 ## SQL Persistence
 
-`SqlRepository` persists entities to a relational database — automatically. Add an entity: it's INSERTed. Change a property: the UPDATE happens in the background. Subscribe to the repository: you get `CrudEvent`s for every operation. Tables are created on first use; existing rows are loaded on initialization.
+`SqlRepository` persists entities to a relational database — automatically. Add an entity: an INSERT is queued. Change a property: the UPDATE is queued. Subscribe to the repository: you get `CrudEvent`s for every operation immediately (at enqueue time, before the SQL write). Tables are created on first use; existing rows are loaded on initialization.
+
+### Batched Writes and Debounce
+
+`SqlRepository` uses a debounced write pipeline, shared with `JsonFileRepository` via `PersistentRepositoryBase`:
+
+- **Optimistic reads** — in-memory state is updated immediately on every CRUD operation or property mutation; reads always return the latest state without waiting for a DB write.
+- **Batched SQL writes** — CRUD operations enqueue `PendingOp` entries. After a configurable debounce window (default **100 ms** of inactivity), the queue is collapsed and all pending operations are written to the database in a **single transaction**: `batchInsert` for multiple inserts, individual `deleteWhere` for deletes, and per-entity `UPDATE` for mutations.
+- **Collapse algorithm** — redundant operations are eliminated before the SQL write: `Insert + Update → Insert`, `Insert + Delete → no-op`, `multiple Updates → single Update (latest state)`.
+- **Max-delay cap** — a 1-second cap prevents starvation under continuous mutations by forcing a flush even while ops keep arriving.
+- **`close()` flushes synchronously** — calling `close()` guarantees all pending ops are written to the database before the repository shuts down. A `ReentrantLock` serializes the final flush with any in-flight debounce flush, preventing race conditions.
+- **Error retry** — if a batch write fails (e.g., transient DB error), the raw ops are re-enqueued and the next debounce cycle retries.
 
 ```kotlin
 // Entity with SQL mapping, secondary index, and aggregate references
@@ -254,10 +265,10 @@ Repository (interface, lirp-api)
 VolatileRepository (class, lirp-core)                   — in-memory
   └── PersistentRepositoryBase (abstract, lirp-core)    — subscription mgmt, lifecycle, dirty tracking
         ├── JsonFileRepository (class, lirp-core)       — debounced JSON file writes
-        └── SqlRepository (class, lirp-sql)             — synchronous SQL writes via Exposed
+        └── SqlRepository (class, lirp-sql)             — batched SQL writes via Exposed
 ```
 
-`PersistentRepository` is the marker interface for repositories that survive JVM lifetime. `PersistentRepositoryBase` provides the shared foundation for all durable backends: it auto-subscribes entities on add, cancels subscriptions on remove, guards mutating operations after close, and calls `flush()` when the state changes. Subclasses implement `flush()` to trigger their storage mechanism — `JsonFileRepository` sends to its serialization channel, `SqlRepository` performs a synchronous SQL UPDATE.
+`PersistentRepository` is the marker interface for repositories that survive JVM lifetime. `PersistentRepositoryBase` provides the shared foundation for all durable backends: it auto-subscribes entities on add, cancels subscriptions on remove, guards mutating operations after close, and drives the debounced write pipeline. Every CRUD operation and entity mutation enqueues a `PendingOp`; a sliding-window debounce collapses the queue and calls `writePending()` on the subclass. `JsonFileRepository` rewrites the full JSON file; `SqlRepository` executes batch SQL in a single transaction.
 
 ## Key Features
 
@@ -270,6 +281,21 @@ VolatileRepository (class, lirp-core)                   — in-memory
 - **JSON persistence** — debounced file writes via `JsonFileRepository`
 - **Repository-as-factory** — typed `create()` methods with automatic `@LirpRepository` registration
 - **Full Java interoperability**
+
+## Limitations and Design Trade-offs
+
+lirp's in-memory-first architecture has trade-offs that influence where it fits best:
+
+- **Full dataset loaded into memory** — On initialization, `SqlRepository` and `JsonFileRepository` load all rows from the backing store into a `ConcurrentHashMap`. This enables instant reads and O(1) indexed lookups but means the JVM heap must fit the entire dataset. Repositories with tens of thousands of entities will increase memory pressure; hundreds of thousands are impractical without significant heap tuning.
+- **Optimistic writes, eventual persistence** — In-memory state is always authoritative. A crash between enqueue and flush loses uncommitted mutations. The debounce window (default 100 ms, max 1 s) defines the data-loss window.
+- **Single-node only** — There is no cross-process replication or distributed cache invalidation. Each JVM instance holds its own copy of the data. lirp is not a substitute for a shared database layer in a multi-instance deployment.
+- **No query language** — Reads are key lookups (`findById`), index lookups (`findByIndex`), or full-scan predicates (`findFirst`). Complex joins, aggregations, or range queries should be handled at the SQL level outside of lirp.
+
+**Best suited for:** microservices or bounded contexts with small-to-medium datasets (hundreds to low thousands of entities) where domain reactivity and transparent persistence matter more than raw query power. Think configuration stores, user preference services, catalog management, or any context where the working set fits comfortably in memory.
+
+**Not suited for:** analytics workloads, high-cardinality datasets, or services requiring cross-instance consistency.
+
+Performance benchmarks comparing lirp's throughput and latency against direct JDBC and other persistence frameworks are planned — see [#69](https://github.com/octaviospain/lirp/issues/69).
 
 ## Documentation
 

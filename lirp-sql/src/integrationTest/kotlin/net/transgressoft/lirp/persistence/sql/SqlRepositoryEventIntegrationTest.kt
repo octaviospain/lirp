@@ -50,6 +50,7 @@ internal class SqlRepositoryEventIntegrationTest : FunSpec({
                 val repo = SqlRepository(dataSource, TestPersonTableDef)
                 val received = AtomicReference<CrudEvent.Type?>()
                 repo.subscribe { event -> received.set(event.type) }
+                delay(50.milliseconds) // let SharedFlow collector coroutine start
 
                 repo.add(TestPerson(1).apply { firstName = "Alice" })
 
@@ -66,12 +67,13 @@ internal class SqlRepositoryEventIntegrationTest : FunSpec({
         withTests(databases) { db ->
             withDatabaseTest(db, TestPersonTableDef) { dataSource ->
                 val repo = SqlRepository(dataSource, TestPersonTableDef)
+                val received = AtomicReference<CrudEvent.Type?>()
+                // Subscribe before add so the collector coroutine is running when DELETE fires
+                repo.subscribe { event -> received.set(event.type) }
+                delay(50.milliseconds) // let SharedFlow collector coroutine start
+
                 val person = TestPerson(2).apply { firstName = "Bob" }
                 repo.add(person)
-
-                val received = AtomicReference<CrudEvent.Type?>()
-                repo.subscribe { event -> received.set(event.type) }
-
                 repo.remove(person)
 
                 eventually(5.seconds) {
@@ -87,11 +89,12 @@ internal class SqlRepositoryEventIntegrationTest : FunSpec({
         withTests(databases) { db ->
             withDatabaseTest(db, TestPersonTableDef) { dataSource ->
                 val repo = SqlRepository(dataSource, TestPersonTableDef)
-                repo.add(TestPerson(3).apply { firstName = "Carol" })
-
                 val eventTypes = Collections.synchronizedList(mutableListOf<CrudEvent.Type>())
+                // Subscribe before add so the collector coroutine is running when DELETE fires
                 repo.subscribe { event -> eventTypes.add(event.type) }
+                delay(50.milliseconds) // let SharedFlow collector coroutine start
 
+                repo.add(TestPerson(3).apply { firstName = "Carol" })
                 repo.clear()
 
                 eventually(5.seconds) {

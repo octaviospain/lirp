@@ -107,11 +107,11 @@ internal class SqlRepositoryLifecycleIntegrationTest : FunSpec({
             withDatabaseTest(db, TestPersonTableDef) { dataSource ->
                 val repo1 = SqlRepository(dataSource, TestPersonTableDef)
                 repo1.add(TestPerson(77).apply { firstName = "Shared" })
+                // close() flushes the pending INSERT so repo2 reads the row on init
+                repo1.close()
 
                 val repo2 = SqlRepository(dataSource, TestPersonTableDef)
                 repo2.findById(77).shouldBePresent { it.firstName shouldBe "Shared" }
-
-                repo1.close()
                 repo2.close()
             }
         }
