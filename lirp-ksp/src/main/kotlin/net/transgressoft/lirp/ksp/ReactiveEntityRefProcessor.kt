@@ -342,19 +342,10 @@ class ReactiveEntityRefProcessor(
      * Falls back to `false` (Set semantics) if the source is unavailable or the line contains neither.
      */
     private fun isOrderedCollectionDelegate(prop: KSPropertyDeclaration): Boolean {
-        val location = prop.location as? FileLocation ?: return false
-        val file = File(location.filePath)
-        if (!file.exists()) return false
-        // Scan the property line and surrounding lines for the factory function name.
-        // The delegate expression may span multiple lines, so we look ahead up to 5 lines.
-        val lines = file.readLines()
-        val startLine = (location.lineNumber - 1).coerceAtLeast(0)
-        val endLine = (startLine + 5).coerceAtMost(lines.size)
-        val declarationText = lines.subList(startLine, endLine).joinToString("\n")
+        val text = readSourceLines(prop, linesBefore = 0, linesAfter = 5) ?: return false
         return when {
-            declarationText.contains("aggregateList") -> true
-            declarationText.contains("aggregateSet") -> false
-            // Fallback: check if the property type's FQN contains List/Set (for explicit type annotations)
+            text.contains("aggregateList") -> true
+            text.contains("aggregateSet") -> false
             else -> {
                 val fqn = prop.type.resolve().declaration.qualifiedName?.asString() ?: return false
                 fqn.contains("List")
@@ -362,23 +353,28 @@ class ReactiveEntityRefProcessor(
         }
     }
 
-    /**
-     * Returns `true` if the `@Aggregate` annotation on [prop] explicitly specifies `onDelete` in source.
-     *
-     * KSP includes all annotation arguments for BINARY retention annotations even when the user
-     * relied on the default value. Reading the source text is the only reliable way to distinguish
-     * an explicit `onDelete = X` from the default. Scans the source lines preceding the property
-     * for the `onDelete` keyword within an annotation parameter list.
-     */
     private fun isOnDeleteExplicitInSource(prop: KSPropertyDeclaration): Boolean {
-        val location = prop.location as? FileLocation ?: return false
+        val text = readSourceLines(prop, linesBefore = 5, linesAfter = 0) ?: return false
+        return Regex("""\bonDelete\s*=""").containsMatchIn(text)
+    }
+
+    /**
+     * Reads source lines around a [KSPropertyDeclaration] from its originating file.
+     *
+     * Returns `null` if the source location is unavailable or the file does not exist.
+     * Used by [isOrderedCollectionDelegate] and [isOnDeleteExplicitInSource] to inspect
+     * source text that KSP's type system cannot distinguish (delegate factory names,
+     * explicit vs default annotation arguments).
+     */
+    private fun readSourceLines(prop: KSPropertyDeclaration, linesBefore: Int = 0, linesAfter: Int = 5): String? {
+        val location = prop.location as? FileLocation ?: return null
         val file = File(location.filePath)
-        if (!file.exists()) return false
+        if (!file.exists()) return null
         val lines = file.readLines()
         val propLine = (location.lineNumber - 1).coerceAtLeast(0)
-        val startLine = (propLine - 5).coerceAtLeast(0)
-        val declarationText = lines.subList(startLine, propLine + 1).joinToString("\n")
-        return Regex("""\bonDelete\s*=""").containsMatchIn(declarationText)
+        val startLine = (propLine - linesBefore).coerceAtLeast(0)
+        val endLine = (propLine + linesAfter + 1).coerceAtMost(lines.size)
+        return lines.subList(startLine, endLine).joinToString("\n")
     }
 
     /**

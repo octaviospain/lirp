@@ -20,26 +20,28 @@ package net.transgressoft.lirp.persistence.sql
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.persistence.ColumnType
 import java.math.BigDecimal
-import java.util.UUID
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 
 /**
  * Test entity covering all 12 [ColumnType] variants, used to verify DDL type mapping
- * against PostgreSQL in integration tests.
+ * and CRUD round-trip correctness in integration tests.
  *
  * Date and datetime fields use `kotlinx.datetime` types because JetBrains Exposed's
  * `exposed-kotlin-datetime` module stores and retrieves [LocalDate] and [LocalDateTime] instances.
- * The `uuid_val` field uses [java.util.UUID] because Exposed's `uuid()` column operates on that type.
+ * The `uuid_val` field uses [kotlin.uuid.Uuid] because Exposed v1's `uuid()` column operates on that type.
  * The `enum_val` field uses [String] because [ColumnType.EnumType] is stored as `VARCHAR(255)`.
  */
+@OptIn(ExperimentalUuidApi::class)
 class AllTypesEntity(override val id: Int) : ReactiveEntityBase<Int, AllTypesEntity>() {
     var longVal: Long by reactiveProperty(0L)
     var textVal: String by reactiveProperty("")
     var boolVal: Boolean by reactiveProperty(false)
     var doubleVal: Double by reactiveProperty(0.0)
     var floatVal: Float by reactiveProperty(0.0f)
-    var uuidVal: UUID by reactiveProperty(UUID.randomUUID())
+    var uuidVal: Uuid by reactiveProperty(Uuid.random())
     var dateVal: LocalDate by reactiveProperty(LocalDate(2025, 1, 1))
     var dateTimeVal: LocalDateTime by reactiveProperty(LocalDateTime(2025, 1, 1, 0, 0, 0))
     var varcharVal: String by reactiveProperty("")
@@ -48,17 +50,19 @@ class AllTypesEntity(override val id: Int) : ReactiveEntityBase<Int, AllTypesEnt
     override val uniqueId: String get() = id.toString()
 
     override fun clone(): AllTypesEntity =
-        AllTypesEntity(id).also {
-            it.longVal = longVal
-            it.textVal = textVal
-            it.boolVal = boolVal
-            it.doubleVal = doubleVal
-            it.floatVal = floatVal
-            it.uuidVal = uuidVal
-            it.dateVal = dateVal
-            it.dateTimeVal = dateTimeVal
-            it.varcharVal = varcharVal
-            it.decimalVal = decimalVal
-            it.enumVal = enumVal
+        AllTypesEntity(id).also { copy ->
+            copy.withEventsDisabled {
+                copy.longVal = longVal
+                copy.textVal = textVal
+                copy.boolVal = boolVal
+                copy.doubleVal = doubleVal
+                copy.floatVal = floatVal
+                copy.uuidVal = uuidVal
+                copy.dateVal = dateVal
+                copy.dateTimeVal = dateTimeVal
+                copy.varcharVal = varcharVal
+                copy.decimalVal = decimalVal
+                copy.enumVal = enumVal
+            }
         }
 }

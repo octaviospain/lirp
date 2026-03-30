@@ -31,9 +31,11 @@ class TestPerson(override val id: Int) : ReactiveEntityBase<Int, TestPerson>() {
     override val uniqueId: String get() = id.toString()
 
     override fun clone(): TestPerson =
-        TestPerson(id).also {
-            it.firstName = firstName
-            it.lastName = lastName
-            it.age = age
+        TestPerson(id).also { copy ->
+            copy.withEventsDisabled {
+                copy.firstName = firstName
+                copy.lastName = lastName
+                copy.age = age
+            }
         }
 }

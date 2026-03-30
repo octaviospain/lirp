@@ -19,21 +19,21 @@ package net.transgressoft.lirp.persistence.sql
 
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
-import org.testcontainers.containers.PostgreSQLContainer
+import org.testcontainers.containers.MySQLContainer
 
 /**
- * Shared Testcontainers PostgreSQL container and [HikariDataSource] factory for integration tests.
+ * Shared Testcontainers MySQL 8.0 container and [HikariDataSource] factory for integration tests.
  *
  * The container is started lazily and thread-safely on first [buildDataSource] call
  * and reused across tests within the same JVM process.
  */
-object PostgresContainerSupport {
+object MysqlContainerSupport {
     private val container by lazy {
-        PostgreSQLContainer("postgres:18-alpine").apply { start() }
+        MySQLContainer("mysql:8.0").apply { start() }
     }
 
     /**
-     * Returns a new [HikariDataSource] connected to the shared PostgreSQL container.
+     * Returns a new [HikariDataSource] connected to the shared MySQL container.
      */
     fun buildDataSource(): HikariDataSource =
         HikariDataSource(

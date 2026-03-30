@@ -30,6 +30,8 @@ dependencies {
     implementation libs.bundles.exposed
     implementation libs.hikari
     runtimeOnly libs.postgresql
+    runtimeOnly libs.mysql
+    runtimeOnly libs.mariadb
 
     testImplementation platform(libs.junit.bom)
     testImplementation libs.bundles.kotest
@@ -41,10 +43,14 @@ dependencies {
     integrationTestImplementation libs.bundles.kotest
     integrationTestImplementation libs.kotest.extensions.testcontainers
     integrationTestImplementation libs.testcontainers.postgresql
+    integrationTestImplementation libs.testcontainers.mysql
+    integrationTestImplementation libs.testcontainers.mariadb
     integrationTestImplementation libs.coroutines.test
     integrationTestImplementation libs.junit.jupiter
     integrationTestRuntimeOnly libs.junit.platform.launcher
     integrationTestRuntimeOnly libs.postgresql
+    integrationTestRuntimeOnly libs.mysql
+    integrationTestRuntimeOnly libs.mariadb
 
     // testFixtures infrastructure — shared entities, table defs, container support
     testFixturesImplementation project(path: ':lirp-api')
@@ -53,6 +59,9 @@ dependencies {
     testFixturesImplementation libs.bundles.exposed
     testFixturesImplementation libs.hikari
     testFixturesImplementation libs.testcontainers.postgresql
+    testFixturesImplementation libs.testcontainers.mysql
+    testFixturesImplementation libs.testcontainers.mariadb
+    testFixturesImplementation libs.kotest.runner.junit6
 
     // Consume testFixtures from both test and integrationTest
     testImplementation testFixtures(project(':lirp-sql'))

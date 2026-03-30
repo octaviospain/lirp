@@ -19,128 +19,135 @@ package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
-import com.zaxxer.hikari.HikariDataSource
-import io.kotest.core.spec.style.StringSpec
+import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.databases
+import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.withDatabaseTest
+import io.kotest.assertions.nondeterministic.eventually
+import io.kotest.core.spec.style.FunSpec
+import io.kotest.datatest.withTests
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.shouldBe
-import org.jetbrains.exposed.v1.jdbc.Database
-import org.jetbrains.exposed.v1.jdbc.SchemaUtils
-import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.junit.jupiter.api.DisplayName
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.delay
 
 /**
- * Integration tests for [SqlRepository] event emission against a real PostgreSQL database.
+ * Integration tests for [SqlRepository] event emission against PostgreSQL, MySQL 8.0, and MariaDB 11.
  *
  * Verifies that [CrudEvent] events (CREATE, UPDATE, DELETE) are emitted correctly by the repository
  * on CRUD operations, and that entity-level [net.transgressoft.lirp.event.MutationEvent]s fire when
  * reactive entity properties are mutated.
- *
- * Each test drops the table before execution to maintain isolation within the shared container schema.
  */
 @DisplayName("SqlRepository Event Integration")
-internal class SqlRepositoryEventIntegrationTest : StringSpec({
+internal class SqlRepositoryEventIntegrationTest : FunSpec({
 
-    var dataSource: HikariDataSource? = null
+    context("emits CREATE CrudEvent on add") {
+        withTests(databases) { db ->
+            withDatabaseTest(db, TestPersonTableDef) { dataSource ->
+                val repo = SqlRepository(dataSource, TestPersonTableDef)
+                val received = AtomicReference<CrudEvent.Type?>()
+                repo.subscribe { event -> received.set(event.type) }
 
-    beforeSpec {
-        dataSource = PostgresContainerSupport.buildDataSource()
+                repo.add(TestPerson(1).apply { firstName = "Alice" })
+
+                eventually(5.seconds) {
+                    received.get() shouldBe CrudEvent.Type.CREATE
+                }
+
+                repo.close()
+            }
+        }
     }
 
-    afterSpec {
-        dataSource?.close()
+    context("emits DELETE CrudEvent on remove") {
+        withTests(databases) { db ->
+            withDatabaseTest(db, TestPersonTableDef) { dataSource ->
+                val repo = SqlRepository(dataSource, TestPersonTableDef)
+                val person = TestPerson(2).apply { firstName = "Bob" }
+                repo.add(person)
+
+                val received = AtomicReference<CrudEvent.Type?>()
+                repo.subscribe { event -> received.set(event.type) }
+
+                repo.remove(person)
+
+                eventually(5.seconds) {
+                    received.get() shouldBe CrudEvent.Type.DELETE
+                }
+
+                repo.close()
+            }
+        }
     }
 
-    beforeTest {
-        val db = Database.connect(dataSource!!)
-        val t = ExposedTableInterpreter().interpret(TestPersonTableDef)
-        runCatching { transaction(db) { SchemaUtils.drop(t.table) } }
+    context("emits DELETE CrudEvent on clear") {
+        withTests(databases) { db ->
+            withDatabaseTest(db, TestPersonTableDef) { dataSource ->
+                val repo = SqlRepository(dataSource, TestPersonTableDef)
+                repo.add(TestPerson(3).apply { firstName = "Carol" })
+
+                val eventTypes = Collections.synchronizedList(mutableListOf<CrudEvent.Type>())
+                repo.subscribe { event -> eventTypes.add(event.type) }
+
+                repo.clear()
+
+                eventually(5.seconds) {
+                    (CrudEvent.Type.DELETE in eventTypes).shouldBeTrue()
+                }
+
+                repo.close()
+            }
+        }
     }
 
-    "emits CREATE CrudEvent on add" {
-        val repo = SqlRepository(dataSource!!, TestPersonTableDef)
-        val received = AtomicReference<CrudEvent.Type?>()
-        repo.subscribe { event -> received.set(event.type) }
+    context("entity MutationEvent fires on property change") {
+        withTests(databases) { db ->
+            withDatabaseTest(db, TestPersonTableDef) { dataSource ->
+                val repo = SqlRepository(dataSource, TestPersonTableDef)
+                repo.add(TestPerson(4).apply { firstName = "Dave" })
 
-        repo.add(TestPerson(1).apply { firstName = "Alice" })
-        Thread.sleep(200)
+                val mutationReceived = AtomicBoolean(false)
+                val person = repo.findById(4).get()
+                person.subscribe { mutationReceived.set(true) }
+                delay(50.milliseconds) // let SharedFlow collector coroutine start
 
-        received.get() shouldBe CrudEvent.Type.CREATE
+                person.firstName = "Changed"
 
-        repo.close()
+                eventually(5.seconds) {
+                    mutationReceived.get().shouldBeTrue()
+                }
+
+                repo.close()
+            }
+        }
     }
 
-    "emits DELETE CrudEvent on remove" {
-        val repo = SqlRepository(dataSource!!, TestPersonTableDef)
-        val person = TestPerson(2).apply { firstName = "Bob" }
-        repo.add(person)
+    context("CrudEvent and MutationEvent both fire on mutation-triggered persist") {
+        withTests(databases) { db ->
+            withDatabaseTest(db, TestPersonTableDef) { dataSource ->
+                val repo = SqlRepository(dataSource, TestPersonTableDef)
+                val crudEventTypes = Collections.synchronizedList(mutableListOf<CrudEvent.Type>())
+                repo.subscribe { event -> crudEventTypes.add(event.type) }
 
-        val received = AtomicReference<CrudEvent.Type?>()
-        repo.subscribe { event -> received.set(event.type) }
+                repo.add(TestPerson(5).apply { firstName = "Eve" })
 
-        repo.remove(person)
-        Thread.sleep(200)
+                val mutationReceived = AtomicBoolean(false)
+                val person = repo.findById(5).get()
+                person.subscribe { mutationReceived.set(true) }
+                delay(50.milliseconds) // let SharedFlow collector coroutine start
 
-        received.get() shouldBe CrudEvent.Type.DELETE
+                person.firstName = "Evelyn"
 
-        repo.close()
-    }
+                eventually(5.seconds) {
+                    mutationReceived.get().shouldBeTrue()
+                    (UPDATE in crudEventTypes).shouldBeTrue()
+                }
 
-    "emits DELETE CrudEvent on clear" {
-        val repo = SqlRepository(dataSource!!, TestPersonTableDef)
-        repo.add(TestPerson(3).apply { firstName = "Carol" })
-
-        val eventTypes = Collections.synchronizedList(mutableListOf<CrudEvent.Type>())
-        repo.subscribe { event -> eventTypes.add(event.type) }
-
-        repo.clear()
-        Thread.sleep(200)
-
-        (CrudEvent.Type.DELETE in eventTypes).shouldBeTrue()
-
-        repo.close()
-    }
-
-    "entity MutationEvent fires on property change" {
-        val repo = SqlRepository(dataSource!!, TestPersonTableDef)
-        repo.add(TestPerson(4).apply { firstName = "Dave" })
-
-        val mutationReceived = AtomicBoolean(false)
-        val person = repo.findById(4).get()
-        person.subscribe { mutationReceived.set(true) }
-        // Allow the subscription coroutine to start collecting before we fire the event
-        Thread.sleep(100)
-
-        person.firstName = "Changed"
-        Thread.sleep(200)
-
-        mutationReceived.get().shouldBeTrue()
-
-        repo.close()
-    }
-
-    "CrudEvent and MutationEvent both fire on mutation-triggered persist" {
-        val repo = SqlRepository(dataSource!!, TestPersonTableDef)
-        val crudEventTypes = Collections.synchronizedList(mutableListOf<CrudEvent.Type>())
-        repo.subscribe { event -> crudEventTypes.add(event.type) }
-
-        repo.add(TestPerson(5).apply { firstName = "Eve" })
-        Thread.sleep(100)
-
-        val mutationReceived = AtomicBoolean(false)
-        val person = repo.findById(5).get()
-        person.subscribe { mutationReceived.set(true) }
-        // Allow the subscription coroutine to start collecting before we fire the event
-        Thread.sleep(100)
-
-        person.firstName = "Evelyn"
-        Thread.sleep(300)
-
-        mutationReceived.get().shouldBeTrue()
-        (UPDATE in crudEventTypes).shouldBeTrue()
-
-        repo.close()
+                repo.close()
+            }
+        }
     }
 })

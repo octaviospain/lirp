@@ -93,8 +93,9 @@ Annotations are optional — convention-over-configuration infers table and colu
 | Target | Module | Status |
 |--------|--------|--------|
 | PostgreSQL | `lirp-sql` | Supported |
+| MySQL | `lirp-sql` | Supported |
+| MariaDB | `lirp-sql` | Supported |
 | JSON file | `lirp-core` | Supported |
-| MySQL | `lirp-sql` | Planned |
 | MS SQL Server | `lirp-sql` | Planned |
 | Oracle | `lirp-sql` | Planned |
 

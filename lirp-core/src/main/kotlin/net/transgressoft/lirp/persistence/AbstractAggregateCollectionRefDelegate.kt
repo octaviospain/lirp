@@ -73,8 +73,8 @@ abstract class AbstractAggregateCollectionRefDelegate<K : Comparable<K>, E : Ide
      * [RegistryBase.bindEntityRefs] when the owning entity is added to a repository.
      */
     internal fun bindRegistry(registry: Registry<K, E>, context: LirpContext) {
-        this.context = context
         registryRef.set(registry)
+        this.context = context
     }
 
     /**
