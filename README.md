@@ -29,36 +29,59 @@ Built on Kotlin Coroutines and Kotlin Serialization. Targets **JVM 17+, Kotlin 2
 `SqlRepository` persists entities to a relational database — automatically. Add an entity: it's INSERTed. Change a property: the UPDATE happens in the background. Subscribe to the repository: you get `CrudEvent`s for every operation. Tables are created on first use; existing rows are loaded on initialization.
 
 ```kotlin
-@PersistenceMapping
-data class Product(
+// Entity with SQL mapping, secondary index, and aggregate references
+@PersistenceMapping(name = "albums")
+data class Album(
     override val id: Int,
-    var name: String,
-    initialPrice: Double = 0.0
-) : ReactiveEntityBase<Int, Product>() {
-    var price: Double by reactiveProperty(initialPrice)
-    override val uniqueId = "product-$id"
-    override fun clone() = Product(id, name, price)
+    var title: String,
+    @Indexed val genre: String,
+    var artistId: Int,
+    val trackIds: List<Int>,
+    initialRating: Double = 0.0
+) : ReactiveEntityBase<Int, Album>() {
+    var rating: Double by reactiveProperty(initialRating)
+
+    @Aggregate(bubbleUp = true, onDelete = CascadeAction.DETACH)
+    @Transient
+    val artist by aggregate<Int, Artist> { artistId }
+
+    @Aggregate(onDelete = CascadeAction.CASCADE)
+    @Transient
+    val tracks by aggregateList<Int, Track> { trackIds }
+
+    override val uniqueId = "album-$id"
+    override fun clone() = Album(id, title, genre, artistId, trackIds, rating)
 }
 
-// KSP generates Product_LirpTableDef at compile time
+// Repository with typed factory method — auto-registers via @LirpRepository
+@LirpRepository
+class AlbumRepository(context: LirpContext) :
+    SqlRepository<Int, Album>(context, Album_LirpTableDef, "jdbc:postgresql://localhost:5432/mydb") {
 
-val repo = SqlRepository<Int, Product>(
-    jdbcUrl = "jdbc:postgresql://localhost:5432/mydb",
-    tableDef = Product_LirpTableDef
-)
+    fun create(id: Int, title: String, genre: String, artistId: Int, trackIds: List<Int>) =
+        Album(id, title, genre, artistId, trackIds).also { add(it) }
+}
 
-repo.subscribe { event ->
+// KSP generates Album_LirpTableDef and Album_LirpRefAccessor at compile time
+
+val ctx = LirpContext()
+val artistRepo = ArtistRepository(ctx)
+val trackRepo = TrackRepository(ctx)
+val albumRepo = AlbumRepository(ctx)
+
+albumRepo.subscribe { event ->
     println("${event.type}: ${event.entities.values}")
 }
 
-val widget = Product(1, "Widget", 29.99)
-repo.add(widget)          // INSERT → CrudEvent.CREATE emitted
+val album = albumRepo.create(1, "OK Computer", "rock", artistId = 42, trackIds = listOf(1, 2, 3))
 
-widget.price = 39.99      // UPDATE happens automatically → CrudEvent.UPDATE emitted
+album.rating = 9.8                     // UPDATE happens automatically → CrudEvent.UPDATE emitted
+val artist = album.artist.resolve()    // lazy resolution from bound ArtistRepository
+val tracks = album.tracks.resolveAll() // returns List<Track> in order
 
-repo.remove(widget)       // DELETE → CrudEvent.DELETE emitted
+val rock: Set<Album> = albumRepo.findByIndex("genre", "rock")  // O(1) indexed lookup
 
-repo.close()              // closes the connection pool
+ctx.close()                            // closes all repositories and connection pools
 ```
 
 No manual saves. No ORM session flushing. Property assignment _is_ persistence.
@@ -70,7 +93,6 @@ Annotations are optional — convention-over-configuration infers table and colu
 | Target | Module | Status |
 |--------|--------|--------|
 | PostgreSQL | `lirp-sql` | Supported |
-| H2 (testing) | `lirp-sql` | Supported |
 | JSON file | `lirp-core` | Supported |
 | MySQL | `lirp-sql` | Planned |
 | MS SQL Server | `lirp-sql` | Planned |
