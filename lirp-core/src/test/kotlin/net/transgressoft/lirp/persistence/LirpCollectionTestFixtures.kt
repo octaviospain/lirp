@@ -56,7 +56,6 @@ data class Playlist(
     override val uniqueId: String get() = "playlist-$id"
 
     @Aggregate
-    @Transient
     val items by aggregateList<Int, TestTrack> { itemIds }
 
     override fun clone(): Playlist = copy()
@@ -76,7 +75,6 @@ data class PlaylistGroup(
     override val uniqueId: String get() = "playlist-group-$id"
 
     @Aggregate
-    @Transient
     val playlists by aggregateSet<Long, Playlist> { playlistIds }
 
     override fun clone(): PlaylistGroup = copy()
@@ -95,7 +93,6 @@ data class CascadePlaylist(
     override val uniqueId: String get() = "cascade-playlist-$id"
 
     @Aggregate(onDelete = CascadeAction.CASCADE)
-    @Transient
     val items by aggregateList<Int, TestTrack> { itemIds }
 
     override fun clone(): CascadePlaylist = copy()
@@ -133,7 +130,6 @@ data class DetachPlaylist(
     override val uniqueId: String get() = "detach-playlist-$id"
 
     @Aggregate(onDelete = CascadeAction.DETACH)
-    @Transient
     val items by aggregateList<Int, TestTrack> { itemIds }
 
     override fun clone(): DetachPlaylist = copy()
@@ -152,7 +148,6 @@ data class NonePlaylist(
     override val uniqueId: String get() = "none-playlist-$id"
 
     @Aggregate(onDelete = CascadeAction.NONE)
-    @Transient
     val items by aggregateList<Int, TestTrack> { itemIds }
 
     override fun clone(): NonePlaylist = copy()
@@ -256,7 +251,6 @@ data class CascadePlaylistGroup(
     override val uniqueId: String get() = "cascade-group-$id"
 
     @Aggregate(onDelete = CascadeAction.CASCADE)
-    @Transient
     val playlists by aggregateSet<Long, Playlist> { playlistIds }
 
     override fun clone(): CascadePlaylistGroup = copy()
@@ -291,7 +285,6 @@ data class DetachPlaylistGroup(
     override val uniqueId: String get() = "detach-group-$id"
 
     @Aggregate(onDelete = CascadeAction.DETACH)
-    @Transient
     val playlists by aggregateSet<Long, Playlist> { playlistIds }
 
     override fun clone(): DetachPlaylistGroup = copy()
@@ -308,7 +301,6 @@ data class NonePlaylistGroup(
     override val uniqueId: String get() = "none-group-$id"
 
     @Aggregate(onDelete = CascadeAction.NONE)
-    @Transient
     val playlists by aggregateSet<Long, Playlist> { playlistIds }
 
     override fun clone(): NonePlaylistGroup = copy()

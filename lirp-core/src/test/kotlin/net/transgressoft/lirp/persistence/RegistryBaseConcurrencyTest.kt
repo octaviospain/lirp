@@ -63,7 +63,7 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
         ReactiveScope.resetDefaultFlowScope()
     }
 
-    "RegistryBase iterator completes without error under concurrent entity additions" {
+    "iterator completes without error under concurrent entity additions" {
         val concurrentCoroutines = 50
         val iterationsPerCoroutine = 100
         val initialSize = 100
@@ -98,7 +98,7 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
         ctx.close()
     }
 
-    "RegistryBase iterator completes without error under concurrent entity removals" {
+    "iterator completes without error under concurrent entity removals" {
         val concurrentCoroutines = 50
         val iterationsPerCoroutine = 100
         val initialSize = 100
@@ -134,7 +134,7 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
         ctx.close()
     }
 
-    "RegistryBase iterator completes without error under concurrent add and remove" {
+    "iterator completes without error under concurrent add and remove" {
         val concurrentCoroutines = 50
         val iterationsPerCoroutine = 100
         val initialSize = 100
@@ -169,7 +169,7 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
         ctx.close()
     }
 
-    "RegistryBase search completes without error under concurrent modifications" {
+    "search completes without error under concurrent modifications" {
         val concurrentCoroutines = 50
         val iterationsPerCoroutine = 100
         val initialSize = 100

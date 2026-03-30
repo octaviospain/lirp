@@ -49,6 +49,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  */
 @DisplayName("AggregateBubbleUpTest")
 @OptIn(ExperimentalCoroutinesApi::class)
+@Suppress("UNCHECKED_CAST")
 internal class AggregateBubbleUpTest : FunSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()
@@ -134,7 +135,7 @@ internal class AggregateBubbleUpTest : FunSpec({
 
         latch.await(2, TimeUnit.SECONDS) shouldBe true
         val aggregateEvent = receivedEvent.get()
-        aggregateEvent.childEvent.shouldBeInstanceOf<ReactiveMutationEvent<*, *>>()
+        aggregateEvent.childEvent.shouldBeInstanceOf<ReactiveMutationEvent<Int, Customer>>()
         val childMutation = aggregateEvent.childEvent as ReactiveMutationEvent<Int, Customer>
         childMutation.newEntity.name shouldBe "Alice Updated"
         childMutation.oldEntity.name shouldBe "Alice"

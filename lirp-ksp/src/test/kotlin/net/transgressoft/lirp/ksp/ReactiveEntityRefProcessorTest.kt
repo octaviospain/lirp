@@ -108,7 +108,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
         return file.readText()
     }
 
-    test("ReactiveEntityRefProcessor generates entries for entity with single aggregate property") {
+    test("generates entries for entity with single aggregate property") {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -143,7 +143,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
         content shouldContain "override val collectionEntries: List<CollectionRefEntry<*, InvoiceEntity>> = emptyList()"
     }
 
-    test("ReactiveEntityRefProcessor generates collectionEntries for entity with aggregateList property") {
+    test("generates collectionEntries for entity with aggregateList property") {
         val result =
             compileWithProcessor(
                 collectionDelegateStubs,
@@ -182,7 +182,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
         content shouldContain "override val entries: List<RefEntry<*, PlaylistEntity>> = emptyList()"
     }
 
-    test("ReactiveEntityRefProcessor generates collectionEntries for entity with aggregateSet property") {
+    test("generates collectionEntries for entity with aggregateSet property") {
         val result =
             compileWithProcessor(
                 collectionDelegateStubs,
@@ -219,7 +219,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
         content shouldContain "cascadeAction = CascadeAction.NONE"
     }
 
-    test("ReactiveEntityRefProcessor generates both entries and collectionEntries for entity with mixed single and collection refs") {
+    test("generates both entries and collectionEntries for entity with mixed single and collection refs") {
         val result =
             compileWithProcessor(
                 collectionDelegateStubs,
@@ -285,7 +285,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
         override fun dataTestName() = delegateFn
     }
 
-    context("ReactiveEntityRefProcessor emits compile error when bubbleUp=true on collection property") {
+    context("emits compile error when bubbleUp=true on collection property") {
         withTests(
             BubbleUpCase("aggregateList", "List<Int>", "BubbleUpListEntity", "ItemEntity"),
             BubbleUpCase("aggregateSet", "Set<Int>", "BubbleUpSetEntity", "TagEntity")
@@ -323,7 +323,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
         }
     }
 
-    test("ReactiveEntityRefProcessor generates isOrdered=true for aggregateList and isOrdered=false for aggregateSet") {
+    test("generates isOrdered=true for aggregateList and isOrdered=false for aggregateSet") {
         val result =
             compileWithProcessor(
                 collectionDelegateStubs,
@@ -369,7 +369,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
         uniqueBlock shouldContain "isOrdered = false"
     }
 
-    test("ReactiveEntityRefProcessor uses @Aggregate annotation for detection and ignores unannotated properties") {
+    test("uses @Aggregate annotation for detection and ignores unannotated properties") {
         val result =
             compileWithProcessor(
                 collectionDelegateStubs,

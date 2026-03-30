@@ -111,9 +111,7 @@ internal class VolatileRepositoryTest : StringSpec({
         customers.forEach { repository.create(it.id, it.name) }
 
         val iterated = mutableSetOf<Customer>()
-        for (entity in repository) {
-            iterated.add(entity as Customer)
-        }
+        repository.forEach(iterated::add)
 
         iterated shouldContainOnly customers
     }

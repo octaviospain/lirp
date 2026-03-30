@@ -31,7 +31,6 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.Transient
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.nullable
 import kotlinx.serialization.builtins.serializer
@@ -85,7 +84,6 @@ data class StandardCustomer(
     override val email: String? = null
 ) : PolymorphicCustomer, ReactiveEntityBase<Int, PolymorphicCustomer>() {
 
-    @Transient
     override var name: String? by reactiveProperty({ initialName }, { initialName = it })
 
     override val uniqueId: String get() = "standard-customer-$id"
@@ -112,10 +110,8 @@ data class PremiumCustomer(
     @SerialName("loyaltyPoints") private var _loyaltyPoints: Int = 0
 ) : PremiumCustomerContract, ReactiveEntityBase<Int, PolymorphicCustomer>() {
 
-    @Transient
     override var name: String? by reactiveProperty({ initialName }, { initialName = it })
 
-    @Transient
     override var loyaltyPoints: Int by reactiveProperty({ _loyaltyPoints }, { _loyaltyPoints = it })
 
     override val uniqueId: String get() = "premium-customer-$id"

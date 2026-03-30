@@ -4,6 +4,7 @@ import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.CrudEvent.Type.READ
 import net.transgressoft.lirp.event.ReactiveScope
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -76,6 +77,7 @@ class IndexedProductVolatileRepo : VolatileRepository<Int, IndexedProduct>("Inde
  * O(1) lookup via [Registry.findByIndex] and [Registry.findFirstByIndex].
  */
 @ExperimentalCoroutinesApi
+@DisplayName("VolatileRepository search performance")
 internal class SearchPerformanceTest : StringSpec({
 
     lateinit var ctx: LirpContext
@@ -108,7 +110,7 @@ internal class SearchPerformanceTest : StringSpec({
         ReactiveScope.resetDefaultFlowScope()
     }
 
-    "VolatileRepository lazySearch returns matching entities as Sequence" {
+    "lazySearch returns matching entities as Sequence" {
         val expected = repository.search { true }
 
         val result = repository.lazySearch { true }.toSet()
@@ -116,14 +118,14 @@ internal class SearchPerformanceTest : StringSpec({
         result shouldContainOnly expected
     }
 
-    "VolatileRepository lazySearch with take(n) returns at most n results" {
+    "lazySearch with take(n) returns at most n results" {
         val n = 3
         val result = repository.lazySearch { true }.take(n).toSet()
 
         result.size shouldBe n
     }
 
-    "VolatileRepository lazySearch terminates early via take without evaluating all elements" {
+    "lazySearch terminates early via take without evaluating all elements" {
         val evaluatedCount = AtomicInteger(0)
         val n = 2
 
@@ -135,7 +137,7 @@ internal class SearchPerformanceTest : StringSpec({
         evaluatedCount.get() shouldBe n
     }
 
-    "VolatileRepository lazySearch on empty repository returns empty Sequence" {
+    "lazySearch on empty repository returns empty Sequence" {
         val emptyRepository = VolatileRepository<Int, Customer>("EmptyRepo")
 
         val result = emptyRepository.lazySearch { true }.toSet()
@@ -143,7 +145,7 @@ internal class SearchPerformanceTest : StringSpec({
         result shouldBe emptySet()
     }
 
-    "VolatileRepository lazySearch does not emit Read events" {
+    "lazySearch does not emit Read events" {
         val readEventEmitted = AtomicBoolean(false)
         repository.subscribe(READ) { readEventEmitted.set(true) }
 
@@ -154,7 +156,7 @@ internal class SearchPerformanceTest : StringSpec({
         readEventEmitted.get() shouldBe false
     }
 
-    "VolatileRepository searchStream returns matching entities as Java Stream" {
+    "searchStream returns matching entities as Java Stream" {
         val expected = repository.search { true }
 
         val result = repository.searchStream { true }.collect(Collectors.toSet())
@@ -162,7 +164,7 @@ internal class SearchPerformanceTest : StringSpec({
         result shouldContainOnly expected
     }
 
-    "VolatileRepository searchStream with limit and findFirst terminates early" {
+    "searchStream with limit and findFirst terminates early" {
         val evaluatedCount = AtomicInteger(0)
 
         val found =
@@ -177,7 +179,7 @@ internal class SearchPerformanceTest : StringSpec({
         evaluatedCount.get() shouldBe 1
     }
 
-    "VolatileRepository searchStream does not emit Read events" {
+    "searchStream does not emit Read events" {
         val readEventEmitted = AtomicBoolean(false)
         repository.subscribe(READ) { readEventEmitted.set(true) }
 
@@ -188,7 +190,7 @@ internal class SearchPerformanceTest : StringSpec({
         readEventEmitted.get() shouldBe false
     }
 
-    "VolatileRepository search(predicate) returns correct Set and emits Read event" {
+    "search(predicate) returns correct Set and emits Read event" {
         val readEventCount = AtomicInteger(0)
         repository.subscribe(READ) { readEventCount.incrementAndGet() }
 
@@ -203,7 +205,7 @@ internal class SearchPerformanceTest : StringSpec({
         readEventCount.get() shouldBeGreaterThan 0
     }
 
-    "VolatileRepository search(size, predicate) returns limited Set and emits Read event" {
+    "search(size, predicate) returns limited Set and emits Read event" {
         val readEventCount = AtomicInteger(0)
         repository.subscribe(READ) { readEventCount.incrementAndGet() }
 
@@ -217,7 +219,7 @@ internal class SearchPerformanceTest : StringSpec({
 
     // Secondary index tests
 
-    "VolatileRepository findByIndex returns entities matching the indexed property value" {
+    "findByIndex returns entities matching the indexed property value" {
         val indexRepo = IndexedProductVolatileRepo()
         val electronics1 = IndexedProduct(1, "electronics", null)
         val electronics2 = IndexedProduct(2, "electronics", null)
@@ -231,7 +233,7 @@ internal class SearchPerformanceTest : StringSpec({
         result shouldContainOnly setOf(electronics1, electronics2)
     }
 
-    "VolatileRepository findFirstByIndex returns Optional with first matching entity" {
+    "findFirstByIndex returns Optional with first matching entity" {
         val indexRepo = IndexedProductVolatileRepo()
         val product = IndexedProduct(1, "books", null)
         indexRepo.create(product)
@@ -241,7 +243,7 @@ internal class SearchPerformanceTest : StringSpec({
         result.shouldBePresent { it shouldBe product }
     }
 
-    "VolatileRepository findByIndex returns empty set when no entities match the value" {
+    "findByIndex returns empty set when no entities match the value" {
         val indexRepo = IndexedProductVolatileRepo()
         indexRepo.create(IndexedProduct(1, "electronics", null))
 
@@ -250,7 +252,7 @@ internal class SearchPerformanceTest : StringSpec({
         result.shouldBeEmpty()
     }
 
-    "VolatileRepository findFirstByIndex returns empty Optional when no entities match" {
+    "findFirstByIndex returns empty Optional when no entities match" {
         val indexRepo = IndexedProductVolatileRepo()
         indexRepo.create(IndexedProduct(1, "electronics", null))
 
@@ -259,7 +261,7 @@ internal class SearchPerformanceTest : StringSpec({
         result.shouldBeEmpty()
     }
 
-    "VolatileRepository findByIndex throws IllegalArgumentException for undeclared index name" {
+    "findByIndex throws IllegalArgumentException for undeclared index name" {
         val indexRepo = IndexedProductVolatileRepo()
         indexRepo.create(IndexedProduct(1, "electronics", null))
 
@@ -268,7 +270,7 @@ internal class SearchPerformanceTest : StringSpec({
         }
     }
 
-    "VolatileRepository findFirstByIndex throws IllegalArgumentException for undeclared index name" {
+    "findFirstByIndex throws IllegalArgumentException for undeclared index name" {
         val indexRepo = IndexedProductVolatileRepo()
         indexRepo.create(IndexedProduct(1, "electronics", null))
 
@@ -277,7 +279,7 @@ internal class SearchPerformanceTest : StringSpec({
         }
     }
 
-    "VolatileRepository index updates correctly on add — new entity appears in index" {
+    "index updates correctly on add — new entity appears in index" {
         val indexRepo = IndexedProductVolatileRepo()
         val product = IndexedProduct(1, "tools", null)
         indexRepo.create(product)
@@ -287,7 +289,7 @@ internal class SearchPerformanceTest : StringSpec({
         result shouldContain product
     }
 
-    "VolatileRepository index updates correctly on remove — removed entity disappears from index" {
+    "index updates correctly on remove — removed entity disappears from index" {
         val indexRepo = IndexedProductVolatileRepo()
         val product = IndexedProduct(1, "tools", null)
         indexRepo.create(product)
@@ -298,7 +300,7 @@ internal class SearchPerformanceTest : StringSpec({
         result.shouldBeEmpty()
     }
 
-    "VolatileRepository index updates correctly on replace — old value deindexed, new value indexed" {
+    "index updates correctly on replace — old value deindexed, new value indexed" {
         val indexRepo = IndexedProductVolatileRepo()
         val original = IndexedProduct(1, "gadgets", null)
         val replacement = IndexedProduct(1, "appliances", null)
@@ -312,7 +314,7 @@ internal class SearchPerformanceTest : StringSpec({
         appliances shouldContain replacement
     }
 
-    "VolatileRepository index clears correctly on clear — all index maps emptied" {
+    "index clears correctly on clear — all index maps emptied" {
         val indexRepo = IndexedProductVolatileRepo()
         indexRepo.create(IndexedProduct(1, "electronics", null))
         indexRepo.create(IndexedProduct(2, "electronics", null))
@@ -323,7 +325,7 @@ internal class SearchPerformanceTest : StringSpec({
         result.shouldBeEmpty()
     }
 
-    "VolatileRepository null indexed property value does not cause NPE — entity not indexed for that property" {
+    "null indexed property value does not cause NPE — entity not indexed for that property" {
         val indexRepo = IndexedProductVolatileRepo()
         val product = IndexedProduct(1, "electronics", null)
         indexRepo.create(product)
@@ -333,7 +335,7 @@ internal class SearchPerformanceTest : StringSpec({
         result.shouldBeEmpty()
     }
 
-    "VolatileRepository null indexed property does not prevent indexing of non-null properties" {
+    "null indexed property does not prevent indexing of non-null properties" {
         val indexRepo = IndexedProductVolatileRepo()
         val product = IndexedProduct(1, "electronics", null)
         indexRepo.create(product)
@@ -343,7 +345,7 @@ internal class SearchPerformanceTest : StringSpec({
         result shouldContain product
     }
 
-    "VolatileRepository index works correctly after batch replace with mixed new and replacement entities" {
+    "index works correctly after batch replace with mixed new and replacement entities" {
         val indexRepo = IndexedProductVolatileRepo()
         val existing = IndexedProduct(1, "books", null)
         indexRepo.create(existing)
@@ -360,7 +362,7 @@ internal class SearchPerformanceTest : StringSpec({
         magazines shouldContainOnly setOf(replacement)
     }
 
-    "VolatileRepository index with named @Indexed annotation resolves by custom name" {
+    "index with named @Indexed annotation resolves by custom name" {
         val indexRepo = IndexedProductVolatileRepo()
         val product = IndexedProduct(1, "electronics", "premium")
         indexRepo.create(product)
@@ -370,7 +372,7 @@ internal class SearchPerformanceTest : StringSpec({
         result shouldContain product
     }
 
-    "VolatileRepository index maintains correct state after removeAll" {
+    "index maintains correct state after removeAll" {
         val indexRepo = IndexedProductVolatileRepo()
         val product1 = IndexedProduct(1, "sports", null)
         val product2 = IndexedProduct(2, "sports", null)
@@ -386,7 +388,7 @@ internal class SearchPerformanceTest : StringSpec({
         result shouldContainOnly setOf(product3)
     }
 
-    "VolatileRepository findByIndex returns defensive copy — mutations to result do not affect index" {
+    "findByIndex returns defensive copy — mutations to result do not affect index" {
         val indexRepo = IndexedProductVolatileRepo()
         val product = IndexedProduct(1, "electronics", null)
         indexRepo.create(product)

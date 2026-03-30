@@ -58,7 +58,7 @@ internal class TableDefProcessorTest : FunSpec({
         return file.readText()
     }
 
-    test("TableDefProcessor generates _LirpTableDef for minimal entity with convention defaults") {
+    test("generates _LirpTableDef for minimal entity with convention defaults") {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -85,7 +85,7 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "object MinimalEntity_LirpTableDef : LirpTableDef<MinimalEntity>"
     }
 
-    test("TableDefProcessor generates _LirpTableDef with annotation overrides for table name and column config") {
+    test("generates _LirpTableDef with annotation overrides for table name and column config") {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -119,7 +119,7 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "ColumnType.LongType"
     }
 
-    test("TableDefProcessor maps reactiveProperty delegate to declared type") {
+    test("maps reactiveProperty delegate to declared type") {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -148,7 +148,7 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "ColumnType.TextType"
     }
 
-    test("TableDefProcessor excludes @PersistenceIgnore properties from generated descriptor") {
+    test("excludes @PersistenceIgnore properties from generated descriptor") {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -179,7 +179,7 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldNotContain "transientData"
     }
 
-    test("TableDefProcessor triggers on @PersistenceProperty without class-level @PersistenceMapping") {
+    test("triggers on @PersistenceProperty without class-level @PersistenceMapping") {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -206,7 +206,7 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "name = \"label\""
     }
 
-    test("TableDefProcessor generates SqlTableDef implementation for entity with all-mutable non-PK properties") {
+    test("generates SqlTableDef implementation for entity with all-mutable non-PK properties") {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -232,7 +232,7 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "import org.jetbrains.exposed.v1.core.Table"
     }
 
-    test("TableDefProcessor generates fromRow that constructs entity with id and sets mutable properties") {
+    test("generates fromRow that constructs entity with id and sets mutable properties") {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -259,7 +259,7 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "return entity"
     }
 
-    test("TableDefProcessor generates toParams that returns all column-value pairs including PK") {
+    test("generates toParams that returns all column-value pairs including PK") {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -285,7 +285,7 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "cols[\"count\"]!! to entity.count"
     }
 
-    test("TableDefProcessor generates descriptor-only LirpTableDef when entity has immutable non-PK properties") {
+    test("generates descriptor-only LirpTableDef when entity has immutable non-PK properties") {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -308,7 +308,7 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldNotContain "toParams"
     }
 
-    test("TableDefProcessor generates correct Exposed v1 imports in SqlTableDef generated code") {
+    test("generates correct Exposed v1 imports in SqlTableDef generated code") {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -333,7 +333,7 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "import org.jetbrains.exposed.v1.core.Table"
     }
 
-    test("TableDefProcessor generates correct enum handling as String in fromRow and toParams") {
+    test("generates correct enum handling as String in fromRow and toParams") {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -359,7 +359,7 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "entity.status.name"
     }
 
-    test("TableDefProcessor reports KSP error for unsupported property type") {
+    test("reports KSP error for unsupported property type") {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -386,7 +386,7 @@ internal class TableDefProcessorTest : FunSpec({
         result.messages shouldContain "Unsupported column type"
     }
 
-    test("TableDefProcessor generates UUID primary key column for entity with UUID id") {
+    test("generates UUID primary key column for entity with UUID id") {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -414,7 +414,7 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "tableName: String = \"uuid_key_entity\""
     }
 
-    test("TableDefProcessor generates nullable columns for entity with all nullable non-PK properties") {
+    test("generates nullable columns for entity with all nullable non-PK properties") {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -441,7 +441,7 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "name = \"active\""
     }
 
-    test("TableDefProcessor generates descriptor-only LirpTableDef for entity with mixed val/var non-PK properties") {
+    test("generates descriptor-only LirpTableDef for entity with mixed val/var non-PK properties") {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -468,7 +468,7 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "name = \"mutable\""
     }
 
-    test("TableDefProcessor generates correct descriptor for UUID PK entity with @PersistenceIgnore field") {
+    test("generates correct descriptor for UUID PK entity with @PersistenceIgnore field") {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
