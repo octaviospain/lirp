@@ -184,7 +184,12 @@ class JsonFileRepositoryTest : DescribeSpec({
             shouldNotThrowAny { ioFailureRepo.create(1, "Test", "test@example.com") }
             ioFailureRepo.findById(1).isPresent shouldBe true
             unmockkAll()
-            ioFailureRepo.close()
+            // close() propagates the final flush failure since the mock file is not writable
+            try {
+                ioFailureRepo.close()
+            } catch (_: Exception) {
+                // expected
+            }
         }
     }
 

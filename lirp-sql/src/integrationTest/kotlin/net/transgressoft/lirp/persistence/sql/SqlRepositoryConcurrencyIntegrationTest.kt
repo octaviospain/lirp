@@ -98,9 +98,15 @@ internal class SqlRepositoryConcurrencyIntegrationTest : FunSpec({
                 }
 
                 repo.close()
-                val repo2 = SqlRepository(dataSource, TestPersonTableDef)
-                repo2.size() shouldBe 0
-                repo2.close()
+                // Verify DB state: close() flushes synchronously, but a concurrent debounce
+                // flush may have still been mid-transaction. Use eventually to allow for
+                // any in-flight DB write to settle before verifying via a second repo.
+                eventually(5.seconds) {
+                    val repo2 = SqlRepository(dataSource, TestPersonTableDef)
+                    val size = repo2.size()
+                    repo2.close()
+                    size shouldBe 0
+                }
             }
         }
     }

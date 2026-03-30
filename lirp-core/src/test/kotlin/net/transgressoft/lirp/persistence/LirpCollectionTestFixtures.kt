@@ -20,7 +20,6 @@ package net.transgressoft.lirp.persistence
 import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.Transient
 
 // --- Collection reference test entities and repositories ---
 // Extracted from LirpTestFixtures.kt for organizational clarity.
@@ -111,7 +110,6 @@ data class RestrictPlaylist(
     override val uniqueId: String get() = "restrict-playlist-$id"
 
     @Aggregate(onDelete = CascadeAction.RESTRICT)
-    @Transient
     val items by aggregateList<Int, TestTrack> { itemIds }
 
     override fun clone(): RestrictPlaylist = copy()
@@ -268,7 +266,6 @@ data class RestrictPlaylistGroup(
     override val uniqueId: String get() = "restrict-group-$id"
 
     @Aggregate(onDelete = CascadeAction.RESTRICT)
-    @Transient
     val playlists by aggregateSet<Long, Playlist> { playlistIds }
 
     override fun clone(): RestrictPlaylistGroup = copy()

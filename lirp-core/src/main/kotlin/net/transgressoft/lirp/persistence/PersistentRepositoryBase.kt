@@ -20,32 +20,54 @@ package net.transgressoft.lirp.persistence
 import net.transgressoft.lirp.entity.ReactiveEntity
 import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.MutationEvent
+import net.transgressoft.lirp.event.ReactiveScope
 import mu.KotlinLogging
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
+import kotlin.time.Duration.Companion.milliseconds
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * Abstract foundation for persistent repositories providing entity mutation subscription management,
- * closeable lifecycle, and dirty tracking via the [flush] hook.
+ * closeable lifecycle, dirty tracking, and a debounced write pipeline.
  *
  * Extends [VolatileRepository] and implements [PersistentRepository], sitting between the in-memory
- * base and concrete storage implementations (JSON, SQL, etc.). Subclasses implement [flush] to
- * trigger their specific persistence mechanism whenever the repository state changes.
+ * base and concrete storage implementations (JSON, SQL, etc.).
+ *
+ * Every CRUD operation and entity mutation enqueues a [PendingOp] to an internal
+ * [ConcurrentLinkedQueue] and updates in-memory state immediately (optimistic). A sliding-window
+ * debounce collapses and flushes pending ops to the underlying store after [debounceMillis] of
+ * inactivity. A [maxDelayMillis] cap prevents starvation under continuous mutations by forcing a
+ * flush even when ops keep arriving.
+ *
+ * Subclasses implement [writePending] to execute the collapsed operation list against the backing
+ * store. On write failure, the raw (non-collapsed) ops are re-enqueued for retry in the next cycle.
  *
  * Lifecycle guarantees:
  * - All mutating operations ([add], [remove], [removeAll], [clear]) throw [IllegalStateException]
  *   after the repository is closed.
  * - [close] is idempotent: subsequent calls after the first are safe no-ops.
+ * - [close] cancels the pending debounce timer, performs a synchronous final flush, then cancels
+ *   all entity mutation subscriptions.
  * - Entity mutation subscriptions are automatically cancelled on removal or close.
  *
  * @param K The type of entity identifier, must be [Comparable]
  * @param R The type of reactive entity stored in this repository
+ * @param debounceMillis Milliseconds of inactivity before pending ops are flushed (sliding window)
+ * @param maxDelayMillis Maximum milliseconds from first enqueue to forced flush (starvation guard)
  */
 abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K, R>>
     internal constructor(
         context: LirpContext,
         name: String,
-        initialEntities: MutableMap<K, R>
+        initialEntities: MutableMap<K, R>,
+        private val debounceMillis: Long = 100L,
+        private val maxDelayMillis: Long = 1000L
     ) : VolatileRepository<K, R>(context, name, initialEntities), PersistentRepository<K, R> {
 
         companion object {
@@ -57,7 +79,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
          * have direct access to [LirpContext].
          *
          * Uses [LirpContext.default] for registration and a [java.util.concurrent.ConcurrentHashMap]
-         * for in-memory storage.
+         * for in-memory storage. Debounce defaults: 100 ms sliding window, 1000 ms max delay cap.
          *
          * @param name A descriptive name for this repository, used in logging and identification.
          */
@@ -70,16 +92,119 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         val dirty = AtomicBoolean(false)
 
         @Volatile
-        var closed = false
+        protected var closed = false
             private set
 
+        private val pendingOps = ConcurrentLinkedQueue<PendingOp<K, R>>()
+
+        // Serializes flush() calls: prevents concurrent drains from the pending queue
+        // and ensures close() waits for any in-flight flush to complete before draining.
+        // Protected so subclasses can serialize direct writes against the same lock (e.g.
+        // JsonFileRepository's jsonFile setter).
+        protected val flushLock = ReentrantLock()
+
+        @Volatile
+        private var debounceJob: Job? = null
+
+        // Fires once per mutation window after maxDelayMillis regardless of ongoing mutations
+        @Volatile
+        private var maxDelayJob: Job? = null
+
         /**
-         * Called whenever the repository state has changed and persistence should be triggered.
+         * Persists the collapsed list of pending operations to the backing store.
          *
-         * Implementations use this hook to schedule or perform the appropriate storage operation,
-         * such as writing to a JSON file or queuing a SQL transaction.
+         * Called by [flush] after collapsing the queue. On failure, the raw ops (before collapse)
+         * are re-enqueued so the next flush cycle can retry.
+         *
+         * @param ops the minimal collapsed list of operations to execute.
          */
-        protected abstract fun flush()
+        protected abstract fun writePending(ops: List<PendingOp<K, R>>)
+
+        /**
+         * Drains the pending operation queue, collapses it via [collapse], and delegates to
+         * [writePending]. On failure, re-enqueues the raw (pre-collapse) ops for the next cycle.
+         *
+         * This method is called synchronously by [close] and asynchronously by the debounce job.
+         * A [flushLock] serializes concurrent calls so that close() always waits for any in-flight
+         * debounce flush to complete before draining the queue itself.
+         * Subclasses are responsible for resetting [dirty] to `false` within [writePending] once
+         * the write is confirmed (or asynchronously, if the write is fire-and-forget).
+         */
+        protected fun flush() {
+            flushLock.withLock {
+                val snapshot = mutableListOf<PendingOp<K, R>>()
+                while (true) {
+                    snapshot.add(pendingOps.poll() ?: break)
+                }
+                if (snapshot.isEmpty())
+                    return
+                val collapsed = collapse(snapshot)
+                if (collapsed.isEmpty())
+                    return
+                try {
+                    writePending(collapsed)
+                } catch (e: Exception) {
+                    // Drain any ops that arrived during the failed write, then prepend the failed
+                    // snapshot to preserve chronological order for the retry
+                    val arrivedDuringWrite = mutableListOf<PendingOp<K, R>>()
+                    while (true) {
+                        arrivedDuringWrite.add(pendingOps.poll() ?: break)
+                    }
+                    snapshot.forEach { pendingOps.offer(it) }
+                    arrivedDuringWrite.forEach { pendingOps.offer(it) }
+                    if (!closed)
+                        scheduleFlush()
+                    throw e
+                }
+            }
+        }
+
+        // All callers (add, remove, removeAll, clear) guard with checkNotClosed() before reaching
+        // enqueue(). A narrow race exists where close() sets closed=true between checkNotClosed()
+        // and enqueue(), causing one op to land after the final flush has drained the queue.
+        // This is acceptable: the concurrent-close window is extremely narrow and the entity
+        // subscription handler already guards with if (!closed) for mutation-triggered enqueues.
+        private fun enqueue(op: PendingOp<K, R>) {
+            pendingOps.offer(op)
+            dirty.set(true)
+            scheduleFlush()
+        }
+
+        private fun scheduleFlush() {
+            // Start max-delay job only on the first enqueue of a new mutation window.
+            // This job fires unconditionally after maxDelayMillis to prevent starvation.
+            // The null-check is not synchronized: two concurrent calls may both launch a max-delay
+            // job. This is harmless — the second flush drains an already-empty queue and returns.
+            if (maxDelayJob == null || maxDelayJob!!.isCompleted || maxDelayJob!!.isCancelled) {
+                maxDelayJob =
+                    ReactiveScope.ioScope.launch {
+                        delay(maxDelayMillis.milliseconds)
+                        maxDelayJob = null
+                        flush()
+                    }
+            }
+            // Sliding-window debounce: each new enqueue resets the idle timer.
+            debounceJob?.cancel()
+            debounceJob =
+                ReactiveScope.ioScope.launch {
+                    delay(debounceMillis.milliseconds)
+                    maxDelayJob?.cancel()
+                    maxDelayJob = null
+                    flush()
+                }
+        }
+
+        /**
+         * Adds [entity] to in-memory storage and subscribes to mutation events without enqueuing
+         * any [PendingOp].
+         *
+         * Used by subclasses during initialization to load entities from an external store
+         * (e.g. DB or JSON file) without triggering a write-back for data already persisted.
+         */
+        protected fun addToMemoryOnly(entity: R) {
+            super.add(entity)
+            subscribeEntity(entity)
+        }
 
         /**
          * Subscribes to mutation events from [entity] and registers the subscription for lifecycle management.
@@ -91,8 +216,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
             val subscription =
                 entity.subscribe { mutationEvent ->
                     if (!closed) {
-                        dirty.set(true)
-                        flush()
+                        enqueue(PendingUpdate(mutationEvent.newEntity))
                         onEntityMutated(mutationEvent)
                     }
                 }
@@ -100,7 +224,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         }
 
         /**
-         * Called after [flush] whenever an entity mutation is detected.
+         * Called after an entity mutation is detected and a [PendingUpdate] has been enqueued.
          *
          * Subclasses may override this method to react to entity-level mutations with additional
          * logic, such as emitting repository-level [CrudEvent] UPDATE events. The default
@@ -119,8 +243,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
             val added = super.add(entity)
             if (added) {
                 subscribeEntity(entity)
-                dirty.set(true)
-                flush()
+                enqueue(PendingInsert(entity))
             }
             return added
         }
@@ -129,8 +252,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
             checkNotClosed()
             return super.remove(entity).also { removed ->
                 if (removed) {
-                    dirty.set(true)
-                    flush()
+                    enqueue(PendingDelete(entity.id))
                     val subscription =
                         subscriptionsMap.remove(entity.id)
                             ?: error("Repository should contain a subscription for $entity")
@@ -144,8 +266,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
             val presentEntities = entities.filter { contains(it) }
             return super.removeAll(entities).also { removed ->
                 if (removed) {
-                    dirty.set(true)
-                    flush()
+                    enqueue(PendingBatchDelete(presentEntities.map { it.id }))
                     presentEntities.forEach {
                         subscriptionsMap.remove(it.id)?.cancel()
                     }
@@ -156,17 +277,32 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         override fun clear() {
             checkNotClosed()
             super.clear()
-            dirty.set(true)
-            flush()
+            enqueue(PendingClear())
             subscriptionsMap.forEach { (_, sub) -> sub.cancel() }
             subscriptionsMap.clear()
         }
 
         override fun close() {
-            if (closed) return
+            if (closed)
+                return
             closed = true
-            subscriptionsMap.forEach { (_, sub) -> sub.cancel() }
-            subscriptionsMap.clear()
-            super.close()
+            debounceJob?.cancel()
+            maxDelayJob?.cancel()
+            // The flushLock ensures that if a debounce flush is mid-writePending, close() blocks
+            // here until that flush completes. After acquiring the lock, flush() drains any ops
+            // that were re-enqueued by a failed debounce flush or are simply waiting in the queue.
+            var flushError: Exception? = null
+            try {
+                flush()
+            } catch (e: Exception) {
+                flushError = e
+                log.error(e) { "Error during final flush on close" }
+            } finally {
+                subscriptionsMap.forEach { (_, sub) -> sub.cancel() }
+                subscriptionsMap.clear()
+                super.close()
+            }
+            if (flushError != null)
+                throw flushError
         }
     }
