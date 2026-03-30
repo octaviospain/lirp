@@ -26,6 +26,8 @@ import net.transgressoft.lirp.persistence.EntityCVolatileRepo
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.MutableRefOrderVolatileRepo
 import net.transgressoft.lirp.persistence.OrderVolatileRepo
+import io.kotest.assertions.nondeterministic.continually
+import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
@@ -33,6 +35,8 @@ import io.kotest.matchers.types.shouldBeInstanceOf
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -150,8 +154,7 @@ internal class AggregateBubbleUpTest : FunSpec({
         customer.updateName("Alice Updated")
 
         // Wait briefly to confirm no event arrives
-        Thread.sleep(300)
-        receivedEventCount.get() shouldBe 0
+        continually(300.milliseconds) { receivedEventCount.get() shouldBe 0 }
     }
 
     test("Bubble-up re-wires to new entity after reference ID change via mutateAndPublish") {
@@ -195,9 +198,8 @@ internal class AggregateBubbleUpTest : FunSpec({
         // Mutate customer1 — should NOT produce further aggregate events
         val countBeforeOldMutation = receivedCount.get()
         customer1.updateName("Alice Again")
-        Thread.sleep(300)
         // No additional events from old customer1 subscription
-        receivedCount.get() shouldBe countBeforeOldMutation
+        continually(300.milliseconds) { receivedCount.get() shouldBe countBeforeOldMutation }
     }
 
     test("Bubble-up stays on old entity when new reference ID does not resolve") {
@@ -228,8 +230,7 @@ internal class AggregateBubbleUpTest : FunSpec({
         // Old subscription to customer1 still active
         val countBefore = eventCount.get()
         customer1.updateName("Alice Again")
-        Thread.sleep(300)
-        eventCount.get() shouldBe countBefore + 1
+        eventually(5.seconds) { eventCount.get() shouldBe countBefore + 1 }
     }
 
     test("Bubble-up re-wires after initially unresolvable new ID becomes available") {
@@ -290,8 +291,7 @@ internal class AggregateBubbleUpTest : FunSpec({
         entityA.updateValue("mutated")
 
         bReceivedLatch.await(2, TimeUnit.SECONDS) shouldBe true
-        Thread.sleep(300)
-        cReceivedCount.get() shouldBe 0
+        continually(300.milliseconds) { cReceivedCount.get() shouldBe 0 }
     }
 
     test("BubbleUpOrder added before its Customer exists completes wireBubbleUp without throwing") {

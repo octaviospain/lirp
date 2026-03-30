@@ -37,6 +37,13 @@ import kotlinx.coroutines.launch
 /** Delay in milliseconds applied to the slow subscriber in every test scenario. Increase this value on slow CI environments. */
 const val SLOW_DELAY_MS = 50L
 
+/**
+ * Spacing between paced emissions. Must be significantly larger than [SLOW_DELAY_MS] to ensure
+ * `collectLatest` does not cancel in-progress slow handlers on loaded CI environments where
+ * coroutine scheduling adds variable overhead.
+ */
+private const val PACED_INTERVAL_MS = 120L
+
 private const val EVENT_COUNT = 60
 
 /**
@@ -136,7 +143,7 @@ class SlowSubscriberTest : DescribeSpec({
 
             // Emit with spacing slightly above SLOW_DELAY_MS so collectLatest does not cancel any handler.
             // This still proves emission is much faster than if blocking occurred.
-            val pacedIntervalMs = SLOW_DELAY_MS + 10L
+            val pacedIntervalMs = PACED_INTERVAL_MS
             val emitter =
                 dedicatedScope.launch {
                     repeat(EVENT_COUNT) { i ->
@@ -186,7 +193,7 @@ class SlowSubscriberTest : DescribeSpec({
                     if (slowLatch.count == 0L) slowCompletedMs.set(System.currentTimeMillis())
                 }
 
-            val pacedIntervalMs = SLOW_DELAY_MS + 10L
+            val pacedIntervalMs = PACED_INTERVAL_MS
             dedicatedScope.launch {
                 repeat(EVENT_COUNT) { i ->
                     publisher.emitAsync(StandardCrudEvent.Create(TestEntity("timing-$i")))
@@ -257,7 +264,7 @@ class SlowSubscriberTest : DescribeSpec({
                     slowLatch.countDown()
                 }
 
-            val pacedIntervalMs = SLOW_DELAY_MS + 10L
+            val pacedIntervalMs = PACED_INTERVAL_MS
             dedicatedScope.launch {
                 repeat(EVENT_COUNT) { i ->
                     repository.create(i, "customer-$i")

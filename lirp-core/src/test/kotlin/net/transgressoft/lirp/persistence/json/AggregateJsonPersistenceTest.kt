@@ -23,12 +23,16 @@ import net.transgressoft.lirp.persistence.BubbleUpOrder
 import net.transgressoft.lirp.persistence.CustomerVolatileRepo
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpRepository
+import net.transgressoft.lirp.persistence.Playlist
+import net.transgressoft.lirp.persistence.TestTrackVolatileRepo
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempfile
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -65,7 +69,7 @@ class AggregateJsonPersistenceTest : FunSpec({
         ReactiveScope.resetDefaultFlowScope()
     }
 
-    test("JsonFileRepository serializes entity with aggregate ref as ID-only, no resolved object") {
+    test("serializes entity with aggregate ref as ID-only, no resolved object") {
         val ctx = LirpContext()
         val orderFile = tempfile("order-repo", ".json").also { it.deleteOnExit() }
         val customerRepo = CustomerVolatileRepo(ctx)
@@ -84,7 +88,7 @@ class AggregateJsonPersistenceTest : FunSpec({
         ctx.close()
     }
 
-    test("JsonFileRepository loaded entity can resolve aggregate ref after child repo is populated") {
+    test("loaded entity can resolve aggregate ref after child repo is populated") {
         val ctx1 = LirpContext()
         val orderFile = tempfile("order-repo-reload", ".json").also { it.deleteOnExit() }
         val customerRepo = CustomerVolatileRepo(ctx1)
@@ -189,6 +193,106 @@ class AggregateJsonPersistenceTest : FunSpec({
 
         ctx2.close()
     }
+
+    test("serializes entity with aggregateList ref as ID list only") {
+        val ctx = LirpContext()
+        val trackRepo = TestTrackVolatileRepo(ctx)
+        val playlistFile = tempfile("playlist-repo", ".json").also { it.deleteOnExit() }
+        val playlistRepo = PlaylistJsonFileRepository(ctx, playlistFile)
+
+        trackRepo.create(1, "Track A")
+        trackRepo.create(2, "Track B")
+        playlistRepo.create(100L, "My Playlist", listOf(1, 2))
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val json = playlistFile.readText()
+        json shouldContain "\"itemIds\""
+        json shouldNotContain "\"items\""
+        json shouldNotContain "\"items\""
+
+        ctx.close()
+    }
+
+    test("loaded entity resolves aggregateList ref after child repo is populated") {
+        val ctx1 = LirpContext()
+        val trackRepo1 = TestTrackVolatileRepo(ctx1)
+        val playlistFile = tempfile("playlist-reload", ".json").also { it.deleteOnExit() }
+        val playlistRepo1 = PlaylistJsonFileRepository(ctx1, playlistFile)
+
+        trackRepo1.create(1, "Track A")
+        trackRepo1.create(2, "Track B")
+        playlistRepo1.create(100L, "My Playlist", listOf(1, 2))
+
+        testDispatcher.scheduler.advanceUntilIdle()
+        ctx1.close()
+
+        val ctx2 = LirpContext()
+        val trackRepo2 = TestTrackVolatileRepo(ctx2)
+        trackRepo2.create(1, "Track A")
+        trackRepo2.create(2, "Track B")
+        val playlistRepo2 = PlaylistJsonFileRepository(ctx2, playlistFile)
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val reloaded = playlistRepo2.findById(100L).get()
+        reloaded.items.resolveAll().map { it.id } shouldContainExactly listOf(1, 2)
+
+        ctx2.close()
+    }
+
+    test("collection ref preserves order after round-trip") {
+        val ctx1 = LirpContext()
+        val trackRepo1 = TestTrackVolatileRepo(ctx1)
+        val playlistFile = tempfile("playlist-order", ".json").also { it.deleteOnExit() }
+        val playlistRepo1 = PlaylistJsonFileRepository(ctx1, playlistFile)
+
+        trackRepo1.create(3, "Track C")
+        trackRepo1.create(1, "Track A")
+        trackRepo1.create(2, "Track B")
+        playlistRepo1.create(100L, "Ordered", listOf(3, 1, 2))
+
+        testDispatcher.scheduler.advanceUntilIdle()
+        ctx1.close()
+
+        val ctx2 = LirpContext()
+        val trackRepo2 = TestTrackVolatileRepo(ctx2)
+        trackRepo2.create(3, "Track C")
+        trackRepo2.create(1, "Track A")
+        trackRepo2.create(2, "Track B")
+        val playlistRepo2 = PlaylistJsonFileRepository(ctx2, playlistFile)
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val reloaded = playlistRepo2.findById(100L).get()
+        reloaded.items.resolveAll().map { it.id } shouldContainExactly listOf(3, 1, 2)
+
+        ctx2.close()
+    }
+
+    test("collection ref resolves to empty list when referenced entities are absent") {
+        val ctx1 = LirpContext()
+        val trackRepo1 = TestTrackVolatileRepo(ctx1)
+        val playlistFile = tempfile("playlist-empty", ".json").also { it.deleteOnExit() }
+        val playlistRepo1 = PlaylistJsonFileRepository(ctx1, playlistFile)
+
+        trackRepo1.create(1, "Track A")
+        playlistRepo1.create(100L, "Ghost Refs", listOf(1, 99))
+
+        testDispatcher.scheduler.advanceUntilIdle()
+        ctx1.close()
+
+        val ctx2 = LirpContext()
+        TestTrackVolatileRepo(ctx2) // register repo but don't add any tracks
+        val playlistRepo2 = PlaylistJsonFileRepository(ctx2, playlistFile)
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val reloaded = playlistRepo2.findById(100L).get()
+        reloaded.items.resolveAll().size shouldBe 0
+
+        ctx2.close()
+    }
 })
 
 /**
@@ -201,7 +305,7 @@ class AggregateJsonPersistenceTest : FunSpec({
 @LirpRepository
 class BubbleUpOrderJsonFileRepository internal constructor(
     context: LirpContext,
-    file: java.io.File,
+    file: File,
     serializationDelayMs: Long = 300L
 ) : JsonFileRepository<Long, BubbleUpOrder>(
         context,
@@ -209,7 +313,29 @@ class BubbleUpOrderJsonFileRepository internal constructor(
         MapSerializer(Long.serializer(), BubbleUpOrder.serializer()),
         serializationDelay = serializationDelayMs.milliseconds
     ) {
-    constructor(file: java.io.File, serializationDelayMs: Long = 300L) : this(LirpContext.default, file, serializationDelayMs)
+    constructor(file: File, serializationDelayMs: Long = 300L) : this(LirpContext.default, file, serializationDelayMs)
 
     fun create(id: Long, customerId: Int): BubbleUpOrder = BubbleUpOrder(id, customerId).also { add(it) }
+}
+
+/**
+ * Test-scoped [JsonFileRepository] for [Playlist] entities with collection aggregate references.
+ *
+ * Used to verify that `aggregateList`-based collection references are serialized as ID lists
+ * and correctly resolved after round-trip through JSON persistence.
+ */
+@LirpRepository
+class PlaylistJsonFileRepository internal constructor(
+    context: LirpContext,
+    file: File,
+    serializationDelayMs: Long = 300L
+) : JsonFileRepository<Long, Playlist>(
+        context,
+        file,
+        MapSerializer(Long.serializer(), Playlist.serializer()),
+        serializationDelay = serializationDelayMs.milliseconds
+    ) {
+    constructor(file: File, serializationDelayMs: Long = 300L) : this(LirpContext.default, file, serializationDelayMs)
+
+    fun create(id: Long, name: String, itemIds: List<Int>): Playlist = Playlist(id, name, itemIds).also { add(it) }
 }

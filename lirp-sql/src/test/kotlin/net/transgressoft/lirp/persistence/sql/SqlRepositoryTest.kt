@@ -20,6 +20,7 @@ package net.transgressoft.lirp.persistence.sql
 import net.transgressoft.lirp.event.CrudEvent
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
+import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.booleans.shouldBeTrue
@@ -28,6 +29,7 @@ import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.DisplayName
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Unit tests for [SqlRepository] using H2 in-memory databases to verify SQL-first CRUD semantics,
@@ -78,9 +80,9 @@ internal class SqlRepositoryTest : StringSpec({
 
         repo.add(TestPerson(1).apply { firstName = "Bob" })
 
-        // FlowEventPublisher emits asynchronously; allow brief settling
-        Thread.sleep(100)
-        received.get() shouldBe CrudEvent.Type.CREATE
+        eventually(5.seconds) {
+            received.get() shouldBe CrudEvent.Type.CREATE
+        }
 
         repo.close()
     }
@@ -117,8 +119,9 @@ internal class SqlRepositoryTest : StringSpec({
 
         repo.remove(person)
 
-        Thread.sleep(100)
-        received.get() shouldBe CrudEvent.Type.DELETE
+        eventually(5.seconds) {
+            received.get() shouldBe CrudEvent.Type.DELETE
+        }
 
         repo.close()
     }
@@ -197,15 +200,13 @@ internal class SqlRepositoryTest : StringSpec({
         // Mutate the entity — triggers the subscription callback and synchronous flush
         person.firstName = "Franklin"
 
-        // Allow the synchronous flush to complete and any async event propagation to settle
-        Thread.sleep(200)
-
-        // Second repository reads from DB; should see the updated value
-        val repo2 = SqlRepository(jdbcUrl, TestPersonTableDef)
-        repo2.findById(5).shouldBePresent { it.firstName shouldBe "Franklin" }
+        eventually(5.seconds) {
+            val repo2 = SqlRepository(jdbcUrl, TestPersonTableDef)
+            repo2.findById(5).shouldBePresent { it.firstName shouldBe "Franklin" }
+            repo2.close()
+        }
 
         repo.close()
-        repo2.close()
     }
 
     "clears all entities from database and in-memory" {

@@ -143,7 +143,7 @@ class FlowEventPublisherTest : DescribeSpec({
             val initialDate = entity.lastDateModified
 
             // Wait a bit to ensure time difference
-            Thread.sleep(10)
+            delay(10.milliseconds)
 
             entity.name = "Updated Name"
 

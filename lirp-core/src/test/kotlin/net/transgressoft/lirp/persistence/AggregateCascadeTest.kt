@@ -20,6 +20,7 @@ package net.transgressoft.lirp.persistence
 import net.transgressoft.lirp.event.AggregateMutationEvent
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.ReactiveScope
+import io.kotest.assertions.nondeterministic.continually
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
@@ -29,6 +30,7 @@ import io.kotest.matchers.string.shouldContain
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -131,8 +133,7 @@ internal class AggregateCascadeTest : FunSpec({
         // After removal, the order should not receive further events
         val eventCountAfter = AtomicInteger(0)
         customer.updateName("Alice Updated Again")
-        Thread.sleep(300)
-        eventCountAfter.get() shouldBe 0
+        continually(300.milliseconds) { eventCountAfter.get() shouldBe 0 }
         subscription.cancel()
     }
 
@@ -248,8 +249,7 @@ internal class AggregateCascadeTest : FunSpec({
         }
 
         customer.updateName("Alice Updated After Concurrent Storm")
-        Thread.sleep(300)
-        eventCount.get() shouldBe 0
+        continually(300.milliseconds) { eventCount.get() shouldBe 0 }
     }
 
     test("ReactiveEntityBase close() always executes DETACH cleanup regardless of cascade config") {
@@ -279,8 +279,7 @@ internal class AggregateCascadeTest : FunSpec({
 
         // After close, no more bubble-up events should reach the order
         customer.updateName("Alice Updated Again")
-        Thread.sleep(300)
-        eventCount.get() shouldBe 1 // still 1, no new events
+        continually(300.milliseconds) { eventCount.get() shouldBe 1 } // still 1, no new events
     }
 
     test("DetachOrder bubble-up subscription is cancelled when the order is removed from its repository") {
