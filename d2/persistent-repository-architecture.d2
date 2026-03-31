@@ -1,0 +1,73 @@
+title: PersistentRepositoryBase — Write Pipeline {
+    near: top-center
+    shape: text
+    style.font-size: 24
+    style.bold: true
+}
+
+base: PersistentRepositoryBase {
+    style.fill: "#f5f5f5"
+    style.stroke: "#333"
+
+    ops: "CRUD Operations" {
+        shape: rectangle
+        style.fill: "#e3f2fd"
+        "add()"
+        "remove()"
+        "clear()"
+        "mutation callback"
+    }
+
+    queue: ConcurrentLinkedQueue {
+        shape: queue
+        style.fill: "#fff3e0"
+        "PendingOp<K,R>"
+    }
+
+    collapse: "collapse(ops)" {
+        shape: rectangle
+        style.fill: "#e8f5e9"
+        "Per-entity-ID"
+        "state reduction"
+    }
+
+    debounce: Debounce Timer {
+        shape: rectangle
+        style.fill: "#fce4ec"
+        "sliding window"
+        debounceMillis
+        maxDelayMillis
+    }
+
+    writePending: "writePending()" {
+        shape: rectangle
+        style.fill: "#f3e5f5"
+        "subclass impl"
+    }
+
+    ops -> queue
+    ops -> debounce
+    queue -> collapse
+    collapse -> writePending
+    debounce -> writePending
+}
+
+sql: SqlRepository {
+    shape: rectangle
+    style.fill: "#e3f2fd"
+    style.stroke: "#1565c0"
+    "Single Exposed"
+    "transaction{}"
+    "with batch SQL"
+}
+
+json: JsonFileRepository {
+    shape: rectangle
+    style.fill: "#e8f5e9"
+    style.stroke: "#2e7d32"
+    "Full-file rewrite"
+    "via encodeToString"
+}
+
+base.writePending -> sql
+base.writePending -> json

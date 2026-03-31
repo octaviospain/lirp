@@ -1,0 +1,33 @@
+direction: down
+
+title: Operation Collapse Algorithm {
+    near: top-center
+    shape: text
+    style.font-size: 24
+    style.bold: true
+}
+
+raw: "Raw Queue (example)" {
+    shape: rectangle
+    style.fill: "#fff3e0"
+    style.stroke: "#e65100"
+    "Insert(A) -> Update(A) -> Insert(B) -> Delete(B) -> Update(A)"
+}
+
+accumulator: "Accumulator (per-entity state)" {
+    shape: rectangle
+    style.fill: "#e3f2fd"
+    style.stroke: "#1565c0"
+    "A: INSERT (latest state from final Update)"
+    "B: (removed — Insert + Delete = no-op)"
+}
+
+result: Collapsed Result {
+    shape: rectangle
+    style.fill: "#e8f5e9"
+    style.stroke: "#2e7d32"
+    "[ PendingInsert(A, latest) ]"
+}
+
+raw -> accumulator: "collapse()"
+accumulator -> result: "build result"

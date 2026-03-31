@@ -1,0 +1,20 @@
+title: Aggregate Reference Resolution {
+    near: top-center
+    shape: text
+    style.font-size: 24
+    style.bold: true
+}
+
+shape: sequence_diagram
+
+P: OrderItem
+D: AggregateRefDelegate
+Ctx: LirpContext
+R: ProductRepository
+
+P -> D: "item.product.resolve()"
+D -> Ctx: "registryFor(Product::class)"
+Ctx -> D: "ProductRepository"
+D -> R: "findById(productId)"
+R -> D: "Optional<Product>"
+D -> P: "Optional<Product>"

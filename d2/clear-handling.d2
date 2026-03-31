@@ -1,0 +1,40 @@
+direction: down
+
+title: Clear Handling — Collapse Example {
+    near: top-center
+    shape: text
+    style.font-size: 24
+    style.bold: true
+}
+
+queue: "Queue: [Insert(A), Clear, Insert(B), Update(B)]" {
+    shape: rectangle
+    style.fill: "#fff3e0"
+    style.stroke: "#e65100"
+}
+
+clear-step: "Clear wipes accumulator" {
+    shape: rectangle
+    style.fill: "#ffebee"
+    style.stroke: "#c62828"
+    "A is gone"
+    "hadClear = true"
+}
+
+fold: "Fold post-clear operations" {
+    shape: rectangle
+    style.fill: "#e3f2fd"
+    style.stroke: "#1565c0"
+    "Insert(B) → B: INSERT"
+    "Update(B) → B: INSERT (latest state, since INSERT was staged)"
+}
+
+result: "Result: [PendingClear, PendingInsert(B-latest)]" {
+    shape: rectangle
+    style.fill: "#e8f5e9"
+    style.stroke: "#2e7d32"
+}
+
+queue -> clear-step
+clear-step -> fold
+fold -> result

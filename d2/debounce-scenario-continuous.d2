@@ -1,0 +1,44 @@
+direction: right
+
+title: "Scenario 2: Continuous Mutations (maxDelay fires)" {
+    near: top-center
+    shape: text
+    style.font-size: 22
+    style.bold: true
+}
+
+subtitle: "debounce=100ms, maxDelay=500ms" {
+    near: top-center
+    shape: text
+    style.font-size: 16
+    style.italic: true
+}
+
+ops: "0-400ms" {
+    shape: rectangle
+    style.fill: "#e3f2fd"
+    "add(A) → add(B) → add(C)"
+    "mutate(A) → mutate(B)"
+    "debounce resets on every op"
+    "no inactivity gap >= 100ms"
+    "debounce never fires"
+}
+
+maxdelay: "500ms" {
+    shape: rectangle
+    style.fill: "#fce4ec"
+    style.stroke: "#c62828"
+    "maxDelay fires"
+    "(500ms from first enqueue)"
+}
+
+flush: "flush()" {
+    shape: rectangle
+    style.fill: "#e8f5e9"
+    style.stroke: "#2e7d32"
+    "collapse → write"
+    "all ops batched"
+}
+
+ops -> maxdelay: "continuous mutations"
+maxdelay -> flush: "starvation guard"

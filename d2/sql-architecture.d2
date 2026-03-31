@@ -1,0 +1,49 @@
+direction: down
+
+title: SQL Persistence Architecture {
+    near: top-center
+    shape: text
+    style.font-size: 24
+    style.bold: true
+}
+
+repo-hierarchy: Repository Hierarchy {
+    style.fill: "#e3f2fd"
+    style.stroke: "#1565c0"
+
+    SqlRepository: "SqlRepository<K, R>"
+    PersistentRepositoryBase: "PersistentRepositoryBase<K, R>"
+    VolatileRepository: "VolatileRepository<K, R>"
+
+    SqlRepository -> PersistentRepositoryBase: extends
+    PersistentRepositoryBase -> VolatileRepository: extends
+}
+
+table-hierarchy: Table Descriptors {
+    style.fill: "#fff3e0"
+    style.stroke: "#e65100"
+
+    SqlTableDef: "SqlTableDef<E>" {
+        "entity-row mapping (KSP-generated)"
+    }
+    LirpTableDef: "LirpTableDef<E>" {
+        "persistence-agnostic descriptor (lirp-api)"
+    }
+
+    SqlTableDef -> LirpTableDef: extends
+}
+
+interpreter: ExposedTableInterpreter {
+    style.fill: "#e8f5e9"
+    style.stroke: "#2e7d32"
+    "converts LirpTableDef → Exposed Table"
+}
+
+exposed-table: ExposedTable {
+    style.fill: "#e8f5e9"
+    style.stroke: "#2e7d32"
+    "wraps Table + column-by-name index"
+}
+
+table-hierarchy.LirpTableDef -> interpreter: reads
+interpreter -> exposed-table: builds

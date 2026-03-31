@@ -1,0 +1,54 @@
+direction: down
+
+title: Entity Class Hierarchy {
+    near: top-center
+    shape: text
+    style.font-size: 24
+    style.bold: true
+}
+
+LirpEntity: LirpEntity {
+    shape: class
+    "<<interface>>"
+}
+
+IdentifiableEntity: IdentifiableEntity {
+    shape: class
+    "<<interface>>"
+    id: K
+    uniqueId: String
+}
+
+ReactiveEntity: ReactiveEntity {
+    shape: class
+    "<<interface>>"
+    changes: SharedFlow
+    lastDateModified: LocalDateTime
+    isClosed: Boolean
+    subscribe(action): LirpEventSubscription
+    emitAsync(event)
+    "clone()": ReactiveEntity
+    "close()"
+}
+
+ReactiveEntityBase: ReactiveEntityBase {
+    shape: class
+    "<<abstract>>"
+    mutateAndPublish(newVal, oldVal, setter)
+}
+
+LirpEntity -> IdentifiableEntity: {
+    style.stroke-dash: 0
+    target-arrowhead.shape: triangle
+    target-arrowhead.style.filled: false
+}
+IdentifiableEntity -> ReactiveEntity: {
+    style.stroke-dash: 0
+    target-arrowhead.shape: triangle
+    target-arrowhead.style.filled: false
+}
+ReactiveEntity -> ReactiveEntityBase: {
+    style.stroke-dash: 3
+    target-arrowhead.shape: triangle
+    target-arrowhead.style.filled: false
+}

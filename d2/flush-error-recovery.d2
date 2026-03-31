@@ -1,0 +1,29 @@
+direction: right
+
+title: "writePending() Failure Recovery" {
+    near: top-center
+    shape: text
+    style.font-size: 24
+    style.bold: true
+}
+
+drain: "drain new arrivals" {
+    shape: rectangle
+    style.fill: "#e3f2fd"
+    style.stroke: "#1565c0"
+}
+
+prepend: "prepend old ops first" {
+    shape: rectangle
+    style.fill: "#fff3e0"
+    style.stroke: "#e65100"
+}
+
+retry: "schedule retry\n(if not closed)" {
+    shape: rectangle
+    style.fill: "#e8f5e9"
+    style.stroke: "#2e7d32"
+}
+
+drain -> prepend
+prepend -> retry

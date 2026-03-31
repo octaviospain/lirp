@@ -1,0 +1,20 @@
+title: Event Flow — Property Mutation to Subscribers {
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+shape: sequence_diagram
+
+E: Product Entity
+P: FlowEventPublisher
+S: Subscriber
+
+E -> E: "product.price = 29.99"
+E -> E: "mutateAndPublish(newVal, oldVal, setter)"
+E."captures clone() as oldEntity\napplies setter\ncreates MutationEvent"
+E -> P: "emitAsync(MutationEvent)"
+P -> S: "event delivered via SharedFlow"
+S -> S: "action(event)"
+S."event.oldEntity.price == 0.0\nevent.newEntity.price == 29.99"

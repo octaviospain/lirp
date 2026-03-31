@@ -1,0 +1,35 @@
+direction: down
+
+title: Repository Lifecycle {
+    near: top-center
+    shape: text
+    style.font-size: 24
+    style.bold: true
+}
+
+constructor: Constructor {
+    shape: rectangle
+    style.fill: "#e8f5e9"
+}
+register: Register in LirpContext
+add: "add / create entities"
+mutate: mutateAndPublish on entity
+persist: "Persist to JSON / emit CrudEvent"
+remove: "remove / removeAll / clear"
+delete-event: Emit DELETE CrudEvent
+close: "close()" {
+    style.fill: "#ffebee"
+}
+deregister: Deregister from LirpContext
+flush: Flush pending JSON write
+
+constructor -> register
+register -> add
+add -> mutate
+mutate -> persist
+persist -> mutate: loop
+add -> remove
+remove -> delete-event
+delete-event -> close
+close -> deregister
+close -> flush

@@ -1,0 +1,39 @@
+direction: right
+
+title: Module Dependency {
+    near: top-center
+    shape: text
+    style.font-size: 24
+    style.bold: true
+}
+
+lirp-api: "lirp-api (contracts)" {
+    style.fill: "#e8f4fd"
+    style.stroke: "#2196f3"
+
+    LirpEntity
+    IdentifiableEntity
+    ReactiveEntity
+    Repository
+    Registry
+    CrudEvent
+    MutationEvent
+    AggregateMutationEvent
+}
+
+lirp-core: "lirp-core (implementations)" {
+    style.fill: "#fce4ec"
+    style.stroke: "#e91e63"
+
+    ReactiveEntityBase
+    VolatileRepository
+    JsonFileRepository
+    FlexibleJsonFileRepository
+    FlowEventPublisher
+    AggregateRefDelegate
+    LirpContext
+}
+
+lirp-core -> lirp-api: depends on {
+    style.stroke: "#666"
+}

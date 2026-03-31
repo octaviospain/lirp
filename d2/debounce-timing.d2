@@ -1,0 +1,43 @@
+direction: down
+
+title: Debounce Timing — Dual Coroutine Strategy {
+    near: top-center
+    shape: text
+    style.font-size: 24
+    style.bold: true
+}
+
+enqueue: "enqueue()" {
+    shape: rectangle
+    style.fill: "#e3f2fd"
+    style.stroke: "#1565c0"
+}
+
+debounce: "debounceJob" {
+    shape: rectangle
+    style.fill: "#fff3e0"
+    style.stroke: "#e65100"
+    "delay(debounceMillis) → flush()"
+    "cancelled and relaunched on every enqueue"
+    "(sliding window)"
+}
+
+maxdelay: "maxDelayJob" {
+    shape: rectangle
+    style.fill: "#fce4ec"
+    style.stroke: "#c62828"
+    "delay(maxDelayMillis) → flush()"
+    "launched once per mutation window"
+    "(starvation guard)"
+}
+
+flush: "flush()" {
+    shape: rectangle
+    style.fill: "#e8f5e9"
+    style.stroke: "#2e7d32"
+}
+
+enqueue -> debounce
+enqueue -> maxdelay
+debounce -> flush
+maxdelay -> flush

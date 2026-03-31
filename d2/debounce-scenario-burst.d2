@@ -1,0 +1,49 @@
+direction: right
+
+title: "Scenario 1: Burst + Inactivity (debounce fires)" {
+    near: top-center
+    shape: text
+    style.font-size: 22
+    style.bold: true
+}
+
+subtitle: "debounce=100ms, maxDelay=1000ms" {
+    near: top-center
+    shape: text
+    style.font-size: 16
+    style.italic: true
+}
+
+t0: "0ms" {
+    shape: rectangle
+    style.fill: "#e3f2fd"
+    "add(A)"
+}
+
+t50: "50ms" {
+    shape: rectangle
+    style.fill: "#e3f2fd"
+    "add(B)"
+    "debounce resets"
+}
+
+inactivity: "50-150ms" {
+    shape: rectangle
+    style.fill: "#fff3e0"
+    "no more ops"
+    "100ms of inactivity"
+}
+
+flush: "150ms" {
+    shape: rectangle
+    style.fill: "#e8f5e9"
+    style.stroke: "#2e7d32"
+    "debounce fires"
+    "flush() → collapse → write"
+    "Result: PendingBatchInsert(A, B)"
+    "maxDelay cancelled (not needed)"
+}
+
+t0 -> t50: enqueue
+t50 -> inactivity: idle
+inactivity -> flush: "debounce triggers"
