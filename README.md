@@ -215,6 +215,24 @@ repo.subscribe(CrudEvent.Type.CREATE) { event ->
 }
 ```
 
+## Inner Class Support
+
+Entities and repositories declared as inner classes are fully supported. KSP generates accessor and info classes using the JVM binary name (`$`-separated), which matches the runtime `Class.forName` lookup:
+
+```kotlin
+class MusicLibrary {
+    @LirpRepository
+    class TrackRepository : VolatileRepository<Int, Track>()
+
+    data class Track(override val id: Int, var title: String) : ReactiveEntityBase<Int, Track>() {
+        override val uniqueId = "track-$id"
+        override fun clone() = copy()
+    }
+}
+```
+
+KSP generates `MusicLibrary$TrackRepository_LirpRegistryInfo`, which `RegistryBase` resolves at runtime via `Class.forName("MusicLibrary$TrackRepository_LirpRegistryInfo")`. Anonymous and local class entities are safely handled — their ref and index discovery is skipped automatically since they cannot have KSP-generated accessors.
+
 ## JSON Persistence
 
 `JsonFileRepository` persists entities to a JSON file with debounced writes — multiple rapid mutations are batched into a single file write. No manual save calls needed:

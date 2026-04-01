@@ -123,12 +123,19 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
      * The generated accessor provides [IndexEntry] descriptors with direct property getter lambdas,
      * completely avoiding `kotlin-reflect` or `java.lang.reflect` overhead for property access.
      * If no generated accessor is found (KSP not applied), the index entry list remains empty.
+     *
+     * Anonymous and local class entities are skipped early — they can never have KSP-generated
+     * accessors because they lack stable binary names.
      */
     @Suppress("UNCHECKED_CAST")
     protected fun discoverIndexes(entity: T) {
         if (indexEntries != null) return
         synchronized(this) {
             if (indexEntries != null) return
+            if (entity.javaClass.isAnonymousClass || entity.javaClass.isLocalClass) {
+                indexEntries = emptyList()
+                return
+            }
             val entries =
                 try {
                     val accessorClass = Class.forName("${entity.javaClass.name}_LirpIndexAccessor")
@@ -186,12 +193,20 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
      * completely avoiding `kotlin-reflect` or `java.lang.reflect` overhead. If no generated
      * accessor is found (KSP not applied or no [@Aggregate][Aggregate] annotations),
      * the reference entry list remains empty.
+     *
+     * Anonymous and local class entities are skipped early — they can never have KSP-generated
+     * accessors and do not require the [failFastIfDelegatePresent] check.
      */
     @Suppress("UNCHECKED_CAST")
     protected fun discoverRefs(entity: T) {
         if (refEntries != null) return
         synchronized(this) {
             if (refEntries != null) return
+            if (entity.javaClass.isAnonymousClass || entity.javaClass.isLocalClass) {
+                collectionRefEntries = emptyList()
+                refEntries = emptyList()
+                return
+            }
             try {
                 val accessorClass = Class.forName("${entity.javaClass.name}_LirpRefAccessor")
                 val accessor = accessorClass.getDeclaredConstructor().newInstance() as LirpRefAccessor<T>
@@ -432,8 +447,10 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
          */
         @JvmStatic
         @Suppress("UNCHECKED_CAST")
-        internal fun refAccessorFor(entityClass: Class<*>): LirpRefAccessor<Any>? =
-            refAccessorCache.computeIfAbsent(entityClass) {
+        internal fun refAccessorFor(entityClass: Class<*>): LirpRefAccessor<Any>? {
+            if (entityClass.isAnonymousClass || entityClass.isLocalClass)
+                return null
+            return refAccessorCache.computeIfAbsent(entityClass) {
                 try {
                     val accessorClass = Class.forName("${entityClass.name}_LirpRefAccessor")
                     Optional.of(accessorClass.getDeclaredConstructor().newInstance() as LirpRefAccessor<Any>)
@@ -441,5 +458,6 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
                     Optional.empty()
                 }
             }.orElse(null)
+        }
     }
 }
