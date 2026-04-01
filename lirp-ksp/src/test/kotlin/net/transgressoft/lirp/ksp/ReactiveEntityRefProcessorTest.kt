@@ -410,4 +410,111 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
         content shouldContain "refName = \"annotatedRefs\""
         content shouldNotContain "ignoredRefs"
     }
+
+    test("generates \$-separated accessor name for 1-level inner class entity") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "Outer.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.Aggregate
+                    import net.transgressoft.lirp.persistence.aggregate
+
+                    class Outer {
+                        data class InnerEntity(override val id: Int) : ReactiveEntityBase<Int, InnerEntity>() {
+                            override val uniqueId: String get() = "${'$'}id"
+                            override fun clone() = copy()
+                        }
+
+                        data class RefEntity(override val id: Int, var innerId: Int) : ReactiveEntityBase<Int, RefEntity>() {
+                            override val uniqueId: String get() = "${'$'}id"
+                            override fun clone() = copy()
+
+                            @Aggregate
+                            val inner by aggregate<Int, InnerEntity> { innerId }
+                        }
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("Outer\$RefEntity_LirpRefAccessor.kt")
+        content shouldContain "`Outer\$RefEntity_LirpRefAccessor`"
+        content shouldContain "LirpRefAccessor<Outer.RefEntity>"
+        content shouldContain "InnerEntity::class.java"
+    }
+
+    test("generates \$-separated accessor name for 3-level nested entity") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "A.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.Aggregate
+                    import net.transgressoft.lirp.persistence.aggregate
+
+                    class A {
+                        class B {
+                            data class RefEntity(override val id: Int) : ReactiveEntityBase<Int, RefEntity>() {
+                                override val uniqueId: String get() = "${'$'}id"
+                                override fun clone() = copy()
+                            }
+                            data class C(override val id: Int, var refId: Int) : ReactiveEntityBase<Int, C>() {
+                                override val uniqueId: String get() = "${'$'}id"
+                                override fun clone() = copy()
+
+                                @Aggregate
+                                val ref by aggregate<Int, RefEntity> { refId }
+                            }
+                        }
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("A\$B\$C_LirpRefAccessor.kt")
+        content shouldContain "`A\$B\$C_LirpRefAccessor`"
+        content shouldContain "LirpRefAccessor<A.B.C>"
+        content shouldContain "RefEntity::class.java"
+    }
+
+    test("top-level entity accessor generation unchanged after inner class support") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "TopLevelEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.Aggregate
+                    import net.transgressoft.lirp.persistence.aggregate
+
+                    data class TargetEntity(override val id: Int) : ReactiveEntityBase<Int, TargetEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                    }
+
+                    data class TopLevelEntity(override val id: Int, var targetId: Int) : ReactiveEntityBase<Int, TopLevelEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+
+                        @Aggregate
+                        val target by aggregate<Int, TargetEntity> { targetId }
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("TopLevelEntity_LirpRefAccessor.kt")
+        content shouldContain "`TopLevelEntity_LirpRefAccessor`"
+        content shouldContain "LirpRefAccessor<TopLevelEntity>"
+        content shouldContain "TargetEntity::class.java"
+    }
 })

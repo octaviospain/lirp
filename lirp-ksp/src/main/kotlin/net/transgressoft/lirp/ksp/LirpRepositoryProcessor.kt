@@ -95,7 +95,7 @@ class LirpRepositoryProcessor(
 
     private fun generateRegistryInfo(classDecl: KSClassDeclaration, entityClassFqn: String) {
         val packageName = classDecl.packageName.asString()
-        val className = classDecl.simpleName.asString()
+        val className = classDecl.jvmBinaryName()
         val infoName = "${className}_LirpRegistryInfo"
         val entitySimpleName = entityClassFqn.substringAfterLast('.')
 
@@ -121,7 +121,7 @@ class LirpRepositoryProcessor(
                 appendLine(" * KSP-generated registry info for [$className].")
                 appendLine(" * Exposes the entity class for zero-config self-registration.")
                 appendLine(" */")
-                appendLine("public class $infoName : LirpRegistryInfo {")
+                appendLine("public class `$infoName` : LirpRegistryInfo {")
                 appendLine("    override val entityClass: Class<*> = $entitySimpleName::class.java")
                 appendLine("}")
             }.toByteArray()

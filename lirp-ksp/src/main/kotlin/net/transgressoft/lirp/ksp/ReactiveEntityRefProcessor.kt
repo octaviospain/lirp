@@ -102,10 +102,11 @@ class ReactiveEntityRefProcessor(
      */
     private fun classifyProperties(
         properties: List<KSPropertyDeclaration>,
-        className: String,
+        ownerDecl: KSClassDeclaration,
         singleEntries: MutableList<RefPropertyMeta>,
         collectionMetas: MutableList<CollectionRefPropertyMeta>
     ) {
+        val className = ownerDecl.jvmBinaryName()
         for (prop in properties) {
             val annotation =
                 prop.annotations.firstOrNull {
@@ -195,12 +196,14 @@ class ReactiveEntityRefProcessor(
 
     private fun generateAccessor(classDecl: KSClassDeclaration, properties: List<KSPropertyDeclaration>) {
         val packageName = classDecl.packageName.asString()
-        val className = classDecl.simpleName.asString()
+        val className = classDecl.jvmBinaryName()
+        // Kotlin-level name for type references: uses dots for nesting (e.g. Outer.RefEntity)
+        val kotlinClassName = classDecl.kotlinNestedName()
         val accessorName = "${className}_LirpRefAccessor"
 
         val singleEntries = mutableListOf<RefPropertyMeta>()
         val collectionMetas = mutableListOf<CollectionRefPropertyMeta>()
-        classifyProperties(properties, className, singleEntries, collectionMetas)
+        classifyProperties(properties, classDecl, singleEntries, collectionMetas)
 
         val file =
             codeGenerator.createNewFile(
@@ -255,7 +258,7 @@ class ReactiveEntityRefProcessor(
 
         val cancelAllBubbleUpCode =
             """
-            override fun cancelAllBubbleUp(entity: $className) {
+            override fun cancelAllBubbleUp(entity: $kotlinClassName) {
                 entries.forEach { entry -> entry.delegateGetter(entity).cancelBubbleUp() }
             }
             """.trimIndent()
@@ -280,19 +283,19 @@ class ReactiveEntityRefProcessor(
                 appendLine(" * KSP-generated aggregate reference accessor for [$className].")
                 appendLine(" * Provides direct ID getter and delegate getter lambdas — no runtime reflection.")
                 appendLine(" */")
-                appendLine("public class $accessorName : LirpRefAccessor<$className> {")
+                appendLine("public class `$accessorName` : LirpRefAccessor<$kotlinClassName> {")
                 if (singleEntries.isEmpty()) {
-                    appendLine("    override val entries: List<RefEntry<*, $className>> = emptyList()")
+                    appendLine("    override val entries: List<RefEntry<*, $kotlinClassName>> = emptyList()")
                 } else {
-                    appendLine("    override val entries: List<RefEntry<*, $className>> = listOf(")
+                    appendLine("    override val entries: List<RefEntry<*, $kotlinClassName>> = listOf(")
                     appendLine("        $entriesCode")
                     appendLine("    )")
                 }
                 appendLine()
                 if (collectionMetas.isEmpty()) {
-                    appendLine("    override val collectionEntries: List<CollectionRefEntry<*, $className>> = emptyList()")
+                    appendLine("    override val collectionEntries: List<CollectionRefEntry<*, $kotlinClassName>> = emptyList()")
                 } else {
-                    appendLine("    override val collectionEntries: List<CollectionRefEntry<*, $className>> = listOf(")
+                    appendLine("    override val collectionEntries: List<CollectionRefEntry<*, $kotlinClassName>> = listOf(")
                     appendLine("        $collectionEntriesCode")
                     appendLine("    )")
                 }
