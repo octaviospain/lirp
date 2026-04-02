@@ -39,7 +39,7 @@ scmVersion {
     }
     useHighestVersion = true
     ignoreUncommittedChanges = false
-    versionIncrementer 'incrementMajor'
+    versionIncrementer 'incrementMinor'
 }
 
 tasks.withType(PublishToMavenLocal).configureEach {
