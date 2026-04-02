@@ -439,3 +439,39 @@ class MutableRefOrderVolatileRepo internal constructor(
 
     fun create(id: Long, customerId: Int): MutableRefOrder = MutableRefOrder(id, customerId).also { add(it) }
 }
+
+/**
+ * Delegation-based repository wrapper for [Customer] entities.
+ *
+ * Demonstrates the manual registration pattern: the `init` block calls
+ * [RegistryBase.registerRepository] to register the delegate [VolatileRepository]
+ * into [LirpContext.default]. The wrapper itself is not a [RegistryBase] subclass.
+ */
+class DelegatingCustomerRepo(
+    private val delegate: VolatileRepository<Int, Customer>
+) : Repository<Int, Customer> by delegate {
+
+    init {
+        RegistryBase.registerRepository(Customer::class.java, delegate)
+    }
+
+    fun create(id: Int, name: String): Customer = Customer(id, name).also { add(it) }
+}
+
+/**
+ * Delegation-based repository wrapper for [Order] entities.
+ *
+ * Demonstrates the manual registration pattern for a second entity type. The `init` block calls
+ * [RegistryBase.registerRepository] to register the delegate [VolatileRepository]
+ * into [LirpContext.default].
+ */
+class DelegatingOrderRepo(
+    private val delegate: VolatileRepository<Long, Order>
+) : Repository<Long, Order> by delegate {
+
+    init {
+        RegistryBase.registerRepository(Order::class.java, delegate)
+    }
+
+    fun create(id: Long, customerId: Int): Order = Order(id, customerId).also { add(it) }
+}

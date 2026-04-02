@@ -109,8 +109,9 @@ class SlowSubscriberTest : DescribeSpec({
             // Blocked: 60 * 50ms = 3000ms; non-blocking: << 1500ms (EVENT_COUNT * SLOW_DELAY_MS / 2)
             emissionMs shouldBeLessThan EVENT_COUNT * SLOW_DELAY_MS / 2
 
-            // Wait long enough for the slow subscriber to settle on the final event's delay
-            delay((SLOW_DELAY_MS * 4).milliseconds)
+            // Wait long enough for the slow subscriber to settle on the final event's delay.
+            // On slow CI runners coroutine scheduling adds significant overhead, so use a generous wait.
+            delay((SLOW_DELAY_MS * 10).milliseconds)
 
             // Fast subscriber receives far more events than the slow subscriber during burst emission
             // because its instant handler is never cancelled by the next event

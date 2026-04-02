@@ -28,6 +28,8 @@ import com.google.devtools.ksp.validate
 
 private const val LIRP_REPOSITORY_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.LirpRepository"
 
+private const val REPOSITORY_INTERFACE_FQN = "net.transgressoft.lirp.persistence.Repository"
+
 private val REPOSITORY_BASE_FQN_SET =
     setOf(
         "net.transgressoft.lirp.persistence.VolatileRepository",
@@ -61,6 +63,10 @@ class LirpRepositoryProcessor(
             }
             val entityClassFqn = findEntityClassFqn(symbol)
             if (entityClassFqn == null) {
+                if (isDelegationClass(symbol)) {
+                    logger.info("Delegation-based @LirpRepository detected on ${symbol.qualifiedName?.asString()} — use registerRepository() in init block")
+                    continue
+                }
                 logger.warn("Cannot determine entity class for @LirpRepository on ${symbol.qualifiedName?.asString()} — skipping")
                 continue
             }
@@ -91,6 +97,40 @@ class LirpRepositoryProcessor(
             if (found != null) return found
         }
         return null
+    }
+
+    /**
+     * Returns `true` if [classDecl] is a delegation-based repository: it directly implements
+     * [Repository][net.transgressoft.lirp.persistence.Repository] (not by extending a known base class)
+     * and has exactly one Repository-typed constructor parameter.
+     *
+     * If the class implements [Repository] but has zero or more than one Repository-typed constructor
+     * parameters, a warning is logged and `false` is returned so the caller proceeds to the generic
+     * warn+skip path.
+     */
+    private fun isDelegationClass(classDecl: KSClassDeclaration): Boolean {
+        val implementsRepository =
+            classDecl.superTypes.any { superTypeRef ->
+                val superDecl = superTypeRef.resolve().declaration as? KSClassDeclaration
+                superDecl?.qualifiedName?.asString() == REPOSITORY_INTERFACE_FQN
+            }
+        if (!implementsRepository) return false
+
+        // require exactly one Repository-typed constructor parameter
+        val repoParamCount =
+            classDecl.primaryConstructor?.parameters?.count { param ->
+                val paramTypeFqn = param.type.resolve().declaration.qualifiedName?.asString()
+                paramTypeFqn == REPOSITORY_INTERFACE_FQN || paramTypeFqn in REPOSITORY_BASE_FQN_SET
+            } ?: 0
+
+        if (repoParamCount != 1) {
+            logger.warn(
+                "@LirpRepository delegation class ${classDecl.qualifiedName?.asString()} " +
+                    "must have exactly one Repository-typed constructor parameter (found $repoParamCount) — skipping"
+            )
+            return false
+        }
+        return true
     }
 
     private fun generateRegistryInfo(classDecl: KSClassDeclaration, entityClassFqn: String) {
