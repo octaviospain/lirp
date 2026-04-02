@@ -215,6 +215,33 @@ repo.subscribe(CrudEvent.Type.CREATE) { event ->
 }
 ```
 
+## Delegation-Based Repositories
+
+When you need to wrap an existing `VolatileRepository` (or other `RegistryBase` subclass) rather than extending it — for example, to add domain-specific behaviour while keeping the repository as a field — use Kotlin's `by` delegation combined with a manual `init` block:
+
+```kotlin
+class MyCustomRepo(
+    private val delegate: VolatileRepository<Int, MyEntity>
+) : Repository<Int, MyEntity> by delegate {
+
+    init {
+        RegistryBase.registerRepository(MyEntity::class.java, delegate)
+    }
+
+    fun create(id: Int, name: String): MyEntity =
+        MyEntity(id, name).also { add(it) }
+}
+```
+
+The `by delegate` clause routes all `Repository` method calls to the underlying `VolatileRepository`. The `init` block calls `RegistryBase.registerRepository()` to register the **delegate** — not the wrapper — into `LirpContext.default`. This means `LirpContext.default.registries()` returns the `VolatileRepository` instance, which is the actual `RegistryBase` subclass.
+
+**Key behaviours:**
+
+- The delegate is what gets registered: `context.registryFor(MyEntity::class.java)` returns the `VolatileRepository`, not the wrapper.
+- Calling `delegate.close()` deregisters the repository from the context.
+- Registering the same instance twice is idempotent (safe to call from multiple wrappers sharing a delegate).
+- Registering a different instance for the same entity class throws `IllegalStateException`, consistent with the `@LirpRepository` duplicate-detection rule.
+
 ## Inner Class Support
 
 Entities and repositories declared as inner classes are fully supported. KSP generates accessor and info classes using the JVM binary name (`$`-separated), which matches the runtime `Class.forName` lookup:

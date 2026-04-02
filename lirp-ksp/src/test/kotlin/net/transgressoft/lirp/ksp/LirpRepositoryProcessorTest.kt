@@ -182,4 +182,121 @@ internal class LirpRepositoryProcessorTest : FunSpec({
         content shouldContain "`Domain\$InnerRepo_LirpRegistryInfo`"
         content shouldContain "InnerEntity::class.java"
     }
+
+    test("delegation-based @LirpRepository compiles successfully and generates no _LirpRegistryInfo") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "DelegatingRepo.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.LirpRepository
+                    import net.transgressoft.lirp.persistence.Repository
+                    import net.transgressoft.lirp.persistence.VolatileRepository
+
+                    data class SomeEntity(override val id: Int) : ReactiveEntityBase<Int, SomeEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                    }
+
+                    @LirpRepository
+                    class DelegatingRepo(private val delegate: VolatileRepository<Int, SomeEntity>) :
+                        Repository<Int, SomeEntity> by delegate
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.sourcesGeneratedBySymbolProcessor
+            .filter { it.name.contains("DelegatingRepo") }
+            .toList() shouldBe emptyList()
+    }
+
+    test("delegation class with zero Repository-typed constructor params warns and generates no _LirpRegistryInfo") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "ZeroParamDelegation.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.LirpRepository
+                    import net.transgressoft.lirp.persistence.Repository
+                    import net.transgressoft.lirp.persistence.VolatileRepository
+
+                    data class SomeEntity(override val id: Int) : ReactiveEntityBase<Int, SomeEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                    }
+
+                    private val sharedDelegate = VolatileRepository<Int, SomeEntity>("shared")
+
+                    @LirpRepository
+                    class ZeroParamDelegation : Repository<Int, SomeEntity> by sharedDelegate
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.sourcesGeneratedBySymbolProcessor
+            .filter { it.name.contains("ZeroParamDelegation") }
+            .toList() shouldBe emptyList()
+        result.messages shouldContain "must have exactly one Repository-typed constructor parameter"
+    }
+
+    test("delegation class with multiple Repository-typed constructor params warns and generates no _LirpRegistryInfo") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "MultiParamDelegation.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.LirpRepository
+                    import net.transgressoft.lirp.persistence.Repository
+                    import net.transgressoft.lirp.persistence.VolatileRepository
+
+                    data class SomeEntity(override val id: Int) : ReactiveEntityBase<Int, SomeEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                    }
+
+                    @LirpRepository
+                    class MultiParamDelegation(
+                        private val delegate1: VolatileRepository<Int, SomeEntity>,
+                        private val delegate2: VolatileRepository<Int, SomeEntity>
+                    ) : Repository<Int, SomeEntity> by delegate1
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.sourcesGeneratedBySymbolProcessor
+            .filter { it.name.contains("MultiParamDelegation") }
+            .toList() shouldBe emptyList()
+        result.messages shouldContain "must have exactly one Repository-typed constructor parameter"
+    }
+
+    test("class annotated with @LirpRepository that neither extends base nor delegates gets warn-and-skip") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "NotARepo.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.persistence.LirpRepository
+
+                    @LirpRepository
+                    class NotARepo
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.sourcesGeneratedBySymbolProcessor
+            .filter { it.name.contains("NotARepo") }
+            .toList() shouldBe emptyList()
+        result.messages shouldContain "Cannot determine entity class"
+    }
 })

@@ -434,6 +434,34 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
         private val refAccessorCache: ConcurrentHashMap<Class<*>, Optional<LirpRefAccessor<Any>>> = ConcurrentHashMap()
 
         /**
+         * Registers a [RegistryBase] instance for the given entity class in the default [LirpContext].
+         *
+         * Intended for delegation-based repositories that do not extend [RegistryBase] directly
+         * but wrap one via Kotlin's `by` delegation. The caller passes the delegate [RegistryBase]
+         * instance, which becomes the registry discoverable via `LirpContext.default.registries()`.
+         *
+         * @param entityClass the entity class to register under
+         * @param registry the delegate [RegistryBase] to register (must be a [RegistryBase] instance)
+         * @throws IllegalArgumentException if [registry] is not a [RegistryBase] instance or was created
+         *   outside [LirpContext.default]
+         * @throws IllegalStateException if a different repository is already registered for [entityClass]
+         */
+        @JvmStatic
+        fun registerRepository(entityClass: Class<*>, registry: Repository<*, *>) {
+            require(registry is RegistryBase<*, *>) {
+                "Only RegistryBase instances can be registered via registerRepository(). Got: ${registry::class.qualifiedName}"
+            }
+            val context = LirpContext.default
+            require(registry.context === context) {
+                "registerRepository() only supports RegistryBase instances created in LirpContext.default."
+            }
+            val registered = context.register(entityClass, registry)
+            check(registered || context.registryFor(entityClass) === registry) {
+                "A repository for ${entityClass.simpleName} is already registered. Only one @LirpRepository per entity type is allowed."
+            }
+        }
+
+        /**
          * Computes the cascade key for an entity: `"${entityClass.name}:${entityId}"`.
          * This format allows cycle detection by class and ID without requiring a live registry lookup.
          */
