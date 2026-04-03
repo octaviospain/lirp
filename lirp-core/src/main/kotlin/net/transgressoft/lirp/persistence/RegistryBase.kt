@@ -462,6 +462,23 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
         }
 
         /**
+         * Deregisters the repository for the given entity class from the default [LirpContext].
+         *
+         * Intended for delegation-based repositories that need to cleanly remove their
+         * registration on shutdown or close. Only removes the mapping -- does not close
+         * the repository or its publisher. Callers manage [close] separately.
+         *
+         * Calling this method for an entity class that has no registered repository
+         * completes without error (idempotent no-op).
+         *
+         * @param entityClass the entity class to deregister
+         */
+        @JvmStatic
+        fun deregisterRepository(entityClass: Class<*>) {
+            LirpContext.default.deregisterByClass(entityClass)
+        }
+
+        /**
          * Computes the cascade key for an entity: `"${entityClass.name}:${entityId}"`.
          * This format allows cycle detection by class and ID without requiring a live registry lookup.
          */
