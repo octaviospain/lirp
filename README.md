@@ -242,6 +242,34 @@ The `by delegate` clause routes all `Repository` method calls to the underlying 
 - Registering the same instance twice is idempotent (safe to call from multiple wrappers sharing a delegate).
 - Registering a different instance for the same entity class throws `IllegalStateException`, consistent with the `@LirpRepository` duplicate-detection rule.
 
+### Deregistration and Lifecycle
+
+Delegation-based repositories should implement `AutoCloseable` to cleanly deregister on shutdown. The `close()` method removes the context mapping via `RegistryBase.deregisterRepository()` and then shuts down the delegate:
+
+```kotlin
+class MyCustomRepo(
+    private val delegate: VolatileRepository<Int, MyEntity>
+) : Repository<Int, MyEntity> by delegate, AutoCloseable {
+
+    init {
+        RegistryBase.registerRepository(MyEntity::class.java, delegate)
+    }
+
+    fun create(id: Int, name: String): MyEntity =
+        MyEntity(id, name).also { add(it) }
+
+    override fun close() {
+        RegistryBase.deregisterRepository(MyEntity::class.java)
+        delegate.close()
+    }
+}
+```
+
+- `close()` calls `deregisterRepository()` first, then `delegate.close()` -- order matters because `delegate.close()` also deregisters (the delegate's own `close()` removes it from context)
+- `deregisterRepository()` is idempotent -- calling it for an unregistered class is a safe no-op
+- `deregisterRepository()` only removes the context mapping; it does not close the repository or its publisher
+- After close, the entity class slot is free for a new repository instance
+
 ## Inner Class Support
 
 Entities and repositories declared as inner classes are fully supported. KSP generates accessor and info classes using the JVM binary name (`$`-separated), which matches the runtime `Class.forName` lookup:

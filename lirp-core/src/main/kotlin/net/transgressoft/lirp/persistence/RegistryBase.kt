@@ -469,7 +469,8 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
          * the repository or its publisher. Callers manage [close] separately.
          *
          * Calling this method for an entity class that has no registered repository
-         * completes without error (idempotent no-op).
+         * completes without error (idempotent no-op). Thread-safe: backed by atomic
+         * [ConcurrentHashMap.remove][java.util.concurrent.ConcurrentHashMap.remove].
          *
          * @param entityClass the entity class to deregister
          */
