@@ -66,6 +66,14 @@ internal class LirpContext : AutoCloseable {
     }
 
     /**
+     * Removes the registry registered under [entityClass] from this context.
+     * Returns silently if no registry is registered for [entityClass].
+     */
+    internal fun deregisterByClass(entityClass: Class<*>) {
+        registriesMap.remove(entityClass)
+    }
+
+    /**
      * Returns the [Registry] registered for [entityClass], or `null` if none is registered.
      */
     internal fun registryFor(entityClass: Class<*>): Registry<*, *>? = registriesMap[entityClass]

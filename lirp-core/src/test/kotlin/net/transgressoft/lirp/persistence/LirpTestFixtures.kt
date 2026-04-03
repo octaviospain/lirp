@@ -445,17 +445,23 @@ class MutableRefOrderVolatileRepo internal constructor(
  *
  * Demonstrates the manual registration pattern: the `init` block calls
  * [RegistryBase.registerRepository] to register the delegate [VolatileRepository]
- * into [LirpContext.default]. The wrapper itself is not a [RegistryBase] subclass.
+ * into [LirpContext.default]. Calling [close] deregisters from the context first,
+ * then closes the delegate.
  */
 class DelegatingCustomerRepo(
     private val delegate: VolatileRepository<Int, Customer>
-) : Repository<Int, Customer> by delegate {
+) : Repository<Int, Customer> by delegate, AutoCloseable {
 
     init {
         RegistryBase.registerRepository(Customer::class.java, delegate)
     }
 
     fun create(id: Int, name: String): Customer = Customer(id, name).also { add(it) }
+
+    override fun close() {
+        RegistryBase.deregisterRepository(Customer::class.java)
+        delegate.close()
+    }
 }
 
 /**
@@ -463,15 +469,21 @@ class DelegatingCustomerRepo(
  *
  * Demonstrates the manual registration pattern for a second entity type. The `init` block calls
  * [RegistryBase.registerRepository] to register the delegate [VolatileRepository]
- * into [LirpContext.default].
+ * into [LirpContext.default]. Calling [close] deregisters from the context first,
+ * then closes the delegate.
  */
 class DelegatingOrderRepo(
     private val delegate: VolatileRepository<Long, Order>
-) : Repository<Long, Order> by delegate {
+) : Repository<Long, Order> by delegate, AutoCloseable {
 
     init {
         RegistryBase.registerRepository(Order::class.java, delegate)
     }
 
     fun create(id: Long, customerId: Int): Order = Order(id, customerId).also { add(it) }
+
+    override fun close() {
+        RegistryBase.deregisterRepository(Order::class.java)
+        delegate.close()
+    }
 }

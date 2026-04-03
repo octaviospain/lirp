@@ -17,6 +17,7 @@
 
 package net.transgressoft.lirp.persistence
 
+import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
@@ -79,15 +80,17 @@ internal class DelegationRegistrationIntegrationTest : StringSpec({
         delegate.findById(1).get() shouldBe customer
     }
 
-    "closing the delegate deregisters it from LirpContext.default" {
+    "closing the wrapper deregisters from LirpContext.default and closes the delegate" {
         val delegate = VolatileRepository<Int, Customer>("DelegatingCustomers")
-        DelegatingCustomerRepo(delegate)
+        val wrapper = DelegatingCustomerRepo(delegate)
+        wrapper.create(1, "Alice")
 
         LirpContext.default.registryFor(Customer::class.java).shouldNotBeNull()
 
-        delegate.close()
+        wrapper.close()
 
         LirpContext.default.registryFor(Customer::class.java).shouldBeNull()
+        delegate.isClosed shouldBe true
     }
 
     "two delegation wrappers for different entity types register independently" {
@@ -111,5 +114,29 @@ internal class DelegationRegistrationIntegrationTest : StringSpec({
         shouldThrow<IllegalStateException> {
             DelegatingCustomerRepo(delegate2)
         }.message shouldBe "A repository for Customer is already registered. Only one @LirpRepository per entity type is allowed."
+    }
+
+    "DelegatingCustomerRepo.close() is safe to call when already deregistered" {
+        val delegate = VolatileRepository<Int, Customer>("DelegatingCustomers")
+        val wrapper = DelegatingCustomerRepo(delegate)
+
+        RegistryBase.deregisterRepository(Customer::class.java)
+
+        shouldNotThrowAny {
+            wrapper.close()
+        }
+        delegate.isClosed shouldBe true
+    }
+
+    "DelegatingOrderRepo.close() deregisters Order independently of Customer" {
+        val customerDelegate = VolatileRepository<Int, Customer>("DelegatingCustomers")
+        val orderDelegate = VolatileRepository<Long, Order>("DelegatingOrders")
+        DelegatingCustomerRepo(customerDelegate)
+        val orderWrapper = DelegatingOrderRepo(orderDelegate)
+
+        orderWrapper.close()
+
+        LirpContext.default.registryFor(Order::class.java).shouldBeNull()
+        LirpContext.default.registryFor(Customer::class.java).shouldNotBeNull()
     }
 })
