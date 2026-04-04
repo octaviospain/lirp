@@ -425,6 +425,107 @@ internal class VolatileRepositoryTest : FunSpec({
             }
         }
 
+        test("addAll on mutable aggregate emits exactly one MutationEvent") {
+            val trackRepo = TestTrackVolatileRepo(ctx)
+            val playlistRepo = MutablePlaylistVolatileRepo(ctx)
+            val events =
+                Collections.synchronizedList(
+                    mutableListOf<MutationEvent<Long, MutablePlaylist>>()
+                )
+
+            val t1 = trackRepo.create(1, "T1")
+            val t2 = trackRepo.create(2, "T2")
+            val t3 = trackRepo.create(3, "T3")
+            val playlist = playlistRepo.create(1L, "Bulk Add")
+
+            playlist.subscribe { events.add(it) }
+
+            playlist.items.addAll(listOf(t1, t2, t3))
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            events shouldHaveSize 1
+        }
+
+        test("removeAll on mutable aggregate emits exactly one MutationEvent") {
+            val trackRepo = TestTrackVolatileRepo(ctx)
+            val playlistRepo = MutablePlaylistVolatileRepo(ctx)
+            val events =
+                Collections.synchronizedList(
+                    mutableListOf<MutationEvent<Long, MutablePlaylist>>()
+                )
+
+            val t1 = trackRepo.create(1, "T1")
+            val t2 = trackRepo.create(2, "T2")
+            val t3 = trackRepo.create(3, "T3")
+            val playlist = playlistRepo.create(1L, "Bulk Remove", listOf(1, 2, 3))
+
+            playlist.subscribe { events.add(it) }
+
+            playlist.items.removeAll(listOf(t1, t3))
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            events shouldHaveSize 1
+        }
+
+        test("addAll with empty collection returns false and emits no event") {
+            val playlistRepo = MutablePlaylistVolatileRepo(ctx)
+            val events =
+                Collections.synchronizedList(
+                    mutableListOf<MutationEvent<Long, MutablePlaylist>>()
+                )
+
+            val playlist = playlistRepo.create(1L, "Empty Add")
+
+            playlist.subscribe { events.add(it) }
+
+            val result = playlist.items.addAll(emptyList())
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            result shouldBe false
+            events shouldHaveSize 0
+        }
+
+        test("removeAll with no matching elements returns false and emits no event") {
+            val trackRepo = TestTrackVolatileRepo(ctx)
+            val playlistRepo = MutablePlaylistVolatileRepo(ctx)
+            val events =
+                Collections.synchronizedList(
+                    mutableListOf<MutationEvent<Long, MutablePlaylist>>()
+                )
+
+            val unrelated = trackRepo.create(99, "Unrelated")
+            val playlist = playlistRepo.create(1L, "No Match Remove")
+
+            playlist.subscribe { events.add(it) }
+
+            val result = playlist.items.removeAll(listOf(unrelated))
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            result shouldBe false
+            events shouldHaveSize 0
+        }
+
+        test("addAll on mutable aggregate set emits exactly one MutationEvent") {
+            val playlistRepo = MutablePlaylistVolatileRepo(ctx)
+            val groupRepo = MutablePlaylistGroupVolatileRepo(ctx)
+            val events =
+                Collections.synchronizedList(
+                    mutableListOf<MutationEvent<Long, MutablePlaylistGroup>>()
+                )
+
+            val p1 = playlistRepo.create(1L, "P1")
+            val p2 = playlistRepo.create(2L, "P2")
+            val p3 = playlistRepo.create(3L, "P3")
+            val group = groupRepo.create(1L)
+
+            group.subscribe { events.add(it) }
+
+            group.playlists.addAll(listOf(p1, p2, p3))
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            events shouldHaveSize 1
+        }
+
         test("entity emits MutationEvent on add to mutable aggregate") {
             val trackRepo = TestTrackVolatileRepo(ctx)
             val playlistRepo = MutablePlaylistVolatileRepo(ctx)
@@ -514,6 +615,27 @@ internal class VolatileRepositoryTest : FunSpec({
             groupRepo.findById(1L).shouldBePresent {
                 it.playlistIds shouldContainExactlyInAnyOrder setOf(1L, 2L)
             }
+        }
+
+        test("retainAll on mutable aggregate emits exactly one MutationEvent") {
+            val trackRepo = TestTrackVolatileRepo(ctx)
+            val playlistRepo = MutablePlaylistVolatileRepo(ctx)
+            val events =
+                Collections.synchronizedList(
+                    mutableListOf<MutationEvent<Long, MutablePlaylist>>()
+                )
+
+            val t1 = trackRepo.create(1, "T1")
+            val t2 = trackRepo.create(2, "T2")
+            val t3 = trackRepo.create(3, "T3")
+            val playlist = playlistRepo.create(1L, "Retain", listOf(1, 2, 3))
+
+            playlist.subscribe { events.add(it) }
+
+            playlist.items.retainAll(listOf(t2))
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            events shouldHaveSize 1
         }
     }
 })

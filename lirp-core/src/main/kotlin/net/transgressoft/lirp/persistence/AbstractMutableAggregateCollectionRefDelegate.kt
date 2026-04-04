@@ -160,64 +160,32 @@ abstract class AbstractMutableAggregateCollectionRefDelegate<K : Comparable<K>, 
     }
 
     /**
-     * Adds all [elements] to this collection by delegating to [add] for each element.
+     * Adds all [elements] to this collection in a single batch mutation, emitting exactly one
+     * [MutationEvent][net.transgressoft.lirp.event.MutationEvent] and one persistence update
+     * regardless of collection size.
      *
-     * Each successful addition triggers an independent mutation callback and event emission.
-     * This per-element semantics enables fine-grained tracking at the cost of N callbacks for N elements.
+     * Returns `true` if the collection was modified (at least one element was not already present).
      */
     override fun addAll(elements: Collection<E>): Boolean {
-        var changed = false
-        for (e in elements) {
-            if (add(e))
-                changed = true
-        }
-        return changed
+        val ids = elements.map { it.id }
+        return mutate { addAll(ids) }
     }
 
     /**
-     * Removes all [elements] from this collection by delegating to [remove] for each element.
+     * Removes all [elements] from this collection in a single batch mutation, emitting exactly one
+     * [MutationEvent][net.transgressoft.lirp.event.MutationEvent] and one persistence update
+     * regardless of collection size.
      *
-     * Each successful removal triggers an independent mutation callback and event emission.
-     * This per-element semantics enables fine-grained tracking at the cost of N callbacks for N elements.
+     * Returns `true` if the collection was modified (at least one element was present and removed).
      */
     override fun removeAll(elements: Collection<E>): Boolean {
-        var changed = false
-        for (e in elements) {
-            if (remove(e))
-                changed = true
-        }
-        return changed
+        val ids = elements.map { it.id }
+        return mutate { removeAll(ids) }
     }
 
     override fun retainAll(elements: Collection<E>): Boolean {
         val idsToKeep = elements.map { it.id }.toSet()
-        val changed: Boolean
-        val newSnapshot: Collection<K>
-        val rollback: Collection<K>
-        lock.lock()
-        try {
-            rollback = ArrayList(backingIds)
-            changed = backingIds.retainAll(idsToKeep)
-            newSnapshot =
-                if (changed)
-                    ArrayList(backingIds)
-                else
-                    emptyList()
-        } finally {
-            lock.unlock()
-        }
-        if (changed) {
-            try {
-                invokeCallback(newSnapshot)
-            } catch (ex: Exception) {
-                lock.withLock {
-                    backingIds.clear()
-                    backingIds.addAll(rollback)
-                }
-                throw ex
-            }
-        }
-        return changed
+        return mutate { retainAll(idsToKeep) }
     }
 
     override fun contains(element: E): Boolean = lock.withLock { element.id in backingIds }
