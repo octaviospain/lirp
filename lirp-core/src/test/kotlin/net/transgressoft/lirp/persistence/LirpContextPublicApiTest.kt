@@ -34,6 +34,10 @@ import io.kotest.matchers.types.shouldBeInstanceOf
 @DisplayName("LirpContextPublicApi")
 internal class LirpContextPublicApiTest : StringSpec({
 
+    beforeEach {
+        LirpContext.resetDefault()
+    }
+
     afterEach {
         LirpContext.resetDefault()
     }
