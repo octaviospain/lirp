@@ -321,7 +321,7 @@ val registry: Registry<*, Album>? = LirpContext.default.registryFor<Album>()
 **Java / Class-based overload:**
 
 ```java
-Registry<?, ?> registry = LirpContext.getDefault().registryFor(Album.class);
+Registry<?, ?> registry = LirpContext.Companion.getDefault().registryFor(Album.class);
 ```
 
 Registry lookup is read-only — `register()` and `deregister()` remain internal. External modules can read the registry map but cannot modify it directly.
