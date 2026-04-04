@@ -308,6 +308,24 @@ class MyCustomRepo(
 - `deregisterRepository()` only removes the context mapping; it does not close the repository or its publisher
 - After close, the entity class slot is free for a new repository instance
 
+### Registry Lookup
+
+`LirpContext.registryFor()` is public API and can be called from any module, including external ones like lirp-sql. It returns the `Registry` registered for a given entity class, or `null` if none is registered.
+
+**Kotlin (reified overload):**
+
+```kotlin
+val registry: Registry<*, Album>? = LirpContext.default.registryFor<Album>()
+```
+
+**Java / Class-based overload:**
+
+```java
+Registry<?, ?> registry = LirpContext.getDefault().registryFor(Album.class);
+```
+
+Registry lookup is read-only — `register()` and `deregister()` remain internal. External modules can read the registry map but cannot modify it directly.
+
 ## Inner Class Support
 
 Entities and repositories declared as inner classes are fully supported. KSP generates accessor and info classes using the JVM binary name (`$`-separated), which matches the runtime `Class.forName` lookup:
