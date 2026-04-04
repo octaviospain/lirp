@@ -170,6 +170,36 @@ Cascade defaults for collection references are `NONE` (unlike `DETACH` for singl
 
 **Cascade options:** `DETACH` (default for single refs), `CASCADE`, `RESTRICT`, `NONE` (default for collection refs).
 
+### Mutable Collection References
+
+Use `mutableAggregateList` or `mutableAggregateSet` when the collection must support runtime `add`/`remove` operations. These delegates own their backing ID store and sync changes back to the entity's serializable field via an optional `idSetter` lambda. After registry binding, any mutation also triggers a `MutationEvent` on the owning entity:
+
+```kotlin
+class Playlist(override val id: Long, val name: String, var trackIds: MutableList<Int> = mutableListOf()) :
+    ReactiveEntityBase<Long, Playlist>() {
+
+    @Aggregate(onDelete = CascadeAction.CASCADE)
+    @Transient
+    val tracks by mutableAggregateList<Int, Track>(
+        idProvider = { trackIds },
+        idSetter = { trackIds = it.toMutableList() }
+    )
+
+    override val uniqueId = "playlist-$id"
+    // Deep-copy trackIds so mutateAndPublish detects changes correctly
+    override fun clone() = Playlist(id, name, ArrayList(trackIds))
+}
+
+// Runtime mutation — ID is tracked back to trackIds, MutationEvent emitted
+playlist.tracks.add(track)
+playlist.tracks.remove(oldTrack)
+val resolved: List<Track> = playlist.tracks.resolveAll()
+```
+
+The `idSetter` is optional. If omitted, mutations update the in-memory delegate but are NOT written back to the entity field and will not survive serialization.
+
+**Important:** Entities using mutable collection delegates MUST deep-copy the backing ID field in `clone()`. Without a deep copy, the `mutateAndPublish` before/after equality check always returns `true` and mutation events are silenced.
+
 ## Entity Reactivity
 
 Entities are reactive by default — no event bus, no manual Flow collection. A property declared with `reactiveProperty()` automatically notifies every subscriber on assignment:

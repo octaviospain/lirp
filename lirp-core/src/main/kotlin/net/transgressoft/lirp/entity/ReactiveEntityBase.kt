@@ -363,6 +363,21 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
         return result
     }
 
+    /**
+     * Internal bridge for collection delegate mutation callback injection.
+     *
+     * Called by [net.transgressoft.lirp.persistence.RegistryBase] via a closure injected into mutable
+     * aggregate collection delegates after registry binding. The [mutationAction] lambda applies the
+     * `idSetter` write-back inside [mutateAndPublish], so the before/after equality check correctly
+     * detects the change: `clone()` captures the entity with OLD IDs, `mutationAction` updates them,
+     * and the resulting `entityBeforeChange != this` diff triggers [ReactiveMutationEvent] emission.
+     *
+     * @param mutationAction the mutation to apply inside [mutateAndPublish] (typically the `idSetter` call)
+     */
+    internal fun mutateForCollection(mutationAction: () -> Unit) {
+        mutateAndPublish { mutationAction() }
+    }
+
     private inner class ReactivePropertyDelegate<T>(private var storedValue: T) :
         ReadWriteProperty<ReactiveEntityBase<K, R>, T> {
 

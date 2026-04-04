@@ -6,13 +6,18 @@ import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpDeserializationException
+import net.transgressoft.lirp.persistence.MutablePlaylistJsonFileRepository
 import net.transgressoft.lirp.persistence.PersistentRepositoryBase
+import net.transgressoft.lirp.persistence.TestTrackVolatileRepo
 import io.kotest.assertions.json.shouldEqualJson
+import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.DescribeSpec
 import io.kotest.engine.spec.tempfile
 import io.kotest.matchers.collections.shouldContainAll
+import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -26,6 +31,8 @@ import java.io.File
 import java.io.IOException
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -632,6 +639,209 @@ class JsonFileRepositoryTest : DescribeSpec({
 
             repo.close()
             LirpContext.resetDefault()
+        }
+    }
+
+    describe("Mutable aggregate collection delegates") {
+
+        it("persists mutable aggregate mutations to JSON file") {
+            val ctx = LirpContext()
+            val file = tempfile("mutable-playlist-test", ".json").also { it.deleteOnExit() }
+            val trackRepo = TestTrackVolatileRepo(ctx)
+            val playlistRepo = MutablePlaylistJsonFileRepository(ctx, file, 10L)
+
+            val t1 = trackRepo.create(1, "Track A")
+            val t2 = trackRepo.create(2, "Track B")
+            val playlist = playlistRepo.create(1L, "Persisted Playlist")
+
+            playlist.items.add(t1)
+            playlist.items.add(t2)
+
+            playlistRepo.close()
+
+            val fileContent = file.readText()
+            fileContent shouldContain "\"itemIds\""
+            fileContent shouldContain "1"
+            fileContent shouldContain "2"
+
+            ctx.close()
+        }
+
+        it("round-trip preserves mutable aggregate state after reload") {
+            val ctx1 = LirpContext()
+            val file = tempfile("mutable-roundtrip-test", ".json").also { it.deleteOnExit() }
+            val trackRepo1 = TestTrackVolatileRepo(ctx1)
+            val playlistRepo1 = MutablePlaylistJsonFileRepository(ctx1, file, 10L)
+
+            trackRepo1.create(1, "Track 1")
+            trackRepo1.create(2, "Track 2")
+            trackRepo1.create(3, "Track 3")
+            val playlist = playlistRepo1.create(1L, "Round-trip Playlist")
+
+            playlist.items.add(trackRepo1.findById(1).get())
+            playlist.items.add(trackRepo1.findById(2).get())
+            playlist.items.add(trackRepo1.findById(3).get())
+
+            playlistRepo1.close()
+            ctx1.close()
+
+            val ctx2 = LirpContext()
+            val trackRepo2 = TestTrackVolatileRepo(ctx2)
+            trackRepo2.create(1, "Track 1")
+            trackRepo2.create(2, "Track 2")
+            trackRepo2.create(3, "Track 3")
+            val playlistRepo2 = MutablePlaylistJsonFileRepository(ctx2, file, 10L)
+
+            playlistRepo2.findById(1L).shouldBePresent {
+                it.itemIds shouldContainExactly listOf(1, 2, 3)
+                it.items.resolveAll() shouldHaveSize 3
+            }
+
+            playlistRepo2.close()
+            ctx2.close()
+        }
+
+        it("round-trip preserves mutable aggregate after further mutations on reload") {
+            val ctx1 = LirpContext()
+            val file = tempfile("mutable-mutate-reload-test", ".json").also { it.deleteOnExit() }
+            val trackRepo1 = TestTrackVolatileRepo(ctx1)
+            val playlistRepo1 = MutablePlaylistJsonFileRepository(ctx1, file, 10L)
+
+            trackRepo1.create(1, "T1")
+            trackRepo1.create(2, "T2")
+            val playlist = playlistRepo1.create(1L, "Evolving Playlist", listOf(1))
+            playlist.items.add(trackRepo1.findById(2).get())
+
+            playlistRepo1.close()
+            ctx1.close()
+
+            val ctx2 = LirpContext()
+            val trackRepo2 = TestTrackVolatileRepo(ctx2)
+            trackRepo2.create(1, "T1")
+            trackRepo2.create(2, "T2")
+            trackRepo2.create(3, "T3")
+            val playlistRepo2 = MutablePlaylistJsonFileRepository(ctx2, file, 10L)
+
+            val reloaded = playlistRepo2.findById(1L).get()
+            reloaded.itemIds shouldContainExactly listOf(1, 2)
+
+            reloaded.items.add(trackRepo2.findById(3).get())
+            reloaded.items.remove(trackRepo2.findById(1).get())
+
+            playlistRepo2.close()
+            ctx2.close()
+
+            val ctx3 = LirpContext()
+            TestTrackVolatileRepo(ctx3)
+            val playlistRepo3 = MutablePlaylistJsonFileRepository(ctx3, file, 10L)
+
+            playlistRepo3.findById(1L).shouldBePresent {
+                it.itemIds shouldContainExactly listOf(2, 3)
+            }
+
+            playlistRepo3.close()
+            ctx3.close()
+        }
+
+        it("addAll persists all added items to JSON") {
+            val ctx1 = LirpContext()
+            val file = tempfile("mutable-addall-test", ".json").also { it.deleteOnExit() }
+            val trackRepo = TestTrackVolatileRepo(ctx1)
+            val playlistRepo = MutablePlaylistJsonFileRepository(ctx1, file, 10L)
+
+            val t1 = trackRepo.create(1, "T1")
+            val t2 = trackRepo.create(2, "T2")
+            val t3 = trackRepo.create(3, "T3")
+            val playlist = playlistRepo.create(1L, "Bulk Add")
+
+            playlist.items.addAll(listOf(t1, t2, t3))
+
+            playlistRepo.close()
+            ctx1.close()
+
+            val ctx2 = LirpContext()
+            TestTrackVolatileRepo(ctx2)
+            val playlistRepo2 = MutablePlaylistJsonFileRepository(ctx2, file, 10L)
+
+            playlistRepo2.findById(1L).shouldBePresent {
+                it.itemIds shouldContainExactly listOf(1, 2, 3)
+            }
+
+            playlistRepo2.close()
+            ctx2.close()
+        }
+
+        it("removeAll persists remaining items to JSON") {
+            val ctx1 = LirpContext()
+            val file = tempfile("mutable-removeall-test", ".json").also { it.deleteOnExit() }
+            val trackRepo = TestTrackVolatileRepo(ctx1)
+            val playlistRepo = MutablePlaylistJsonFileRepository(ctx1, file, 10L)
+
+            val t1 = trackRepo.create(1, "T1")
+            val t2 = trackRepo.create(2, "T2")
+            val t3 = trackRepo.create(3, "T3")
+            val playlist = playlistRepo.create(1L, "Bulk Remove", listOf(1, 2, 3))
+
+            playlist.items.removeAll(listOf(t1, t3))
+
+            playlistRepo.close()
+            ctx1.close()
+
+            val ctx2 = LirpContext()
+            TestTrackVolatileRepo(ctx2)
+            val playlistRepo2 = MutablePlaylistJsonFileRepository(ctx2, file, 10L)
+
+            playlistRepo2.findById(1L).shouldBePresent {
+                it.itemIds shouldContainExactly listOf(2)
+            }
+
+            playlistRepo2.close()
+            ctx2.close()
+        }
+
+        it("entity emits MutationEvent when mutable aggregate collection is mutated") {
+            val ctx = LirpContext()
+            val file = tempfile("mutable-event-test", ".json").also { it.deleteOnExit() }
+            val trackRepo = TestTrackVolatileRepo(ctx)
+            val playlistRepo = MutablePlaylistJsonFileRepository(ctx, file, 10L)
+            val received = AtomicReference(false)
+
+            val t1 = trackRepo.create(1, "Track")
+            val playlist = playlistRepo.create(1L, "EventTest")
+
+            playlist.subscribe { received.set(true) }
+
+            playlist.items.add(t1)
+
+            eventually(5.seconds) {
+                received.get() shouldBe true
+            }
+
+            playlistRepo.close()
+            ctx.close()
+        }
+
+        it("persists entity constructed with initial itemIds") {
+            val ctx = LirpContext()
+            val file = tempfile("mutable-initial-ids-test", ".json").also { it.deleteOnExit() }
+            TestTrackVolatileRepo(ctx)
+            val playlistRepo = MutablePlaylistJsonFileRepository(ctx, file, 10L)
+
+            playlistRepo.create(1L, "Pre-loaded", listOf(10, 20, 30))
+
+            playlistRepo.close()
+            ctx.close()
+
+            val ctx2 = LirpContext()
+            TestTrackVolatileRepo(ctx2)
+            val playlistRepo2 = MutablePlaylistJsonFileRepository(ctx2, file, 10L)
+
+            playlistRepo2.findById(1L).shouldBePresent {
+                it.itemIds shouldContainExactly listOf(10, 20, 30)
+            }
+
+            playlistRepo2.close()
+            ctx2.close()
         }
     }
 })

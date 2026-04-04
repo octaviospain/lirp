@@ -123,7 +123,7 @@ internal class ReflectionFreeVerificationTest : FunSpec({
         customerRepo.findById(3).shouldBeEmpty()
     }
 
-    test("detachAllRefs path via close() cancels bubble-up subscriptions without field scan") {
+    test("close() cancels bubble-up subscriptions via cancelAllBubbleUp without field scan") {
         val customer = customerRepo.create(id = 4, name = "Dana")
 
         val detachRepo = DetachOrderVolatileRepo(ctx)
