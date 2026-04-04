@@ -19,12 +19,12 @@ package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.entity.ReactiveEntity
+import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
 import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.LirpEventPublisher
 import net.transgressoft.lirp.event.StandardCrudEvent.Read
-import net.transgressoft.lirp.persistence.LirpRegistryInfo
 import mu.KotlinLogging
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
@@ -161,7 +161,9 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
         val entries = indexEntries ?: return
         for ((indexName, getter) in entries) {
             val value = getter(entity) ?: continue
-            secondaryIndexes[indexName]?.computeIfAbsent(value) { ConcurrentHashMap.newKeySet() }?.add(entity)
+            secondaryIndexes[indexName]
+                ?.computeIfAbsent(value) { ConcurrentHashMap.newKeySet() }
+                ?.add(entity)
         }
     }
 
@@ -172,7 +174,9 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
         val entries = indexEntries ?: return
         for ((indexName, getter) in entries) {
             val value = getter(entity) ?: continue
-            secondaryIndexes[indexName]?.get(value)?.remove(entity)
+            secondaryIndexes[indexName]
+                ?.get(value)
+                ?.remove(entity)
         }
     }
 
@@ -217,6 +221,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
             } catch (_: ClassNotFoundException) {
                 failFastIfDelegatePresent(entity.javaClass, AggregateRefDelegate::class.java, "LirpRefAccessor")
                 failFastIfDelegatePresent(entity.javaClass, AbstractAggregateCollectionRefDelegate::class.java, "LirpRefAccessor")
+                failFastIfDelegatePresent(entity.javaClass, AbstractMutableAggregateCollectionRefDelegate::class.java, "LirpRefAccessor")
                 collectionRefEntries = emptyList()
                 refEntries = emptyList()
             }
@@ -284,6 +289,13 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
                 (delegate as AbstractAggregateCollectionRefDelegate<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>)
                     .bindRegistry(registry as Registry<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>, context)
             }
+            // Inject mutation callback for mutable collection delegates after registry binding.
+            // The callback receives the idSetter invocation as a lambda and wraps it inside
+            // mutateForCollection so the entity field update occurs inside mutateAndPublish,
+            // enabling correct before/after comparison for MutationEvent emission.
+            if (delegate is AbstractMutableAggregateCollectionRefDelegate<*, *> && entity is ReactiveEntityBase<*, *>) {
+                delegate.bindMutationCallback { applyMutation -> entity.mutateForCollection(applyMutation) }
+            }
         }
     }
 
@@ -339,19 +351,6 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
             }
         } finally {
             if (isTopLevel) visited.clear()
-        }
-    }
-
-    /**
-     * Cancels bubble-up subscriptions for all aggregate references on [entity].
-     *
-     * Called when an entity is permanently closed to ensure subscription cleanup,
-     * regardless of the configured cascade action.
-     */
-    protected fun detachAllRefs(entity: T) {
-        val entries = refEntries ?: return
-        for (entry in entries) {
-            entry.delegateGetter(entity).cancelBubbleUp()
         }
     }
 
