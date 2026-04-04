@@ -200,6 +200,8 @@ The `idSetter` is optional. If omitted, mutations update the in-memory delegate 
 
 **Important:** Entities using mutable collection delegates MUST deep-copy the backing ID field in `clone()`. Without a deep copy, the `mutateAndPublish` before/after equality check always returns `true` and mutation events are silenced.
 
+KSP recognizes `mutableAggregateList` and `mutableAggregateSet` and generates `CollectionRefEntry` descriptors with the correct `idsGetter`, `isOrdered` flag, and cascade action — no hand-written accessor needed. All four cascade modes (`CASCADE`, `RESTRICT`, `DETACH`, `NONE`) and `bubbleUp = false` enforcement apply identically to mutable and immutable collection delegates.
+
 ## Entity Reactivity
 
 Entities are reactive by default — no event bus, no manual Flow collection. A property declared with `reactiveProperty()` automatically notifies every subscriber on assignment:
