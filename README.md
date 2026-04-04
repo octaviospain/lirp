@@ -148,7 +148,16 @@ val resolved: Optional<Category> = product.category.resolve()
 
 ### Collection References
 
-Use `aggregateList` (ordered, allows duplicates) or `aggregateSet` (unique elements) when an entity holds a collection of related IDs:
+LIRP provides four collection delegate types for modeling entities that hold collections of related IDs. All four implement `ReactiveEntityCollectionReference` and resolve lazily via `resolveAll()`. For full copy-paste runnable examples, see [DDD & Aggregates](https://github.com/octaviospain/lirp/wiki/DDD-and-Aggregates) in the wiki.
+
+| Delegate | Mutability | Ordering | Uniqueness | ID write-back |
+|----------|-----------|----------|------------|---------------|
+| `aggregateList` | read-only | ordered | allows duplicates | N/A |
+| `aggregateSet` | read-only | unordered | unique | N/A |
+| `mutableAggregateList` | mutable | ordered | allows duplicates | via `idSetter` |
+| `mutableAggregateSet` | mutable | insertion-ordered | unique | via `idSetter` |
+
+**Read-only example** — use `aggregateList` or `aggregateSet` when the collection of related IDs never changes at runtime:
 
 ```kotlin
 class Playlist(override val id: Long, val name: String, val trackIds: List<Int>) :
@@ -162,17 +171,10 @@ class Playlist(override val id: Long, val name: String, val trackIds: List<Int>)
     override fun clone() = Playlist(id, name, trackIds)
 }
 
-// Resolution returns List<Track> or Set<Track>
 val tracks: List<Track> = playlist.tracks.resolveAll()
 ```
 
-Cascade defaults for collection references are `NONE` (unlike `DETACH` for single references). Bubble-up propagation is not supported for collection references. KSP generates `collectionEntries` in the accessor to wire the delegates automatically.
-
-**Cascade options:** `DETACH` (default for single refs), `CASCADE`, `RESTRICT`, `NONE` (default for collection refs).
-
-### Mutable Collection References
-
-Use `mutableAggregateList` or `mutableAggregateSet` when the collection must support runtime `add`/`remove` operations. These delegates own their backing ID store and sync changes back to the entity's serializable field via an optional `idSetter` lambda. After registry binding, any mutation also triggers a `MutationEvent` on the owning entity:
+**Mutable example** — use `mutableAggregateList` or `mutableAggregateSet` when the collection must support runtime `add`/`remove` operations. Mutations trigger a `MutationEvent` on the owning entity and write IDs back to the entity's serializable field via `idSetter`:
 
 ```kotlin
 class Playlist(override val id: Long, val name: String, var trackIds: MutableList<Int> = mutableListOf()) :
@@ -190,15 +192,21 @@ class Playlist(override val id: Long, val name: String, var trackIds: MutableLis
     override fun clone() = Playlist(id, name, ArrayList(trackIds))
 }
 
-// Runtime mutation — ID is tracked back to trackIds, MutationEvent emitted
-playlist.tracks.add(track)
+playlist.tracks.add(newTrack)        // ID tracked back to trackIds, MutationEvent emitted
 playlist.tracks.remove(oldTrack)
 val resolved: List<Track> = playlist.tracks.resolveAll()
 ```
 
-The `idSetter` is optional. If omitted, mutations update the in-memory delegate but are NOT written back to the entity field and will not survive serialization.
+**Bulk operations:** `addAll(collection)`, `removeAll(collection)`, and `retainAll(collection)` each emit exactly one `MutationEvent` regardless of how many elements are in the input — the backing ID store is updated atomically and `idSetter` is called once with the complete new state.
 
-**Important:** Entities using mutable collection delegates MUST deep-copy the backing ID field in `clone()`. Without a deep copy, the `mutateAndPublish` before/after equality check always returns `true` and mutation events are silenced.
+**Important notes:**
+- `idSetter` is optional; without it, mutations are in-memory only and will NOT survive serialization.
+- Entities using mutable collection delegates MUST deep-copy the backing ID field in `clone()`. Without a deep copy, the `mutateAndPublish` before/after equality check always returns `true` and mutation events are silenced.
+- KSP generates `collectionEntries` in the accessor for all four delegate types, wiring them automatically — no manual accessor code needed.
+- Cascade defaults for collection references are `NONE` (unlike `DETACH` for single references).
+- Bubble-up propagation is not supported for collection references.
+
+**Cascade options:** `DETACH` (default for single refs), `CASCADE`, `RESTRICT`, `NONE` (default for collection refs).
 
 ## Entity Reactivity
 
