@@ -17,6 +17,7 @@
 
 package net.transgressoft.lirp.persistence
 
+import net.transgressoft.lirp.entity.IdentifiableEntity
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -40,7 +41,7 @@ import java.util.concurrent.ConcurrentHashMap
  * implement [AutoCloseable]. After [close], no further repositories should be registered into
  * this context.
  */
-internal class LirpContext : AutoCloseable {
+class LirpContext : AutoCloseable {
     private val registriesMap: ConcurrentHashMap<Class<*>, Registry<*, *>> = ConcurrentHashMap()
 
     /**
@@ -75,8 +76,26 @@ internal class LirpContext : AutoCloseable {
 
     /**
      * Returns the [Registry] registered for [entityClass], or `null` if none is registered.
+     *
+     * @param entityClass the entity class to look up
+     * @return the [Registry] registered for [entityClass], or `null` if none exists
      */
-    internal fun registryFor(entityClass: Class<*>): Registry<*, *>? = registriesMap[entityClass]
+    fun registryFor(entityClass: Class<*>): Registry<*, *>? = registriesMap[entityClass]
+
+    /**
+     * Returns the [Registry] registered for entity type [E], or `null` if none is registered.
+     *
+     * Provides type-safe Kotlin access by delegating to [registryFor(Class)][registryFor] with
+     * an unchecked cast. The cast is safe because the registry was registered under `E::class.java`,
+     * so its entity type parameter matches [E] by construction.
+     *
+     * @param E the entity type to look up
+     * @return the [Registry] for [E], cast to `Registry<*, E>?`, or `null` if none exists
+     */
+    inline fun <reified E : IdentifiableEntity<*>> registryFor(): Registry<*, E>? {
+        @Suppress("UNCHECKED_CAST")
+        return registryFor(E::class.java) as Registry<*, E>?
+    }
 
     /**
      * Returns an immutable snapshot of the current registry map. The snapshot is consistent

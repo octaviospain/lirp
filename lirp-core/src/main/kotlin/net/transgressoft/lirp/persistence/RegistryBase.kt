@@ -97,7 +97,6 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
         // so the CREATE and DELETE events are disabled by default.
         // READ is disabled also because its use case is not clear yet
         activateEvents(UPDATE)
-        // Auto-register if @LirpRepository KSP accessor is present
         try {
             val infoClass = Class.forName(this::class.java.name + "_LirpRegistryInfo")
             val info = infoClass.getDeclaredConstructor().newInstance() as LirpRegistryInfo
