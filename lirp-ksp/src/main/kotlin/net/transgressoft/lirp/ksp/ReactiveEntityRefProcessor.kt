@@ -36,9 +36,6 @@ private const val REACTIVE_ENTITY_REFERENCE_FQN = "net.transgressoft.lirp.persis
 private const val REACTIVE_ENTITY_COLLECTION_REFERENCE_FQN = "net.transgressoft.lirp.persistence.ReactiveEntityCollectionReference"
 private const val AGGREGATE_LIST_REF_DELEGATE_FQN = "net.transgressoft.lirp.persistence.AggregateListRefDelegate"
 private const val AGGREGATE_SET_REF_DELEGATE_FQN = "net.transgressoft.lirp.persistence.AggregateSetRefDelegate"
-private const val MUTABLE_AGGREGATE_LIST_REF_DELEGATE_FQN = "net.transgressoft.lirp.persistence.MutableAggregateListRefDelegate"
-private const val MUTABLE_AGGREGATE_SET_REF_DELEGATE_FQN = "net.transgressoft.lirp.persistence.MutableAggregateSetRefDelegate"
-private const val MUTABLE_REACTIVE_ENTITY_COLLECTION_REFERENCE_FQN = "net.transgressoft.lirp.persistence.MutableReactiveEntityCollectionReference"
 
 /**
  * KSP processor that generates [LirpRefAccessor][net.transgressoft.lirp.persistence.LirpRefAccessor]
@@ -334,10 +331,7 @@ class ReactiveEntityRefProcessor(
     private fun isCollectionReferenceFqn(fqn: String?): Boolean =
         fqn == REACTIVE_ENTITY_COLLECTION_REFERENCE_FQN ||
             fqn == AGGREGATE_LIST_REF_DELEGATE_FQN ||
-            fqn == AGGREGATE_SET_REF_DELEGATE_FQN ||
-            fqn == MUTABLE_AGGREGATE_LIST_REF_DELEGATE_FQN ||
-            fqn == MUTABLE_AGGREGATE_SET_REF_DELEGATE_FQN ||
-            fqn == MUTABLE_REACTIVE_ENTITY_COLLECTION_REFERENCE_FQN
+            fqn == AGGREGATE_SET_REF_DELEGATE_FQN
 
     /**
      * Determines whether the collection reference is ordered (List semantics) by inspecting the
@@ -351,19 +345,13 @@ class ReactiveEntityRefProcessor(
      * Falls back to `false` (Set semantics) if the source is unavailable or the line contains neither.
      */
     private fun isOrderedCollectionDelegate(prop: KSPropertyDeclaration): Boolean {
-        // Read only the property declaration line itself (plus 1 line for multi-line declarations)
-        // to avoid matching factory calls from adjacent properties in the same entity.
-        val text = readSourceLines(prop, linesBefore = 0, linesAfter = 1) ?: return false
+        val text = readSourceLines(prop, linesBefore = 0, linesAfter = 5) ?: return false
         return when {
-            text.contains("mutableAggregateList") -> true
-            text.contains("mutableAggregateSet") -> false
             text.contains("aggregateList") -> true
             text.contains("aggregateSet") -> false
             else -> {
                 val fqn = prop.type.resolve().declaration.qualifiedName?.asString() ?: return false
-                fqn == MUTABLE_AGGREGATE_LIST_REF_DELEGATE_FQN ||
-                    fqn == AGGREGATE_LIST_REF_DELEGATE_FQN ||
-                    fqn.contains("List")
+                fqn.contains("List")
             }
         }
     }
