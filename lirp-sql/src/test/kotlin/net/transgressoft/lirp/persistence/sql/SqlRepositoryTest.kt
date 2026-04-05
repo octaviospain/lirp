@@ -266,6 +266,105 @@ internal class SqlRepositoryTest : FunSpec({
         repo2.close()
     }
 
+    context("Deferred loading") {
+
+        test("constructs with table created but empty when loadOnInit is false") {
+            val jdbcUrl = freshJdbcUrl()
+            // Pre-populate the database via an eager repo, then close it
+            val seedRepo = SqlRepository(jdbcUrl, TestPersonTableDef)
+            seedRepo.add(TestPerson(1).apply { firstName = "Alice" })
+            seedRepo.close()
+
+            val repo = SqlRepository(jdbcUrl, TestPersonTableDef, loadOnInit = false)
+
+            repo.size() shouldBe 0
+            repo.isLoaded shouldBe false
+
+            repo.close()
+        }
+
+        test("load() populates repository from database") {
+            val jdbcUrl = freshJdbcUrl()
+            val seedRepo = SqlRepository(jdbcUrl, TestPersonTableDef)
+            seedRepo.add(TestPerson(1).apply { firstName = "Alice" })
+            seedRepo.add(TestPerson(2).apply { firstName = "Bob" })
+            seedRepo.close()
+
+            val repo = SqlRepository(jdbcUrl, TestPersonTableDef, loadOnInit = false)
+            repo.size() shouldBe 0
+
+            repo.load()
+
+            repo.size() shouldBe 2
+            repo.isLoaded shouldBe true
+            repo.findById(1).shouldBePresent { it.firstName shouldBe "Alice" }
+            repo.findById(2).shouldBePresent { it.firstName shouldBe "Bob" }
+
+            repo.close()
+        }
+
+        test("load() twice throws IllegalStateException") {
+            val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef, loadOnInit = false)
+            repo.load()
+
+            shouldThrow<IllegalStateException> { repo.load() }
+
+            repo.close()
+        }
+
+        test("add() before load() throws IllegalStateException") {
+            val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef, loadOnInit = false)
+
+            shouldThrow<IllegalStateException> {
+                repo.add(TestPerson(99).apply { firstName = "Zara" })
+            }
+
+            repo.close()
+        }
+
+        test("isLoaded reflects state before and after load()") {
+            val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef, loadOnInit = false)
+            repo.isLoaded shouldBe false
+
+            repo.load()
+
+            repo.isLoaded shouldBe true
+
+            repo.close()
+        }
+
+        test("CRUD operations work normally after explicit load()") {
+            val jdbcUrl = freshJdbcUrl()
+            val repo = SqlRepository(jdbcUrl, TestPersonTableDef, loadOnInit = false)
+            repo.load()
+
+            repo.add(TestPerson(10).apply { firstName = "Carol" })
+
+            repo.size() shouldBe 1
+            repo.close()
+
+            val repo2 = SqlRepository(jdbcUrl, TestPersonTableDef)
+            repo2.size() shouldBe 1
+            repo2.findById(10).shouldBePresent { it.firstName shouldBe "Carol" }
+            repo2.close()
+        }
+
+        test("default loadOnInit=true loads rows eagerly") {
+            val jdbcUrl = freshJdbcUrl()
+            val seedRepo = SqlRepository(jdbcUrl, TestPersonTableDef)
+            seedRepo.add(TestPerson(5).apply { firstName = "Eve" })
+            seedRepo.close()
+
+            val repo = SqlRepository(jdbcUrl, TestPersonTableDef)
+
+            repo.size() shouldBe 1
+            repo.isLoaded shouldBe true
+            repo.findById(5).shouldBePresent { it.firstName shouldBe "Eve" }
+
+            repo.close()
+        }
+    }
+
     context("Mutable aggregate collection delegates") {
 
         test("persists mutable aggregate trackIds and reloads them") {

@@ -18,8 +18,6 @@
 package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.entity.ReactiveEntity
-import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
-import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.StandardCrudEvent
 import net.transgressoft.lirp.persistence.PendingBatchDelete
@@ -56,8 +54,8 @@ import javax.sql.DataSource
  *
  * On initialization, this repository:
  * 1. Auto-creates the table using [SchemaUtils.create] (no-op if it already exists).
- * 2. Loads all existing rows from the database into in-memory state via [addToMemoryOnly],
- *    bypassing the pending-ops queue so loaded entities are not re-written.
+ * 2. When [loadOnInit] is `true` (default), loads all existing rows from the database into
+ *    in-memory state immediately. When `false`, rows are not loaded until [load] is called.
  *
  * Two construction modes are supported:
  * - **User-provided [DataSource]:** The caller owns the connection pool; [close] does not close it.
@@ -66,12 +64,16 @@ import javax.sql.DataSource
  *
  * @param K The type of entity identifier, must be [Comparable].
  * @param R The type of reactive entity stored in this repository.
+ * @param loadOnInit When `true` (default), rows are loaded from the database immediately during
+ *   construction. When `false`, the caller must invoke [load] explicitly before any mutating
+ *   operations.
  */
 open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     private val dataSource: DataSource,
     private val tableDef: SqlTableDef<R>,
-    private val ownsDataSource: Boolean
-) : PersistentRepositoryBase<K, R>("SqlRepository-${tableDef.tableName}") {
+    private val ownsDataSource: Boolean,
+    loadOnInit: Boolean = true
+) : PersistentRepositoryBase<K, R>("SqlRepository-${tableDef.tableName}", loadOnInit) {
 
     /**
      * Creates a [SqlRepository] using a user-provided [DataSource].
@@ -81,8 +83,11 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      *
      * @param dataSource The JDBC data source to use for all SQL operations.
      * @param tableDef The SQL table definition describing the entity's column mapping.
+     * @param loadOnInit When `true` (default), rows are loaded from the database immediately
+     *   during construction. When `false`, [load] must be called explicitly.
      */
-    constructor(dataSource: DataSource, tableDef: SqlTableDef<R>): this(dataSource, tableDef, false)
+    constructor(dataSource: DataSource, tableDef: SqlTableDef<R>, loadOnInit: Boolean = true):
+        this(dataSource, tableDef, false, loadOnInit)
 
     /**
      * Creates a [SqlRepository] with a HikariCP connection pool configured from the given JDBC URL.
@@ -94,14 +99,17 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      * @param tableDef The SQL table definition describing the entity's column mapping.
      * @param poolSize Maximum number of connections in the HikariCP pool. Defaults to 10.
      * @param schema Optional database schema name to use for the connection.
+     * @param loadOnInit When `true` (default), rows are loaded from the database immediately
+     *   during construction. When `false`, [load] must be called explicitly.
      */
     @JvmOverloads
     constructor(
         jdbcUrl: String,
         tableDef: SqlTableDef<R>,
         poolSize: Int = 10,
-        schema: String? = null
-    ) : this(buildDataSource(jdbcUrl, poolSize, schema), tableDef, true)
+        schema: String? = null,
+        loadOnInit: Boolean = true
+    ) : this(buildDataSource(jdbcUrl, poolSize, schema), tableDef, true, loadOnInit)
 
     private val exposedTable: ExposedTable = ExposedTableInterpreter().interpret(tableDef)
     private val table: Table = exposedTable.table
@@ -110,29 +118,35 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
 
     init {
         try {
-            disableEvents(CREATE, UPDATE)
-
-            // Auto-create the table if it does not yet exist
+            // Auto-create the table if it does not yet exist (always, even when loadOnInit=false)
             transaction(db = db) {
                 SchemaUtils.create(table)
             }
-
-            // Load all existing rows into in-memory state via addToMemoryOnly(), which bypasses
-            // the pending-ops queue — loaded entities are already persisted and must not be re-written.
-            val loaded =
-                transaction(db = db) {
-                    table.selectAll().map { row -> tableDef.fromRow(row, table) }
-                }
-            loaded.forEach { entity -> addToMemoryOnly(entity) }
-            dirty.set(false)
-
-            activateEvents(CREATE, UPDATE)
+            if (loadOnInit) load()
         } catch (e: Exception) {
             if (ownsDataSource) {
                 (dataSource as? HikariDataSource)?.close()
             }
             throw e
         }
+    }
+
+    /**
+     * Loads all existing rows from the database into memory.
+     *
+     * Called by [load] as part of the template method. Reads the full table contents via a
+     * single SELECT query and returns the entities. After this method returns, the [dirty]
+     * flag is reset so that the initial load does not trigger an immediate write-back.
+     *
+     * @return a map of entity ID to entity from the database, or an empty map if the table is empty.
+     */
+    override fun loadFromStore(): Map<K, R> {
+        val entities =
+            transaction(db = db) {
+                table.selectAll().map { row -> tableDef.fromRow(row, table) }
+            }
+        dirty.set(false)
+        return entities.associateBy { it.id }
     }
 
     /**

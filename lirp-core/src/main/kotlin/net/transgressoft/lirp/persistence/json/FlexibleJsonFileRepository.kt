@@ -76,12 +76,14 @@ open class FlexibleJsonFileRepository
     @JvmOverloads
     constructor(
         jsonFile: File,
-        serializationDelay: Duration = 300.milliseconds
+        serializationDelay: Duration = 300.milliseconds,
+        loadOnInit: Boolean = true
     ) :
     JsonFileRepository<String, ReactivePrimitive<Any>>(
             jsonFile,
             ReactiveValueMapSerializer,
-            serializationDelay = serializationDelay
+            serializationDelay = serializationDelay,
+            loadOnInit = loadOnInit
         ) {
 
         /**
