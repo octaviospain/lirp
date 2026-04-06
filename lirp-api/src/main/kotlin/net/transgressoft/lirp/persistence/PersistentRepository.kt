@@ -21,14 +21,33 @@ import net.transgressoft.lirp.entity.ReactiveEntity
 import java.io.Closeable
 
 /**
- * Marker interface for repositories that persist entity state beyond the JVM lifetime.
+ * Interface for repositories that persist entity state beyond the JVM lifetime.
  *
- * Extends [Repository] with [Closeable] lifecycle management. Concrete implementations such as
- * [net.transgressoft.lirp.persistence.json.JsonRepository] and future SQL-backed repositories
- * extend this interface to signal that they operate on a durable storage medium and must be
- * explicitly closed to release underlying resources.
+ * Extends [Repository] with [Closeable] lifecycle management and on-demand loading. Concrete
+ * implementations such as [net.transgressoft.lirp.persistence.json.JsonRepository] and future
+ * SQL-backed repositories extend this interface to signal that they operate on a durable storage
+ * medium and must be explicitly closed to release underlying resources.
+ *
+ * Repositories may be constructed without loading data immediately by passing `loadOnInit = false`
+ * to the concrete constructor. In that case, [load] must be called explicitly before any mutating
+ * operations.
  *
  * @param K The type of entity identifier, must be [Comparable]
  * @param R The type of reactive entity stored in this repository
  */
-interface PersistentRepository<K : Comparable<K>, R : ReactiveEntity<K, R>> : Repository<K, R>, Closeable
+interface PersistentRepository<K : Comparable<K>, R : ReactiveEntity<K, R>> : Repository<K, R>, Closeable {
+
+    /**
+     * Loads entities from the backing store into memory.
+     *
+     * When `loadOnInit = true` (the default), this method is called automatically during
+     * construction. When `loadOnInit = false`, callers must invoke this method explicitly before
+     * performing any mutating operations.
+     *
+     * Events are suppressed during loading so subscribers do not receive CREATE or UPDATE
+     * notifications for entities that already exist in the store.
+     *
+     * @throws IllegalStateException if called more than once on the same repository instance.
+     */
+    fun load()
+}

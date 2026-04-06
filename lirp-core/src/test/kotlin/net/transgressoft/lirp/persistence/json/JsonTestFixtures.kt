@@ -289,15 +289,18 @@ private val customerMapSerializer = MapSerializer(Int.serializer(), PolymorphicC
 class StandardCustomerJsonFileRepository internal constructor(
     context: LirpContext,
     file: File,
-    serializationDelayMs: Long = 300L
+    serializationDelayMs: Long = 300L,
+    loadOnInit: Boolean = true
 ) : JsonFileRepository<Int, PolymorphicCustomer>(
         context,
         file,
         customerMapSerializer,
         customerSerializersModule,
-        serializationDelay = serializationDelayMs.milliseconds
+        serializationDelay = serializationDelayMs.milliseconds,
+        loadOnInit = loadOnInit
     ) {
-    constructor(file: File, serializationDelayMs: Long = 300L) : this(LirpContext.default, file, serializationDelayMs)
+    constructor(file: File, serializationDelayMs: Long = 300L, loadOnInit: Boolean = true) :
+        this(LirpContext.default, file, serializationDelayMs, loadOnInit)
 
     /** Creates and adds a [StandardCustomer] with the given properties. */
     fun create(id: Int, name: String?, email: String?): StandardCustomer =
@@ -314,15 +317,18 @@ class StandardCustomerJsonFileRepository internal constructor(
 class PremiumCustomerJsonFileRepository internal constructor(
     context: LirpContext,
     file: File,
-    serializationDelayMs: Long = 300L
+    serializationDelayMs: Long = 300L,
+    loadOnInit: Boolean = true
 ) : JsonFileRepository<Int, PolymorphicCustomer>(
         context,
         file,
         customerMapSerializer,
         customerSerializersModule,
-        serializationDelay = serializationDelayMs.milliseconds
+        serializationDelay = serializationDelayMs.milliseconds,
+        loadOnInit = loadOnInit
     ) {
-    constructor(file: File, serializationDelayMs: Long = 300L) : this(LirpContext.default, file, serializationDelayMs)
+    constructor(file: File, serializationDelayMs: Long = 300L, loadOnInit: Boolean = true) :
+        this(LirpContext.default, file, serializationDelayMs, loadOnInit)
 
     /** Creates and adds a [PremiumCustomer] with the given properties. */
     fun create(id: Int, name: String?, email: String?): PremiumCustomer =

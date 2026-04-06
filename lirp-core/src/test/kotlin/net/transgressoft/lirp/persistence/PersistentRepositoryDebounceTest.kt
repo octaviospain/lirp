@@ -267,6 +267,12 @@ private class TestPersistentRepository(
     val writtenOps = mutableListOf<List<PendingOp<Int, Customer>>>()
     var failNextWrite = false
 
+    init {
+        if (loadOnInit) load()
+    }
+
+    override fun loadFromStore(): Map<Int, Customer> = emptyMap()
+
     override fun writePending(ops: List<PendingOp<Int, Customer>>) {
         if (failNextWrite) {
             failNextWrite = false

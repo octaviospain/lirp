@@ -362,6 +362,31 @@ widget.price = 39.99   // debounced write triggered; no extra code needed
 
 The `@Serializable` annotation (from Kotlin Serialization) is required on the entity class. For polymorphic entity hierarchies, use `TransEntityPolymorphicSerializer`.
 
+## Deferred Loading
+
+Both `JsonFileRepository` and `SqlRepository` support **deferred loading**: construction and data loading are decoupled so you can coordinate multiple repositories before any of them reads from the backing store.
+
+By default (`loadOnInit = true`), rows are loaded immediately during construction. Pass `loadOnInit = false` to defer loading until an explicit `load()` call:
+
+```kotlin
+// SQL — table is created on construction, but no rows are loaded yet
+val repo = SqlRepository(jdbcUrl, tableDef, loadOnInit = false)
+// ... set up aggregate references, register other repositories ...
+repo.load()  // rows loaded now; mutating operations become available
+
+// JSON — file is validated on construction, but no entities are read yet
+val jsonRepo = JsonFileRepository(file, serializer, loadOnInit = false)
+// ... configure serializer modules, coordinate with other repos ...
+jsonRepo.load()  // entities loaded now
+```
+
+**Key rules:**
+
+- `load()` may only be called once; a second call throws `IllegalStateException`.
+- Mutating operations (`add`, `remove`, `removeAll`, `clear`) throw `IllegalStateException` before `load()` is called on a deferred repository. Query operations return empty results.
+- `isLoaded` returns `false` before `load()` and `true` after a successful call.
+- For SQL repositories, the table is always created during construction regardless of `loadOnInit`.
+
 ## Installation
 
 ```kotlin

@@ -18,6 +18,7 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.ReactiveEntity
+import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.ReactiveScope
@@ -48,9 +49,26 @@ import kotlinx.coroutines.launch
  * Subclasses implement [writePending] to execute the collapsed operation list against the backing
  * store. On write failure, the raw (non-collapsed) ops are re-enqueued for retry in the next cycle.
  *
+ * Loading behaviour is controlled by the [loadOnInit] parameter. When `true` (default), the
+ * subclass is expected to call [load] at the end of its own init block so that [loadFromStore]
+ * executes after all subclass fields are initialised. When `false`, callers must invoke [load]
+ * explicitly before using any mutating operations.
+ *
+ * ### Subclassing contract
+ *
+ * Custom subclasses **must** implement:
+ * - [loadFromStore] — reads entities from the backing store and returns them as a map.
+ * - [writePending] — persists collapsed pending operations to the backing store.
+ *
+ * Subclasses that set `loadOnInit = true` (the default) **must** call [load] at the end of
+ * their own `init` block, after all subclass-specific fields are initialised. This ensures
+ * [loadFromStore] can safely access subclass state (e.g. database connections, file handles).
+ *
  * Lifecycle guarantees:
  * - All mutating operations ([add], [remove], [removeAll], [clear]) throw [IllegalStateException]
  *   after the repository is closed.
+ * - Mutating operations also throw [IllegalStateException] if called before [load] on a repository
+ *   constructed with `loadOnInit = false`.
  * - [close] is idempotent: subsequent calls after the first are safe no-ops.
  * - [close] cancels the pending debounce timer, performs a synchronous final flush, then cancels
  *   all entity mutation subscriptions.
@@ -60,6 +78,8 @@ import kotlinx.coroutines.launch
  * @param R The type of reactive entity stored in this repository
  * @param debounceMillis Milliseconds of inactivity before pending ops are flushed (sliding window)
  * @param maxDelayMillis Maximum milliseconds from first enqueue to forced flush (starvation guard)
+ * @param loadOnInit When `true`, subclasses call [load] in their own init block to eagerly load
+ *        entities from the backing store. When `false`, [load] must be called explicitly.
  */
 abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K, R>>
     internal constructor(
@@ -67,11 +87,13 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         name: String,
         initialEntities: MutableMap<K, R>,
         private val debounceMillis: Long = 100L,
-        private val maxDelayMillis: Long = 1000L
+        private val maxDelayMillis: Long = 1000L,
+        protected val loadOnInit: Boolean = true
     ) : VolatileRepository<K, R>(context, name, initialEntities), PersistentRepository<K, R> {
 
         companion object {
             private const val CLOSED_MESSAGE = "PersistentRepositoryBase is closed"
+            private const val NOT_LOADED_MESSAGE = "Repository has not been loaded yet. Call load() first."
         }
 
         /**
@@ -82,10 +104,81 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
          * for in-memory storage. Debounce defaults: 100 ms sliding window, 1000 ms max delay cap.
          *
          * @param name A descriptive name for this repository, used in logging and identification.
+         * @param loadOnInit When `true` (default), the subclass is expected to call [load] in its
+         *   own init block to eagerly load from the backing store. When `false`, [load] must be
+         *   called explicitly by the caller.
          */
-        constructor(name: String) : this(LirpContext.default, name, ConcurrentHashMap())
+        constructor(name: String, loadOnInit: Boolean = true) :
+            this(LirpContext.default, name, ConcurrentHashMap(), loadOnInit = loadOnInit)
 
         private val log = KotlinLogging.logger(javaClass.name)
+
+        @Volatile
+        private var loaded: Boolean = false
+
+        @Volatile
+        private var loading: Boolean = false
+
+        /**
+         * Whether entities from the backing store have been loaded into memory.
+         *
+         * Returns `true` after a successful [load] call or after eager construction with
+         * `loadOnInit = true`. Returns `false` before [load] is called on a deferred repository
+         * or while loading is in progress.
+         */
+        val isLoaded: Boolean get() = loaded
+
+        /**
+         * Loads entities from the backing store into memory.
+         *
+         * Delegates to [loadFromStore] to obtain the entity map, then inserts each entity via
+         * [addToMemoryOnly] so that no write-back is triggered for data already persisted.
+         * CREATE and UPDATE events are suppressed during the load so subscribers do not observe
+         * bulk-load operations as individual mutations.
+         *
+         * A separate [loading] flag prevents concurrent callers from entering [load] while a
+         * load is in progress. The [loaded] flag is only set to `true` after [loadFromStore]
+         * completes successfully. If [loadFromStore] throws, [loading] is reset so that a
+         * subsequent retry is possible.
+         *
+         * The entire load is performed under [flushLock] to prevent a concurrent [close] from
+         * clearing subscriptions while entities are being added via [addToMemoryOnly].
+         *
+         * @throws IllegalStateException if called after a successful load, while a load is
+         *         already in progress, or after the repository has been closed.
+         */
+        override fun load() {
+            flushLock.withLock {
+                checkNotClosed()
+                check(!loaded) { "Repository has already been loaded" }
+                check(!loading) { "Repository is currently being loaded" }
+                loading = true
+                disableEvents(CrudEvent.Type.CREATE, CrudEvent.Type.UPDATE)
+                try {
+                    val entities = loadFromStore()
+                    entities.values.forEach { addToMemoryOnly(it) }
+                    loaded = true
+                } finally {
+                    loading = false
+                    activateEvents(CrudEvent.Type.CREATE, CrudEvent.Type.UPDATE)
+                }
+            }
+        }
+
+        /**
+         * Loads entities from the backing store and returns them as a map of ID to entity.
+         *
+         * Called by [load] as part of the template method. Subclasses implement this method to
+         * read from their specific storage medium (JSON file, SQL database, etc.) and return
+         * the persisted entity map. The returned entities are inserted via [addToMemoryOnly]
+         * without triggering write-back or events.
+         *
+         * @return a map of entity ID to entity from the backing store, or an empty map if the
+         *         store contains no data.
+         */
+        protected abstract fun loadFromStore(): Map<K, R>
+
+        private fun checkLoaded() = check(loaded) { NOT_LOADED_MESSAGE }
 
         private val subscriptionsMap: MutableMap<K, LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>> = ConcurrentHashMap()
 
@@ -240,6 +333,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
 
         override fun add(entity: R): Boolean {
             checkNotClosed()
+            checkLoaded()
             val added = super.add(entity)
             if (added) {
                 subscribeEntity(entity)
@@ -250,6 +344,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
 
         override fun remove(entity: R): Boolean {
             checkNotClosed()
+            checkLoaded()
             return super.remove(entity).also { removed ->
                 if (removed) {
                     enqueue(PendingDelete(entity.id))
@@ -263,6 +358,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
 
         override fun removeAll(entities: Collection<R>): Boolean {
             checkNotClosed()
+            checkLoaded()
             val presentEntities = entities.filter { contains(it) }
             return super.removeAll(entities).also { removed ->
                 if (removed) {
@@ -276,6 +372,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
 
         override fun clear() {
             checkNotClosed()
+            checkLoaded()
             super.clear()
             enqueue(PendingClear())
             subscriptionsMap.forEach { (_, sub) -> sub.cancel() }

@@ -68,20 +68,24 @@ import kotlinx.serialization.json.put
  *
  * @param jsonFile The JSON file to store primitive values in
  * @param serializationDelay The delay between the last change and JSON file write. Defaults to 300 milliseconds.
- * @param ioScope The coroutine scope used for file I/O operations. By default, uses a scope with
- *        limitedParallelism(1) on the IO dispatcher to ensure thread-safe file access. For testing,
- *        provide a scope created with a test dispatcher to control virtual time execution.
+ * @param loadOnInit When `true` (default), the JSON file is deserialized eagerly during construction
+ *        and all primitives are available immediately. When `false`, construction skips loading and
+ *        callers **must** invoke [load] before using [getReactiveString], [getReactiveInt], or
+ *        [getReactiveBoolean] — those methods fall through to [add] internally, which throws
+ *        [IllegalStateException] until [load] has completed.
  */
 open class FlexibleJsonFileRepository
     @JvmOverloads
     constructor(
         jsonFile: File,
-        serializationDelay: Duration = 300.milliseconds
+        serializationDelay: Duration = 300.milliseconds,
+        loadOnInit: Boolean = true
     ) :
     JsonFileRepository<String, ReactivePrimitive<Any>>(
             jsonFile,
             ReactiveValueMapSerializer,
-            serializationDelay = serializationDelay
+            serializationDelay = serializationDelay,
+            loadOnInit = loadOnInit
         ) {
 
         /**

@@ -844,4 +844,142 @@ class JsonFileRepositoryTest : DescribeSpec({
             ctx2.close()
         }
     }
+
+    describe("deferred loading") {
+
+        it("constructs empty repository when loadOnInit is false") {
+            val deferredFile = tempfile("deferred-empty", ".json").also { it.deleteOnExit() }
+            val arb = arbitraryStandardCustomer().next()
+            deferredFile.writeText("""{"${arb.id}":{"type":"StandardCustomer","id":${arb.id},"name":"${arb.name}","email":null,"loyaltyPoints":0}}""")
+            val ctx = LirpContext()
+            val deferred = StandardCustomerJsonFileRepository(ctx, deferredFile, loadOnInit = false)
+            try {
+                deferred.size() shouldBe 0
+                deferred.isLoaded shouldBe false
+            } finally {
+                deferred.close()
+                ctx.close()
+            }
+        }
+
+        it("load() deserializes entities from file") {
+            val deferredFile = tempfile("deferred-load", ".json").also { it.deleteOnExit() }
+            val json1 = """{"type":"StandardCustomer","id":1,"name":"Alice","email":null,"loyaltyPoints":0}"""
+            val json2 = """{"type":"StandardCustomer","id":2,"name":"Bob","email":null,"loyaltyPoints":0}"""
+            deferredFile.writeText("""{"1":$json1,"2":$json2}""")
+            val ctx = LirpContext()
+            val deferred = StandardCustomerJsonFileRepository(ctx, deferredFile, loadOnInit = false)
+            try {
+                deferred.load()
+                deferred.size() shouldBe 2
+                deferred.isLoaded shouldBe true
+                deferred.findById(1) shouldBePresent { it.name shouldBe "Alice" }
+                deferred.findById(2) shouldBePresent { it.name shouldBe "Bob" }
+            } finally {
+                deferred.close()
+                ctx.close()
+            }
+        }
+
+        it("load() twice throws IllegalStateException with 'already been loaded'") {
+            val deferredFile = tempfile("deferred-double-load", ".json").also { it.deleteOnExit() }
+            val ctx = LirpContext()
+            val deferred = StandardCustomerJsonFileRepository(ctx, deferredFile, loadOnInit = false)
+            try {
+                deferred.load()
+                shouldThrow<IllegalStateException> { deferred.load() }.message shouldContain "already been loaded"
+            } finally {
+                deferred.close()
+                ctx.close()
+            }
+        }
+
+        it("loadOnInit = true auto-loads on construction") {
+            val eagerFile = tempfile("eager-load", ".json").also { it.deleteOnExit() }
+            eagerFile.writeText("""{"1":{"type":"StandardCustomer","id":1,"name":"Alice","email":null,"loyaltyPoints":0}}""")
+            val ctx = LirpContext()
+            val eager = StandardCustomerJsonFileRepository(ctx, eagerFile)
+            try {
+                eager.size() shouldBe 1
+                eager.isLoaded shouldBe true
+            } finally {
+                eager.close()
+                ctx.close()
+            }
+        }
+
+        it("load() does not emit CREATE or UPDATE events") {
+            val deferredFile = tempfile("deferred-no-events", ".json").also { it.deleteOnExit() }
+            deferredFile.writeText("""{"1":{"type":"StandardCustomer","id":1,"name":"Alice","email":null,"loyaltyPoints":0}}""")
+            val ctx = LirpContext()
+            val deferred = StandardCustomerJsonFileRepository(ctx, deferredFile, loadOnInit = false)
+            try {
+                val receivedEvents = AtomicReference(mutableListOf<CrudEvent<Int, PolymorphicCustomer>>())
+                deferred.subscribe { event -> receivedEvents.get().add(event) }
+                deferred.load()
+                testDispatcher.scheduler.advanceUntilIdle()
+                receivedEvents.get().filter { it.isCreate() || it.isUpdate() } shouldBe emptyList()
+            } finally {
+                deferred.close()
+                ctx.close()
+            }
+        }
+
+        it("add() before load() throws IllegalStateException with 'not been loaded'") {
+            val deferredFile = tempfile("deferred-add-guard", ".json").also { it.deleteOnExit() }
+            val ctx = LirpContext()
+            val deferred = StandardCustomerJsonFileRepository(ctx, deferredFile, loadOnInit = false)
+            try {
+                shouldThrow<IllegalStateException> {
+                    deferred.create(1, "Alice", null)
+                }.message shouldContain "not been loaded"
+            } finally {
+                deferred.close()
+                ctx.close()
+            }
+        }
+
+        it("load() after close() throws IllegalStateException") {
+            val deferredFile = tempfile("deferred-load-after-close", ".json").also { it.deleteOnExit() }
+            val ctx = LirpContext()
+            val deferred = StandardCustomerJsonFileRepository(ctx, deferredFile, loadOnInit = false)
+            deferred.close()
+            try {
+                shouldThrow<IllegalStateException> { deferred.load() }.message shouldContain "closed"
+            } finally {
+                ctx.close()
+            }
+        }
+
+        it("CRUD works normally after load()") {
+            val deferredFile = tempfile("deferred-crud-after-load", ".json").also { it.deleteOnExit() }
+            val ctx = LirpContext()
+            val deferred = StandardCustomerJsonFileRepository(ctx, deferredFile, loadOnInit = false)
+            try {
+                deferred.load()
+                val customer = deferred.create(1, "Alice", null)
+                deferred.size() shouldBe 1
+                testDispatcher.scheduler.advanceUntilIdle()
+                deferred.remove(customer)
+                deferred.size() shouldBe 0
+            } finally {
+                deferred.close()
+                ctx.close()
+            }
+        }
+
+        it("isLoaded reflects false before load() and true after load()") {
+            val deferredFile = tempfile("deferred-is-loaded", ".json").also { it.deleteOnExit() }
+            val ctx = LirpContext()
+            val deferred = StandardCustomerJsonFileRepository(ctx, deferredFile, loadOnInit = false)
+            try {
+                deferred.isLoaded shouldBe false
+                deferred.load()
+                deferred.isLoaded shouldBe true
+            } finally {
+                deferred.close()
+                ctx.close()
+            }
+        }
+    }
 })

@@ -112,14 +112,17 @@ class MutablePlaylistGroupVolatileRepo internal constructor(
 class MutablePlaylistJsonFileRepository internal constructor(
     context: LirpContext,
     file: File,
-    serializationDelayMs: Long = 50L
+    serializationDelayMs: Long = 50L,
+    loadOnInit: Boolean = true
 ) : JsonFileRepository<Long, MutablePlaylist>(
         context,
         file,
         MapSerializer(Long.serializer(), MutablePlaylist.serializer()),
-        serializationDelay = serializationDelayMs.milliseconds
+        serializationDelay = serializationDelayMs.milliseconds,
+        loadOnInit = loadOnInit
     ) {
-    constructor(file: File, serializationDelayMs: Long = 50L) : this(LirpContext.default, file, serializationDelayMs)
+    constructor(file: File, serializationDelayMs: Long = 50L, loadOnInit: Boolean = true) :
+        this(LirpContext.default, file, serializationDelayMs, loadOnInit)
 
     fun create(id: Long, name: String, itemIds: List<Int> = emptyList()): MutablePlaylist =
         MutablePlaylist(id, name, itemIds).also { add(it) }

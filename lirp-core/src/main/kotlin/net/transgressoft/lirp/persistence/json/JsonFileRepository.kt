@@ -18,8 +18,6 @@
 package net.transgressoft.lirp.persistence.json
 
 import net.transgressoft.lirp.entity.ReactiveEntity
-import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
-import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpDeserializationException
 import net.transgressoft.lirp.persistence.PendingOp
@@ -68,6 +66,9 @@ import kotlinx.serialization.modules.SerializersModule
  * @param serializationDelay The debounce window before a pending write is flushed to disk.
  *        Defaults to 300 milliseconds. Lower values increase responsiveness but may cause more I/O;
  *        higher values batch more changes into fewer writes.
+ * @param loadOnInit When `true` (default), entities are loaded from the JSON file immediately
+ *        during construction. When `false`, [load] must be called explicitly before any mutating
+ *        operations.
  */
 open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
     internal constructor(
@@ -75,13 +76,15 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
         file: File,
         private val mapSerializer: KSerializer<Map<K, R>>,
         private val repositorySerializersModule: SerializersModule = SerializersModule {},
-        private val serializationDelay: Duration = 300.milliseconds
+        private val serializationDelay: Duration = 300.milliseconds,
+        loadOnInit: Boolean = true
     ) : PersistentRepositoryBase<K, R>(
             context,
             "JsonFileRepository-${file.name}",
             ConcurrentHashMap(),
             debounceMillis = serializationDelay.inWholeMilliseconds,
-            maxDelayMillis = serializationDelay.inWholeMilliseconds.coerceAtLeast(1000L)
+            maxDelayMillis = serializationDelay.inWholeMilliseconds.coerceAtLeast(1000L),
+            loadOnInit = loadOnInit
         ),
         JsonRepository<K, R> {
 
@@ -90,8 +93,9 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
             file: File,
             mapSerializer: KSerializer<Map<K, R>>,
             repositorySerializersModule: SerializersModule = SerializersModule {},
-            serializationDelay: Duration = 300.milliseconds
-        ) : this(LirpContext.default, file, mapSerializer, repositorySerializersModule, serializationDelay)
+            serializationDelay: Duration = 300.milliseconds,
+            loadOnInit: Boolean = true
+        ) : this(LirpContext.default, file, mapSerializer, repositorySerializersModule, serializationDelay, loadOnInit)
 
         private val log = KotlinLogging.logger(javaClass.name)
 
@@ -124,25 +128,35 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
                 require(jsonFile.exists().and(jsonFile.canWrite()).and(jsonFile.extension == "json")) {
                     "Provided jsonFile does not exist, is not writable or is not a json file"
                 }
-
-                disableEvents(CREATE, UPDATE)
-
-                // Load entities from the JSON file on initialization.
-                // addToMemoryOnly() bypasses the pending-ops queue so loaded entities are not
-                // re-written back — the file already reflects the current state.
-                decodeFromJson()?.let { loadedEntities ->
-                    log.info { "${loadedEntities.size} objects deserialized from file $jsonFile" }
-
-                    loadedEntities.values.forEach { addToMemoryOnly(it) }
-                }
-
-                activateEvents(CREATE, UPDATE)
+                if (loadOnInit) load()
             } catch (exception: Exception) {
                 // Deregister from context before propagating to avoid leaving a zombie registration
                 // that would block re-creation of a repository for the same entity type.
                 context.deregister(this@JsonFileRepository)
                 throw exception
             }
+        }
+
+        /**
+         * Reads all entities from the JSON file and returns them as a map of ID to entity.
+         *
+         * Called by [load] as part of the template method. Validates that the file is still
+         * accessible at load time (relevant for deferred loads where time has elapsed since
+         * construction), then deserializes the full contents and resets the [dirty] flag so
+         * that the initial load does not trigger an immediate write-back. Returns an empty map
+         * when the file is empty.
+         *
+         * @return a map of entity ID to entity deserialized from [jsonFile], or an empty map
+         *         if the file contains no data.
+         */
+        override fun loadFromStore(): Map<K, R> {
+            require(jsonFile.exists().and(jsonFile.canWrite()).and(jsonFile.extension == "json")) {
+                "Provided jsonFile does not exist, is not writable or is not a json file"
+            }
+            val entities = decodeFromJson() ?: emptyMap()
+            log.info { "${entities.size} objects deserialized from file $jsonFile" }
+            dirty.set(false)
+            return entities
         }
 
         /**
