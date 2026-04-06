@@ -54,6 +54,16 @@ import kotlinx.coroutines.launch
  * executes after all subclass fields are initialised. When `false`, callers must invoke [load]
  * explicitly before using any mutating operations.
  *
+ * ### Subclassing contract
+ *
+ * Custom subclasses **must** implement:
+ * - [loadFromStore] — reads entities from the backing store and returns them as a map.
+ * - [writePending] — persists collapsed pending operations to the backing store.
+ *
+ * Subclasses that set `loadOnInit = true` (the default) **must** call [load] at the end of
+ * their own `init` block, after all subclass-specific fields are initialised. This ensures
+ * [loadFromStore] can safely access subclass state (e.g. database connections, file handles).
+ *
  * Lifecycle guarantees:
  * - All mutating operations ([add], [remove], [removeAll], [clear]) throw [IllegalStateException]
  *   after the repository is closed.
@@ -106,11 +116,15 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         @Volatile
         private var loaded: Boolean = false
 
+        @Volatile
+        private var loading: Boolean = false
+
         /**
          * Whether entities from the backing store have been loaded into memory.
          *
          * Returns `true` after a successful [load] call or after eager construction with
-         * `loadOnInit = true`. Returns `false` before [load] is called on a deferred repository.
+         * `loadOnInit = true`. Returns `false` before [load] is called on a deferred repository
+         * or while loading is in progress.
          */
         val isLoaded: Boolean get() = loaded
 
@@ -122,22 +136,32 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
          * CREATE and UPDATE events are suppressed during the load so subscribers do not observe
          * bulk-load operations as individual mutations.
          *
-         * The [loaded] flag is set inside [flushLock] before calling [loadFromStore] to prevent
-         * concurrent callers from passing the guard while loading is in progress.
+         * A separate [loading] flag prevents concurrent callers from entering [load] while a
+         * load is in progress. The [loaded] flag is only set to `true` after [loadFromStore]
+         * completes successfully. If [loadFromStore] throws, [loading] is reset so that a
+         * subsequent retry is possible.
          *
-         * @throws IllegalStateException if called more than once on the same repository instance.
+         * The entire load is performed under [flushLock] to prevent a concurrent [close] from
+         * clearing subscriptions while entities are being added via [addToMemoryOnly].
+         *
+         * @throws IllegalStateException if called after a successful load, while a load is
+         *         already in progress, or after the repository has been closed.
          */
         override fun load() {
             flushLock.withLock {
+                checkNotClosed()
                 check(!loaded) { "Repository has already been loaded" }
-                loaded = true
-            }
-            disableEvents(CrudEvent.Type.CREATE, CrudEvent.Type.UPDATE)
-            try {
-                val entities = loadFromStore()
-                entities.values.forEach { addToMemoryOnly(it) }
-            } finally {
-                activateEvents(CrudEvent.Type.CREATE, CrudEvent.Type.UPDATE)
+                check(!loading) { "Repository is currently being loaded" }
+                loading = true
+                disableEvents(CrudEvent.Type.CREATE, CrudEvent.Type.UPDATE)
+                try {
+                    val entities = loadFromStore()
+                    entities.values.forEach { addToMemoryOnly(it) }
+                    loaded = true
+                } finally {
+                    loading = false
+                    activateEvents(CrudEvent.Type.CREATE, CrudEvent.Type.UPDATE)
+                }
             }
         }
 

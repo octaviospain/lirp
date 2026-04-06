@@ -939,6 +939,18 @@ class JsonFileRepositoryTest : DescribeSpec({
             }
         }
 
+        it("load() after close() throws IllegalStateException") {
+            val deferredFile = tempfile("deferred-load-after-close", ".json").also { it.deleteOnExit() }
+            val ctx = LirpContext()
+            val deferred = StandardCustomerJsonFileRepository(ctx, deferredFile, loadOnInit = false)
+            deferred.close()
+            try {
+                shouldThrow<IllegalStateException> { deferred.load() }.message shouldContain "closed"
+            } finally {
+                ctx.close()
+            }
+        }
+
         it("CRUD works normally after load()") {
             val deferredFile = tempfile("deferred-crud-after-load", ".json").also { it.deleteOnExit() }
             val ctx = LirpContext()

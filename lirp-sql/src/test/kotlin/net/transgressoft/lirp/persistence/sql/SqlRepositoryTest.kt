@@ -270,15 +270,22 @@ internal class SqlRepositoryTest : FunSpec({
 
         test("constructs with table created but empty when loadOnInit is false") {
             val jdbcUrl = freshJdbcUrl()
-            // Pre-populate the database via an eager repo, then close it
-            val seedRepo = SqlRepository(jdbcUrl, TestPersonTableDef)
-            seedRepo.add(TestPerson(1).apply { firstName = "Alice" })
-            seedRepo.close()
-
             val repo = SqlRepository(jdbcUrl, TestPersonTableDef, loadOnInit = false)
 
             repo.size() shouldBe 0
             repo.isLoaded shouldBe false
+
+            // Verify the table was created by the deferred constructor itself
+            // by querying the fresh database directly via JDBC
+            val ds = buildExternalDataSource(jdbcUrl)
+            ds.connection.use { conn ->
+                conn.createStatement().use { stmt ->
+                    val rs = stmt.executeQuery("SELECT COUNT(*) FROM test_persons")
+                    rs.next()
+                    rs.getInt(1) shouldBe 0
+                }
+            }
+            ds.close()
 
             repo.close()
         }
@@ -320,6 +327,13 @@ internal class SqlRepositoryTest : FunSpec({
             }
 
             repo.close()
+        }
+
+        test("load() after close() throws IllegalStateException") {
+            val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef, loadOnInit = false)
+            repo.close()
+
+            shouldThrow<IllegalStateException> { repo.load() }
         }
 
         test("isLoaded reflects state before and after load()") {

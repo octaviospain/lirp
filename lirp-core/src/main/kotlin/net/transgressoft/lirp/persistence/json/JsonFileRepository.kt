@@ -142,8 +142,9 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
          *
          * Called by [load] as part of the template method. Validates that the file is still
          * accessible at load time (relevant for deferred loads where time has elapsed since
-         * construction), then deserializes the full contents. Returns an empty map when the
-         * file is empty.
+         * construction), then deserializes the full contents and resets the [dirty] flag so
+         * that the initial load does not trigger an immediate write-back. Returns an empty map
+         * when the file is empty.
          *
          * @return a map of entity ID to entity deserialized from [jsonFile], or an empty map
          *         if the file contains no data.
@@ -154,6 +155,7 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
             }
             val entities = decodeFromJson() ?: emptyMap()
             log.info { "${entities.size} objects deserialized from file $jsonFile" }
+            dirty.set(false)
             return entities
         }
 
