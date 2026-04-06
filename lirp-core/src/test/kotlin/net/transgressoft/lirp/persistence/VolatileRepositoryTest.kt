@@ -364,7 +364,7 @@ internal class VolatileRepositoryTest : FunSpec({
             playlist.items.add(t2)
 
             playlistRepo.findById(1L).shouldBePresent {
-                it.itemIds shouldContainExactly listOf(1, 2)
+                it.items.referenceIds shouldContainExactly listOf(1, 2)
                 it.items.resolveAll() shouldContainExactly listOf(t1, t2)
             }
         }
@@ -381,13 +381,13 @@ internal class VolatileRepositoryTest : FunSpec({
             playlist.items.remove(t2)
 
             playlistRepo.findById(1L).shouldBePresent {
-                it.itemIds shouldContainExactly listOf(1, 3)
+                it.items.referenceIds shouldContainExactly listOf(1, 3)
             }
 
             playlist.items.clear()
 
             playlistRepo.findById(1L).shouldBePresent {
-                it.itemIds shouldBe emptyList()
+                it.items.referenceIds shouldBe emptyList()
             }
         }
 
@@ -403,7 +403,7 @@ internal class VolatileRepositoryTest : FunSpec({
             playlist.items.addAll(listOf(t1, t2, t3))
 
             playlistRepo.findById(1L).shouldBePresent {
-                it.itemIds shouldContainExactly listOf(1, 2, 3)
+                it.items.referenceIds shouldContainExactly listOf(1, 2, 3)
                 it.items.resolveAll() shouldContainExactly listOf(t1, t2, t3)
             }
         }
@@ -420,7 +420,7 @@ internal class VolatileRepositoryTest : FunSpec({
             playlist.items.removeAll(setOf(t1, t3))
 
             playlistRepo.findById(1L).shouldBePresent {
-                it.itemIds shouldContainExactly listOf(2)
+                it.items.referenceIds shouldContainExactly listOf(2)
                 it.items.resolveAll() shouldContainExactly listOf(t2)
             }
         }
@@ -596,8 +596,8 @@ internal class VolatileRepositoryTest : FunSpec({
             pl1.items.addAll(listOf(t1, t2))
             pl2.items.addAll(listOf(t2, t3))
 
-            playlistRepo.findById(1L).shouldBePresent { it.itemIds shouldContainExactly listOf(1, 2) }
-            playlistRepo.findById(2L).shouldBePresent { it.itemIds shouldContainExactly listOf(2, 3) }
+            playlistRepo.findById(1L).shouldBePresent { it.items.referenceIds shouldContainExactly listOf(1, 2) }
+            playlistRepo.findById(2L).shouldBePresent { it.items.referenceIds shouldContainExactly listOf(2, 3) }
         }
 
         test("set-based mutable aggregate maintains uniqueness across repository operations") {
@@ -613,7 +613,7 @@ internal class VolatileRepositoryTest : FunSpec({
             group.playlists.add(p1) // duplicate
 
             groupRepo.findById(1L).shouldBePresent {
-                it.playlistIds shouldContainExactlyInAnyOrder setOf(1L, 2L)
+                it.playlists.referenceIds shouldContainExactlyInAnyOrder setOf(1L, 2L)
             }
         }
 

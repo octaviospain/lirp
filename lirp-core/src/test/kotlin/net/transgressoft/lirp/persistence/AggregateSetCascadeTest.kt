@@ -94,7 +94,7 @@ internal class AggregateSetCascadeTest : StringSpec({
     "CASCADE on unbound set ref delegate is a no-op" {
         val group = CascadePlaylistGroup(id = 100L, playlistIds = setOf(10L))
 
-        val delegate = group.playlists as AggregateSetRefDelegate<Long, Playlist>
+        val delegate = group.playlists as AbstractAggregateCollectionRefDelegate<Long, Playlist>
         // Unbound delegate — registryRef is null, so doCascade returns early without exception
         delegate.executeCascade(net.transgressoft.lirp.entity.CascadeAction.CASCADE, group)
     }

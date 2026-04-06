@@ -25,25 +25,22 @@ import kotlin.concurrent.withLock
  * of entities stored in a [Registry]. Preserves insertion order and allows duplicate IDs (bag semantics).
  *
  * Returned by the [mutableAggregateList] factory function for use with Kotlin property delegation.
- * The internal backing list is owned by this delegate and initialized from the `idProvider` at
+ * The internal backing list is owned by this delegate and initialized from [initialIds] at
  * construction time; subsequent mutations are reflected directly in [referenceIds].
  *
- * See [AbstractMutableAggregateCollectionRefDelegate] for shared behavior: locking, idSetter write-back,
+ * See [AbstractMutableAggregateCollectionRefDelegate] for shared behavior: locking,
  * mutation callback injection, and the deep-copy requirement.
  *
  * @param K the type of the referenced entity's ID
  * @param E the referenced entity type
- * @param idProvider lambda that returns the initial list of referenced entity IDs at construction time
- * @param idSetter optional lambda to write mutated IDs back to the owning entity's serializable field
+ * @param initialIds the initial list of referenced entity IDs at construction time
  */
 internal class MutableAggregateListRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
-    idProvider: () -> List<K>,
-    idSetter: ((List<K>) -> Unit)?
-) : AbstractMutableAggregateCollectionRefDelegate<K, E>(
-        idSetter?.let { setter -> { ids -> setter(ids.toList()) } }
-    ) {
+    initialIds: List<K>
+) : AbstractMutableAggregateCollectionRefDelegate<K, E>(),
+    LirpDelegate {
 
-    override val backingIds: MutableList<K> = ArrayList(idProvider())
+    override val backingIds: MutableList<K> = ArrayList(initialIds)
 
     override fun add(element: E): Boolean = mutate { add(element.id) }
 
@@ -62,30 +59,24 @@ internal class MutableAggregateListRefDelegate<K : Comparable<K>, E : Identifiab
 /**
  * Creates a property delegate for a mutable ordered aggregate collection reference.
  *
- * The returned delegate owns a mutable backing ID list, initialized from [idProvider] at property
- * delegation time. Calls to [MutableReactiveEntityCollectionReference.add] and
- * [MutableReactiveEntityCollectionReference.remove] update the internal list and sync changes back
- * to the entity's serializable field via [idSetter]. After registry binding, mutations also trigger
- * mutation event emission on the owning entity. Duplicate IDs are allowed (bag semantics).
- *
- * The [idSetter] is optional (default `null`). If omitted, mutations update the internal backing
- * store but are NOT written back to the entity field — serialization will not reflect runtime changes.
- * Document this limitation in entity KDoc when using without [idSetter].
+ * The returned delegate owns a mutable backing ID list, initialized from [initialIds] at property
+ * delegation time. Calls to [MutableAggregateCollectionRef.add] and
+ * [MutableAggregateCollectionRef.remove] update the internal list. After registry
+ * binding, mutations also trigger mutation event emission on the owning entity.
+ * Duplicate IDs are allowed (bag semantics).
  *
  * IMPORTANT: Entities using this delegate MUST deep-copy the backing list field in `clone()`:
  * ```
- * copy(itemIds = ArrayList(itemIds))
+ * copy(itemIds = ArrayList(items.referenceIds.toList()))
  * ```
  * Without a deep copy, the `mutateAndPublish` equality check will always return true and
  * mutation events will never be emitted.
  *
  * @param K the type of the referenced entity's ID, must be [Comparable]
  * @param E the referenced entity type, must extend [IdentifiableEntity]
- * @param idProvider lambda returning the current list of referenced entity IDs
- * @param idSetter optional lambda to write mutated IDs back to the owning entity's serializable field
- * @return an [AbstractMutableAggregateCollectionRefDelegate] implementing [MutableReactiveEntityCollectionReference]
+ * @param initialIds the initial list of referenced entity IDs
+ * @return a [MutableAggregateCollectionRef] delegate for ordered mutable list references
  */
 fun <K : Comparable<K>, E : IdentifiableEntity<K>> mutableAggregateList(
-    idProvider: () -> List<K>,
-    idSetter: ((List<K>) -> Unit)? = null
-): AbstractMutableAggregateCollectionRefDelegate<K, E> = MutableAggregateListRefDelegate(idProvider, idSetter)
+    initialIds: List<K> = emptyList()
+): MutableAggregateCollectionRef<K, E> = MutableAggregateListRefDelegate(initialIds)

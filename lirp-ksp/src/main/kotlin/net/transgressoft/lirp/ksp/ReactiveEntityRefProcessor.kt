@@ -33,7 +33,7 @@ import java.io.File
 
 private const val REACTIVE_ENTITY_REF_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.Aggregate"
 private const val REACTIVE_ENTITY_REFERENCE_FQN = "net.transgressoft.lirp.persistence.ReactiveEntityReference"
-private const val REACTIVE_ENTITY_COLLECTION_REFERENCE_FQN = "net.transgressoft.lirp.persistence.ReactiveEntityCollectionReference"
+private const val AGGREGATE_COLLECTION_REF_FQN = "net.transgressoft.lirp.persistence.AggregateCollectionRef"
 private const val AGGREGATE_LIST_REF_DELEGATE_FQN = "net.transgressoft.lirp.persistence.AggregateListRefDelegate"
 private const val AGGREGATE_SET_REF_DELEGATE_FQN = "net.transgressoft.lirp.persistence.AggregateSetRefDelegate"
 
@@ -60,7 +60,7 @@ private const val AGGREGATE_SET_REF_DELEGATE_FQN = "net.transgressoft.lirp.persi
  * extracts `E` from its first type argument.
  *
  * Collection reference detection inspects the resolved property type against
- * `ReactiveEntityCollectionReference` in its supertype chain. Whether the reference is ordered
+ * `AggregateCollectionRef` in its supertype chain. Whether the reference is ordered
  * (List) or unordered (Set) is determined by scanning the property's source declaration text for
  * the `aggregateList` vs `aggregateSet` factory call, since KSP resolves delegated property types
  * to the interface rather than the concrete delegate class.
@@ -248,7 +248,7 @@ class ReactiveEntityRefProcessor(
                 CollectionRefEntry(
                     refName = "${meta.refName}",
                     idsGetter = { it.${meta.propertyName}.referenceIds },
-                    delegateGetter = { it.${meta.propertyName} as ReactiveEntityCollectionReference<*, *> },
+                    delegateGetter = { it.${meta.propertyName} as AggregateCollectionRef<*, *> },
                     referencedClass = $referencedSimpleName::class.java,
                     cascadeAction = CascadeAction.${meta.cascadeAction},
                     isOrdered = ${meta.isOrdered}
@@ -273,7 +273,7 @@ class ReactiveEntityRefProcessor(
                 appendLine("import net.transgressoft.lirp.persistence.AggregateRefDelegate")
                 appendLine("import net.transgressoft.lirp.persistence.CollectionRefEntry")
                 appendLine("import net.transgressoft.lirp.persistence.LirpRefAccessor")
-                appendLine("import net.transgressoft.lirp.persistence.ReactiveEntityCollectionReference")
+                appendLine("import net.transgressoft.lirp.persistence.AggregateCollectionRef")
                 appendLine("import net.transgressoft.lirp.persistence.RefEntry")
                 for (importFqn in allReferencedFqns) {
                     appendLine("import $importFqn")
@@ -311,7 +311,7 @@ class ReactiveEntityRefProcessor(
 
     /**
      * Determines whether a resolved property type represents a collection reference by walking
-     * the supertype chain to find [REACTIVE_ENTITY_COLLECTION_REFERENCE_FQN].
+     * the supertype chain to find [AGGREGATE_COLLECTION_REF_FQN].
      */
     private fun isCollectionReference(type: KSType): Boolean {
         val declaration = type.declaration
@@ -329,7 +329,7 @@ class ReactiveEntityRefProcessor(
     }
 
     private fun isCollectionReferenceFqn(fqn: String?): Boolean =
-        fqn == REACTIVE_ENTITY_COLLECTION_REFERENCE_FQN ||
+        fqn == AGGREGATE_COLLECTION_REF_FQN ||
             fqn == AGGREGATE_LIST_REF_DELEGATE_FQN ||
             fqn == AGGREGATE_SET_REF_DELEGATE_FQN
 
@@ -337,7 +337,7 @@ class ReactiveEntityRefProcessor(
      * Determines whether the collection reference is ordered (List semantics) by inspecting the
      * property's source declaration text for the `aggregateList` vs `aggregateSet` factory call.
      *
-     * Because KSP resolves delegated property types to the interface (`ReactiveEntityCollectionReference`)
+     * Because KSP resolves delegated property types to the interface (`AggregateCollectionRef`)
      * rather than the concrete delegate class, the type system alone cannot distinguish list from set.
      * Reading the source file around the property declaration is the most reliable way to detect
      * which factory function is used.
@@ -382,7 +382,7 @@ class ReactiveEntityRefProcessor(
 
     /**
      * Extracts the referenced entity FQN from a collection reference type by walking the
-     * [REACTIVE_ENTITY_COLLECTION_REFERENCE_FQN] supertype and reading its first type argument.
+     * [AGGREGATE_COLLECTION_REF_FQN] supertype and reading its first type argument.
      */
     private fun findReferencedClassFqnFromCollectionType(type: KSType): String? {
         val declaration = type.declaration
@@ -399,12 +399,12 @@ class ReactiveEntityRefProcessor(
             return entityArg?.declaration?.qualifiedName?.asString()
         }
 
-        // Walk supertypes for ReactiveEntityCollectionReference<K, E>
+        // Walk supertypes for AggregateCollectionRef<K, E>
         if (declaration is KSClassDeclaration) {
             for (superType in declaration.superTypes) {
                 val resolvedSuperType = superType.resolve()
                 val superFqn = resolvedSuperType.declaration.qualifiedName?.asString()
-                if (superFqn == REACTIVE_ENTITY_COLLECTION_REFERENCE_FQN) {
+                if (superFqn == AGGREGATE_COLLECTION_REF_FQN) {
                     val entityArg = resolvedSuperType.arguments.getOrNull(1)?.type?.resolve()
                     return entityArg?.declaration?.qualifiedName?.asString()
                 }

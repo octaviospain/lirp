@@ -26,36 +26,26 @@ import kotlin.reflect.KProperty
  * Abstract base for mutable collection-typed aggregate reference delegates that lazily resolve a group
  * of entities from a bound [Registry] and allow runtime add/remove operations.
  *
- * Extends [AbstractAggregateCollectionRefDelegate] with a mutable backing ID store, write-back via
- * `idSetter`, and mutation callback injection for event emission.
+ * Extends [AbstractAggregateCollectionRefDelegate] with a mutable backing ID store and mutation
+ * callback injection for event emission.
  *
- * **Dual-lambda ownership model (D-01):** The delegate owns its own mutable backing collection
- * initialized from `idProvider()` at construction time. The `idSetter` writes mutated IDs back to
- * the entity's serializable field after each mutation, keeping the entity's constructor-level field
- * in sync for JSON/SQL serialization.
- *
- * **idSetter optionality (D-02):** The `idSetter` is nullable. If omitted, mutations update the
- * internal backing store but are NOT written back to the entity field. Serialization will not reflect
- * runtime changes in that case. Document this risk in entity KDoc when using without `idSetter`.
- *
- * **Thread safety (D-10):** A [ReentrantLock] guards all reads and writes to [backingIds].
- * The mutation callback is always invoked OUTSIDE the lock to prevent deadlock (Pitfall 2), since
+ * **Thread safety:** A [ReentrantLock] guards all reads and writes to [backingIds].
+ * The mutation callback is always invoked with the mutation action as a lambda so that
  * `mutateAndPublish` in [ReactiveEntityBase][net.transgressoft.lirp.entity.ReactiveEntityBase]
- * calls `clone()` which may access the same backing IDs.
+ * calls `clone()` BEFORE the action executes. This ensures the before/after comparison correctly
+ * detects the change, enabling [MutationEvent][net.transgressoft.lirp.event.MutationEvent] emission.
  *
- * **Deep-copy requirement (D-11):** Entities using this delegate MUST deep-copy the backing ID
+ * **Deep-copy requirement:** Entities using this delegate MUST deep-copy the backing ID
  * collection in their `clone()` implementation. Without a deep copy, the `mutateAndPublish`
  * equality check will always return true (entity before == entity after the mutation), silencing
- * all mutation events. Example: `copy(itemIds = ArrayList(itemIds))` for a list field.
+ * all mutation events.
  *
  * @param K the type of the referenced entity's ID
  * @param E the referenced entity type
- * @param idSetter optional lambda to write mutated IDs back to the owning entity's serializable field
  */
-abstract class AbstractMutableAggregateCollectionRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
-    private val idSetter: ((Collection<K>) -> Unit)?
-) : AbstractAggregateCollectionRefDelegate<K, E>(),
-    MutableReactiveEntityCollectionReference<K, E> {
+abstract class AbstractMutableAggregateCollectionRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>> :
+    AbstractAggregateCollectionRefDelegate<K, E>(),
+    MutableAggregateCollectionRef<K, E> {
 
     /** Guards all reads and writes to [backingIds]. */
     protected val lock = ReentrantLock()
@@ -64,7 +54,7 @@ abstract class AbstractMutableAggregateCollectionRefDelegate<K : Comparable<K>, 
     private var mutationCallback: ((() -> Unit) -> Unit)? = null
 
     /**
-     * The mutable backing ID collection, initialized from the [idProvider] at construction time.
+     * The mutable backing ID collection, initialized from the initial IDs at construction time.
      * Subclasses provide a concrete typed implementation (e.g., [ArrayList] or [LinkedHashSet]).
      * All access must be guarded by [lock].
      */
@@ -74,10 +64,9 @@ abstract class AbstractMutableAggregateCollectionRefDelegate<K : Comparable<K>, 
      * Injects the mutation callback that triggers event emission on the owning entity.
      * Called by [RegistryBase.bindEntityRefs] after registry binding.
      *
-     * The callback receives the `idSetter` invocation as a lambda so it can be executed
-     * INSIDE [ReactiveEntityBase.mutateAndPublish], enabling correct before/after comparison
-     * for event emission: the entity field is updated by `applyMutation` during the publish cycle,
-     * so the clone captured before reflects the pre-mutation state.
+     * The callback receives the mutation action as a lambda executed INSIDE
+     * [ReactiveEntityBase.mutateAndPublish][net.transgressoft.lirp.entity.ReactiveEntityBase],
+     * so `clone()` is called before the mutation runs — enabling correct before/after event comparison.
      */
     internal fun bindMutationCallback(callback: (() -> Unit) -> Unit) {
         mutationCallback = callback
@@ -88,74 +77,47 @@ abstract class AbstractMutableAggregateCollectionRefDelegate<K : Comparable<K>, 
     override val referenceIds: Collection<K> get() = lock.withLock { ArrayList(backingIds) }
 
     /**
-     * Invokes the mutation callback (or [idSetter] directly if no callback is bound) with [snapshot].
+     * Executes [action] on [backingIds], delegating to the mutation callback so that
+     * `mutateAndPublish` fires BEFORE the action modifies [backingIds]. This ordering ensures
+     * `clone()` captures the pre-mutation state for event equality comparison.
      *
-     * If the callback throws (e.g. entity is closed), the exception propagates to the caller
-     * so that it can roll back [backingIds] to the pre-mutation state.
+     * If no callback is bound (entity not yet added to a repository), the action runs directly.
      */
-    private fun invokeCallback(snapshot: Collection<K>) {
+    protected fun mutate(action: MutableCollection<K>.() -> Boolean): Boolean {
+        val cb = mutationCallback
+        return if (cb != null) {
+            var changed = false
+            cb.invoke {
+                lock.withLock {
+                    changed = backingIds.action()
+                }
+            }
+            changed
+        } else {
+            lock.withLock { backingIds.action() }
+        }
+    }
+
+    override fun clear() {
         val cb = mutationCallback
         if (cb != null) {
-            cb.invoke { idSetter?.invoke(snapshot) }
+            cb.invoke {
+                lock.withLock { backingIds.clear() }
+            }
         } else {
-            idSetter?.invoke(snapshot)
+            lock.withLock { backingIds.clear() }
         }
     }
 
     /**
-     * Executes [action] on [backingIds] under the lock, then invokes the mutation callback outside the lock.
-     *
-     * If the callback throws (e.g. entity is closed), [backingIds] is rolled back to the pre-mutation
-     * snapshot to prevent state divergence between delegate and entity.
-     *
-     * The callback is invoked outside the lock to prevent deadlock: `mutateAndPublish`
-     * calls `clone()` which may re-enter the same lock to snapshot [backingIds].
+     * Directly replaces the contents of [backingIds] without triggering mutation events.
+     * Intended for use by the framework serializer during deserialization within
+     * `withEventsDisabled` to restore persisted IDs without side effects.
      */
-    protected fun mutate(action: MutableCollection<K>.() -> Boolean): Boolean {
-        val changed: Boolean
-        val newSnapshot: Collection<K>
-        val rollback: Collection<K>
-        lock.lock()
-        try {
-            rollback = ArrayList(backingIds)
-            changed = backingIds.action()
-            newSnapshot = if (changed) ArrayList(backingIds) else emptyList()
-        } finally {
-            lock.unlock()
-        }
-        if (changed) {
-            try {
-                invokeCallback(newSnapshot)
-            } catch (ex: Exception) {
-                // Rollback backingIds to pre-mutation state if the callback fails
-                // (e.g. entity is closed and mutateAndPublish throws)
-                lock.withLock {
-                    backingIds.clear()
-                    backingIds.addAll(rollback)
-                }
-                throw ex
-            }
-        }
-        return changed
-    }
-
-    override fun clear() {
-        val rollback: Collection<K>
-        lock.lock()
-        try {
-            rollback = ArrayList(backingIds)
+    internal fun setBackingIds(ids: Collection<K>) {
+        lock.withLock {
             backingIds.clear()
-        } finally {
-            lock.unlock()
-        }
-        try {
-            invokeCallback(emptyList())
-        } catch (ex: Exception) {
-            lock.withLock {
-                backingIds.clear()
-                backingIds.addAll(rollback)
-            }
-            throw ex
+            backingIds.addAll(ids)
         }
     }
 
@@ -199,5 +161,9 @@ abstract class AbstractMutableAggregateCollectionRefDelegate<K : Comparable<K>, 
 
     override val size: Int get() = lock.withLock { backingIds.size }
 
-    override fun getValue(thisRef: Any?, property: KProperty<*>): MutableReactiveEntityCollectionReference<K, E> = this
+    /**
+     * Returns `this` typed as [MutableAggregateCollectionRef] so that delegated properties
+     * expose the mutable API (add/remove/clear) directly without casting.
+     */
+    override fun getValue(thisRef: Any?, property: KProperty<*>): MutableAggregateCollectionRef<K, E> = this
 }

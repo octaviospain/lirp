@@ -578,7 +578,7 @@ class JavaInteroperabilityTest {
 
             assertTrue(added);
             assertTrue(playlist.getItems().getReferenceIds().contains(1));
-            assertEquals(1, playlist.getItemIds().size());
+            assertEquals(1, playlist.getItems().getReferenceIds().size());
         }
 
         @Test
@@ -591,7 +591,6 @@ class JavaInteroperabilityTest {
 
             assertTrue(removed);
             assertTrue(playlist.getItems().getReferenceIds().isEmpty());
-            assertTrue(playlist.getItemIds().isEmpty());
         }
     }
 

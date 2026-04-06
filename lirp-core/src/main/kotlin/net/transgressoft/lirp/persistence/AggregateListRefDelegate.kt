@@ -33,7 +33,7 @@ import net.transgressoft.lirp.entity.IdentifiableEntity
  * class Playlist(override val id: Long, val itemIds: List<Int>) : ReactiveEntityBase<Long, Playlist>() {
  *     @Aggregate(onDelete = CascadeAction.NONE)
  *     @Transient
- *     val items by aggregateList<Int, AudioItem> { itemIds }
+ *     val items by aggregateList<Int, AudioItem>(itemIds)
  * }
  *
  * // After adding the playlist to its repository:
@@ -42,28 +42,29 @@ import net.transgressoft.lirp.entity.IdentifiableEntity
  *
  * @param K the type of the referenced entity's ID
  * @param E the referenced entity type
- * @param idProvider lambda that returns the current list of referenced entity IDs
+ * @param initialIds the list of referenced entity IDs at construction time
  */
 internal class AggregateListRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
-    private val idProvider: () -> List<K>
-) : AbstractAggregateCollectionRefDelegate<K, E>() {
+    private val initialIds: List<K>
+) : AbstractAggregateCollectionRefDelegate<K, E>(),
+    LirpDelegate {
 
-    override fun provideIds(): List<K> = idProvider()
+    override fun provideIds(): List<K> = initialIds
 
-    override val referenceIds: List<K> get() = idProvider()
+    override val referenceIds: List<K> get() = initialIds
 
     override fun resolveAll(): List<E> {
         val reg = boundRegistry() ?: return emptyList()
-        return idProvider().mapNotNull { reg.findById(it).orElse(null) }
+        return initialIds.mapNotNull { reg.findById(it).orElse(null) }
     }
 }
 
 /**
  * Creates a property delegate that declares a typed aggregate reference to an ordered list of entities.
  *
- * The [idProvider] lambda is captured at entity construction time and evaluated on each
- * [ReactiveEntityCollectionReference.resolveAll] call to obtain the current referenced entity IDs.
- * Duplicate IDs are preserved; order is maintained.
+ * The [initialIds] list is captured at entity construction time and used for resolution and as
+ * the source of [AggregateCollectionRef.referenceIds]. Duplicate IDs are preserved;
+ * order is maintained.
  *
  * **Requires KSP** — annotate the delegated property with [@Aggregate][Aggregate]
  * so the KSP processor generates the required `{ClassName}_LirpRefAccessor` class.
@@ -72,14 +73,14 @@ internal class AggregateListRefDelegate<K : Comparable<K>, E : IdentifiableEntit
  * ```kotlin
  * @Aggregate(onDelete = CascadeAction.NONE)
  * @Transient
- * val items by aggregateList<Int, AudioItem> { itemIds }
+ * val items by aggregateList<Int, AudioItem>(itemIds)
  * ```
  *
  * @param K the type of the referenced entity's ID, must be [Comparable]
  * @param E the referenced entity type, must extend [IdentifiableEntity]
- * @param idProvider lambda returning the current list of referenced entity IDs
- * @return an [AbstractAggregateCollectionRefDelegate] implementing both [ReactiveEntityCollectionReference] and [ReadOnlyProperty][kotlin.properties.ReadOnlyProperty]
+ * @param initialIds the list of referenced entity IDs
+ * @return an [AggregateCollectionRef] delegate for ordered list references
  */
 fun <K : Comparable<K>, E : IdentifiableEntity<K>> aggregateList(
-    idProvider: () -> List<K>
-): AbstractAggregateCollectionRefDelegate<K, E> = AggregateListRefDelegate(idProvider)
+    initialIds: List<K> = emptyList()
+): AggregateCollectionRef<K, E> = AggregateListRefDelegate(initialIds)

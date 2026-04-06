@@ -16,6 +16,7 @@ dependencies {
 
     implementation libs.jsr305
     implementation libs.kotlin.logging
+    implementation libs.kotlin.reflect
     implementation libs.serialization.json
 
     ksp project(path: ':lirp-ksp')

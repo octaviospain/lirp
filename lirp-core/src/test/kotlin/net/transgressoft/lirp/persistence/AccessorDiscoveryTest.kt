@@ -98,7 +98,7 @@ internal class AccessorDiscoveryTest : FunSpec({
 
         val ex =
             shouldThrow<java.lang.reflect.InvocationTargetException> {
-                method.invoke(repo, EntityWithCollectionDelegate::class.java, AbstractAggregateCollectionRefDelegate::class.java, "LirpRefAccessor")
+                method.invoke(repo, EntityWithCollectionDelegate::class.java, AggregateCollectionRef::class.java, "LirpRefAccessor")
             }
 
         ex.cause.shouldBeInstanceOf<IllegalStateException>()
@@ -144,7 +144,7 @@ class EntityWithDelegate(override val id: Int, val customerId: Int) : ReactiveEn
 }
 
 /**
- * Entity with an [AbstractAggregateCollectionRefDelegate] backing field — tests the collection-delegate
+ * Entity with an [AggregateCollectionRef] backing field — tests the collection-delegate
  * branch of [RegistryBase.failFastIfDelegatePresent].
  */
 @LirpRepository
@@ -152,7 +152,7 @@ class EntityWithCollectionDelegate(override val id: Int, val itemIds: List<Int>)
     override val uniqueId: String get() = "coll-delegate-$id"
 
     @Aggregate
-    val items by aggregateList<Int, Customer> { itemIds }
+    val items by aggregateList<Int, Customer>(itemIds)
 
     override fun clone() = EntityWithCollectionDelegate(id, itemIds)
 }

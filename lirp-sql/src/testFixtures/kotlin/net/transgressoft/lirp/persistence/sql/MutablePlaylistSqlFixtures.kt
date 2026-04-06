@@ -87,18 +87,14 @@ class MutablePlaylistSql(
     var trackIds: List<Int> = initialTrackIds
 
     @Aggregate(onDelete = CascadeAction.NONE)
-    val tracks by mutableAggregateList<Int, SqlTestTrack>(
-        idProvider = { trackIds },
-        idSetter = { trackIds = it }
-    )
+    val tracks by mutableAggregateList<Int, SqlTestTrack>(trackIds)
 
     override val uniqueId: String get() = "mutable-playlist-sql-$id"
 
     override fun clone(): MutablePlaylistSql =
-        MutablePlaylistSql(id).also { copy ->
+        MutablePlaylistSql(id, tracks.referenceIds.toList()).also { copy ->
             copy.withEventsDisabled {
                 copy.name = name
-                copy.trackIds = ArrayList(trackIds)
             }
         }
 }
@@ -134,7 +130,7 @@ object MutablePlaylistSqlTableDef : SqlTableDef<MutablePlaylistSql> {
         return mapOf(
             cols["id"]!! to entity.id,
             cols["name"]!! to entity.name,
-            cols["track_ids"]!! to entity.trackIds.joinToString(",")
+            cols["track_ids"]!! to entity.tracks.referenceIds.joinToString(",")
         )
     }
 }

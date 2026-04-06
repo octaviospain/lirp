@@ -63,30 +63,30 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
             import kotlin.reflect.KProperty
 
             class AggregateListRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
-                private val idProvider: () -> List<K>
-            ) : ReactiveEntityCollectionReference<K, E>,
-                ReadOnlyProperty<Any?, ReactiveEntityCollectionReference<K, E>> {
-                override val referenceIds: List<K> get() = idProvider()
+                private val initialIds: List<K> = emptyList()
+            ) : AggregateCollectionRef<K, E>,
+                ReadOnlyProperty<Any?, AggregateCollectionRef<K, E>> {
+                override val referenceIds: List<K> get() = initialIds
                 override fun resolveAll(): Collection<E> = emptyList()
-                override fun getValue(thisRef: Any?, property: KProperty<*>): ReactiveEntityCollectionReference<K, E> = this
+                override fun getValue(thisRef: Any?, property: KProperty<*>): AggregateCollectionRef<K, E> = this
             }
 
             class AggregateSetRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
-                private val idProvider: () -> Set<K>
-            ) : ReactiveEntityCollectionReference<K, E>,
-                ReadOnlyProperty<Any?, ReactiveEntityCollectionReference<K, E>> {
-                override val referenceIds: Set<K> get() = idProvider()
+                private val initialIds: Set<K> = emptySet()
+            ) : AggregateCollectionRef<K, E>,
+                ReadOnlyProperty<Any?, AggregateCollectionRef<K, E>> {
+                override val referenceIds: Set<K> get() = initialIds
                 override fun resolveAll(): Collection<E> = emptySet()
-                override fun getValue(thisRef: Any?, property: KProperty<*>): ReactiveEntityCollectionReference<K, E> = this
+                override fun getValue(thisRef: Any?, property: KProperty<*>): AggregateCollectionRef<K, E> = this
             }
 
             fun <K : Comparable<K>, E : IdentifiableEntity<K>> aggregateList(
-                idProvider: () -> List<K>
-            ): AggregateListRefDelegate<K, E> = AggregateListRefDelegate(idProvider)
+                initialIds: List<K> = emptyList()
+            ): AggregateListRefDelegate<K, E> = AggregateListRefDelegate(initialIds)
 
             fun <K : Comparable<K>, E : IdentifiableEntity<K>> aggregateSet(
-                idProvider: () -> Set<K>
-            ): AggregateSetRefDelegate<K, E> = AggregateSetRefDelegate(idProvider)
+                initialIds: Set<K> = emptySet()
+            ): AggregateSetRefDelegate<K, E> = AggregateSetRefDelegate(initialIds)
             """
         )
 
@@ -166,7 +166,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                         override fun clone() = copy()
 
                         @Aggregate(onDelete = CascadeAction.CASCADE)
-                        val items by aggregateList<Int, TestTrack> { trackIds }
+                        val items by aggregateList<Int, TestTrack>(trackIds)
                     }
                     """
                 )
@@ -204,7 +204,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                         override fun clone() = copy()
 
                         @Aggregate
-                        val playlists by aggregateSet<Long, PlaylistRef> { playlistIds }
+                        val playlists by aggregateSet<Long, PlaylistRef>(playlistIds)
                     }
                     """
                 )
@@ -255,7 +255,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                         val artist by aggregate<Int, ArtistEntity> { artistId }
 
                         @Aggregate(onDelete = CascadeAction.CASCADE)
-                        val tracks by aggregateList<Int, TrackEntity> { trackIds }
+                        val tracks by aggregateList<Int, TrackEntity>(trackIds)
                     }
                     """
                 )
@@ -350,10 +350,10 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                         override fun clone() = copy()
 
                         @Aggregate
-                        val orderedRefs by aggregateList<Int, RefEntity> { orderedIds }
+                        val orderedRefs by aggregateList<Int, RefEntity>(orderedIds)
 
                         @Aggregate
-                        val uniqueRefs by aggregateSet<Int, RefEntity> { uniqueIds }
+                        val uniqueRefs by aggregateSet<Int, RefEntity>(uniqueIds)
                     }
                     """
                 )
@@ -396,10 +396,10 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                         override fun clone() = copy()
 
                         @Aggregate
-                        val annotatedRefs by aggregateList<Int, SomeEntity> { annotatedIds }
+                        val annotatedRefs by aggregateList<Int, SomeEntity>(annotatedIds)
 
                         // No @Aggregate annotation — should NOT appear in generated accessor
-                        val ignoredRefs by aggregateSet<Int, SomeEntity> { ignoredIds }
+                        val ignoredRefs by aggregateSet<Int, SomeEntity>(ignoredIds)
                     }
                     """
                 )
