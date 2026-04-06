@@ -219,8 +219,8 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
                 refEntries = discoveredEntries
             } catch (_: ClassNotFoundException) {
                 failFastIfDelegatePresent(entity.javaClass, AggregateRefDelegate::class.java, "LirpRefAccessor")
-                failFastIfDelegatePresent(entity.javaClass, AbstractAggregateCollectionRefDelegate::class.java, "LirpRefAccessor")
-                failFastIfDelegatePresent(entity.javaClass, AbstractMutableAggregateCollectionRefDelegate::class.java, "LirpRefAccessor")
+                failFastIfDelegatePresent(entity.javaClass, AggregateCollectionRef::class.java, "LirpRefAccessor")
+                failFastIfDelegatePresent(entity.javaClass, MutableAggregateCollectionRef::class.java, "LirpRefAccessor")
                 collectionRefEntries = emptyList()
                 refEntries = emptyList()
             }
@@ -264,7 +264,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
      * Binds each [AggregateRefDelegate] on [entity] to the [Registry] that holds its referenced entity type,
      * using the [RefEntry] descriptors discovered via [discoverRefs].
      *
-     * Also binds each collection reference delegate ([AbstractAggregateCollectionRefDelegate] subclass)
+     * Also binds each collection reference delegate ([AggregateCollectionRef] implementation)
      * discovered via [CollectionRefEntry] descriptors.
      *
      * The unchecked casts consolidate type erasure at one call site. They are safe because
@@ -289,9 +289,9 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
                     .bindRegistry(registry as Registry<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>, context)
             }
             // Inject mutation callback for mutable collection delegates after registry binding.
-            // The callback receives the idSetter invocation as a lambda and wraps it inside
-            // mutateForCollection so the entity field update occurs inside mutateAndPublish,
-            // enabling correct before/after comparison for MutationEvent emission.
+            // The callback wraps the mutation action inside mutateForCollection so the backingIds
+            // update occurs inside mutateAndPublish, enabling correct before/after comparison
+            // for MutationEvent emission.
             if (delegate is AbstractMutableAggregateCollectionRefDelegate<*, *> && entity is ReactiveEntityBase<*, *>) {
                 delegate.bindMutationCallback { applyMutation -> entity.mutateForCollection(applyMutation) }
             }

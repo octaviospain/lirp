@@ -21,7 +21,6 @@ import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import mu.KotlinLogging
 import java.util.concurrent.atomic.AtomicReference
-import kotlin.properties.ReadOnlyProperty
 import kotlin.reflect.KProperty
 
 /**
@@ -45,8 +44,7 @@ import kotlin.reflect.KProperty
  * @param E the referenced entity type
  */
 abstract class AbstractAggregateCollectionRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>> :
-    ReactiveEntityCollectionReference<K, E>,
-    ReadOnlyProperty<Any?, ReactiveEntityCollectionReference<K, E>> {
+    AggregateCollectionRef<K, E> {
 
     private val log = KotlinLogging.logger {}
 
@@ -56,8 +54,8 @@ abstract class AbstractAggregateCollectionRefDelegate<K : Comparable<K>, E : Ide
     private var context: LirpContext? = null
 
     /**
-     * Returns the current collection of referenced entity IDs from the owning entity.
-     * Subclasses delegate to their typed `idProvider` lambda.
+     * Returns the current collection of referenced entity IDs.
+     * Subclasses return their backing ID collection.
      */
     protected abstract fun provideIds(): Collection<K>
 
@@ -159,8 +157,8 @@ abstract class AbstractAggregateCollectionRefDelegate<K : Comparable<K>, E : Ide
     }
 
     /**
-     * Returns `this` so that the delegate object itself serves as the [ReactiveEntityCollectionReference]
-     * handle -- callers write `entity.collectionProp.resolveAll()` with no extra unwrapping.
+     * Returns `this` so that the delegate object itself serves as the [AggregateCollectionRef]
+     * handle — callers write `entity.collectionProp.resolveAll()` with no extra unwrapping.
      */
-    override fun getValue(thisRef: Any?, property: KProperty<*>): ReactiveEntityCollectionReference<K, E> = this
+    override fun getValue(thisRef: Any?, property: KProperty<*>): AggregateCollectionRef<K, E> = this
 }

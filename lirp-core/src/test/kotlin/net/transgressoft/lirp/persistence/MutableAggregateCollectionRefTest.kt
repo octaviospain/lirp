@@ -70,7 +70,6 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         ctx.close()
     }
 
-    // CORE-01: mutableAggregateList delegate returns items lazily resolved from registry after add()
     "mutableAggregateList resolves added entities from registry" {
         val t1 = trackRepo.create(1, "Track 1")
         val t2 = trackRepo.create(2, "Track 2")
@@ -89,7 +88,6 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         playlist.items.resolveAll() shouldBe emptyList()
     }
 
-    // CORE-02: mutableAggregateSet delegate returns unique playlists; duplicate add returns false
     "mutableAggregateSet enforces uniqueness" {
         val p1 = playlistRepo.create(1L, "P1")
         val group = groupRepo.create(1L)
@@ -99,30 +97,25 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         group.playlists.referenceIds shouldHaveSize 1
     }
 
-    // CORE-03: add updates backing ID collection and entity field
-    "add updates backing ID collection and entity field" {
+    "add updates delegate backing ID collection" {
         val t1 = trackRepo.create(1, "T1")
         val playlist = playlistRepo.create(1L, "Test")
 
         playlist.items.add(t1)
 
         playlist.items.referenceIds shouldContain 1
-        playlist.itemIds shouldContain 1
     }
 
-    // CORE-03: remove updates backing ID collection and entity field
-    "remove updates backing ID collection and entity field" {
+    "remove updates delegate backing ID collection" {
         val t1 = trackRepo.create(1, "T1")
         val playlist = playlistRepo.create(1L, "Test", listOf(1))
 
         playlist.items.remove(t1)
 
         playlist.items.referenceIds shouldNotContain 1
-        playlist.itemIds shouldNotContain 1
     }
 
-    // CORE-03: clear empties backing ID collection and entity field
-    "clear empties backing ID collection and entity field" {
+    "clear empties delegate backing ID collection" {
         trackRepo.create(1, "T1")
         trackRepo.create(2, "T2")
         val playlist = playlistRepo.create(1L, "Test", listOf(1, 2))
@@ -130,10 +123,8 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         playlist.items.clear()
 
         playlist.items.referenceIds shouldBe emptyList()
-        playlist.itemIds shouldBe emptyList()
     }
 
-    // CORE-03 additional: clone() produces independent copy (identity check)
     "clone produces independent copy of mutable list field" {
         val playlist = MutablePlaylist(1L, "Test", listOf(1, 2))
         val cloned = playlist.clone()
@@ -141,7 +132,6 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         (cloned.itemIds !== playlist.itemIds) shouldBe true
     }
 
-    // CORE-04: 10 coroutines x 100 adds produce no lost updates
     "concurrent coroutine adds produce no lost updates" {
         val playlist = playlistRepo.create(1L, "Concurrent")
         (1..1000).forEach { trackRepo.create(it, "Track $it") }
@@ -163,7 +153,6 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         playlist.items.referenceIds shouldHaveSize 1000
     }
 
-    // EVT-01: MutationEvent emitted after add() on mutable list delegate
     "MutationEvent emitted after add on mutable list" {
         val t1 = trackRepo.create(1, "T1")
         val playlist = playlistRepo.create(1L, "Test")

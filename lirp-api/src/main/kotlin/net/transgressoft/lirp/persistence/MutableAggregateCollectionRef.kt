@@ -18,11 +18,12 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
+import kotlin.reflect.KProperty
 
 /**
  * A lazily-resolved, mutable reference to a collection of aggregate entities stored in a [Registry].
  *
- * Extends [ReactiveEntityCollectionReference] with mutation methods that synchronize the backing ID store
+ * Extends [AggregateCollectionRef] with mutation methods that synchronize the backing ID store
  * maintained by the delegate implementation. Changes made via [add], [remove], or [clear] are immediately
  * reflected in [referenceIds] and trigger mutation event emission after registry binding.
  *
@@ -35,8 +36,8 @@ import net.transgressoft.lirp.entity.IdentifiableEntity
  * @param K the type of the referenced entities' IDs, which must be [Comparable]
  * @param E the type of the referenced entities
  */
-interface MutableReactiveEntityCollectionReference<K : Comparable<K>, E : IdentifiableEntity<K>> :
-    ReactiveEntityCollectionReference<K, E>,
+interface MutableAggregateCollectionRef<K : Comparable<K>, E : IdentifiableEntity<K>> :
+    AggregateCollectionRef<K, E>,
     MutableCollection<E> {
 
     /**
@@ -71,4 +72,6 @@ interface MutableReactiveEntityCollectionReference<K : Comparable<K>, E : Identi
      * mutation event emission.
      */
     override fun clear()
+
+    override fun getValue(thisRef: Any?, property: KProperty<*>): MutableAggregateCollectionRef<K, E>
 }

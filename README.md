@@ -58,7 +58,7 @@ data class Album(
 
     @Aggregate(onDelete = CascadeAction.CASCADE)
     @Transient
-    val tracks by aggregateList<Int, Track> { trackIds }
+    val tracks by aggregateList<Int, Track>(trackIds)
 
     override val uniqueId = "album-$id"
     override fun clone() = Album(id, title, genre, artistId, trackIds, rating)
@@ -148,14 +148,14 @@ val resolved: Optional<Category> = product.category.resolve()
 
 ### Collection References
 
-LIRP provides four collection delegate types for modeling entities that hold collections of related IDs. All four implement `ReactiveEntityCollectionReference` and resolve lazily via `resolveAll()`. For full copy-paste runnable examples, see [DDD & Aggregates](https://github.com/octaviospain/lirp/wiki/DDD-and-Aggregates) in the wiki.
+LIRP provides four collection delegate types for modeling entities that hold collections of related IDs. All four implement `AggregateCollectionRef` and resolve lazily via `resolveAll()`. For full copy-paste runnable examples, see [DDD & Aggregates](https://github.com/octaviospain/lirp/wiki/DDD-and-Aggregates) in the wiki.
 
-| Delegate | Mutability | Ordering | Uniqueness | ID write-back |
-|----------|-----------|----------|------------|---------------|
-| `aggregateList` | read-only | ordered | allows duplicates | N/A |
-| `aggregateSet` | read-only | unordered | unique | N/A |
-| `mutableAggregateList` | mutable | ordered | allows duplicates | via `idSetter` |
-| `mutableAggregateSet` | mutable | insertion-ordered | unique | via `idSetter` |
+| Delegate | Mutability | Ordering | Uniqueness |
+|----------|-----------|----------|------------|
+| `aggregateList` | read-only | ordered | allows duplicates |
+| `aggregateSet` | read-only | unordered | unique |
+| `mutableAggregateList` | mutable | ordered | allows duplicates |
+| `mutableAggregateSet` | mutable | insertion-ordered | unique |
 
 **Read-only example** — use `aggregateList` or `aggregateSet` when the collection of related IDs never changes at runtime:
 
@@ -165,7 +165,7 @@ class Playlist(override val id: Long, val name: String, val trackIds: List<Int>)
 
     @Aggregate(onDelete = CascadeAction.CASCADE)
     @Transient
-    val tracks by aggregateList<Int, Track> { trackIds }
+    val tracks by aggregateList<Int, Track>(trackIds)
 
     override val uniqueId = "playlist-$id"
     override fun clone() = Playlist(id, name, trackIds)
@@ -174,35 +174,38 @@ class Playlist(override val id: Long, val name: String, val trackIds: List<Int>)
 val tracks: List<Track> = playlist.tracks.resolveAll()
 ```
 
-**Mutable example** — use `mutableAggregateList` or `mutableAggregateSet` when the collection must support runtime `add`/`remove` operations. Mutations trigger a `MutationEvent` on the owning entity and write IDs back to the entity's serializable field via `idSetter`:
+**Mutable example** — use `mutableAggregateList` or `mutableAggregateSet` when the collection must support runtime `add`/`remove` operations. Mutations trigger a `MutationEvent` on the owning entity:
 
 ```kotlin
-class Playlist(override val id: Long, val name: String, var trackIds: MutableList<Int> = mutableListOf()) :
+@Serializable
+data class Playlist(override val id: Long, val name: String, val trackIds: List<Int> = emptyList()) :
     ReactiveEntityBase<Long, Playlist>() {
 
     @Aggregate(onDelete = CascadeAction.CASCADE)
-    @Transient
-    val tracks by mutableAggregateList<Int, Track>(
-        idProvider = { trackIds },
-        idSetter = { trackIds = it.toMutableList() }
-    )
+    val tracks by mutableAggregateList<Int, Track>(trackIds)
 
     override val uniqueId = "playlist-$id"
-    // Deep-copy trackIds so mutateAndPublish detects changes correctly
-    override fun clone() = Playlist(id, name, ArrayList(trackIds))
+    // Deep-copy referenceIds in clone() so mutateAndPublish detects changes correctly
+    override fun clone() = copy(trackIds = tracks.referenceIds.toList())
+
+    override fun equals(other: Any?): Boolean {
+        if (other !is Playlist) return false
+        return id == other.id && name == other.name && tracks.referenceIds == other.tracks.referenceIds
+    }
+    override fun hashCode() = 31 * (31 * id.hashCode() + name.hashCode()) + tracks.referenceIds.hashCode()
 }
 
-playlist.tracks.add(newTrack)        // ID tracked back to trackIds, MutationEvent emitted
+playlist.tracks.add(newTrack)        // backingIds updated, MutationEvent emitted
 playlist.tracks.remove(oldTrack)
 val resolved: List<Track> = playlist.tracks.resolveAll()
 ```
 
-**Bulk operations:** `addAll(collection)`, `removeAll(collection)`, and `retainAll(collection)` each emit exactly one `MutationEvent` regardless of how many elements are in the input — the backing ID store is updated atomically and `idSetter` is called once with the complete new state.
+**Bulk operations:** `addAll(collection)`, `removeAll(collection)`, and `retainAll(collection)` each emit exactly one `MutationEvent` regardless of how many elements are in the input — the backing ID store is updated atomically.
 
 **Important notes:**
-- `idSetter` is optional; without it, mutations are in-memory only and will NOT survive serialization.
-- Entities using mutable collection delegates MUST deep-copy the backing ID field in `clone()`. Without a deep copy, the `mutateAndPublish` before/after equality check always returns `true` and mutation events are silenced.
-- KSP generates `collectionEntries` in the accessor for all four delegate types, wiring them automatically — no manual accessor code needed.
+- The delegate's `referenceIds` property is the live source of truth after mutations. For persistence, read from `tracks.referenceIds` in your serializer or `toParams` method.
+- Entities using mutable collection delegates MUST deep-copy `referenceIds` in `clone()` and override `equals`/`hashCode()` to compare `referenceIds`. Without this, the `mutateAndPublish` before/after equality check always returns `true` and mutation events are silenced.
+- KSP generates accessor metadata for all four delegate types, wiring them automatically — no manual accessor code needed.
 - Cascade defaults for collection references are `NONE` (unlike `DETACH` for single references).
 - Bubble-up propagation is not supported for collection references.
 
@@ -360,7 +363,36 @@ repo.add(widget)       // entity is tracked and file write is scheduled
 widget.price = 39.99   // debounced write triggered; no extra code needed
 ```
 
-The `@Serializable` annotation (from Kotlin Serialization) is required on the entity class. For polymorphic entity hierarchies, use `TransEntityPolymorphicSerializer`.
+### Framework Serializer (LirpEntitySerializer)
+
+Entities that use `reactiveProperty()` and aggregate collection delegates can be serialized without `@Serializable` or any KSP-generated code. `LirpEntitySerializer` introspects the entity's delegate registry at runtime and builds a `KSerializer` automatically:
+
+```kotlin
+class MyEntity(override val id: Int) : ReactiveEntityBase<Int, MyEntity>() {
+    var name by reactiveProperty("default")
+    val items by mutableAggregateList<Int, Track>()
+
+    override val uniqueId get() = id.toString()
+    override fun clone() = MyEntity(id).also { copy ->
+        copy.withEventsDisabled {
+            copy.name = name
+            // Deep-copy mutable aggregate backing IDs for correct mutation event comparison
+        }
+    }
+}
+
+// Create the serializer from a sample instance
+val serializer = lirpSerializer(MyEntity(0))
+val repo = JsonFileRepository(file, MapSerializer(Int.serializer(), serializer))
+```
+
+The serializer encodes constructor parameters first, then delegate properties in declaration order. Reactive property values are encoded as their declared type; aggregate delegate backing IDs are encoded as a JSON array under the delegate's property name.
+
+Entities with `@Serializable` continue to use their plugin-generated serializer — `LirpEntitySerializer` is opt-in and does not affect existing code.
+
+### Manual Serializers
+
+For entities annotated with `@Serializable`, supply the Kotlin Serialization serializer directly. For polymorphic entity hierarchies, use `TransEntityPolymorphicSerializer`.
 
 ## Deferred Loading
 

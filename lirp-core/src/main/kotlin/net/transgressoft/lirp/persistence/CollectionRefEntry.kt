@@ -33,7 +33,7 @@ import net.transgressoft.lirp.entity.CascadeAction
  * @property refName the name of the reference property (defaults to the property name)
  * @property idsGetter direct accessor function returning all referenced entity IDs — compiled
  *   to a regular method call accessing the backing field's collection of IDs, not reflection
- * @property delegateGetter KSP-generated lambda returning the [ReactiveEntityCollectionReference]
+ * @property delegateGetter KSP-generated lambda returning the [AggregateCollectionRef]
  *   delegate instance — either an `AggregateListRefDelegate` (when [isOrdered] is `true`) or an
  *   `AggregateSetRefDelegate` (when [isOrdered] is `false`). Used by [RegistryBase] to call
  *   registry binding and cascade operations without any `java.lang.reflect` field access.
@@ -48,7 +48,7 @@ import net.transgressoft.lirp.entity.CascadeAction
 data class CollectionRefEntry<K : Comparable<K>, T>(
     val refName: String,
     val idsGetter: (T) -> Collection<K>,
-    val delegateGetter: (T) -> ReactiveEntityCollectionReference<*, *>,
+    val delegateGetter: (T) -> AggregateCollectionRef<*, *>,
     val referencedClass: Class<*>,
     val cascadeAction: CascadeAction,
     val isOrdered: Boolean

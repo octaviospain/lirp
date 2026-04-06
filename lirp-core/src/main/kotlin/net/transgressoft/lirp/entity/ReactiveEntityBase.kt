@@ -25,6 +25,7 @@ import net.transgressoft.lirp.event.MutationEvent.Type.MUTATE
 import net.transgressoft.lirp.event.ReactiveMutationEvent
 import net.transgressoft.lirp.event.StandardAggregateMutationEvent
 import net.transgressoft.lirp.persistence.AggregateRefDelegate
+import net.transgressoft.lirp.persistence.LirpDelegate
 import net.transgressoft.lirp.persistence.LirpRefAccessor
 import mu.KotlinLogging
 import java.time.LocalDateTime
@@ -33,6 +34,9 @@ import java.util.concurrent.atomic.AtomicReference
 import java.util.function.Consumer
 import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty
+import kotlin.reflect.KProperty1
+import kotlin.reflect.full.memberProperties
+import kotlin.reflect.jvm.isAccessible
 import kotlinx.coroutines.flow.SharedFlow
 
 /**
@@ -378,13 +382,56 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
         mutateAndPublish { mutationAction() }
     }
 
-    private inner class ReactivePropertyDelegate<T>(private var storedValue: T) :
-        ReadWriteProperty<ReactiveEntityBase<K, R>, T> {
+    /**
+     * Public bridge exposing [withEventsDisabled] for framework-level operations like
+     * [LirpEntitySerializer][net.transgressoft.lirp.persistence.json.LirpEntitySerializer]
+     * deserialization and user-written clone implementations.
+     *
+     * Provides the same event-suppression guarantee as [withEventsDisabled] while keeping that
+     * method protected for subclass use.
+     *
+     * @param action the block to execute with events disabled
+     * @return the result of [action]
+     */
+    internal fun <T> withEventsDisabledForClone(action: () -> T): T = withEventsDisabled(action)
 
-        override fun getValue(thisRef: ReactiveEntityBase<K, R>, property: KProperty<*>): T = storedValue
+    @Volatile
+    private var _delegateRegistry: Map<String, LirpDelegate>? = null
+
+    /**
+     * Lazy registry mapping property names to their [LirpDelegate] instances.
+     * Built on first access by scanning this entity's member properties via kotlin-reflect
+     * and filtering for LIRP delegate types.
+     */
+    internal val delegateRegistry: Map<String, LirpDelegate>
+        get() {
+            _delegateRegistry?.let { return it }
+            synchronized(this) {
+                _delegateRegistry?.let { return it }
+                val map = mutableMapOf<String, LirpDelegate>()
+                @Suppress("UNCHECKED_CAST")
+                for (prop in this::class.memberProperties) {
+                    val typedProp = prop as? KProperty1<ReactiveEntityBase<*, *>, *> ?: continue
+                    // isAccessible is required for private entity classes (e.g. in test files)
+                    typedProp.isAccessible = true
+                    val delegate = typedProp.getDelegate(this)
+                    if (delegate is LirpDelegate) {
+                        map[prop.name] = delegate
+                    }
+                }
+                _delegateRegistry = map
+                return map
+            }
+        }
+
+    private inner class ReactivePropertyDelegate<T>(private var storedValue: T) :
+        ReadWriteProperty<Any?, T>,
+        LirpDelegate {
+
+        override fun getValue(thisRef: Any?, property: KProperty<*>): T = storedValue
 
         @Suppress("UNCHECKED_CAST")
-        override fun setValue(thisRef: ReactiveEntityBase<K, R>, property: KProperty<*>, value: T) {
+        override fun setValue(thisRef: Any?, property: KProperty<*>, value: T) {
             check(!isClosed) { "Entity '${this@ReactiveEntityBase::class.java.simpleName}' is closed" }
 
             if (value != storedValue) {
@@ -407,12 +454,13 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     private inner class ReactivePropertyDelegateWithAccessors<T>(
         private val getter: () -> T,
         private val setter: (T) -> Unit
-    ) : ReadWriteProperty<ReactiveEntityBase<K, R>, T> {
+    ) : ReadWriteProperty<Any?, T>,
+        LirpDelegate {
 
-        override fun getValue(thisRef: ReactiveEntityBase<K, R>, property: KProperty<*>): T = getter()
+        override fun getValue(thisRef: Any?, property: KProperty<*>): T = getter()
 
         @Suppress("UNCHECKED_CAST")
-        override fun setValue(thisRef: ReactiveEntityBase<K, R>, property: KProperty<*>, value: T) {
+        override fun setValue(thisRef: Any?, property: KProperty<*>, value: T) {
             check(!isClosed) { "Entity '${this@ReactiveEntityBase::class.java.simpleName}' is closed" }
 
             val oldValue = getter()

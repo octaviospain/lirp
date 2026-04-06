@@ -33,7 +33,7 @@ import net.transgressoft.lirp.entity.IdentifiableEntity
  * class Library(override val id: Long, val playlistIds: Set<Long>) : ReactiveEntityBase<Long, Library>() {
  *     @Aggregate(onDelete = CascadeAction.CASCADE)
  *     @Transient
- *     val playlists by aggregateSet<Long, Playlist> { playlistIds }
+ *     val playlists by aggregateSet<Long, Playlist>(playlistIds)
  * }
  *
  * // After adding the library to its repository:
@@ -42,28 +42,29 @@ import net.transgressoft.lirp.entity.IdentifiableEntity
  *
  * @param K the type of the referenced entity's ID
  * @param E the referenced entity type
- * @param idProvider lambda that returns the current set of referenced entity IDs
+ * @param initialIds the set of referenced entity IDs at construction time
  */
 internal class AggregateSetRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
-    private val idProvider: () -> Set<K>
-) : AbstractAggregateCollectionRefDelegate<K, E>() {
+    private val initialIds: Set<K>
+) : AbstractAggregateCollectionRefDelegate<K, E>(),
+    LirpDelegate {
 
-    override fun provideIds(): Set<K> = idProvider()
+    override fun provideIds(): Set<K> = initialIds
 
-    override val referenceIds: Set<K> get() = idProvider()
+    override val referenceIds: Set<K> get() = initialIds
 
     override fun resolveAll(): Set<E> {
         val reg = boundRegistry() ?: return emptySet()
-        return idProvider().mapNotNull { reg.findById(it).orElse(null) }.toSet()
+        return initialIds.mapNotNull { reg.findById(it).orElse(null) }.toSet()
     }
 }
 
 /**
  * Creates a property delegate that declares a typed aggregate reference to a unique set of entities.
  *
- * The [idProvider] lambda is captured at entity construction time and evaluated on each
- * [ReactiveEntityCollectionReference.resolveAll] call to obtain the current referenced entity IDs.
- * Duplicate IDs are not permitted — Set semantics are enforced both in the ID provider and the resolved result.
+ * The [initialIds] set is captured at entity construction time and used for resolution and as
+ * the source of [AggregateCollectionRef.referenceIds]. Duplicate IDs are not permitted —
+ * Set semantics are enforced both in the initial IDs and the resolved result.
  *
  * **Requires KSP** — annotate the delegated property with [@Aggregate][Aggregate]
  * so the KSP processor generates the required `{ClassName}_LirpRefAccessor` class.
@@ -72,14 +73,14 @@ internal class AggregateSetRefDelegate<K : Comparable<K>, E : IdentifiableEntity
  * ```kotlin
  * @Aggregate(onDelete = CascadeAction.CASCADE)
  * @Transient
- * val playlists by aggregateSet<Long, Playlist> { playlistIds }
+ * val playlists by aggregateSet<Long, Playlist>(playlistIds)
  * ```
  *
  * @param K the type of the referenced entity's ID, must be [Comparable]
  * @param E the referenced entity type, must extend [IdentifiableEntity]
- * @param idProvider lambda returning the current set of referenced entity IDs
- * @return an [AbstractAggregateCollectionRefDelegate] implementing both [ReactiveEntityCollectionReference] and [ReadOnlyProperty][kotlin.properties.ReadOnlyProperty]
+ * @param initialIds the set of referenced entity IDs
+ * @return an [AggregateCollectionRef] delegate for unique set references
  */
 fun <K : Comparable<K>, E : IdentifiableEntity<K>> aggregateSet(
-    idProvider: () -> Set<K>
-): AbstractAggregateCollectionRefDelegate<K, E> = AggregateSetRefDelegate(idProvider)
+    initialIds: Set<K> = emptySet()
+): AggregateCollectionRef<K, E> = AggregateSetRefDelegate(initialIds)

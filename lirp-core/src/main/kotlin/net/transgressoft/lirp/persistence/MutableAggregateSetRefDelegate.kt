@@ -26,25 +26,22 @@ import kotlin.concurrent.withLock
  * uniqueness — duplicate entity IDs are not stored.
  *
  * Returned by the [mutableAggregateSet] factory function for use with Kotlin property delegation.
- * The internal backing set is owned by this delegate and initialized from the `idProvider` at
+ * The internal backing set is owned by this delegate and initialized from [initialIds] at
  * construction time; subsequent mutations are reflected directly in [referenceIds].
  *
- * See [AbstractMutableAggregateCollectionRefDelegate] for shared behavior: locking, idSetter write-back,
+ * See [AbstractMutableAggregateCollectionRefDelegate] for shared behavior: locking,
  * mutation callback injection, and the deep-copy requirement.
  *
  * @param K the type of the referenced entity's ID
  * @param E the referenced entity type
- * @param idProvider lambda that returns the initial set of referenced entity IDs at construction time
- * @param idSetter optional lambda to write mutated IDs back to the owning entity's serializable field
+ * @param initialIds the initial set of referenced entity IDs at construction time
  */
 internal class MutableAggregateSetRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
-    idProvider: () -> Set<K>,
-    idSetter: ((Set<K>) -> Unit)?
-) : AbstractMutableAggregateCollectionRefDelegate<K, E>(
-        idSetter?.let { setter -> { ids -> setter(ids.toSet()) } }
-    ) {
+    initialIds: Set<K>
+) : AbstractMutableAggregateCollectionRefDelegate<K, E>(),
+    LirpDelegate {
 
-    override val backingIds: MutableSet<K> = LinkedHashSet(idProvider())
+    override val backingIds: MutableSet<K> = LinkedHashSet(initialIds)
 
     override fun add(element: E): Boolean = mutate { add(element.id) }
 
@@ -65,21 +62,19 @@ internal class MutableAggregateSetRefDelegate<K : Comparable<K>, E : Identifiabl
 /**
  * Creates a property delegate for a mutable unique-set aggregate collection reference.
  *
- * The returned delegate owns a mutable backing ID set ([LinkedHashSet]), initialized from [idProvider]
- * at property delegation time. Calls to [MutableReactiveEntityCollectionReference.add] and
- * [MutableReactiveEntityCollectionReference.remove] update the internal set and sync changes back
- * to the entity's serializable field via [idSetter]. After registry binding, mutations also trigger
- * mutation event emission on the owning entity. Uniqueness is enforced — duplicate IDs are silently ignored.
+ * The returned delegate owns a mutable backing ID set ([LinkedHashSet]), initialized from [initialIds]
+ * at property delegation time. Calls to [MutableAggregateCollectionRef.add] and
+ * [MutableAggregateCollectionRef.remove] update the internal set. After registry binding,
+ * mutations also trigger mutation event emission on the owning entity. Uniqueness is enforced —
+ * duplicate IDs are silently ignored.
  *
- * See [mutableAggregateList] for details on [idSetter] optionality and `clone()` deep-copy requirements.
+ * See [mutableAggregateList] for details on `clone()` deep-copy requirements.
  *
  * @param K the type of the referenced entity's ID, must be [Comparable]
  * @param E the referenced entity type, must extend [IdentifiableEntity]
- * @param idProvider lambda returning the current set of referenced entity IDs
- * @param idSetter optional lambda to write mutated IDs back to the owning entity's serializable field
- * @return an [AbstractMutableAggregateCollectionRefDelegate] implementing [MutableReactiveEntityCollectionReference]
+ * @param initialIds the initial set of referenced entity IDs
+ * @return a [MutableAggregateCollectionRef] delegate for unique mutable set references
  */
 fun <K : Comparable<K>, E : IdentifiableEntity<K>> mutableAggregateSet(
-    idProvider: () -> Set<K>,
-    idSetter: ((Set<K>) -> Unit)? = null
-): AbstractMutableAggregateCollectionRefDelegate<K, E> = MutableAggregateSetRefDelegate(idProvider, idSetter)
+    initialIds: Set<K> = emptySet()
+): MutableAggregateCollectionRef<K, E> = MutableAggregateSetRefDelegate(initialIds)

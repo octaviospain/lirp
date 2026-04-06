@@ -1,9 +1,9 @@
 package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.entity.CascadeAction
+import net.transgressoft.lirp.persistence.AggregateCollectionRef
 import net.transgressoft.lirp.persistence.CollectionRefEntry
 import net.transgressoft.lirp.persistence.LirpRefAccessor
-import net.transgressoft.lirp.persistence.ReactiveEntityCollectionReference
 import net.transgressoft.lirp.persistence.RefEntry
 
 /**
@@ -23,7 +23,7 @@ class `MutablePlaylistSql_LirpRefAccessor` : LirpRefAccessor<MutablePlaylistSql>
             CollectionRefEntry(
                 refName = "tracks",
                 idsGetter = { it.tracks.referenceIds },
-                delegateGetter = { it.tracks as ReactiveEntityCollectionReference<*, *> },
+                delegateGetter = { it.tracks as AggregateCollectionRef<*, *> },
                 referencedClass = SqlTestTrack::class.java,
                 cascadeAction = CascadeAction.NONE,
                 isOrdered = true

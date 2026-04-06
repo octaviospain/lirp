@@ -18,6 +18,7 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
+import kotlin.properties.ReadOnlyProperty
 
 /**
  * A lazily-resolved reference to a collection of aggregate entities stored in a [Registry].
@@ -27,13 +28,13 @@ import net.transgressoft.lirp.entity.IdentifiableEntity
  * factory functions. The delegate holds only the raw IDs of the referenced entities; actual entity
  * lookups are deferred to the first [resolveAll] call.
  *
- * Concrete delegates ([AggregateListRefDelegate] and [AggregateSetRefDelegate]) narrow the return
- * types of [referenceIds] and [resolveAll] to `List` and `Set` respectively via covariant overrides.
+ * Concrete delegates narrow the return types of [referenceIds] and [resolveAll] to `List` and
+ * `Set` respectively via covariant overrides.
  *
  * Example:
  * ```kotlin
  * @Aggregate
- * val items by aggregateList<Int, AudioItem> { itemIds }
+ * val items by aggregateList<Int, AudioItem>(itemIds)
  *
  * // Resolving all referenced entities:
  * val resolved: Collection<AudioItem> = playlist.items.resolveAll()
@@ -42,7 +43,8 @@ import net.transgressoft.lirp.entity.IdentifiableEntity
  * @param K the type of the referenced entities' IDs, which must be [Comparable]
  * @param E the type of the referenced entities
  */
-interface ReactiveEntityCollectionReference<K : Comparable<K>, E : IdentifiableEntity<K>> {
+interface AggregateCollectionRef<K : Comparable<K>, E : IdentifiableEntity<K>> :
+    ReadOnlyProperty<Any?, AggregateCollectionRef<K, E>> {
 
     /**
      * The raw IDs of all referenced entities.

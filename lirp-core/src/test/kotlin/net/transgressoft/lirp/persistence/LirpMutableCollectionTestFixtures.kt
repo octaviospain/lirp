@@ -34,49 +34,60 @@ import kotlinx.serialization.builtins.serializer
  * Test entity representing a playlist that supports runtime mutation of its track list
  * via a [mutableAggregateList] delegate.
  *
- * The [items] property delegates to a mutable aggregate list backed by [itemIds]. The [idSetter]
- * writes mutated IDs back to [itemIds] after each add/remove/clear, keeping the serializable field
- * in sync. The [clone] method deep-copies [itemIds] to satisfy the `mutateAndPublish` equality check.
+ * The [items] property delegates to a mutable aggregate list backed by the delegate's backing store,
+ * initialized from [itemIds] at construction time. The [clone] method snapshots the delegate's current
+ * IDs to satisfy the `mutateAndPublish` equality check. Equality is based on the delegate's live
+ * [referenceIds] so that add/remove/clear mutations are correctly detected as state changes.
  */
 @Serializable
 data class MutablePlaylist(
     override val id: Long,
     val name: String,
-    var itemIds: List<Int> = emptyList()
+    val itemIds: List<Int> = emptyList()
 ) : ReactiveEntityBase<Long, MutablePlaylist>() {
     override val uniqueId: String get() = "mutable-playlist-$id"
 
     @Aggregate(onDelete = CascadeAction.NONE)
-    val items by mutableAggregateList<Int, TestTrack>(
-        idProvider = { itemIds },
-        idSetter = { itemIds = it }
-    )
+    val items by mutableAggregateList<Int, TestTrack>(itemIds)
 
-    override fun clone(): MutablePlaylist = copy(itemIds = ArrayList(itemIds))
+    override fun clone(): MutablePlaylist = copy(itemIds = items.referenceIds.toList())
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is MutablePlaylist) return false
+        return id == other.id && name == other.name && items.referenceIds == other.items.referenceIds
+    }
+
+    override fun hashCode(): Int = 31 * (31 * id.hashCode() + name.hashCode()) + items.referenceIds.hashCode()
 }
 
 /**
  * Test entity representing a group that supports runtime mutation of its playlist set
  * via a [mutableAggregateSet] delegate.
  *
- * The [playlists] property delegates to a mutable aggregate set backed by [playlistIds]. Uniqueness
- * is enforced by the set delegate. The [clone] method deep-copies [playlistIds] to a new
- * [LinkedHashSet] to preserve insertion order and satisfy the `mutateAndPublish` equality check.
+ * The [playlists] property delegates to a mutable aggregate set backed by the delegate's backing store,
+ * initialized from [playlistIds] at construction time. Equality is based on the delegate's live
+ * [referenceIds] so that add/remove/clear mutations are correctly detected as state changes.
  */
 @Serializable
 data class MutablePlaylistGroup(
     override val id: Long,
-    var playlistIds: Set<Long> = emptySet()
+    val playlistIds: Set<Long> = emptySet()
 ) : ReactiveEntityBase<Long, MutablePlaylistGroup>() {
     override val uniqueId: String get() = "mutable-group-$id"
 
     @Aggregate(onDelete = CascadeAction.NONE)
-    val playlists by mutableAggregateSet<Long, MutablePlaylist>(
-        idProvider = { playlistIds },
-        idSetter = { playlistIds = it }
-    )
+    val playlists by mutableAggregateSet<Long, MutablePlaylist>(playlistIds)
 
-    override fun clone(): MutablePlaylistGroup = copy(playlistIds = LinkedHashSet(playlistIds))
+    override fun clone(): MutablePlaylistGroup = copy(playlistIds = LinkedHashSet(playlists.referenceIds))
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is MutablePlaylistGroup) return false
+        return id == other.id && playlists.referenceIds == other.playlists.referenceIds
+    }
+
+    override fun hashCode(): Int = 31 * id.hashCode() + playlists.referenceIds.hashCode()
 }
 
 /**

@@ -46,16 +46,16 @@ internal class AggregateCollectionRefDeclarationTest : StringSpec({
         group.playlists.referenceIds shouldBe setOf(10L, 20L, 30L)
     }
 
-    "AggregateListRefDelegate.getValue returns the delegate itself typed as ReactiveEntityCollectionReference" {
+    "aggregateList getValue returns the delegate typed as AggregateCollectionRef" {
         val playlist = Playlist(id = 1L, name = "My Playlist", itemIds = listOf(1, 2, 3))
 
-        playlist.items.shouldBeInstanceOf<ReactiveEntityCollectionReference<Int, TestTrack>>()
+        playlist.items.shouldBeInstanceOf<AggregateCollectionRef<Int, TestTrack>>()
     }
 
-    "AggregateSetRefDelegate.getValue returns the delegate itself typed as ReactiveEntityCollectionReference" {
+    "aggregateSet getValue returns the delegate typed as AggregateCollectionRef" {
         val group = PlaylistGroup(id = 1L, playlistIds = setOf(1L))
 
-        group.playlists.shouldBeInstanceOf<ReactiveEntityCollectionReference<Long, Playlist>>()
+        group.playlists.shouldBeInstanceOf<AggregateCollectionRef<Long, Playlist>>()
     }
 
     "Unbound AggregateListRefDelegate.resolveAll returns empty list" {
@@ -71,30 +71,30 @@ internal class AggregateCollectionRefDeclarationTest : StringSpec({
     }
 
     "AggregateListRefDelegate has no wireBubbleUp or cancelBubbleUp methods" {
-        val delegate = AggregateListRefDelegate<Int, TestTrack> { listOf(1, 2, 3) }
+        val delegate = AggregateListRefDelegate(listOf(1, 2, 3))
 
         val methods = delegate.javaClass.methods.map { it.name }
         methods.none { it in listOf("wireBubbleUp", "cancelBubbleUp") } shouldBe true
     }
 
     "AggregateSetRefDelegate has no wireBubbleUp or cancelBubbleUp methods" {
-        val delegate = AggregateSetRefDelegate<Long, Playlist> { setOf(1L, 2L) }
+        val delegate = AggregateSetRefDelegate(setOf(1L, 2L))
 
         val methods = delegate.javaClass.methods.map { it.name }
         methods.none { it in listOf("wireBubbleUp", "cancelBubbleUp") } shouldBe true
     }
 
-    "aggregateList factory creates AggregateListRefDelegate" {
-        val delegate = aggregateList<Int, TestTrack> { listOf(1, 2, 3) }
+    "aggregateList factory returns AggregateCollectionRef" {
+        val delegate = aggregateList(listOf(1, 2, 3))
 
-        delegate.shouldBeInstanceOf<AggregateListRefDelegate<Int, TestTrack>>()
+        delegate.shouldBeInstanceOf<AggregateCollectionRef<Int, TestTrack>>()
         delegate.referenceIds shouldHaveSize 3
     }
 
-    "aggregateSet factory creates AggregateSetRefDelegate" {
-        val delegate = aggregateSet<Long, Playlist> { setOf(1L, 2L) }
+    "aggregateSet factory returns AggregateCollectionRef" {
+        val delegate = aggregateSet(setOf(1L, 2L))
 
-        delegate.shouldBeInstanceOf<AggregateSetRefDelegate<Long, Playlist>>()
+        delegate.shouldBeInstanceOf<AggregateCollectionRef<Long, Playlist>>()
         delegate.referenceIds shouldHaveSize 2
     }
 })
