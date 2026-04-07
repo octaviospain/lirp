@@ -73,7 +73,7 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
          * @param entity The entity to add
          * @return `true` if the entity was added, `false` if an entity with the same ID is already present
          */
-        open override fun add(entity: T): Boolean {
+        override fun add(entity: T): Boolean {
             val previous = entitiesById.putIfAbsent(entity.id, entity)
             if (previous == null) {
                 discoverIndexes(entity)

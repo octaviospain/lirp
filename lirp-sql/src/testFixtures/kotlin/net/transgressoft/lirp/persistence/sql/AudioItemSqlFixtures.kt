@@ -44,9 +44,10 @@ object AudioItemSqlTableDef : SqlTableDef<AudioItem> {
     @Suppress("UNCHECKED_CAST")
     override fun fromRow(row: ResultRow, table: Table): AudioItem {
         val cols = table.columns.associateBy { it.name }
-        return MutableAudioItem(row[cols["id"]!! as Column<Int>]).also {
-            it.title = row[cols["title"]!! as Column<String>]
-        }
+        return MutableAudioItem(
+            row[cols["id"]!! as Column<Int>],
+            row[cols["title"]!! as Column<String>]
+        )
     }
 
     override fun toParams(entity: AudioItem, table: Table): Map<Column<*>, Any?> {
@@ -86,9 +87,7 @@ object AudioPlaylistSqlTableDef : SqlTableDef<MutableAudioPlaylist> {
         val parsedPlaylistIds =
             if (playlistIdsText.isBlank()) emptySet()
             else playlistIdsText.split(",").mapNotNull { it.trim().toIntOrNull() }.toSet()
-        return MutableAudioPlaylistEntity(row[cols["id"]!! as Column<Int>], parsedAudioItemIds, parsedPlaylistIds).also {
-            it.name = row[cols["name"]!! as Column<String>]
-        }
+        return MutableAudioPlaylistEntity(row[cols["id"]!! as Column<Int>], row[cols["name"]!! as Column<String>], parsedAudioItemIds, parsedPlaylistIds)
     }
 
     override fun toParams(entity: MutableAudioPlaylist, table: Table): Map<Column<*>, Any?> {

@@ -76,11 +76,12 @@ internal class MutableAggregateSetRefDelegate<K : Comparable<K>, E : Identifiabl
 class MutableAggregateSetProxy<K : Comparable<K>, E : IdentifiableEntity<K>>
     internal constructor(
         internal val innerDelegate: MutableAggregateSetRefDelegate<K, E>
-    ) : AbstractMutableSet<E>(), AggregateCollectionRef<K, E> by innerDelegate, LirpDelegate {
+    ) : AbstractMutableSet<E>(),
+        AggregateCollectionRef<K, E> by innerDelegate,
+        MutableCollection<E> by innerDelegate,
+        LirpDelegate {
 
         override val size: Int get() = innerDelegate.size
-
-        override fun add(element: E): Boolean = innerDelegate.add(element)
 
         override fun iterator(): MutableIterator<E> {
             val snapshot = innerDelegate.referenceIds.toList()
@@ -108,17 +109,6 @@ class MutableAggregateSetProxy<K : Comparable<K>, E : IdentifiableEntity<K>>
                 }
             }
         }
-
-        override fun contains(element: E): Boolean = innerDelegate.contains(element)
-
-        // Delegate batch operations to innerDelegate for single-event emission semantics
-        override fun addAll(elements: Collection<E>): Boolean = innerDelegate.addAll(elements)
-
-        override fun removeAll(elements: Collection<E>): Boolean = innerDelegate.removeAll(elements)
-
-        override fun retainAll(elements: Collection<E>): Boolean = innerDelegate.retainAll(elements)
-
-        override fun clear() = innerDelegate.clear()
 
         operator fun getValue(thisRef: Any?, property: KProperty<*>): MutableAggregateSetProxy<K, E> = this
     }

@@ -30,8 +30,9 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 /**
  * Tests for cascade behavior on collection-typed aggregate references.
  *
- * Verifies that [CascadePlaylist] (CASCADE), [DetachPlaylist] (DETACH), [NonePlaylist] (NONE),
- * and [RestrictPlaylist] (RESTRICT) behave correctly when the parent entity is removed.
+ * Verifies that [CascadeAudioPlaylist] (CASCADE), [DetachAudioPlaylist] (DETACH),
+ * [NoneAudioPlaylist] (NONE), and [RestrictAudioPlaylist] (RESTRICT) behave correctly
+ * when the parent entity is removed.
  */
 @DisplayName("AggregateCascadeCollection")
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -46,11 +47,11 @@ internal class AggregateCascadeCollectionTest : StringSpec({
     }
 
     lateinit var ctx: LirpContext
-    lateinit var trackRepo: TestTrackVolatileRepo
+    lateinit var trackRepo: AudioItemVolatileRepository
 
     beforeEach {
         ctx = LirpContext()
-        trackRepo = TestTrackVolatileRepo(ctx)
+        trackRepo = AudioItemVolatileRepository(ctx)
     }
 
     afterEach {
@@ -58,15 +59,15 @@ internal class AggregateCascadeCollectionTest : StringSpec({
     }
 
     "CASCADE on collection ref removes all referenced entities from their repository" {
-        val track1 = trackRepo.create(id = 1, title = "Track A")
-        val track2 = trackRepo.create(id = 2, title = "Track B")
+        trackRepo.create(1, "Track A")
+        trackRepo.create(2, "Track B")
         trackRepo.size() shouldBe 2
 
-        val playlistRepo = CascadePlaylistVolatileRepo(ctx)
-        playlistRepo.create(id = 10L, name = "Mix", itemIds = listOf(1, 2))
+        val playlistRepo = CascadePlaylistRepo(ctx)
+        playlistRepo.create(id = 10, name = "Mix", audioItemIds = listOf(1, 2))
 
         // Remove parent — CASCADE should remove both tracks
-        playlistRepo.remove(playlistRepo.findById(10L).get())
+        playlistRepo.remove(playlistRepo.findById(10).get())
 
         trackRepo.contains(1) shouldBe false
         trackRepo.contains(2) shouldBe false
@@ -74,12 +75,12 @@ internal class AggregateCascadeCollectionTest : StringSpec({
     }
 
     "CASCADE on collection ref skips already-removed entities with warning" {
-        trackRepo.create(id = 1, title = "Track A")
-        val track2 = trackRepo.create(id = 2, title = "Track B")
+        trackRepo.create(1, "Track A")
+        trackRepo.create(2, "Track B")
 
-        val playlistRepo = CascadePlaylistVolatileRepo(ctx)
-        val playlist1 = playlistRepo.create(id = 10L, name = "Mix 1", itemIds = listOf(1, 2))
-        val playlist2 = playlistRepo.create(id = 11L, name = "Mix 2", itemIds = listOf(1, 2))
+        val playlistRepo = CascadePlaylistRepo(ctx)
+        val playlist1 = playlistRepo.create(id = 10, name = "Mix 1", audioItemIds = listOf(1, 2))
+        val playlist2 = playlistRepo.create(id = 11, name = "Mix 2", audioItemIds = listOf(1, 2))
 
         // Remove playlist1 — cascades track1 and track2
         playlistRepo.remove(playlist1)
@@ -91,12 +92,12 @@ internal class AggregateCascadeCollectionTest : StringSpec({
     }
 
     "RESTRICT on collection ref blocks parent removal when a referenced entity is still referenced by another entity" {
-        trackRepo.create(id = 1, title = "Track A")
+        trackRepo.create(1, "Track A")
 
-        val restrictPlaylistRepo = RestrictPlaylistVolatileRepo(ctx)
-        val playlist1 = restrictPlaylistRepo.create(id = 10L, name = "Mix 1", itemIds = listOf(1))
+        val restrictPlaylistRepo = RestrictPlaylistRepo(ctx)
+        val playlist1 = restrictPlaylistRepo.create(id = 10, name = "Mix 1", audioItemIds = listOf(1))
         // Another playlist also references track 1
-        restrictPlaylistRepo.create(id = 11L, name = "Mix 2", itemIds = listOf(1))
+        restrictPlaylistRepo.create(id = 11, name = "Mix 2", audioItemIds = listOf(1))
 
         val exception =
             shouldThrow<IllegalStateException> {
@@ -106,10 +107,10 @@ internal class AggregateCascadeCollectionTest : StringSpec({
     }
 
     "RESTRICT on collection ref allows removal when no external references exist" {
-        trackRepo.create(id = 1, title = "Track A")
+        trackRepo.create(1, "Track A")
 
-        val restrictPlaylistRepo = RestrictPlaylistVolatileRepo(ctx)
-        val playlist = restrictPlaylistRepo.create(id = 10L, name = "Mix", itemIds = listOf(1))
+        val restrictPlaylistRepo = RestrictPlaylistRepo(ctx)
+        val playlist = restrictPlaylistRepo.create(id = 10, name = "Mix", audioItemIds = listOf(1))
 
         // Only this playlist references track 1 — removal should succeed
         restrictPlaylistRepo.remove(playlist)
@@ -119,10 +120,10 @@ internal class AggregateCascadeCollectionTest : StringSpec({
     }
 
     "DETACH on collection ref is a no-op" {
-        trackRepo.create(id = 1, title = "Track A")
+        trackRepo.create(1, "Track A")
 
-        val detachPlaylistRepo = DetachPlaylistVolatileRepo(ctx)
-        val playlist = detachPlaylistRepo.create(id = 10L, name = "Mix", itemIds = listOf(1))
+        val detachPlaylistRepo = DetachPlaylistRepo(ctx)
+        val playlist = detachPlaylistRepo.create(id = 10, name = "Mix", audioItemIds = listOf(1))
 
         // Remove parent with DETACH — no error, tracks remain
         detachPlaylistRepo.remove(playlist)
@@ -131,11 +132,11 @@ internal class AggregateCascadeCollectionTest : StringSpec({
     }
 
     "NONE on collection ref is a no-op (default behavior)" {
-        trackRepo.create(id = 1, title = "Track A")
-        trackRepo.create(id = 2, title = "Track B")
+        trackRepo.create(1, "Track A")
+        trackRepo.create(2, "Track B")
 
-        val nonePlaylistRepo = NonePlaylistVolatileRepo(ctx)
-        val playlist = nonePlaylistRepo.create(id = 10L, name = "Mix", itemIds = listOf(1, 2))
+        val nonePlaylistRepo = NonePlaylistRepo(ctx)
+        val playlist = nonePlaylistRepo.create(id = 10, name = "Mix", audioItemIds = listOf(1, 2))
 
         nonePlaylistRepo.remove(playlist)
 

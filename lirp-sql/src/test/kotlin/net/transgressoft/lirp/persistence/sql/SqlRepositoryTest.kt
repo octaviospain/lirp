@@ -387,8 +387,8 @@ internal class SqlRepositoryTest : FunSpec({
             val trackRepo = SqlTestTrackRepository(jdbcUrl)
             val playlistRepo = MutablePlaylistSqlRepository(jdbcUrl)
 
-            val track1 = SqlTestTrack(1).also { it.title = "Track A" }
-            val track2 = SqlTestTrack(2).also { it.title = "Track B" }
+            val track1 = SqlTestTrack(1, "Track A")
+            val track2 = SqlTestTrack(2, "Track B")
             trackRepo.add(track1)
             trackRepo.add(track2)
 
@@ -420,9 +420,9 @@ internal class SqlRepositoryTest : FunSpec({
             val trackRepo1 = SqlTestTrackRepository(jdbcUrl)
             val playlistRepo1 = MutablePlaylistSqlRepository(jdbcUrl)
 
-            val t1 = SqlTestTrack(1).also { it.title = "T1" }
-            val t2 = SqlTestTrack(2).also { it.title = "T2" }
-            val t3 = SqlTestTrack(3).also { it.title = "T3" }
+            val t1 = SqlTestTrack(1, "T1")
+            val t2 = SqlTestTrack(2, "T2")
+            val t3 = SqlTestTrack(3, "T3")
             trackRepo1.add(t1)
             trackRepo1.add(t2)
             trackRepo1.add(t3)
@@ -467,9 +467,9 @@ internal class SqlRepositoryTest : FunSpec({
             val trackRepo = SqlTestTrackRepository(jdbcUrl)
             val playlistRepo = MutablePlaylistSqlRepository(jdbcUrl)
 
-            val t1 = SqlTestTrack(1).also { it.title = "T1" }
-            val t2 = SqlTestTrack(2).also { it.title = "T2" }
-            val t3 = SqlTestTrack(3).also { it.title = "T3" }
+            val t1 = SqlTestTrack(1, "T1")
+            val t2 = SqlTestTrack(2, "T2")
+            val t3 = SqlTestTrack(3, "T3")
             trackRepo.add(t1)
             trackRepo.add(t2)
             trackRepo.add(t3)
@@ -500,9 +500,9 @@ internal class SqlRepositoryTest : FunSpec({
             val trackRepo = SqlTestTrackRepository(jdbcUrl)
             val playlistRepo = MutablePlaylistSqlRepository(jdbcUrl)
 
-            val t1 = SqlTestTrack(1).also { it.title = "T1" }
-            val t2 = SqlTestTrack(2).also { it.title = "T2" }
-            val t3 = SqlTestTrack(3).also { it.title = "T3" }
+            val t1 = SqlTestTrack(1, "T1")
+            val t2 = SqlTestTrack(2, "T2")
+            val t3 = SqlTestTrack(3, "T3")
             trackRepo.add(t1)
             trackRepo.add(t2)
             trackRepo.add(t3)
@@ -535,7 +535,7 @@ internal class SqlRepositoryTest : FunSpec({
             playlistRepo.subscribe { event -> received.set(event.type) }
             delay(100.milliseconds)
 
-            val t1 = SqlTestTrack(1).also { it.title = "Track" }
+            val t1 = SqlTestTrack(1, "Track")
             trackRepo.add(t1)
 
             val playlist = MutablePlaylistSql(1L).also { it.name = "EventTest" }
@@ -557,7 +557,7 @@ internal class SqlRepositoryTest : FunSpec({
             val trackRepo = SqlTestTrackRepository(jdbcUrl)
             val playlistRepo = MutablePlaylistSqlRepository(jdbcUrl)
 
-            val t1 = SqlTestTrack(10).also { it.title = "Pre-existing Track" }
+            val t1 = SqlTestTrack(10, "Pre-existing Track")
             trackRepo.add(t1)
 
             val playlist = MutablePlaylistSql(1L, listOf(10)).also { it.name = "Pre-loaded" }
@@ -584,7 +584,7 @@ internal class SqlRepositoryTest : FunSpec({
             val trackRepo1 = SqlTestTrackRepository(jdbcUrl)
             val playlistRepo1 = MutablePlaylistSqlRepository(jdbcUrl)
 
-            val t1 = SqlTestTrack(1).also { it.title = "T1" }
+            val t1 = SqlTestTrack(1, "T1")
             trackRepo1.add(t1)
 
             val playlist = MutablePlaylistSql(1L).also { it.name = "ClearMe" }

@@ -102,14 +102,8 @@ class MusicCommonsSqlIntegrationTest : MusicCommonsIntegrationTestBase() {
         // -------------------------------------------------------------------------
 
         test("SQL persistence survives close and reopen for AudioItems") {
-            MutableAudioItem(1).also {
-                it.title = "Persisted Song"
-                audioItemRepo.add(it)
-            }
-            MutableAudioItem(2).also {
-                it.title = "Another Song"
-                audioItemRepo.add(it)
-            }
+            MutableAudioItem(1, "Persisted Song").also(audioItemRepo::add)
+            MutableAudioItem(2, "Another Song").also(audioItemRepo::add)
             flushPendingWrites()
 
             // Close everything and reopen from the same database
@@ -128,18 +122,9 @@ class MusicCommonsSqlIntegrationTest : MusicCommonsIntegrationTestBase() {
         }
 
         test("SQL persistence survives close and reopen for playlists with referenced items") {
-            MutableAudioItem(1).also {
-                it.title = "Track 1"
-                audioItemRepo.add(it)
-            }
-            MutableAudioItem(2).also {
-                it.title = "Track 2"
-                audioItemRepo.add(it)
-            }
-            MutableAudioPlaylistEntity(10, listOf(1, 2)).also {
-                it.name = "My Playlist"
-                playlistRepo.add(it)
-            }
+            MutableAudioItem(1, "Track 1").also(audioItemRepo::add)
+            MutableAudioItem(2, "Track 2").also(audioItemRepo::add)
+            MutableAudioPlaylistEntity(10, "My Playlist", listOf(1, 2)).also(playlistRepo::add)
             flushPendingWrites()
 
             ctx.close()
@@ -162,20 +147,9 @@ class MusicCommonsSqlIntegrationTest : MusicCommonsIntegrationTestBase() {
         }
 
         test("SQL persistence preserves self-referencing playlist aggregates after reload") {
-            val subA =
-                MutableAudioPlaylistEntity(20).also {
-                    it.name = "Sub A"
-                    playlistRepo.add(it)
-                }
-            val subB =
-                MutableAudioPlaylistEntity(30).also {
-                    it.name = "Sub B"
-                    playlistRepo.add(it)
-                }
-            MutableAudioPlaylistEntity(10, emptyList(), setOf(20, 30)).also {
-                it.name = "Parent"
-                playlistRepo.add(it)
-            }
+            val subA = MutableAudioPlaylistEntity(20, "Sub A").also(playlistRepo::add)
+            val subB = MutableAudioPlaylistEntity(30, "Sub B").also(playlistRepo::add)
+            MutableAudioPlaylistEntity(10, "Parent", emptyList(), setOf(20, 30)).also(playlistRepo::add)
             flushPendingWrites()
 
             ctx.close()
@@ -196,16 +170,8 @@ class MusicCommonsSqlIntegrationTest : MusicCommonsIntegrationTestBase() {
         }
 
         test("SQL persistence reflects runtime mutations after close and reload") {
-            val item =
-                MutableAudioItem(1).also {
-                    it.title = "Original"
-                    audioItemRepo.add(it)
-                }
-            val playlist =
-                MutableAudioPlaylistEntity(10).also {
-                    it.name = "Empty"
-                    playlistRepo.add(it)
-                }
+            val item = MutableAudioItem(1, "Original").also(audioItemRepo::add)
+            val playlist = MutableAudioPlaylistEntity(10, "Empty").also(playlistRepo::add)
 
             // Mutate at runtime: add item (auto-persists via mutation event subscription)
             playlist.audioItems.add(item)

@@ -35,37 +35,37 @@ import io.kotest.matchers.types.shouldBeInstanceOf
 internal class AggregateCollectionRefDeclarationTest : StringSpec({
 
     "AggregateListRefDelegate returns referenceIds as List preserving order and duplicates" {
-        val playlist = Playlist(id = 1L, name = "My Playlist", itemIds = listOf(3, 1, 2, 1))
+        val playlist = ImmutableAudioPlaylist(id = 1, name = "My Playlist", initialAudioItemIds = listOf(3, 1, 2, 1))
 
-        playlist.items.referenceIds shouldContainExactly listOf(3, 1, 2, 1)
+        playlist.audioItems.referenceIds shouldContainExactly listOf(3, 1, 2, 1)
     }
 
     "AggregateSetRefDelegate returns referenceIds as Set with unique elements" {
-        val group = PlaylistGroup(id = 1L, playlistIds = setOf(10L, 20L, 30L))
+        val group = ImmutablePlaylistGroup(id = 1, initialPlaylistIds = setOf(10, 20, 30))
 
-        group.playlists.referenceIds shouldBe setOf(10L, 20L, 30L)
+        group.playlists.referenceIds shouldBe setOf(10, 20, 30)
     }
 
     "aggregateList getValue returns the delegate typed as AggregateCollectionRef" {
-        val playlist = Playlist(id = 1L, name = "My Playlist", itemIds = listOf(1, 2, 3))
+        val playlist = ImmutableAudioPlaylist(id = 1, name = "My Playlist", initialAudioItemIds = listOf(1, 2, 3))
 
-        playlist.items.shouldBeInstanceOf<AggregateCollectionRef<Int, TestTrack>>()
+        playlist.audioItems.shouldBeInstanceOf<AggregateCollectionRef<Int, AudioItem>>()
     }
 
     "aggregateSet getValue returns the delegate typed as AggregateCollectionRef" {
-        val group = PlaylistGroup(id = 1L, playlistIds = setOf(1L))
+        val group = ImmutablePlaylistGroup(id = 1, initialPlaylistIds = setOf(1))
 
-        group.playlists.shouldBeInstanceOf<AggregateCollectionRef<Long, Playlist>>()
+        group.playlists.shouldBeInstanceOf<AggregateCollectionRef<Int, ImmutableAudioPlaylist>>()
     }
 
     "Unbound AggregateListRefDelegate.resolveAll returns empty list" {
-        val playlist = Playlist(id = 1L, name = "My Playlist", itemIds = listOf(1, 2, 3))
+        val playlist = ImmutableAudioPlaylist(id = 1, name = "My Playlist", initialAudioItemIds = listOf(1, 2, 3))
 
-        playlist.items.resolveAll() shouldBe emptyList()
+        playlist.audioItems.resolveAll() shouldBe emptyList()
     }
 
     "Unbound AggregateSetRefDelegate.resolveAll returns empty set" {
-        val group = PlaylistGroup(id = 1L, playlistIds = setOf(1L, 2L))
+        val group = ImmutablePlaylistGroup(id = 1, initialPlaylistIds = setOf(1, 2))
 
         group.playlists.resolveAll() shouldBe emptySet()
     }
@@ -78,7 +78,7 @@ internal class AggregateCollectionRefDeclarationTest : StringSpec({
     }
 
     "AggregateSetRefDelegate has no wireBubbleUp or cancelBubbleUp methods" {
-        val delegate = AggregateSetRefDelegate(setOf(1L, 2L))
+        val delegate = AggregateSetRefDelegate(setOf(1, 2))
 
         val methods = delegate.javaClass.methods.map { it.name }
         methods.none { it in listOf("wireBubbleUp", "cancelBubbleUp") } shouldBe true
@@ -87,14 +87,14 @@ internal class AggregateCollectionRefDeclarationTest : StringSpec({
     "aggregateList factory returns AggregateCollectionRef" {
         val delegate = aggregateList(listOf(1, 2, 3))
 
-        delegate.shouldBeInstanceOf<AggregateCollectionRef<Int, TestTrack>>()
+        delegate.shouldBeInstanceOf<AggregateCollectionRef<Int, AudioItem>>()
         delegate.referenceIds shouldHaveSize 3
     }
 
     "aggregateSet factory returns AggregateCollectionRef" {
-        val delegate = aggregateSet(setOf(1L, 2L))
+        val delegate = aggregateSet(setOf(1, 2))
 
-        delegate.shouldBeInstanceOf<AggregateCollectionRef<Long, Playlist>>()
+        delegate.shouldBeInstanceOf<AggregateCollectionRef<Int, ImmutableAudioPlaylist>>()
         delegate.referenceIds shouldHaveSize 2
     }
 })

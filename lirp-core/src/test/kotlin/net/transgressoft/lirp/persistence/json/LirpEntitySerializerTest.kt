@@ -19,9 +19,9 @@ package net.transgressoft.lirp.persistence.json
 
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.persistence.AbstractMutableAggregateCollectionRefDelegate
+import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.MutableAggregateListProxy
 import net.transgressoft.lirp.persistence.MutableAggregateSetProxy
-import net.transgressoft.lirp.persistence.TestTrack
 import net.transgressoft.lirp.persistence.mutableAggregateList
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldContainExactly
@@ -81,7 +81,7 @@ private class NullableDelegate(override val id: Int) : ReactiveEntityBase<Int, N
  * the delegate property name without requiring a corresponding constructor field.
  */
 private class DelegateWithCollection(override val id: Int) : ReactiveEntityBase<Int, DelegateWithCollection>() {
-    val tracks by mutableAggregateList<Int, TestTrack>()
+    val tracks by mutableAggregateList<Int, AudioItem>()
     override val uniqueId: String get() = id.toString()
 
     // Clone does not copy tracks — serialization tests don't use mutation events.
@@ -102,7 +102,7 @@ private class DelegateWithCollection(override val id: Int) : ReactiveEntityBase<
  */
 private class CombinedDelegate(override val id: Int) : ReactiveEntityBase<Int, CombinedDelegate>() {
     var name by reactiveProperty("combined")
-    val tracks by mutableAggregateList<Int, TestTrack>()
+    val tracks by mutableAggregateList<Int, AudioItem>()
     override val uniqueId: String get() = id.toString()
 
     override fun clone(): CombinedDelegate =

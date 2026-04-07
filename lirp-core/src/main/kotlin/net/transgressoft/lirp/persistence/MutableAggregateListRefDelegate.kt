@@ -58,7 +58,7 @@ internal class MutableAggregateListRefDelegate<K : Comparable<K>, E : Identifiab
 
     internal fun setAt(index: Int, id: K): Boolean =
         mutate {
-            (this as MutableList<K>).set(index, id)
+            (this as MutableList<K>)[index] = id
             true
         }
 
