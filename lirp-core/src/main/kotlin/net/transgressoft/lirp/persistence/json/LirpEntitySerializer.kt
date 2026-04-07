@@ -98,18 +98,32 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
     private val constructorParams: List<ConstructorParamInfo>
     private val delegateInfos: List<DelegateInfo>
 
+    /**
+     * Constructor parameters that are also reactive delegate properties (e.g. `name` passed to
+     * `reactiveProperty(name)`). These are serialized as delegate fields but must also be supplied
+     * to the primary constructor during deserialization.
+     */
+    private val constructorDelegateParams: Map<String, KParameter>
+
     init {
         val registry = sampleInstance.delegateRegistry
         val delegateNames = registry.keys.toSet()
         val memberProps = kClass.memberProperties.associateBy { it.name }
+        val allConstructorParams = kClass.primaryConstructor?.parameters ?: emptyList()
 
         // Only serialize constructor params that have a corresponding member property (not constructor-only params
         // like `initialIds` which are consumed at construction time and have no getter for serialization)
-        constructorParams = kClass.primaryConstructor
-            ?.parameters
-            ?.filter { param -> param.name != null && param.name !in delegateNames && param.name in memberProps }
-            ?.map { param -> ConstructorParamInfo(param, serializer(param.type)) }
-            ?: emptyList()
+        constructorParams =
+            allConstructorParams
+                .filter { param -> param.name != null && param.name !in delegateNames && param.name in memberProps }
+                .map { param -> ConstructorParamInfo(param, serializer(param.type)) }
+
+        // Track constructor params that are also reactive delegates — they are serialized as
+        // delegate fields but must be forwarded to the constructor during deserialization
+        constructorDelegateParams =
+            allConstructorParams
+                .filter { param -> param.name != null && param.name in delegateNames }
+                .associateBy { it.name!! }
 
         // Collect delegate infos preserving the order from memberProperties (kotlin-reflect preserves declaration order)
         delegateInfos =
@@ -219,7 +233,14 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
         val decoded = decodeElements(composite, paramByIndex, delegateByIndex)
         composite.endStructure(descriptor)
 
-        val entity = constructEntity(decoded.paramValues)
+        // Merge reactive delegate values that are also constructor params (e.g. `name`)
+        val mergedParamValues = decoded.paramValues.toMutableMap()
+        for ((name, param) in constructorDelegateParams) {
+            val value = decoded.reactiveValues[name]
+            if (value != null) mergedParamValues[param] = value
+        }
+
+        val entity = constructEntity(mergedParamValues)
         entity.withEventsDisabledForClone {
             restoreReactiveProperties(entity, decoded.reactiveValues)
             restoreAggregateIds(entity, decoded.aggregateIds)

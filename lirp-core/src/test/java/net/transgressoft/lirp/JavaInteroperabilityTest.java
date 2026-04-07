@@ -15,12 +15,12 @@ import net.transgressoft.lirp.persistence.BubbleUpOrderVolatileRepo;
 import net.transgressoft.lirp.persistence.Customer;
 import net.transgressoft.lirp.persistence.CustomerVolatileRepo;
 import net.transgressoft.lirp.persistence.LirpContext;
-import net.transgressoft.lirp.persistence.MutablePlaylist;
-import net.transgressoft.lirp.persistence.MutablePlaylistVolatileRepo;
+import net.transgressoft.lirp.persistence.AudioItemVolatileRepository;
+import net.transgressoft.lirp.persistence.MutableAudioItem;
+import net.transgressoft.lirp.persistence.MutableAudioPlaylistEntity;
+import net.transgressoft.lirp.persistence.AudioPlaylistVolatileRepository;
 import net.transgressoft.lirp.persistence.OrderVolatileRepo;
 import net.transgressoft.lirp.persistence.ReactiveEntityReference;
-import net.transgressoft.lirp.persistence.TestTrack;
-import net.transgressoft.lirp.persistence.TestTrackVolatileRepo;
 import net.transgressoft.lirp.persistence.json.FlexibleJsonFileRepository;
 import net.transgressoft.lirp.persistence.json.primitives.ReactiveString;
 import org.junit.jupiter.api.AfterAll;
@@ -553,14 +553,14 @@ class JavaInteroperabilityTest {
     class MutableAggregateCollectionTests {
 
         LirpContext ctx;
-        TestTrackVolatileRepo trackRepo;
-        MutablePlaylistVolatileRepo playlistRepo;
+        AudioItemVolatileRepository trackRepo;
+        AudioPlaylistVolatileRepository playlistRepo;
 
         @BeforeEach
         void setUp() {
             ctx = new LirpContext();
-            trackRepo = new TestTrackVolatileRepo(ctx);
-            playlistRepo = new MutablePlaylistVolatileRepo(ctx);
+            trackRepo = new AudioItemVolatileRepository(ctx);
+            playlistRepo = new AudioPlaylistVolatileRepository(ctx);
         }
 
         @AfterEach
@@ -569,28 +569,32 @@ class JavaInteroperabilityTest {
         }
 
         @Test
-        @DisplayName("Java code adds entity to mutable aggregate list via getItems().add()")
-        void javaAddsEntityToMutableAggregateListViaGetItemsAdd() {
-            TestTrack track = trackRepo.create(1, "Track 1");
-            MutablePlaylist playlist = playlistRepo.create(1L, "Java Test", Collections.emptyList());
+        @DisplayName("Java code adds entity to mutable aggregate list via getAudioItems().add()")
+        void javaAddsEntityToMutableAggregateListViaGetAudioItemsAdd() {
+            MutableAudioItem track = new MutableAudioItem(1, "Track 1");
+            trackRepo.add(track);
+            MutableAudioPlaylistEntity playlist = new MutableAudioPlaylistEntity(1, "Test Playlist", Collections.emptyList(), Collections.emptySet());
+            playlistRepo.add(playlist);
 
-            boolean added = playlist.getItems().add(track);
+            boolean added = playlist.getAudioItems().add(track);
 
             assertTrue(added);
-            assertTrue(playlist.getItems().getReferenceIds().contains(1));
-            assertEquals(1, playlist.getItems().getReferenceIds().size());
+            assertTrue(playlist.getAudioItems().getReferenceIds().contains(1));
+            assertEquals(1, playlist.getAudioItems().getReferenceIds().size());
         }
 
         @Test
-        @DisplayName("Java code removes entity from mutable aggregate list via getItems().remove()")
-        void javaRemovesEntityFromMutableAggregateListViaGetItemsRemove() {
-            TestTrack track = trackRepo.create(1, "Track 1");
-            MutablePlaylist playlist = playlistRepo.create(1L, "Java Test", List.of(1));
+        @DisplayName("Java code removes entity from mutable aggregate list via getAudioItems().remove()")
+        void javaRemovesEntityFromMutableAggregateListViaGetAudioItemsRemove() {
+            MutableAudioItem track = new MutableAudioItem(1, "Track 1");
+            trackRepo.add(track);
+            MutableAudioPlaylistEntity playlist = new MutableAudioPlaylistEntity(1, "Test Playlist", List.of(1), Collections.emptySet());
+            playlistRepo.add(playlist);
 
-            boolean removed = playlist.getItems().remove(track);
+            boolean removed = playlist.getAudioItems().remove(track);
 
             assertTrue(removed);
-            assertTrue(playlist.getItems().getReferenceIds().isEmpty());
+            assertTrue(playlist.getAudioItems().getReferenceIds().isEmpty());
         }
     }
 

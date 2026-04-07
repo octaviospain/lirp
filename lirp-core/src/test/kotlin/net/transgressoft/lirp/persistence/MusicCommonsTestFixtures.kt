@@ -61,15 +61,14 @@ interface AudioItem : ReactiveAudioItem<AudioItem> {
  *
  * Not declared `internal` so it is accessible from the lirp-sql testFixtures source set.
  */
-class MutableAudioItem(override val id: Int) : ReactiveEntityBase<Int, AudioItem>(), AudioItem {
+class MutableAudioItem(override val id: Int, title: String) : ReactiveEntityBase<Int, AudioItem>(), AudioItem {
     override val uniqueId: String get() = "audio-item-$id"
 
-    override var title: String by reactiveProperty("")
+    override var title: String by reactiveProperty(title)
 
     override fun compareTo(other: AudioItem): Int = id.compareTo(other.id)
 
-    override fun clone(): MutableAudioItem =
-        MutableAudioItem(id).also { it.withEventsDisabledForClone { it.title = title } }
+    override fun clone(): MutableAudioItem = MutableAudioItem(id, title)
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -118,12 +117,13 @@ interface MutableAudioPlaylist : ReactiveAudioPlaylist<AudioItem, MutableAudioPl
  * Not declared `internal` so it is accessible from the lirp-sql testFixtures source set.
  */
 abstract class MutablePlaylistBase<I : ReactiveAudioItem<I>, P : ReactiveAudioPlaylist<I, P>>(
-    override val id: Int
+    override val id: Int,
+    name: String
 ) : ReactiveEntityBase<Int, P>(), ReactiveAudioPlaylist<I, P> {
 
     override val uniqueId: String get() = "audio-playlist-$id"
 
-    override var name: String by reactiveProperty("")
+    override var name: String by reactiveProperty(name)
 
     override fun compareTo(other: AudioPlaylist<I>): Int = id.compareTo(other.id)
 }
@@ -136,9 +136,10 @@ abstract class MutablePlaylistBase<I : ReactiveAudioItem<I>, P : ReactiveAudioPl
  */
 class MutableAudioPlaylistEntity(
     id: Int,
+    name: String,
     initialAudioItemIds: List<Int> = emptyList(),
     initialPlaylistIds: Set<Int> = emptySet()
-) : MutablePlaylistBase<AudioItem, MutableAudioPlaylist>(id),
+) : MutablePlaylistBase<AudioItem, MutableAudioPlaylist>(id, name),
     MutableAudioPlaylist {
 
     @Aggregate(onDelete = CascadeAction.DETACH)
@@ -148,8 +149,7 @@ class MutableAudioPlaylistEntity(
     override val playlists by mutableAggregateSet<Int, MutableAudioPlaylist>(initialPlaylistIds)
 
     override fun clone(): MutableAudioPlaylistEntity =
-        MutableAudioPlaylistEntity(id, audioItems.referenceIds.toList(), LinkedHashSet(playlists.referenceIds))
-            .also { it.withEventsDisabledForClone { it.name = name } }
+        MutableAudioPlaylistEntity(id, name, audioItems.referenceIds.toList(), LinkedHashSet(playlists.referenceIds))
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -226,6 +226,8 @@ abstract class AudioLibraryBase<I, AC>(
 class AudioItemVolatileRepository internal constructor(context: LirpContext) :
     VolatileRepository<Int, AudioItem>(context, "AudioItems") {
         constructor() : this(LirpContext.default)
+
+        fun create(id: Int, title: String): AudioItem = MutableAudioItem(id, title).also(::add)
     }
 
 /**
@@ -238,11 +240,7 @@ class DefaultAudioLibrary internal constructor(repository: Repository<Int, Audio
         constructor(context: LirpContext) : this(AudioItemVolatileRepository(context))
         constructor() : this(LirpContext.default)
 
-        fun create(id: Int, title: String): AudioItem =
-            MutableAudioItem(id).also {
-                it.title = title
-                add(it)
-            }
+        fun create(id: Int, title: String): AudioItem = MutableAudioItem(id, title).also(::add)
     }
 
 // ---------------------------------------------------------------------------
@@ -307,10 +305,7 @@ class DefaultPlaylistHierarchy internal constructor(repository: Repository<Int, 
             audioItemIds: List<Int> = emptyList(),
             playlistIds: Set<Int> = emptySet()
         ): MutableAudioPlaylist =
-            MutableAudioPlaylistEntity(id, audioItemIds, playlistIds).also {
-                it.name = name
-                add(it)
-            }
+            MutableAudioPlaylistEntity(id, name, audioItemIds, playlistIds)
     }
 
 // ---------------------------------------------------------------------------
@@ -353,18 +348,18 @@ class CascadeAudioPlaylist(
  */
 class RestrictAudioPlaylist(
     override val id: Int,
+    name: String,
     initialAudioItemIds: List<Int> = emptyList()
 ) : ReactiveEntityBase<Int, RestrictAudioPlaylist>(), IdentifiableEntity<Int> {
     override val uniqueId: String get() = "restrict-audio-playlist-$id"
 
-    var name: String by reactiveProperty("")
+    var name: String by reactiveProperty(name)
 
     @Aggregate(onDelete = CascadeAction.RESTRICT)
     val audioItems by mutableAggregateList<Int, AudioItem>(initialAudioItemIds)
 
     override fun clone(): RestrictAudioPlaylist =
-        RestrictAudioPlaylist(id, audioItems.referenceIds.toList())
-            .also { it.withEventsDisabledForClone { it.name = name } }
+        RestrictAudioPlaylist(id, name, audioItems.referenceIds.toList())
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -383,18 +378,18 @@ class RestrictAudioPlaylist(
  */
 class NoneAudioPlaylist(
     override val id: Int,
+    name: String,
     initialAudioItemIds: List<Int> = emptyList()
 ) : ReactiveEntityBase<Int, NoneAudioPlaylist>(), IdentifiableEntity<Int> {
     override val uniqueId: String get() = "none-audio-playlist-$id"
 
-    var name: String by reactiveProperty("")
+    var name: String by reactiveProperty(name)
 
     @Aggregate(onDelete = CascadeAction.NONE)
     val audioItems by mutableAggregateList<Int, AudioItem>(initialAudioItemIds)
 
     override fun clone(): NoneAudioPlaylist =
-        NoneAudioPlaylist(id, audioItems.referenceIds.toList())
-            .also { it.withEventsDisabledForClone { it.name = name } }
+        NoneAudioPlaylist(id, name, audioItems.referenceIds.toList())
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -431,10 +426,7 @@ class RestrictPlaylistRepo internal constructor(context: LirpContext) :
         constructor() : this(LirpContext.default)
 
         fun create(id: Int, name: String, audioItemIds: List<Int> = emptyList()): RestrictAudioPlaylist =
-            RestrictAudioPlaylist(id, audioItemIds).also {
-                it.name = name
-                add(it)
-            }
+            RestrictAudioPlaylist(id, name, audioItemIds).also(::add)
     }
 
 /** Repository for [NoneAudioPlaylist] entities. */
@@ -444,10 +436,7 @@ class NonePlaylistRepo internal constructor(context: LirpContext) :
         constructor() : this(LirpContext.default)
 
         fun create(id: Int, name: String, audioItemIds: List<Int> = emptyList()): NoneAudioPlaylist =
-            NoneAudioPlaylist(id, audioItemIds).also {
-                it.name = name
-                add(it)
-            }
+            NoneAudioPlaylist(id, name, audioItemIds).also(::add)
     }
 
 // ---------------------------------------------------------------------------
@@ -479,3 +468,281 @@ class PlaylistHierarchyJsonFileRepository internal constructor(
     serializationDelayMs: Long = 50L,
     loadOnInit: Boolean = true
 ) : JsonFileRepository<Int, MutableAudioPlaylist>(context, file, serializer, serializationDelay = serializationDelayMs.milliseconds, loadOnInit = loadOnInit)
+
+// ---------------------------------------------------------------------------
+// Immutable aggregate delegate entities — for AggregateCollectionRefDeclaration/ResolutionTests
+// ---------------------------------------------------------------------------
+
+/**
+ * Audio playlist with an immutable (read-only) [aggregateList] delegate for [audioItems].
+ * Used in collection reference declaration and resolution tests to verify the [AggregateListRefDelegate].
+ */
+class ImmutableAudioPlaylist(
+    override val id: Int,
+    val name: String,
+    initialAudioItemIds: List<Int> = emptyList()
+) : ReactiveEntityBase<Int, ImmutableAudioPlaylist>(), IdentifiableEntity<Int> {
+    override val uniqueId: String get() = "immutable-audio-playlist-$id"
+
+    @Aggregate
+    val audioItems by aggregateList<Int, AudioItem>(initialAudioItemIds)
+
+    override fun clone(): ImmutableAudioPlaylist =
+        ImmutableAudioPlaylist(id, name, audioItems.referenceIds.toList())
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is ImmutableAudioPlaylist) return false
+        return id == other.id && name == other.name && audioItems.referenceIds == other.audioItems.referenceIds
+    }
+
+    override fun hashCode(): Int = 31 * (31 * id.hashCode() + name.hashCode()) + audioItems.referenceIds.hashCode()
+
+    override fun toString(): String = "ImmutableAudioPlaylist(id=$id, name='$name')"
+}
+
+/**
+ * Playlist group with an immutable (read-only) [aggregateSet] delegate for [playlists].
+ * Used in set-based collection reference declaration and resolution tests.
+ */
+class ImmutablePlaylistGroup(
+    override val id: Int,
+    initialPlaylistIds: Set<Int> = emptySet()
+) : ReactiveEntityBase<Int, ImmutablePlaylistGroup>(), IdentifiableEntity<Int> {
+    override val uniqueId: String get() = "immutable-playlist-group-$id"
+
+    @Aggregate
+    val playlists by aggregateSet<Int, ImmutableAudioPlaylist>(initialPlaylistIds)
+
+    override fun clone(): ImmutablePlaylistGroup =
+        ImmutablePlaylistGroup(id, LinkedHashSet(playlists.referenceIds))
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is ImmutablePlaylistGroup) return false
+        return id == other.id && playlists.referenceIds == other.playlists.referenceIds
+    }
+
+    override fun hashCode(): Int = 31 * id.hashCode() + playlists.referenceIds.hashCode()
+
+    override fun toString(): String = "ImmutablePlaylistGroup(id=$id)"
+}
+
+/** Repository for [ImmutableAudioPlaylist] entities. */
+@LirpRepository
+class ImmutableAudioPlaylistVolatileRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Int, ImmutableAudioPlaylist>(context, "ImmutableAudioPlaylists") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Int, name: String, audioItemIds: List<Int> = emptyList()): ImmutableAudioPlaylist =
+            ImmutableAudioPlaylist(id, name, audioItemIds).also { add(it) }
+    }
+
+/** Repository for [ImmutablePlaylistGroup] entities. */
+@LirpRepository
+class ImmutablePlaylistGroupVolatileRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Int, ImmutablePlaylistGroup>(context, "ImmutablePlaylistGroups") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Int, playlistIds: Set<Int> = emptySet()): ImmutablePlaylistGroup =
+            ImmutablePlaylistGroup(id, playlistIds).also { add(it) }
+    }
+
+// ---------------------------------------------------------------------------
+// DetachAudioPlaylist — missing cascade variant (DETACH on audioItems)
+// ---------------------------------------------------------------------------
+
+/**
+ * Audio playlist variant with [CascadeAction.DETACH] on [audioItems]: removing this entity does
+ * nothing to the referenced audio items (the reference is simply detached with no side effects).
+ */
+class DetachAudioPlaylist(
+    override val id: Int,
+    initialAudioItemIds: List<Int> = emptyList()
+) : ReactiveEntityBase<Int, DetachAudioPlaylist>(), IdentifiableEntity<Int> {
+    override val uniqueId: String get() = "detach-audio-playlist-$id"
+
+    var name: String by reactiveProperty("")
+
+    @Aggregate(onDelete = CascadeAction.DETACH)
+    val audioItems by mutableAggregateList<Int, AudioItem>(initialAudioItemIds)
+
+    override fun clone(): DetachAudioPlaylist =
+        DetachAudioPlaylist(id, audioItems.referenceIds.toList())
+            .also { it.withEventsDisabledForClone { it.name = name } }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is DetachAudioPlaylist) return false
+        return id == other.id && name == other.name && audioItems.referenceIds == other.audioItems.referenceIds
+    }
+
+    override fun hashCode(): Int = 31 * (31 * id.hashCode() + name.hashCode()) + audioItems.referenceIds.hashCode()
+
+    override fun toString(): String = "DetachAudioPlaylist(id=$id, name='$name')"
+}
+
+/** Repository for [DetachAudioPlaylist] entities. */
+@LirpRepository
+class DetachPlaylistRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Int, DetachAudioPlaylist>(context, "DetachPlaylists") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Int, name: String, audioItemIds: List<Int> = emptyList()): DetachAudioPlaylist =
+            DetachAudioPlaylist(id, audioItemIds).also {
+                it.name = name
+                add(it)
+            }
+    }
+
+// ---------------------------------------------------------------------------
+// Set-based cascade variants — for AggregateSetCascadeTest
+// ---------------------------------------------------------------------------
+
+/**
+ * Playlist group with [CascadeAction.CASCADE] on [playlists]: removing this entity also removes
+ * all referenced [MutableAudioPlaylist] entities.
+ */
+class CascadeMusicPlaylistGroup(
+    override val id: Int,
+    initialPlaylistIds: Set<Int> = emptySet()
+) : ReactiveEntityBase<Int, CascadeMusicPlaylistGroup>(), IdentifiableEntity<Int> {
+    override val uniqueId: String get() = "cascade-music-playlist-group-$id"
+
+    @Aggregate(onDelete = CascadeAction.CASCADE)
+    val playlists by aggregateSet<Int, MutableAudioPlaylist>(initialPlaylistIds)
+
+    override fun clone(): CascadeMusicPlaylistGroup =
+        CascadeMusicPlaylistGroup(id, LinkedHashSet(playlists.referenceIds))
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is CascadeMusicPlaylistGroup) return false
+        return id == other.id && playlists.referenceIds == other.playlists.referenceIds
+    }
+
+    override fun hashCode(): Int = 31 * id.hashCode() + playlists.referenceIds.hashCode()
+
+    override fun toString(): String = "CascadeMusicPlaylistGroup(id=$id)"
+}
+
+/**
+ * Playlist group with [CascadeAction.RESTRICT] on [playlists]: removing this entity is blocked
+ * if any referenced [MutableAudioPlaylist] is still referenced by other entities.
+ */
+class RestrictMusicPlaylistGroup(
+    override val id: Int,
+    initialPlaylistIds: Set<Int> = emptySet()
+) : ReactiveEntityBase<Int, RestrictMusicPlaylistGroup>(), IdentifiableEntity<Int> {
+    override val uniqueId: String get() = "restrict-music-playlist-group-$id"
+
+    @Aggregate(onDelete = CascadeAction.RESTRICT)
+    val playlists by aggregateSet<Int, MutableAudioPlaylist>(initialPlaylistIds)
+
+    override fun clone(): RestrictMusicPlaylistGroup =
+        RestrictMusicPlaylistGroup(id, LinkedHashSet(playlists.referenceIds))
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is RestrictMusicPlaylistGroup) return false
+        return id == other.id && playlists.referenceIds == other.playlists.referenceIds
+    }
+
+    override fun hashCode(): Int = 31 * id.hashCode() + playlists.referenceIds.hashCode()
+
+    override fun toString(): String = "RestrictMusicPlaylistGroup(id=$id)"
+}
+
+/**
+ * Playlist group with [CascadeAction.DETACH] on [playlists]: removing this entity is a no-op
+ * with respect to the referenced [MutableAudioPlaylist] entities.
+ */
+class DetachMusicPlaylistGroup(
+    override val id: Int,
+    initialPlaylistIds: Set<Int> = emptySet()
+) : ReactiveEntityBase<Int, DetachMusicPlaylistGroup>(), IdentifiableEntity<Int> {
+    override val uniqueId: String get() = "detach-music-playlist-group-$id"
+
+    @Aggregate(onDelete = CascadeAction.DETACH)
+    val playlists by aggregateSet<Int, MutableAudioPlaylist>(initialPlaylistIds)
+
+    override fun clone(): DetachMusicPlaylistGroup =
+        DetachMusicPlaylistGroup(id, LinkedHashSet(playlists.referenceIds))
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is DetachMusicPlaylistGroup) return false
+        return id == other.id && playlists.referenceIds == other.playlists.referenceIds
+    }
+
+    override fun hashCode(): Int = 31 * id.hashCode() + playlists.referenceIds.hashCode()
+
+    override fun toString(): String = "DetachMusicPlaylistGroup(id=$id)"
+}
+
+/**
+ * Playlist group with [CascadeAction.NONE] on [playlists]: removing this entity does nothing
+ * to the referenced [MutableAudioPlaylist] entities.
+ */
+class NoneMusicPlaylistGroup(
+    override val id: Int,
+    initialPlaylistIds: Set<Int> = emptySet()
+) : ReactiveEntityBase<Int, NoneMusicPlaylistGroup>(), IdentifiableEntity<Int> {
+    override val uniqueId: String get() = "none-music-playlist-group-$id"
+
+    @Aggregate(onDelete = CascadeAction.NONE)
+    val playlists by aggregateSet<Int, MutableAudioPlaylist>(initialPlaylistIds)
+
+    override fun clone(): NoneMusicPlaylistGroup =
+        NoneMusicPlaylistGroup(id, LinkedHashSet(playlists.referenceIds))
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is NoneMusicPlaylistGroup) return false
+        return id == other.id && playlists.referenceIds == other.playlists.referenceIds
+    }
+
+    override fun hashCode(): Int = 31 * id.hashCode() + playlists.referenceIds.hashCode()
+
+    override fun toString(): String = "NoneMusicPlaylistGroup(id=$id)"
+}
+
+/** Repository for [CascadeMusicPlaylistGroup] entities. */
+@LirpRepository
+class CascadeMusicPlaylistGroupRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Int, CascadeMusicPlaylistGroup>(context, "CascadeMusicPlaylistGroups") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Int, playlistIds: Set<Int> = emptySet()): CascadeMusicPlaylistGroup =
+            CascadeMusicPlaylistGroup(id, playlistIds).also { add(it) }
+    }
+
+/** Repository for [RestrictMusicPlaylistGroup] entities. */
+@LirpRepository
+class RestrictMusicPlaylistGroupRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Int, RestrictMusicPlaylistGroup>(context, "RestrictMusicPlaylistGroups") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Int, playlistIds: Set<Int> = emptySet()): RestrictMusicPlaylistGroup =
+            RestrictMusicPlaylistGroup(id, playlistIds).also { add(it) }
+    }
+
+/** Repository for [DetachMusicPlaylistGroup] entities. */
+@LirpRepository
+class DetachMusicPlaylistGroupRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Int, DetachMusicPlaylistGroup>(context, "DetachMusicPlaylistGroups") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Int, playlistIds: Set<Int> = emptySet()): DetachMusicPlaylistGroup =
+            DetachMusicPlaylistGroup(id, playlistIds).also { add(it) }
+    }
+
+/** Repository for [NoneMusicPlaylistGroup] entities. */
+@LirpRepository
+class NoneMusicPlaylistGroupRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Int, NoneMusicPlaylistGroup>(context, "NoneMusicPlaylistGroups") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Int, playlistIds: Set<Int> = emptySet()): NoneMusicPlaylistGroup =
+            NoneMusicPlaylistGroup(id, playlistIds).also { add(it) }
+    }

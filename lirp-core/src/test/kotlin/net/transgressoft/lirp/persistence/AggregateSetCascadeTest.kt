@@ -33,8 +33,8 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * Tests for cascade behavior on set-typed aggregate references ([AggregateSetRefDelegate]).
  *
  * Mirrors [AggregateCascadeCollectionTest] but uses [aggregateSet]-based entities
- * ([CascadePlaylistGroup], [RestrictPlaylistGroup], [DetachPlaylistGroup], [NonePlaylistGroup])
- * to exercise the [AggregateSetRefDelegate.executeCascade] code path.
+ * ([CascadeMusicPlaylistGroup], [RestrictMusicPlaylistGroup], [DetachMusicPlaylistGroup],
+ * [NoneMusicPlaylistGroup]) to exercise the [AggregateSetRefDelegate.executeCascade] code path.
  */
 @DisplayName("AggregateSetCascade")
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -49,11 +49,11 @@ internal class AggregateSetCascadeTest : StringSpec({
     }
 
     lateinit var ctx: LirpContext
-    lateinit var playlistRepo: PlaylistVolatileRepo
+    lateinit var playlistRepo: AudioPlaylistVolatileRepository
 
     beforeEach {
         ctx = LirpContext()
-        playlistRepo = PlaylistVolatileRepo(ctx)
+        playlistRepo = AudioPlaylistVolatileRepository(ctx)
     }
 
     afterEach {
@@ -61,40 +61,40 @@ internal class AggregateSetCascadeTest : StringSpec({
     }
 
     "CASCADE on set ref removes all referenced entities from their repository" {
-        playlistRepo.create(id = 10L, name = "Mix A", itemIds = emptyList())
-        playlistRepo.create(id = 20L, name = "Mix B", itemIds = emptyList())
+        playlistRepo.add(MutableAudioPlaylistEntity(10, "Mix A"))
+        playlistRepo.add(MutableAudioPlaylistEntity(20, "Mix B"))
         playlistRepo.size() shouldBe 2
 
-        val groupRepo = CascadePlaylistGroupVolatileRepo(ctx)
-        groupRepo.create(id = 100L, playlistIds = setOf(10L, 20L))
+        val groupRepo = CascadeMusicPlaylistGroupRepo(ctx)
+        groupRepo.create(id = 100, playlistIds = setOf(10, 20))
 
-        groupRepo.remove(groupRepo.findById(100L).get())
+        groupRepo.remove(groupRepo.findById(100).get())
 
-        playlistRepo.contains(10L) shouldBe false
-        playlistRepo.contains(20L) shouldBe false
+        playlistRepo.contains(10) shouldBe false
+        playlistRepo.contains(20) shouldBe false
         playlistRepo.size() shouldBe 0
     }
 
     "CASCADE on set ref skips already-removed entities with warning" {
-        playlistRepo.create(id = 10L, name = "Mix A", itemIds = emptyList())
-        playlistRepo.create(id = 20L, name = "Mix B", itemIds = emptyList())
+        playlistRepo.add(MutableAudioPlaylistEntity(10, "Mix A"))
+        playlistRepo.add(MutableAudioPlaylistEntity(20, "Mix B"))
 
-        val groupRepo = CascadePlaylistGroupVolatileRepo(ctx)
-        val group1 = groupRepo.create(id = 100L, playlistIds = setOf(10L, 20L))
-        val group2 = groupRepo.create(id = 101L, playlistIds = setOf(10L, 20L))
+        val groupRepo = CascadeMusicPlaylistGroupRepo(ctx)
+        val group1 = groupRepo.create(id = 100, playlistIds = setOf(10, 20))
+        val group2 = groupRepo.create(id = 101, playlistIds = setOf(10, 20))
 
         groupRepo.remove(group1) shouldBe true
-        groupRepo.findById(100L).isPresent shouldBe false
+        groupRepo.findById(100).isPresent shouldBe false
         playlistRepo.size() shouldBe 0
 
         // Second removal — playlists already gone, no error
         groupRepo.remove(group2) shouldBe true
-        groupRepo.findById(101L).isPresent shouldBe false
+        groupRepo.findById(101).isPresent shouldBe false
         playlistRepo.size() shouldBe 0
     }
 
     "CASCADE on unbound set ref delegate is a no-op" {
-        val group = CascadePlaylistGroup(id = 100L, playlistIds = setOf(10L))
+        val group = CascadeMusicPlaylistGroup(id = 100, initialPlaylistIds = setOf(10))
 
         // Unwrap proxy to reach inner delegate; unbound so doCascade returns early without exception
         val proxy = group.playlists
@@ -102,62 +102,62 @@ internal class AggregateSetCascadeTest : StringSpec({
     }
 
     "RESTRICT on set ref blocks parent removal when a referenced entity is still referenced" {
-        playlistRepo.create(id = 10L, name = "Mix", itemIds = emptyList())
+        playlistRepo.add(MutableAudioPlaylistEntity(10, "Mix"))
 
-        val restrictGroupRepo = RestrictPlaylistGroupVolatileRepo(ctx)
-        val group1 = restrictGroupRepo.create(id = 100L, playlistIds = setOf(10L))
-        restrictGroupRepo.create(id = 101L, playlistIds = setOf(10L))
+        val restrictGroupRepo = RestrictMusicPlaylistGroupRepo(ctx)
+        val group1 = restrictGroupRepo.create(id = 100, playlistIds = setOf(10))
+        restrictGroupRepo.create(id = 101, playlistIds = setOf(10))
 
         val exception =
             shouldThrow<IllegalStateException> {
                 restrictGroupRepo.remove(group1)
             }
         exception.message shouldContain "Cannot cascade-delete"
-        playlistRepo.contains(10L) shouldBe true
+        playlistRepo.contains(10) shouldBe true
     }
 
     "RESTRICT on set ref allows removal when no external references exist" {
-        playlistRepo.create(id = 10L, name = "Mix", itemIds = emptyList())
+        playlistRepo.add(MutableAudioPlaylistEntity(10, "Mix"))
 
-        val restrictGroupRepo = RestrictPlaylistGroupVolatileRepo(ctx)
-        val group = restrictGroupRepo.create(id = 100L, playlistIds = setOf(10L))
+        val restrictGroupRepo = RestrictMusicPlaylistGroupRepo(ctx)
+        val group = restrictGroupRepo.create(id = 100, playlistIds = setOf(10))
 
         restrictGroupRepo.remove(group) shouldBe true
-        restrictGroupRepo.findById(100L).isPresent shouldBe false
+        restrictGroupRepo.findById(100).isPresent shouldBe false
 
-        playlistRepo.contains(10L) shouldBe true
+        playlistRepo.contains(10) shouldBe true
     }
 
     "RESTRICT on set ref with empty IDs is a no-op" {
-        val restrictGroupRepo = RestrictPlaylistGroupVolatileRepo(ctx)
-        val group = restrictGroupRepo.create(id = 100L, playlistIds = emptySet())
+        val restrictGroupRepo = RestrictMusicPlaylistGroupRepo(ctx)
+        val group = restrictGroupRepo.create(id = 100, playlistIds = emptySet())
 
         restrictGroupRepo.remove(group) shouldBe true
-        restrictGroupRepo.findById(100L).isPresent shouldBe false
+        restrictGroupRepo.findById(100).isPresent shouldBe false
     }
 
     "DETACH on set ref is a no-op" {
-        playlistRepo.create(id = 10L, name = "Mix", itemIds = emptyList())
+        playlistRepo.add(MutableAudioPlaylistEntity(10, "Mix"))
 
-        val detachGroupRepo = DetachPlaylistGroupVolatileRepo(ctx)
-        val group = detachGroupRepo.create(id = 100L, playlistIds = setOf(10L))
+        val detachGroupRepo = DetachMusicPlaylistGroupRepo(ctx)
+        val group = detachGroupRepo.create(id = 100, playlistIds = setOf(10))
 
         detachGroupRepo.remove(group) shouldBe true
-        detachGroupRepo.findById(100L).isPresent shouldBe false
-        playlistRepo.contains(10L) shouldBe true
+        detachGroupRepo.findById(100).isPresent shouldBe false
+        playlistRepo.contains(10) shouldBe true
     }
 
     "NONE on set ref is a no-op" {
-        playlistRepo.create(id = 10L, name = "Mix A", itemIds = emptyList())
-        playlistRepo.create(id = 20L, name = "Mix B", itemIds = emptyList())
+        playlistRepo.add(MutableAudioPlaylistEntity(10, "Mix A"))
+        playlistRepo.add(MutableAudioPlaylistEntity(20, "Mix B"))
 
-        val noneGroupRepo = NonePlaylistGroupVolatileRepo(ctx)
-        val group = noneGroupRepo.create(id = 100L, playlistIds = setOf(10L, 20L))
+        val noneGroupRepo = NoneMusicPlaylistGroupRepo(ctx)
+        val group = noneGroupRepo.create(id = 100, playlistIds = setOf(10, 20))
 
         noneGroupRepo.remove(group) shouldBe true
-        noneGroupRepo.findById(100L).isPresent shouldBe false
-        playlistRepo.contains(10L) shouldBe true
-        playlistRepo.contains(20L) shouldBe true
+        noneGroupRepo.findById(100).isPresent shouldBe false
+        playlistRepo.contains(10) shouldBe true
+        playlistRepo.contains(20) shouldBe true
         playlistRepo.size() shouldBe 2
     }
 })

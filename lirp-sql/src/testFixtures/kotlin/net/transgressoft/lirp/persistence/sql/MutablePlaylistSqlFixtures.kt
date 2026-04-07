@@ -34,14 +34,11 @@ import org.jetbrains.exposed.v1.core.Table
  * Lives in the same [LirpContext][net.transgressoft.lirp.persistence.LirpContext] so the mutable
  * aggregate delegate can resolve IDs to entity instances at runtime.
  */
-class SqlTestTrack(override val id: Int) : ReactiveEntityBase<Int, SqlTestTrack>() {
-    var title: String by reactiveProperty("")
+class SqlTestTrack(override val id: Int, title: String) : ReactiveEntityBase<Int, SqlTestTrack>() {
+    var title: String by reactiveProperty(title)
     override val uniqueId: String get() = "sql-track-$id"
 
-    override fun clone(): SqlTestTrack =
-        SqlTestTrack(id).also { copy ->
-            copy.withEventsDisabled { copy.title = title }
-        }
+    override fun clone(): SqlTestTrack = SqlTestTrack(id, title)
 }
 
 /**
@@ -58,9 +55,10 @@ object SqlTestTrackTableDef : SqlTableDef<SqlTestTrack> {
     @Suppress("UNCHECKED_CAST")
     override fun fromRow(row: ResultRow, table: Table): SqlTestTrack {
         val cols = table.columns.associateBy { it.name }
-        return SqlTestTrack(row[cols["id"]!! as Column<Int>]).also {
-            it.title = row[cols["title"]!! as Column<String>]
-        }
+        return SqlTestTrack(
+            row[cols["id"]!! as Column<Int>],
+            row[cols["title"]!! as Column<String>]
+        )
     }
 
     override fun toParams(entity: SqlTestTrack, table: Table): Map<Column<*>, Any?> {

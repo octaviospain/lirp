@@ -76,21 +76,12 @@ abstract class MusicCommonsIntegrationTestBase : FunSpec() {
         // -------------------------------------------------------------------------
 
         test("CRUD round-trip creates AudioItem, reads back, verifies fields") {
-            val item =
-                MutableAudioItem(1).also {
-                    it.title = "Song A"
-                    audioItemRepo.add(it)
-                }
-
+            val item = MutableAudioItem(1, "Song A").also(audioItemRepo::add)
             audioItemRepo.findById(1) shouldBePresent { it.title shouldBe "Song A" }
         }
 
         test("CRUD round-trip updates reactive property on AudioItem") {
-            val item =
-                MutableAudioItem(1).also {
-                    it.title = "Song A"
-                    audioItemRepo.add(it)
-                }
+            val item = MutableAudioItem(1, "Song A").also(audioItemRepo::add)
 
             item.title = "Song B"
 
@@ -98,11 +89,7 @@ abstract class MusicCommonsIntegrationTestBase : FunSpec() {
         }
 
         test("CRUD round-trip deletes AudioItem and verifies removal") {
-            val item =
-                MutableAudioItem(1).also {
-                    it.title = "Song A"
-                    audioItemRepo.add(it)
-                }
+            val item = MutableAudioItem(1, "Song A").also(audioItemRepo::add)
 
             audioItemRepo.remove(item)
 
@@ -110,11 +97,7 @@ abstract class MusicCommonsIntegrationTestBase : FunSpec() {
         }
 
         test("CRUD round-trip creates AudioPlaylist with name, reads back") {
-            val playlist =
-                MutableAudioPlaylistEntity(10).also {
-                    it.name = "My Playlist"
-                    playlistRepo.add(it)
-                }
+            val playlist = MutableAudioPlaylistEntity(10, "My Playlist").also(playlistRepo::add)
 
             playlistRepo.findById(10) shouldBePresent { it.name shouldBe "My Playlist" }
         }
@@ -124,27 +107,13 @@ abstract class MusicCommonsIntegrationTestBase : FunSpec() {
         // -------------------------------------------------------------------------
 
         test("aggregate resolution resolves AudioItems from AudioPlaylist via LirpContext") {
-            val item1 =
-                MutableAudioItem(1).also {
-                    it.title = "Track 1"
-                    audioItemRepo.add(it)
-                }
-            val item2 =
-                MutableAudioItem(2).also {
-                    it.title = "Track 2"
-                    audioItemRepo.add(it)
-                }
-            val item3 =
-                MutableAudioItem(3).also {
-                    it.title = "Track 3"
-                    audioItemRepo.add(it)
-                }
+            val item1 = MutableAudioItem(1, "Track 1").also(audioItemRepo::add)
+            val item2 = MutableAudioItem(2, "Track 2").also(audioItemRepo::add)
+            val item3 = MutableAudioItem(3, "Track 3").also(audioItemRepo::add)
 
             val playlist =
-                MutableAudioPlaylistEntity(10, listOf(1, 2, 3)).also {
-                    it.name = "Full Mix"
-                    playlistRepo.add(it)
-                }
+                MutableAudioPlaylistEntity(10, "Full Mix", listOf(1, 2, 3))
+                    .also(playlistRepo::add)
 
             val resolved = playlist.audioItems.resolveAll()
             resolved shouldHaveSize 3
@@ -152,21 +121,11 @@ abstract class MusicCommonsIntegrationTestBase : FunSpec() {
         }
 
         test("aggregate resolution resolves nested playlists (self-referencing)") {
-            val subA =
-                MutableAudioPlaylistEntity(20).also {
-                    it.name = "Sub A"
-                    playlistRepo.add(it)
-                }
-            val subB =
-                MutableAudioPlaylistEntity(30).also {
-                    it.name = "Sub B"
-                    playlistRepo.add(it)
-                }
+            val subA = MutableAudioPlaylistEntity(20, "Sub A").also(playlistRepo::add)
+            val subB = MutableAudioPlaylistEntity(30, "Sub B").also(playlistRepo::add)
             val parent =
-                MutableAudioPlaylistEntity(10, emptyList(), setOf(20, 30)).also {
-                    it.name = "Parent"
-                    playlistRepo.add(it)
-                }
+                MutableAudioPlaylistEntity(10, "Parent", emptyList(), setOf(20, 30))
+                    .also(playlistRepo::add)
 
             val resolved = parent.playlists.resolveAll()
             resolved shouldHaveSize 2
@@ -174,11 +133,7 @@ abstract class MusicCommonsIntegrationTestBase : FunSpec() {
         }
 
         test("aggregate resolution returns empty for playlist with no audioItems") {
-            val playlist =
-                MutableAudioPlaylistEntity(10).also {
-                    it.name = "Empty"
-                    playlistRepo.add(it)
-                }
+            val playlist = MutableAudioPlaylistEntity(10, "Empty").also(playlistRepo::add)
 
             playlist.audioItems.resolveAll() shouldHaveSize 0
         }
@@ -188,16 +143,8 @@ abstract class MusicCommonsIntegrationTestBase : FunSpec() {
         // -------------------------------------------------------------------------
 
         test("mutable collection adds AudioItem to playlist at runtime and backing IDs update") {
-            val item =
-                MutableAudioItem(1).also {
-                    it.title = "Song A"
-                    audioItemRepo.add(it)
-                }
-            val playlist =
-                MutableAudioPlaylistEntity(10).also {
-                    it.name = "Runtime Add"
-                    playlistRepo.add(it)
-                }
+            val item = MutableAudioItem(1, "Song A").also(audioItemRepo::add)
+            val playlist = MutableAudioPlaylistEntity(10, "Runtime Add").also(playlistRepo::add)
 
             playlist.audioItems.add(item)
 
@@ -206,21 +153,11 @@ abstract class MusicCommonsIntegrationTestBase : FunSpec() {
         }
 
         test("mutable collection removes AudioItem from playlist and backing IDs update") {
-            val item1 =
-                MutableAudioItem(1).also {
-                    it.title = "Song A"
-                    audioItemRepo.add(it)
-                }
-            val item2 =
-                MutableAudioItem(2).also {
-                    it.title = "Song B"
-                    audioItemRepo.add(it)
-                }
+            val item1 = MutableAudioItem(1, "Song A").also(audioItemRepo::add)
+            val item2 = MutableAudioItem(2, "Song B").also(audioItemRepo::add)
             val playlist =
-                MutableAudioPlaylistEntity(10, listOf(1, 2)).also {
-                    it.name = "Two Items"
-                    playlistRepo.add(it)
-                }
+                MutableAudioPlaylistEntity(10, "Two Items", listOf(1, 2))
+                    .also(playlistRepo::add)
 
             playlist.audioItems.remove(item1)
 
@@ -228,16 +165,8 @@ abstract class MusicCommonsIntegrationTestBase : FunSpec() {
         }
 
         test("mutable collection adds nested playlist at runtime (self-referencing)") {
-            val child =
-                MutableAudioPlaylistEntity(20).also {
-                    it.name = "Child"
-                    playlistRepo.add(it)
-                }
-            val parent =
-                MutableAudioPlaylistEntity(10).also {
-                    it.name = "Parent"
-                    playlistRepo.add(it)
-                }
+            val child = MutableAudioPlaylistEntity(20, "Child").also(playlistRepo::add)
+            val parent = MutableAudioPlaylistEntity(10, "Parentq").also(playlistRepo::add)
 
             parent.playlists.add(child)
 
@@ -250,21 +179,11 @@ abstract class MusicCommonsIntegrationTestBase : FunSpec() {
         // -------------------------------------------------------------------------
 
         test("cascade DETACH leaves AudioItems in repo when playlist is removed") {
-            val item1 =
-                MutableAudioItem(1).also {
-                    it.title = "Song A"
-                    audioItemRepo.add(it)
-                }
-            val item2 =
-                MutableAudioItem(2).also {
-                    it.title = "Song B"
-                    audioItemRepo.add(it)
-                }
+            val item1 = MutableAudioItem(1, "Song A").also(audioItemRepo::add)
+            val item2 = MutableAudioItem(2, "Song B").also(audioItemRepo::add)
             val playlist =
-                MutableAudioPlaylistEntity(10, listOf(1, 2)).also {
-                    it.name = "Detach Playlist"
-                    playlistRepo.add(it)
-                }
+                MutableAudioPlaylistEntity(10, "Detach Playlist", listOf(1, 2))
+                    .also(playlistRepo::add)
 
             playlistRepo.remove(playlist)
 
@@ -273,21 +192,11 @@ abstract class MusicCommonsIntegrationTestBase : FunSpec() {
         }
 
         test("cascade DETACH on self-referencing playlist leaves sub-playlists in repo") {
-            val sub1 =
-                MutableAudioPlaylistEntity(20).also {
-                    it.name = "Sub 1"
-                    playlistRepo.add(it)
-                }
-            val sub2 =
-                MutableAudioPlaylistEntity(30).also {
-                    it.name = "Sub 2"
-                    playlistRepo.add(it)
-                }
+            val sub1 = MutableAudioPlaylistEntity(20, "Sub 1").also(playlistRepo::add)
+            val sub2 = MutableAudioPlaylistEntity(30, "Sub 2").also(playlistRepo::add)
             val parent =
-                MutableAudioPlaylistEntity(10, emptyList(), setOf(20, 30)).also {
-                    it.name = "Parent"
-                    playlistRepo.add(it)
-                }
+                MutableAudioPlaylistEntity(10, "Parent", emptyList(), setOf(20, 30))
+                    .also(playlistRepo::add)
 
             playlistRepo.remove(parent)
 
@@ -296,16 +205,8 @@ abstract class MusicCommonsIntegrationTestBase : FunSpec() {
         }
 
         test("cascade CASCADE removes referenced AudioItems when playlist is removed") {
-            val item1 =
-                MutableAudioItem(1).also {
-                    it.title = "Song A"
-                    audioItemRepo.add(it)
-                }
-            val item2 =
-                MutableAudioItem(2).also {
-                    it.title = "Song B"
-                    audioItemRepo.add(it)
-                }
+            val item1 = MutableAudioItem(1, "Song A").also(audioItemRepo::add)
+            val item2 = MutableAudioItem(2, "Song B").also(audioItemRepo::add)
 
             val cascadeRepo = CascadePlaylistRepo(ctx)
             val playlist =
@@ -321,20 +222,12 @@ abstract class MusicCommonsIntegrationTestBase : FunSpec() {
         }
 
         test("cascade RESTRICT throws when removing playlist with referenced AudioItems") {
-            val item1 =
-                MutableAudioItem(1).also {
-                    it.title = "Song A"
-                    audioItemRepo.add(it)
-                }
+            val item1 = MutableAudioItem(1, "Song A").also(audioItemRepo::add)
 
             val restrictRepo = RestrictPlaylistRepo(ctx)
-            val playlist1 =
-                RestrictAudioPlaylist(10, listOf(1)).also {
-                    it.name = "Restrict 1"
-                    restrictRepo.add(it)
-                }
+            val playlist1 = RestrictAudioPlaylist(10, "Restrict 1", listOf(1)).also(restrictRepo::add)
             // Second playlist referencing the same item makes removal restricted
-            restrictRepo.add(RestrictAudioPlaylist(11, listOf(1)).also { it.name = "Restrict 2" })
+            restrictRepo.add(RestrictAudioPlaylist(11, "Restrict 2", listOf(1)))
 
             shouldThrow<IllegalStateException> {
                 restrictRepo.remove(playlist1)
@@ -342,23 +235,11 @@ abstract class MusicCommonsIntegrationTestBase : FunSpec() {
         }
 
         test("cascade NONE leaves AudioItems and does not modify referenceIds") {
-            val item1 =
-                MutableAudioItem(1).also {
-                    it.title = "Song A"
-                    audioItemRepo.add(it)
-                }
-            val item2 =
-                MutableAudioItem(2).also {
-                    it.title = "Song B"
-                    audioItemRepo.add(it)
-                }
+            val item1 = MutableAudioItem(1, "Song A").also(audioItemRepo::add)
+            val item2 = MutableAudioItem(2, "Song B").also(audioItemRepo::add)
 
             val noneRepo = NonePlaylistRepo(ctx)
-            val playlist =
-                NoneAudioPlaylist(10, listOf(1, 2)).also {
-                    it.name = "None"
-                    noneRepo.add(it)
-                }
+            val playlist = NoneAudioPlaylist(10, "None", listOf(1, 2)).also(noneRepo::add)
 
             noneRepo.remove(playlist)
 
