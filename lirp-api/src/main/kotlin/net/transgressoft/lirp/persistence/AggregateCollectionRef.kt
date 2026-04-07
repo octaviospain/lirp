@@ -18,7 +18,6 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
-import kotlin.properties.ReadOnlyProperty
 
 /**
  * A lazily-resolved reference to a collection of aggregate entities stored in a [Registry].
@@ -43,8 +42,7 @@ import kotlin.properties.ReadOnlyProperty
  * @param K the type of the referenced entities' IDs, which must be [Comparable]
  * @param E the type of the referenced entities
  */
-interface AggregateCollectionRef<K : Comparable<K>, E : IdentifiableEntity<K>> :
-    ReadOnlyProperty<Any?, AggregateCollectionRef<K, E>> {
+interface AggregateCollectionRef<K : Comparable<K>, E : IdentifiableEntity<K>> {
 
     /**
      * The raw IDs of all referenced entities.

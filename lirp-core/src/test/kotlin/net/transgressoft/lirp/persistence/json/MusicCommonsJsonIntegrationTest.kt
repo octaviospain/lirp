@@ -197,8 +197,8 @@ class MusicCommonsJsonIntegrationTest : MusicCommonsIntegrationTestBase() {
 
             reloadedRepo.findById(10) shouldBePresent {
                 it.name shouldBe "Persisted Playlist"
-                it.audioItems.resolveAll() shouldHaveSize 1
-                it.audioItems.resolveAll().first().title shouldBe "Persisted Track"
+                it.audioItems shouldHaveSize 1
+                it.audioItems.first().title shouldBe "Persisted Track"
             }
 
             ctx2.close()
@@ -235,9 +235,8 @@ class MusicCommonsJsonIntegrationTest : MusicCommonsIntegrationTestBase() {
 
             reloadedRepo.findById(10) shouldBePresent {
                 it.name shouldBe "Parent"
-                val resolved = it.playlists.resolveAll()
-                resolved shouldHaveSize 2
-                resolved.map { p -> p.id } shouldContainExactlyInAnyOrder listOf(20, 30)
+                it.playlists shouldHaveSize 2
+                it.playlists.map { p -> p.id } shouldContainExactlyInAnyOrder listOf(20, 30)
             }
 
             ctx2.close()

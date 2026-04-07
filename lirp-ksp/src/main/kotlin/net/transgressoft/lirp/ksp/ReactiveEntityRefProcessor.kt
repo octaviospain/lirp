@@ -36,6 +36,13 @@ private const val REACTIVE_ENTITY_REFERENCE_FQN = "net.transgressoft.lirp.persis
 private const val AGGREGATE_COLLECTION_REF_FQN = "net.transgressoft.lirp.persistence.AggregateCollectionRef"
 private const val AGGREGATE_LIST_REF_DELEGATE_FQN = "net.transgressoft.lirp.persistence.AggregateListRefDelegate"
 private const val AGGREGATE_SET_REF_DELEGATE_FQN = "net.transgressoft.lirp.persistence.AggregateSetRefDelegate"
+private val STDLIB_COLLECTION_FQNS =
+    setOf(
+        "kotlin.collections.MutableList",
+        "kotlin.collections.MutableSet",
+        "kotlin.collections.List",
+        "kotlin.collections.Set"
+    )
 
 /**
  * KSP processor that generates [LirpRefAccessor][net.transgressoft.lirp.persistence.LirpRefAccessor]
@@ -59,11 +66,13 @@ private const val AGGREGATE_SET_REF_DELEGATE_FQN = "net.transgressoft.lirp.persi
  * recursively walks the supertype chain to find the `ReactiveEntityReference<K, E>` supertype and
  * extracts `E` from its first type argument.
  *
- * Collection reference detection inspects the resolved property type against
- * `AggregateCollectionRef` in its supertype chain. Whether the reference is ordered
- * (List) or unordered (Set) is determined by scanning the property's source declaration text for
- * the `aggregateList` vs `aggregateSet` factory call, since KSP resolves delegated property types
- * to the interface rather than the concrete delegate class.
+ * Collection reference detection uses source-text scanning of the property declaration for known
+ * aggregate factory calls (`mutableAggregateList`, `mutableAggregateSet`, `aggregateList`,
+ * `aggregateSet`) as the primary mechanism. This is required because the factory return types are
+ * `MutableList<E>`/`List<E>`/`MutableSet<E>`/`Set<E>` — stdlib types that do not have
+ * `AggregateCollectionRef` in their supertype chain. A supertype-walk fallback handles direct
+ * delegate usage. Whether the reference is ordered (List) or unordered (Set) is also determined
+ * by source-text scanning for the factory call name.
  *
  * For collection-typed properties, `bubbleUp = true` is rejected with a compile error since
  * collection references do not support event propagation.
@@ -120,7 +129,7 @@ class ReactiveEntityRefProcessor(
 
             val resolvedType = prop.type.resolve()
 
-            if (isCollectionReference(resolvedType)) {
+            if (isCollectionReference(prop, resolvedType)) {
                 classifyCollectionProperty(prop, className, bubbleUp, onDeleteExplicitInSource, explicitOnDeleteName, resolvedType, collectionMetas)
             } else {
                 classifySingleProperty(prop, className, bubbleUp, explicitOnDeleteName, resolvedType, singleEntries)
@@ -247,7 +256,7 @@ class ReactiveEntityRefProcessor(
                 @Suppress("UNCHECKED_CAST")
                 CollectionRefEntry(
                     refName = "${meta.refName}",
-                    idsGetter = { it.${meta.propertyName}.referenceIds },
+                    idsGetter = { (it.${meta.propertyName} as AggregateCollectionRef<*, *>).referenceIds },
                     delegateGetter = { it.${meta.propertyName} as AggregateCollectionRef<*, *> },
                     referencedClass = $referencedSimpleName::class.java,
                     cascadeAction = CascadeAction.${meta.cascadeAction},
@@ -310,19 +319,43 @@ class ReactiveEntityRefProcessor(
     }
 
     /**
-     * Determines whether a resolved property type represents a collection reference by walking
-     * the supertype chain to find [AGGREGATE_COLLECTION_REF_FQN].
+     * Determines whether a property represents a collection reference, using source-text detection
+     * of aggregate factory calls as the primary mechanism, with supertype-walking as a fallback.
+     *
+     * Source-text detection is preferred because after the return type changes to
+     * `MutableList<E>`/`List<E>`/`MutableSet<E>`/`Set<E>`, the stdlib types do not have
+     * [AGGREGATE_COLLECTION_REF_FQN] in their supertype chain.
      */
-    private fun isCollectionReference(type: KSType): Boolean {
+    private fun isCollectionReference(prop: KSPropertyDeclaration, type: KSType): Boolean {
+        // Read only the property line plus 1 continuation line to avoid false-positive matches
+        // from factory calls in adjacent property declarations (e.g. 'aggregateList' in the next
+        // property within the default linesAfter window).
+        val text = readSourceLines(prop, linesBefore = 0, linesAfter = 1)
+        if (text != null && containsAggregateFactoryCall(text)) return true
+        return isCollectionReferenceByType(type)
+    }
+
+    private fun containsAggregateFactoryCall(text: String): Boolean =
+        text.contains("mutableAggregateList") ||
+            text.contains("mutableAggregateSet") ||
+            text.contains("aggregateList") ||
+            text.contains("aggregateSet")
+
+    /**
+     * Fallback type-walk for collection reference detection, used when source text is unavailable
+     * or does not contain a known factory call. Walks the supertype chain to find
+     * [AGGREGATE_COLLECTION_REF_FQN].
+     */
+    private fun isCollectionReferenceByType(type: KSType): Boolean {
         val declaration = type.declaration
         if (declaration is KSTypeAlias) {
-            return isCollectionReference(declaration.type.resolve())
+            return isCollectionReferenceByType(declaration.type.resolve())
         }
         if (isCollectionReferenceFqn(declaration.qualifiedName?.asString())) return true
 
         if (declaration is KSClassDeclaration) {
             for (superType in declaration.superTypes) {
-                if (isCollectionReference(superType.resolve())) return true
+                if (isCollectionReferenceByType(superType.resolve())) return true
             }
         }
         return false
@@ -346,7 +379,11 @@ class ReactiveEntityRefProcessor(
      */
     private fun isOrderedCollectionDelegate(prop: KSPropertyDeclaration): Boolean {
         val text = readSourceLines(prop, linesBefore = 0, linesAfter = 5) ?: return false
+        // Note: mutableAggregateList uses camelCase capital 'A', so "aggregateList" (lowercase)
+        // does NOT match as a substring. Check mutable variants explicitly before the lowercase check.
         return when {
+            text.contains("mutableAggregateList") -> true
+            text.contains("mutableAggregateSet") -> false
             text.contains("aggregateList") -> true
             text.contains("aggregateSet") -> false
             else -> {
@@ -381,8 +418,15 @@ class ReactiveEntityRefProcessor(
     }
 
     /**
-     * Extracts the referenced entity FQN from a collection reference type by walking the
-     * [AGGREGATE_COLLECTION_REF_FQN] supertype and reading its first type argument.
+     * Extracts the referenced entity FQN from a collection reference type.
+     *
+     * Resolution strategy (in priority order):
+     * 1. If the type is a [KSTypeAlias], unwrap and recurse.
+     * 2. If the type is a stdlib collection (`MutableList<E>`, `List<E>`, `MutableSet<E>`, `Set<E>`),
+     *    extract the entity FQN directly from the single type argument.
+     * 3. If the type has two or more type arguments (e.g., `AggregateListRefDelegate<K, E>`),
+     *    extract the entity FQN from the second type argument (K-first ordering).
+     * 4. Walk the supertype chain looking for [AGGREGATE_COLLECTION_REF_FQN] and extract from there.
      */
     private fun findReferencedClassFqnFromCollectionType(type: KSType): String? {
         val declaration = type.declaration
@@ -391,9 +435,17 @@ class ReactiveEntityRefProcessor(
             return findReferencedClassFqnFromCollectionType(declaration.type.resolve())
         }
 
+        val typeArgs = type.arguments
+        val fqn = declaration.qualifiedName?.asString()
+
+        // Direct type argument extraction for stdlib collection types (MutableList<E>, List<E>, MutableSet<E>, Set<E>)
+        if (fqn in STDLIB_COLLECTION_FQNS && typeArgs.size == 1) {
+            val entityArg = typeArgs[0].type?.resolve()
+            return entityArg?.declaration?.qualifiedName?.asString()
+        }
+
         // Direct type arguments on the resolved type (e.g., AggregateListRefDelegate<Int, Track>)
         // E is the second type argument after the K-first ordering
-        val typeArgs = type.arguments
         if (typeArgs.size >= 2) {
             val entityArg = typeArgs[1].type?.resolve()
             return entityArg?.declaration?.qualifiedName?.asString()

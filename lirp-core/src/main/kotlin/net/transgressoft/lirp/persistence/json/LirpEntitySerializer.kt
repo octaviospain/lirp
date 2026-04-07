@@ -20,6 +20,9 @@ package net.transgressoft.lirp.persistence.json
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.persistence.AbstractMutableAggregateCollectionRefDelegate
 import net.transgressoft.lirp.persistence.AggregateCollectionRef
+import net.transgressoft.lirp.persistence.MutableAggregateListProxy
+import net.transgressoft.lirp.persistence.MutableAggregateSetProxy
+import mu.KotlinLogging
 import kotlin.reflect.KClass
 import kotlin.reflect.KParameter
 import kotlin.reflect.KProperty1
@@ -61,6 +64,8 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
     private val kClass: KClass<E>,
     sampleInstance: E
 ) : KSerializer<E> {
+
+    private val logger = KotlinLogging.logger {}
 
     /**
      * Describes a constructor parameter that contributes to the serialized form.
@@ -146,7 +151,12 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
         if (idKType != null) {
             return serializer(idKType)
         }
-        // Last resort: Int
+        // Last resort: Int — warn because this may silently corrupt Long/String keyed data
+        logger.warn {
+            "Could not determine aggregate ID type for property '${prop?.name}' on ${kClass.simpleName}; " +
+                "falling back to Int serializer. If your entity uses Long or String IDs, ensure the collection is " +
+                "non-empty at serializer construction time or the property's return type is resolvable."
+        }
         return serializer(Int::class, emptyList(), false)
     }
 
@@ -279,8 +289,16 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
     private fun restoreAggregateIds(entity: E, aggregateIds: Map<String, List<Any?>>) {
         val registry = entity.delegateRegistry
         for ((name, ids) in aggregateIds) {
-            val delegate = registry[name] as? AbstractMutableAggregateCollectionRefDelegate<*, *> ?: continue
-            delegate.setBackingIds(ids as Collection<Nothing>)
+            val delegate = registry[name]
+            // Unwrap proxy layer to reach the backing ID delegate
+            val mutableDelegate =
+                when (delegate) {
+                    is MutableAggregateListProxy<*, *> -> delegate.innerDelegate
+                    is MutableAggregateSetProxy<*, *> -> delegate.innerDelegate
+                    is AbstractMutableAggregateCollectionRefDelegate<*, *> -> delegate
+                    else -> continue
+                }
+            mutableDelegate.setBackingIds(ids as Collection<Nothing>)
         }
     }
 }

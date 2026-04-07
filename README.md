@@ -148,14 +148,14 @@ val resolved: Optional<Category> = product.category.resolve()
 
 ### Collection References
 
-LIRP provides four collection delegate types for modeling entities that hold collections of related IDs. All four implement `AggregateCollectionRef` and resolve lazily via `resolveAll()`. For full copy-paste runnable examples, see [DDD & Aggregates](https://github.com/octaviospain/lirp/wiki/DDD-and-Aggregates) in the wiki.
+LIRP provides four collection delegate types for modeling entities that hold collections of related IDs. Each factory returns a standard Kotlin stdlib collection type that also implements `AggregateCollectionRef` internally, providing both the full collection API and access to the underlying reference IDs. For full copy-paste runnable examples, see [DDD & Aggregates](https://github.com/octaviospain/lirp/wiki/DDD-and-Aggregates) in the wiki.
 
-| Delegate | Mutability | Ordering | Uniqueness |
-|----------|-----------|----------|------------|
-| `aggregateList` | read-only | ordered | allows duplicates |
-| `aggregateSet` | read-only | unordered | unique |
-| `mutableAggregateList` | mutable | ordered | allows duplicates |
-| `mutableAggregateSet` | mutable | insertion-ordered | unique |
+| Delegate | Return type | Mutability | Ordering | Uniqueness |
+|----------|------------|-----------|----------|------------|
+| `aggregateList` | `List<E>` | read-only | ordered | allows duplicates |
+| `aggregateSet` | `Set<E>` | read-only | unordered | unique |
+| `mutableAggregateList` | `MutableList<E>` | mutable | ordered | allows duplicates |
+| `mutableAggregateSet` | `MutableSet<E>` | mutable | insertion-ordered | unique |
 
 **Read-only example** — use `aggregateList` or `aggregateSet` when the collection of related IDs never changes at runtime:
 
@@ -171,10 +171,12 @@ class Playlist(override val id: Long, val name: String, val trackIds: List<Int>)
     override fun clone() = Playlist(id, name, trackIds)
 }
 
-val tracks: List<Track> = playlist.tracks.resolveAll()
+// Standard List<Track> — indexed access, iteration, all collection operations
+val firstTrack: Track = playlist.tracks[0]
+val allTracks: List<Track> = playlist.tracks.toList()
 ```
 
-**Mutable example** — use `mutableAggregateList` or `mutableAggregateSet` when the collection must support runtime `add`/`remove` operations. Mutations trigger a `MutationEvent` on the owning entity:
+**Mutable example** — use `mutableAggregateList` or `mutableAggregateSet` when the collection must support runtime mutations. The property type is `MutableList<E>` / `MutableSet<E>`, providing the full standard collection API. Every mutation emits exactly one `MutationEvent` on the owning entity:
 
 ```kotlin
 @Serializable
@@ -195,15 +197,31 @@ data class Playlist(override val id: Long, val name: String, val trackIds: List<
     override fun hashCode() = 31 * (31 * id.hashCode() + name.hashCode()) + tracks.referenceIds.hashCode()
 }
 
-playlist.tracks.add(newTrack)        // backingIds updated, MutationEvent emitted
-playlist.tracks.remove(oldTrack)
-val resolved: List<Track> = playlist.tracks.resolveAll()
+// Standard MutableList<Track> operations — no special API needed
+playlist.tracks.add(newTrack)           // MutationEvent emitted
+playlist.tracks.remove(oldTrack)        // MutationEvent emitted
+playlist.tracks[0]                      // indexed access — resolves entity from registry on every call
+playlist.tracks.removeAt(2)             // remove by position — MutationEvent emitted
+playlist.tracks[1] = newTrack           // replace at position — MutationEvent emitted
+
+// Views work naturally — mutations on views emit events on the owning entity
+val sub = playlist.tracks.subList(0, 3)
+val iter = playlist.tracks.listIterator()
+```
+
+**Resolution behavior:** Entities are resolved lazily from the registry on every element access — no caching. If an ID cannot be found in the registry, `NoSuchElementException` is thrown. If the registry changes (entity updated or removed), the next access reflects the current state.
+
+**Accessing reference IDs:** The reference ID list is accessible via a cast to `AggregateCollectionRef`:
+
+```kotlin
+// For serialization, debugging, or direct ID access
+val ids = (playlist.tracks as AggregateCollectionRef<*, *>).referenceIds
 ```
 
 **Bulk operations:** `addAll(collection)`, `removeAll(collection)`, and `retainAll(collection)` each emit exactly one `MutationEvent` regardless of how many elements are in the input — the backing ID store is updated atomically.
 
 **Important notes:**
-- The delegate's `referenceIds` property is the live source of truth after mutations. For persistence, read from `tracks.referenceIds` in your serializer or `toParams` method.
+- The delegate's `referenceIds` property (accessed via cast) is the live source of truth after mutations. For persistence, read from `(tracks as AggregateCollectionRef<*, *>).referenceIds` in your serializer or `toParams` method.
 - Entities using mutable collection delegates MUST deep-copy `referenceIds` in `clone()` and override `equals`/`hashCode()` to compare `referenceIds`. Without this, the `mutateAndPublish` before/after equality check always returns `true` and mutation events are silenced.
 - KSP generates accessor metadata for all four delegate types, wiring them automatically — no manual accessor code needed.
 - Cascade defaults for collection references are `NONE` (unlike `DETACH` for single references).

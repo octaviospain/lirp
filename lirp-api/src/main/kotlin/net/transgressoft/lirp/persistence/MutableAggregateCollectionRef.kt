@@ -18,7 +18,6 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
-import kotlin.reflect.KProperty
 
 /**
  * A lazily-resolved, mutable reference to a collection of aggregate entities stored in a [Registry].
@@ -41,11 +40,15 @@ interface MutableAggregateCollectionRef<K : Comparable<K>, E : IdentifiableEntit
     MutableCollection<E> {
 
     /**
-     * Returns a [MutableIterator] over a detached snapshot of the resolved entities.
+     * Returns a [MutableIterator] over a snapshot of the resolved entities.
      *
-     * Mutations performed through this iterator (e.g., [MutableIterator.remove] during iteration) operate
-     * on the snapshot copy only and do **not** propagate to the backing ID store, trigger `idSetter`
-     * write-back, or emit mutation events. For structural modifications that must be persisted, use
+     * The behavior of [MutableIterator.remove] depends on the delegate implementation:
+     * - **List delegates:** Operates on a detached snapshot copy; removals do **not** propagate to
+     *   the backing ID store or emit mutation events.
+     * - **Set delegates:** Propagates removals to the backing ID store via the delegate's locked
+     *   mutation path, triggering event emission.
+     *
+     * For guaranteed persistent structural modifications across all delegate types, use
      * [add], [remove], or [clear] directly.
      */
     override fun iterator(): MutableIterator<E>
@@ -72,6 +75,4 @@ interface MutableAggregateCollectionRef<K : Comparable<K>, E : IdentifiableEntit
      * mutation event emission.
      */
     override fun clear()
-
-    override fun getValue(thisRef: Any?, property: KProperty<*>): MutableAggregateCollectionRef<K, E>
 }

@@ -52,6 +52,13 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
     // Shared stubs for collection reference delegates used in test source code.
     // These stubs live in net.transgressoft.lirp.persistence so the processor's FQN-based
     // detection works — the class names contain "List"/"Set" for isOrdered determination.
+    // Shared stubs for collection reference delegates used in test source code.
+    // These stubs live in net.transgressoft.lirp.persistence so the processor's source-text
+    // factory call detection works. The stubs shadow the real internal delegate classes
+    // (AggregateListRefDelegate, AggregateSetRefDelegate) and provide factory functions whose
+    // return types implement ReadOnlyProperty so Kotlin delegation compiles in test source.
+    // Mutable factories use the same pattern with distinct stub delegate class names to avoid
+    // conflicts with the internal production delegate classes of the same name.
     val collectionDelegateStubs =
         SourceFile.kotlin(
             "CollectionDelegateStubs.kt",
@@ -80,6 +87,24 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                 override fun getValue(thisRef: Any?, property: KProperty<*>): AggregateCollectionRef<K, E> = this
             }
 
+            class MutableAggregateListStubDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
+                private val initialIds: List<K> = emptyList()
+            ) : AggregateCollectionRef<K, E>,
+                ReadOnlyProperty<Any?, AggregateCollectionRef<K, E>> {
+                override val referenceIds: List<K> get() = initialIds
+                override fun resolveAll(): Collection<E> = emptyList()
+                override fun getValue(thisRef: Any?, property: KProperty<*>): AggregateCollectionRef<K, E> = this
+            }
+
+            class MutableAggregateSetStubDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
+                private val initialIds: Set<K> = emptySet()
+            ) : AggregateCollectionRef<K, E>,
+                ReadOnlyProperty<Any?, AggregateCollectionRef<K, E>> {
+                override val referenceIds: Set<K> get() = initialIds
+                override fun resolveAll(): Collection<E> = emptySet()
+                override fun getValue(thisRef: Any?, property: KProperty<*>): AggregateCollectionRef<K, E> = this
+            }
+
             fun <K : Comparable<K>, E : IdentifiableEntity<K>> aggregateList(
                 initialIds: List<K> = emptyList()
             ): AggregateListRefDelegate<K, E> = AggregateListRefDelegate(initialIds)
@@ -87,6 +112,14 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
             fun <K : Comparable<K>, E : IdentifiableEntity<K>> aggregateSet(
                 initialIds: Set<K> = emptySet()
             ): AggregateSetRefDelegate<K, E> = AggregateSetRefDelegate(initialIds)
+
+            fun <K : Comparable<K>, E : IdentifiableEntity<K>> mutableAggregateList(
+                initialIds: List<K> = emptyList()
+            ): MutableAggregateListStubDelegate<K, E> = MutableAggregateListStubDelegate(initialIds)
+
+            fun <K : Comparable<K>, E : IdentifiableEntity<K>> mutableAggregateSet(
+                initialIds: Set<K> = emptySet()
+            ): MutableAggregateSetStubDelegate<K, E> = MutableAggregateSetStubDelegate(initialIds)
             """
         )
 
@@ -176,7 +209,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
         val content = result.generatedFileContent("PlaylistEntity_LirpRefAccessor.kt")
         content shouldContain "override val collectionEntries: List<CollectionRefEntry<*, PlaylistEntity>>"
         content shouldContain "refName = \"items\""
-        content shouldContain "idsGetter = { it.items.referenceIds }"
+        content shouldContain "idsGetter = { (it.items as AggregateCollectionRef<*, *>).referenceIds }"
         content shouldContain "cascadeAction = CascadeAction.CASCADE"
         content shouldContain "isOrdered = true"
         content shouldContain "override val entries: List<RefEntry<*, PlaylistEntity>> = emptyList()"
@@ -214,7 +247,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
         val content = result.generatedFileContent("PlaylistGroupEntity_LirpRefAccessor.kt")
         content shouldContain "override val collectionEntries: List<CollectionRefEntry<*, PlaylistGroupEntity>>"
         content shouldContain "refName = \"playlists\""
-        content shouldContain "idsGetter = { it.playlists.referenceIds }"
+        content shouldContain "idsGetter = { (it.playlists as AggregateCollectionRef<*, *>).referenceIds }"
         content shouldContain "isOrdered = false"
         content shouldContain "cascadeAction = CascadeAction.NONE"
     }
@@ -271,7 +304,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
         // Collection ref entry
         content shouldContain "override val collectionEntries: List<CollectionRefEntry<*, AlbumEntity>>"
         content shouldContain "refName = \"tracks\""
-        content shouldContain "idsGetter = { it.tracks.referenceIds }"
+        content shouldContain "idsGetter = { (it.tracks as AggregateCollectionRef<*, *>).referenceIds }"
         content shouldContain "isOrdered = true"
         content shouldContain "cascadeAction = CascadeAction.CASCADE"
     }
@@ -516,5 +549,44 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
         content shouldContain "`TopLevelEntity_LirpRefAccessor`"
         content shouldContain "LirpRefAccessor<TopLevelEntity>"
         content shouldContain "TargetEntity::class.java"
+    }
+
+    test("generates collectionEntries for entity with mutableAggregateList returning MutableList") {
+        val result =
+            compileWithProcessor(
+                collectionDelegateStubs,
+                SourceFile.kotlin(
+                    "MutablePlaylistEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.CascadeAction
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.Aggregate
+                    import net.transgressoft.lirp.persistence.mutableAggregateList
+
+                    data class TestTrack(override val id: Int) : ReactiveEntityBase<Int, TestTrack>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                    }
+
+                    data class MutablePlaylistEntity(override val id: Int, val trackIds: List<Int>) : ReactiveEntityBase<Int, MutablePlaylistEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+
+                        @Aggregate(onDelete = CascadeAction.CASCADE)
+                        val items by mutableAggregateList<Int, TestTrack>(trackIds)
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("MutablePlaylistEntity_LirpRefAccessor.kt")
+        content shouldContain "override val collectionEntries: List<CollectionRefEntry<*, MutablePlaylistEntity>>"
+        content shouldContain "refName = \"items\""
+        content shouldContain "idsGetter = { (it.items as AggregateCollectionRef<*, *>).referenceIds }"
+        content shouldContain "cascadeAction = CascadeAction.CASCADE"
+        content shouldContain "isOrdered = true"
+        content shouldContain "override val entries: List<RefEntry<*, MutablePlaylistEntity>> = emptyList()"
     }
 })

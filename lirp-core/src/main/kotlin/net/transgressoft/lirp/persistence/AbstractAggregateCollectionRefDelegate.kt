@@ -21,7 +21,6 @@ import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import mu.KotlinLogging
 import java.util.concurrent.atomic.AtomicReference
-import kotlin.reflect.KProperty
 
 /**
  * Abstract base for collection-typed aggregate reference delegates that lazily resolve a group of
@@ -64,6 +63,12 @@ abstract class AbstractAggregateCollectionRefDelegate<K : Comparable<K>, E : Ide
      * Used by subclasses in their [resolveAll] implementations.
      */
     protected fun boundRegistry(): Registry<K, E>? = registryRef.get()
+
+    /**
+     * Internal accessor for proxy classes in the same module to read the bound registry.
+     * Proxies use this to resolve entities without extending the abstract base class.
+     */
+    internal fun boundRegistryInternal(): Registry<K, E>? = registryRef.get()
 
     /**
      * Binds this delegate to the registry that holds the referenced entity type, and associates
@@ -155,10 +160,4 @@ abstract class AbstractAggregateCollectionRefDelegate<K : Comparable<K>, E : Ide
             }
         }
     }
-
-    /**
-     * Returns `this` so that the delegate object itself serves as the [AggregateCollectionRef]
-     * handle — callers write `entity.collectionProp.resolveAll()` with no extra unwrapping.
-     */
-    override fun getValue(thisRef: Any?, property: KProperty<*>): AggregateCollectionRef<K, E> = this
 }
