@@ -55,6 +55,8 @@ dependencies {
     // testFixtures infrastructure — shared entities, table defs, container support
     testFixturesImplementation project(path: ':lirp-api')
     testFixturesImplementation project(path: ':lirp-core')
+    testFixturesImplementation files(project(':lirp-core').sourceSets.test.output)
+    integrationTestImplementation files(project(':lirp-core').sourceSets.test.output)
     testFixturesImplementation platform(libs.exposed.bom)
     testFixturesImplementation libs.bundles.exposed
     testFixturesImplementation libs.hikari
