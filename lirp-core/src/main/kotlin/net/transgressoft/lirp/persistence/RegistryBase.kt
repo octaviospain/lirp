@@ -283,20 +283,40 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
         for (entry in collEntries) {
             val registry = context.registryFor(entry.referencedClass) ?: continue
             val delegate = entry.delegateGetter(entity)
-            if (delegate is AbstractAggregateCollectionRefDelegate<*, *>) {
+            val inner = unwrapCollectionDelegate(delegate)
+            if (inner != null) {
                 @Suppress("UNCHECKED_CAST")
-                (delegate as AbstractAggregateCollectionRefDelegate<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>)
+                (inner as AbstractAggregateCollectionRefDelegate<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>)
                     .bindRegistry(registry as Registry<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>, context)
             }
             // Inject mutation callback for mutable collection delegates after registry binding.
             // The callback wraps the mutation action inside mutateForCollection so the backingIds
             // update occurs inside mutateAndPublish, enabling correct before/after comparison
             // for MutationEvent emission.
-            if (delegate is AbstractMutableAggregateCollectionRefDelegate<*, *> && entity is ReactiveEntityBase<*, *>) {
-                delegate.bindMutationCallback { applyMutation -> entity.mutateForCollection(applyMutation) }
+            val mutableInner = unwrapMutableDelegate(delegate)
+            if (mutableInner != null && entity is ReactiveEntityBase<*, *>) {
+                mutableInner.bindMutationCallback { applyMutation -> entity.mutateForCollection(applyMutation) }
             }
         }
     }
+
+    private fun unwrapCollectionDelegate(delegate: Any?): AbstractAggregateCollectionRefDelegate<*, *>? =
+        when (delegate) {
+            is MutableAggregateListProxy<*, *> -> delegate.innerDelegate
+            is MutableAggregateSetProxy<*, *> -> delegate.innerDelegate
+            is AggregateListProxy<*, *> -> delegate.innerDelegate
+            is AggregateSetProxy<*, *> -> delegate.innerDelegate
+            is AbstractAggregateCollectionRefDelegate<*, *> -> delegate
+            else -> null
+        }
+
+    private fun unwrapMutableDelegate(delegate: Any?): AbstractMutableAggregateCollectionRefDelegate<*, *>? =
+        when (delegate) {
+            is MutableAggregateListProxy<*, *> -> delegate.innerDelegate
+            is MutableAggregateSetProxy<*, *> -> delegate.innerDelegate
+            is AbstractMutableAggregateCollectionRefDelegate<*, *> -> delegate
+            else -> null
+        }
 
     /**
      * Wires bubble-up subscriptions for all aggregate references on [entity] that have
@@ -343,9 +363,8 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
             if (collEntries != null) {
                 for (entry in collEntries) {
                     val delegate = entry.delegateGetter(entity)
-                    if (delegate is AbstractAggregateCollectionRefDelegate<*, *>) {
-                        delegate.executeCascade(entry.cascadeAction, entity)
-                    }
+                    val inner = unwrapCollectionDelegate(delegate)
+                    inner?.executeCascade(entry.cascadeAction, entity)
                 }
             }
         } finally {

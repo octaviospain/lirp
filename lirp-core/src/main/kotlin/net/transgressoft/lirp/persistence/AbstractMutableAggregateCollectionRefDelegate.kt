@@ -20,7 +20,6 @@ package net.transgressoft.lirp.persistence
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
-import kotlin.reflect.KProperty
 
 /**
  * Abstract base for mutable collection-typed aggregate reference delegates that lazily resolve a group
@@ -75,6 +74,22 @@ abstract class AbstractMutableAggregateCollectionRefDelegate<K : Comparable<K>, 
     override fun provideIds(): Collection<K> = lock.withLock { ArrayList(backingIds) }
 
     override val referenceIds: Collection<K> get() = lock.withLock { ArrayList(backingIds) }
+
+    /**
+     * Executes [action] on [backingIds] without returning a result, delegating to the mutation
+     * callback so that `mutateAndPublish` fires BEFORE the action modifies [backingIds].
+     *
+     * Used for indexed mutations (e.g., `add(index, element)`, `removeAt(index)`) where no Boolean
+     * result is needed. If no callback is bound, the action runs directly.
+     */
+    protected fun mutateVoid(action: MutableCollection<K>.() -> Unit) {
+        val cb = mutationCallback
+        if (cb != null) {
+            cb.invoke { lock.withLock { backingIds.action() } }
+        } else {
+            lock.withLock { backingIds.action() }
+        }
+    }
 
     /**
      * Executes [action] on [backingIds], delegating to the mutation callback so that
@@ -160,10 +175,4 @@ abstract class AbstractMutableAggregateCollectionRefDelegate<K : Comparable<K>, 
     override fun isEmpty(): Boolean = lock.withLock { backingIds.isEmpty() }
 
     override val size: Int get() = lock.withLock { backingIds.size }
-
-    /**
-     * Returns `this` typed as [MutableAggregateCollectionRef] so that delegated properties
-     * expose the mutable API (add/remove/clear) directly without casting.
-     */
-    override fun getValue(thisRef: Any?, property: KProperty<*>): MutableAggregateCollectionRef<K, E> = this
 }

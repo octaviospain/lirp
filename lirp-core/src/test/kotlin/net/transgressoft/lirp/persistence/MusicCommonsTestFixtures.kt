@@ -101,8 +101,8 @@ interface AudioPlaylist<I : ReactiveAudioItem<I>> : IdentifiableEntity<Int>, Com
 interface ReactiveAudioPlaylist<I : ReactiveAudioItem<I>, P : ReactiveAudioPlaylist<I, P>> :
     AudioPlaylist<I>, ReactiveEntity<Int, P> {
     override var name: String
-    val audioItems: MutableAggregateCollectionRef<Int, I>
-    val playlists: MutableAggregateCollectionRef<Int, P>
+    val audioItems: MutableList<I>
+    val playlists: MutableSet<P>
 }
 
 /**
@@ -124,10 +124,6 @@ abstract class MutablePlaylistBase<I : ReactiveAudioItem<I>, P : ReactiveAudioPl
     override val uniqueId: String get() = "audio-playlist-$id"
 
     override var name: String by reactiveProperty("")
-
-    abstract override val audioItems: MutableAggregateCollectionRef<Int, I>
-
-    abstract override val playlists: MutableAggregateCollectionRef<Int, P>
 
     override fun compareTo(other: AudioPlaylist<I>): Int = id.compareTo(other.id)
 }

@@ -17,7 +17,9 @@
 
 package net.transgressoft.lirp.persistence
 
+import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.event.ReactiveScope
+import net.transgressoft.lirp.persistence.AggregateSetProxy
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
@@ -94,9 +96,9 @@ internal class AggregateSetCascadeTest : StringSpec({
     "CASCADE on unbound set ref delegate is a no-op" {
         val group = CascadePlaylistGroup(id = 100L, playlistIds = setOf(10L))
 
-        val delegate = group.playlists as AbstractAggregateCollectionRefDelegate<Long, Playlist>
-        // Unbound delegate — registryRef is null, so doCascade returns early without exception
-        delegate.executeCascade(net.transgressoft.lirp.entity.CascadeAction.CASCADE, group)
+        // Unwrap proxy to reach inner delegate; unbound so doCascade returns early without exception
+        val proxy = group.playlists
+        proxy.innerDelegate.executeCascade(CascadeAction.CASCADE, group)
     }
 
     "RESTRICT on set ref blocks parent removal when a referenced entity is still referenced" {

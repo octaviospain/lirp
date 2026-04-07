@@ -19,6 +19,7 @@ package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.ReactiveScope
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldContain
@@ -37,10 +38,12 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 
 /**
- * Tests for [MutableAggregateListRefDelegate] and [MutableAggregateSetRefDelegate], validating
- * all phase requirements: lazy resolution (CORE-01), uniqueness enforcement (CORE-02),
- * ID write-back (CORE-03), thread safety (CORE-04), Java interop (CORE-05), and
- * mutation event emission (EVT-01).
+ * Tests for [MutableAggregateListProxy] and [MutableAggregateSetProxy], validating
+ * all proxy behaviors: lazy resolution per-access (D-01/D-02), indexed mutations (D-03),
+ * replace at index (D-03), indexed removal (D-03), live sub-list and list-iterator views (D-07),
+ * iterator().remove on set proxy (D-02), NoSuchElementException on unresolvable ID (D-05),
+ * resolve-per-call freshness (D-04), referenceIds accessible via AggregateCollectionRef cast (D-08),
+ * thread safety (CORE-04), and mutation event emission (EVT-01).
  */
 @DisplayName("MutableAggregateCollectionRefDelegate")
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -173,5 +176,179 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
 
         events shouldHaveSize 1
         playlist.lastDateModified shouldBeGreaterThan beforeModified
+    }
+
+    "MutableAggregateListProxy get(index) resolves entity from registry" {
+        val t1 = trackRepo.create(1, "Track 1")
+        val t2 = trackRepo.create(2, "Track 2")
+        val t3 = trackRepo.create(3, "Track 3")
+        val playlist = playlistRepo.create(1L, "Test", listOf(1, 2, 3))
+
+        playlist.items[0] shouldBe t1
+        playlist.items[2] shouldBe t3
+    }
+
+    "MutableAggregateListProxy get(index) throws IndexOutOfBoundsException for invalid index" {
+        val playlist = playlistRepo.create(1L, "Test", listOf(1, 2))
+
+        shouldThrow<IndexOutOfBoundsException> {
+            playlist.items[5]
+        }
+    }
+
+    "MutableAggregateListProxy get(index) throws NoSuchElementException for unresolvable ID" {
+        // ID 999 is not in trackRepo
+        val playlist = playlistRepo.create(1L, "Test", listOf(999))
+
+        shouldThrow<NoSuchElementException> {
+            playlist.items[0]
+        }
+    }
+
+    "MutableAggregateListProxy set(index, element) replaces entity and emits MutationEvent" {
+        val t1 = trackRepo.create(1, "Track 1")
+        val t2 = trackRepo.create(2, "Track 2")
+        val playlist = playlistRepo.create(1L, "Test", listOf(1))
+        val events = Collections.synchronizedList(mutableListOf<MutationEvent<Long, MutablePlaylist>>())
+        playlist.subscribe { events.add(it) }
+
+        playlist.items[0] = t2
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        playlist.items[0] shouldBe t2
+        playlist.items.referenceIds shouldContainExactly listOf(2)
+        events shouldHaveSize 1
+    }
+
+    "MutableAggregateListProxy add(index, element) inserts at position and emits MutationEvent" {
+        val t1 = trackRepo.create(1, "Track 1")
+        val t2 = trackRepo.create(2, "Track 2")
+        val t3 = trackRepo.create(3, "Track 3")
+        val playlist = playlistRepo.create(1L, "Test", listOf(1, 3))
+        val events = Collections.synchronizedList(mutableListOf<MutationEvent<Long, MutablePlaylist>>())
+        playlist.subscribe { events.add(it) }
+
+        playlist.items.add(1, t2)
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        playlist.items shouldContainExactly listOf(t1, t2, t3)
+        events shouldHaveSize 1
+    }
+
+    "MutableAggregateListProxy removeAt(index) removes by position and emits MutationEvent" {
+        val t1 = trackRepo.create(1, "Track 1")
+        val t2 = trackRepo.create(2, "Track 2")
+        val t3 = trackRepo.create(3, "Track 3")
+        val playlist = playlistRepo.create(1L, "Test", listOf(1, 2, 3))
+        val events = Collections.synchronizedList(mutableListOf<MutationEvent<Long, MutablePlaylist>>())
+        playlist.subscribe { events.add(it) }
+
+        val removed = playlist.items.removeAt(1)
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        removed shouldBe t2
+        playlist.items shouldContainExactly listOf(t1, t3)
+        events shouldHaveSize 1
+    }
+
+    "MutableAggregateListProxy subList() returns live view that emits events on mutation" {
+        val t1 = trackRepo.create(1, "Track 1")
+        val t2 = trackRepo.create(2, "Track 2")
+        val t3 = trackRepo.create(3, "Track 3")
+        val tNew = trackRepo.create(4, "Track 4")
+        val playlist = playlistRepo.create(1L, "Test", listOf(1, 2, 3))
+        val events = Collections.synchronizedList(mutableListOf<MutationEvent<Long, MutablePlaylist>>())
+        playlist.subscribe { events.add(it) }
+
+        val sub = playlist.items.subList(1, 3)
+        sub.add(tNew)
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        playlist.items shouldContain tNew
+        events shouldHaveSize 1
+    }
+
+    "MutableAggregateListProxy listIterator() set emits MutationEvent" {
+        val t1 = trackRepo.create(1, "Track 1")
+        val t2 = trackRepo.create(2, "Track 2")
+        val t3 = trackRepo.create(3, "Track 3")
+        val playlist = playlistRepo.create(1L, "Test", listOf(1, 2))
+        val events = Collections.synchronizedList(mutableListOf<MutationEvent<Long, MutablePlaylist>>())
+        playlist.subscribe { events.add(it) }
+
+        val iter = playlist.items.listIterator()
+        iter.next()
+        iter.set(t3)
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        playlist.items[0] shouldBe t3
+        events shouldHaveSize 1
+    }
+
+    "MutableAggregateSetProxy iterator().remove() removes entity and emits MutationEvent" {
+        val p1 = playlistRepo.create(1L, "P1")
+        val p2 = playlistRepo.create(2L, "P2")
+        val group = groupRepo.create(1L, setOf(1L, 2L))
+        val events = Collections.synchronizedList(mutableListOf<MutationEvent<Long, MutablePlaylistGroup>>())
+        group.subscribe { events.add(it) }
+
+        val iter = group.playlists.iterator()
+        iter.next()
+        iter.remove()
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        group.playlists shouldHaveSize 1
+        events shouldHaveSize 1
+    }
+
+    "MutableAggregateListProxy resolve-per-call returns updated entity after registry change" {
+        val track = trackRepo.create(1, "Original Title")
+        val playlist = playlistRepo.create(1L, "Test", listOf(1))
+
+        playlist.items[0].title shouldBe "Original Title"
+
+        // Remove and re-add with same ID but different title to simulate an update
+        trackRepo.remove(track)
+        val updatedTrack = trackRepo.create(1, "Updated Title")
+
+        playlist.items[0].title shouldBe "Updated Title"
+    }
+
+    "referenceIds accessible via AggregateCollectionRef cast on mutable list proxy" {
+        val t1 = trackRepo.create(1, "T1")
+        val t2 = trackRepo.create(2, "T2")
+        val playlist = playlistRepo.create(1L, "Test", listOf(1, 2))
+
+        val ids = (playlist.items as AggregateCollectionRef<*, *>).referenceIds
+
+        ids shouldContainExactly listOf(1, 2)
+    }
+
+    "AggregateListProxy provides List<E> with indexed access" {
+        val t1 = trackRepo.create(1, "T1")
+        val t2 = trackRepo.create(2, "T2")
+        val playlistRepo2 = PlaylistVolatileRepo(ctx)
+        val playlist = playlistRepo2.create(1L, "Test", listOf(1, 2))
+
+        playlist.items[0] shouldBe t1
+        playlist.items[1] shouldBe t2
+        playlist.items shouldHaveSize 2
+    }
+
+    "AggregateSetProxy provides Set<E> with iteration" {
+        val immutablePlaylistRepo = PlaylistVolatileRepo(ctx)
+        val p1 = immutablePlaylistRepo.create(1L, "P1", emptyList())
+        val p2 = immutablePlaylistRepo.create(2L, "P2", emptyList())
+        val groupRepo2 = PlaylistGroupVolatileRepo(ctx)
+        val group = groupRepo2.create(1L, setOf(1L, 2L))
+
+        group.playlists shouldHaveSize 2
+        group.playlists.toSet() shouldContainExactly setOf(p1, p2)
     }
 })

@@ -19,6 +19,8 @@ package net.transgressoft.lirp.persistence.json
 
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.persistence.AbstractMutableAggregateCollectionRefDelegate
+import net.transgressoft.lirp.persistence.MutableAggregateListProxy
+import net.transgressoft.lirp.persistence.MutableAggregateSetProxy
 import net.transgressoft.lirp.persistence.TestTrack
 import net.transgressoft.lirp.persistence.mutableAggregateList
 import io.kotest.core.spec.style.StringSpec
@@ -231,8 +233,13 @@ class LirpEntitySerializerTest : StringSpec({
 /** Test helper to set backing IDs on a named delegate via the entity's delegateRegistry. */
 @Suppress("UNCHECKED_CAST")
 private fun <K : Comparable<K>> ReactiveEntityBase<*, *>.setDelegateIds(delegateName: String, ids: List<K>) {
-    val delegate =
-        delegateRegistry[delegateName] as? AbstractMutableAggregateCollectionRefDelegate<K, *>
-            ?: error("No mutable aggregate delegate named '$delegateName'")
-    delegate.setBackingIds(ids)
+    val raw = delegateRegistry[delegateName]
+    val delegate: AbstractMutableAggregateCollectionRefDelegate<K, *>? =
+        when (raw) {
+            is MutableAggregateListProxy<*, *> -> raw.innerDelegate as AbstractMutableAggregateCollectionRefDelegate<K, *>
+            is MutableAggregateSetProxy<*, *> -> raw.innerDelegate as AbstractMutableAggregateCollectionRefDelegate<K, *>
+            is AbstractMutableAggregateCollectionRefDelegate<*, *> -> raw as AbstractMutableAggregateCollectionRefDelegate<K, *>
+            else -> null
+        }
+    delegate?.setBackingIds(ids) ?: error("No mutable aggregate delegate named '$delegateName'")
 }

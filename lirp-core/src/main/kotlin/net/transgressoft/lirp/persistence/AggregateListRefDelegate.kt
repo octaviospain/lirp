@@ -18,6 +18,7 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
+import kotlin.reflect.KProperty
 
 /**
  * Property delegate that implements a lazily-resolved aggregate reference to an ordered list of
@@ -27,18 +28,6 @@ import net.transgressoft.lirp.entity.IdentifiableEntity
  * Resolution is always performed fresh against the bound [Registry] — no caching is applied.
  *
  * See [AbstractAggregateCollectionRefDelegate] for shared behavior: binding, cascade, and thread safety.
- *
- * Example:
- * ```kotlin
- * class Playlist(override val id: Long, val itemIds: List<Int>) : ReactiveEntityBase<Long, Playlist>() {
- *     @Aggregate(onDelete = CascadeAction.NONE)
- *     @Transient
- *     val items by aggregateList<Int, AudioItem>(itemIds)
- * }
- *
- * // After adding the playlist to its repository:
- * val resolved: List<AudioItem> = playlist.items.resolveAll()
- * ```
  *
  * @param K the type of the referenced entity's ID
  * @param E the referenced entity type
@@ -60,11 +49,42 @@ internal class AggregateListRefDelegate<K : Comparable<K>, E : IdentifiableEntit
 }
 
 /**
+ * Proxy that exposes an [AggregateListRefDelegate] as a standard read-only [List].
+ *
+ * Composes the inner delegate via [AggregateCollectionRef] delegation so that [referenceIds],
+ * [resolveAll], and cascade operations are forwarded. [get] resolves each entity from the bound
+ * registry on demand; [size] reads from the delegate's [referenceIds].
+ *
+ * Inheriting from [AbstractList] provides all iteration and bulk-query operations for free.
+ *
+ * @param K the type of the referenced entity's ID
+ * @param E the referenced entity type
+ */
+class AggregateListProxy<K : Comparable<K>, E : IdentifiableEntity<K>>
+    internal constructor(
+        internal val innerDelegate: AggregateListRefDelegate<K, E>
+    ) : AbstractList<E>(), AggregateCollectionRef<K, E> by innerDelegate, LirpDelegate {
+
+        override val size: Int get() = innerDelegate.referenceIds.size
+
+        override fun get(index: Int): E {
+            val ids = innerDelegate.referenceIds
+            val id = ids[index]
+            val reg =
+                innerDelegate.boundRegistryInternal()
+                    ?: throw NoSuchElementException("Aggregate collection not yet bound to a registry")
+            return reg.findById(id).orElseThrow { NoSuchElementException("Entity(id=$id) not found in registry") }
+        }
+
+        operator fun getValue(thisRef: Any?, property: KProperty<*>): AggregateListProxy<K, E> = this
+    }
+
+/**
  * Creates a property delegate that declares a typed aggregate reference to an ordered list of entities.
  *
- * The [initialIds] list is captured at entity construction time and used for resolution and as
- * the source of [AggregateCollectionRef.referenceIds]. Duplicate IDs are preserved;
- * order is maintained.
+ * The returned object is a [List] proxy. The [initialIds] list is captured at entity construction
+ * time and used for resolution and as the source of [AggregateCollectionRef.referenceIds].
+ * Duplicate IDs are preserved; order is maintained.
  *
  * **Requires KSP** — annotate the delegated property with [@Aggregate][Aggregate]
  * so the KSP processor generates the required `{ClassName}_LirpRefAccessor` class.
@@ -79,8 +99,8 @@ internal class AggregateListRefDelegate<K : Comparable<K>, E : IdentifiableEntit
  * @param K the type of the referenced entity's ID, must be [Comparable]
  * @param E the referenced entity type, must extend [IdentifiableEntity]
  * @param initialIds the list of referenced entity IDs
- * @return an [AggregateCollectionRef] delegate for ordered list references
+ * @return a [List] property delegate for ordered list references
  */
 fun <K : Comparable<K>, E : IdentifiableEntity<K>> aggregateList(
     initialIds: List<K> = emptyList()
-): AggregateCollectionRef<K, E> = AggregateListRefDelegate(initialIds)
+): AggregateListProxy<K, E> = AggregateListProxy(AggregateListRefDelegate(initialIds))

@@ -18,6 +18,7 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
+import kotlin.reflect.KProperty
 
 /**
  * Property delegate that implements a lazily-resolved aggregate reference to a unique set of
@@ -27,18 +28,6 @@ import net.transgressoft.lirp.entity.IdentifiableEntity
  * Resolution is always performed fresh against the bound [Registry] — no caching is applied.
  *
  * See [AbstractAggregateCollectionRefDelegate] for shared behavior: binding, cascade, and thread safety.
- *
- * Example:
- * ```kotlin
- * class Library(override val id: Long, val playlistIds: Set<Long>) : ReactiveEntityBase<Long, Library>() {
- *     @Aggregate(onDelete = CascadeAction.CASCADE)
- *     @Transient
- *     val playlists by aggregateSet<Long, Playlist>(playlistIds)
- * }
- *
- * // After adding the library to its repository:
- * val resolved: Set<Playlist> = library.playlists.resolveAll()
- * ```
  *
  * @param K the type of the referenced entity's ID
  * @param E the referenced entity type
@@ -60,11 +49,39 @@ internal class AggregateSetRefDelegate<K : Comparable<K>, E : IdentifiableEntity
 }
 
 /**
+ * Proxy that exposes an [AggregateSetRefDelegate] as a standard read-only [Set].
+ *
+ * Composes the inner delegate via [AggregateCollectionRef] delegation so that [referenceIds],
+ * [resolveAll], and cascade operations are forwarded. [iterator] resolves entities from the bound
+ * registry on demand, skipping IDs that are no longer present (soft-delete friendly).
+ *
+ * Inheriting from [AbstractSet] provides all bulk-query operations for free.
+ *
+ * @param K the type of the referenced entity's ID
+ * @param E the referenced entity type
+ */
+class AggregateSetProxy<K : Comparable<K>, E : IdentifiableEntity<K>>
+    internal constructor(
+        internal val innerDelegate: AggregateSetRefDelegate<K, E>
+    ) : AbstractSet<E>(), AggregateCollectionRef<K, E> by innerDelegate, LirpDelegate {
+
+        override val size: Int get() = innerDelegate.referenceIds.size
+
+        override fun iterator(): Iterator<E> {
+            val reg = innerDelegate.boundRegistryInternal() ?: return emptyList<E>().iterator()
+            return innerDelegate.referenceIds.mapNotNull { reg.findById(it).orElse(null) }.iterator()
+        }
+
+        operator fun getValue(thisRef: Any?, property: KProperty<*>): AggregateSetProxy<K, E> = this
+    }
+
+/**
  * Creates a property delegate that declares a typed aggregate reference to a unique set of entities.
  *
- * The [initialIds] set is captured at entity construction time and used for resolution and as
- * the source of [AggregateCollectionRef.referenceIds]. Duplicate IDs are not permitted —
- * Set semantics are enforced both in the initial IDs and the resolved result.
+ * The returned object is a [Set] proxy. The [initialIds] set is captured at entity construction
+ * time and used for resolution and as the source of [AggregateCollectionRef.referenceIds].
+ * Duplicate IDs are not permitted — Set semantics are enforced both in the initial IDs and the
+ * resolved result.
  *
  * **Requires KSP** — annotate the delegated property with [@Aggregate][Aggregate]
  * so the KSP processor generates the required `{ClassName}_LirpRefAccessor` class.
@@ -79,8 +96,8 @@ internal class AggregateSetRefDelegate<K : Comparable<K>, E : IdentifiableEntity
  * @param K the type of the referenced entity's ID, must be [Comparable]
  * @param E the referenced entity type, must extend [IdentifiableEntity]
  * @param initialIds the set of referenced entity IDs
- * @return an [AggregateCollectionRef] delegate for unique set references
+ * @return a [Set] property delegate for unique set references
  */
 fun <K : Comparable<K>, E : IdentifiableEntity<K>> aggregateSet(
     initialIds: Set<K> = emptySet()
-): AggregateCollectionRef<K, E> = AggregateSetRefDelegate(initialIds)
+): AggregateSetProxy<K, E> = AggregateSetProxy(AggregateSetRefDelegate(initialIds))

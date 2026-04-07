@@ -153,9 +153,8 @@ class MusicCommonsSqlIntegrationTest : MusicCommonsIntegrationTestBase() {
 
             playlistRepo2.findById(10) shouldBePresent {
                 it.name shouldBe "My Playlist"
-                val resolved = it.audioItems.resolveAll()
-                resolved shouldHaveSize 2
-                resolved.map { item -> item.title } shouldContainExactlyInAnyOrder listOf("Track 1", "Track 2")
+                it.audioItems shouldHaveSize 2
+                it.audioItems.map { item: AudioItem -> item.title } shouldContainExactlyInAnyOrder listOf("Track 1", "Track 2")
             }
 
             ctx2.close()
@@ -188,9 +187,8 @@ class MusicCommonsSqlIntegrationTest : MusicCommonsIntegrationTestBase() {
 
             playlistRepo2.findById(10) shouldBePresent {
                 it.name shouldBe "Parent"
-                val resolved = it.playlists.resolveAll()
-                resolved shouldHaveSize 2
-                resolved.map { p -> p.id } shouldContainExactlyInAnyOrder listOf(20, 30)
+                it.playlists shouldHaveSize 2
+                it.playlists.map(MutableAudioPlaylist::id) shouldContainExactlyInAnyOrder listOf(20, 30)
             }
 
             ctx2.close()
@@ -223,8 +221,8 @@ class MusicCommonsSqlIntegrationTest : MusicCommonsIntegrationTestBase() {
             registerInContext(ctx2, MutableAudioPlaylist::class.java, playlistRepo2)
 
             playlistRepo2.findById(10) shouldBePresent {
-                it.audioItems.resolveAll() shouldHaveSize 1
-                it.audioItems.resolveAll().first().title shouldBe "Original"
+                it.audioItems shouldHaveSize 1
+                it.audioItems.first().title shouldBe "Original"
             }
 
             ctx2.close()
