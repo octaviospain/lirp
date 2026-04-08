@@ -52,8 +52,9 @@ internal class AggregateSetRefDelegate<K : Comparable<K>, E : IdentifiableEntity
  * Proxy that exposes an [AggregateSetRefDelegate] as a standard read-only [Set].
  *
  * Composes the inner delegate via [AggregateCollectionRef] delegation so that [referenceIds],
- * [resolveAll], and cascade operations are forwarded. [iterator] resolves entities from the bound
- * registry on demand, skipping IDs that are no longer present (soft-delete friendly).
+ * [resolveAll], and cascade operations are forwarded. [iterator] eagerly resolves all entities
+ * from the bound registry; throws [NoSuchElementException] if any ID cannot be resolved.
+ * Use [resolveAll] for soft-delete-friendly resolution that silently skips missing IDs.
  *
  * Inheriting from [AbstractSet] provides all bulk-query operations for free.
  *
@@ -65,11 +66,14 @@ class AggregateSetProxy<K : Comparable<K>, E : IdentifiableEntity<K>>
         internal val innerDelegate: AggregateSetRefDelegate<K, E>
     ) : AbstractSet<E>(), AggregateCollectionRef<K, E> by innerDelegate, LirpDelegate {
 
-        override val size: Int get() = innerDelegate.referenceIds.size
+        override val size: Int
+            get() = if (innerDelegate.boundRegistryInternal() != null) innerDelegate.referenceIds.size else 0
 
         override fun iterator(): Iterator<E> {
             val reg = innerDelegate.boundRegistryInternal() ?: return emptyList<E>().iterator()
-            return innerDelegate.referenceIds.mapNotNull { reg.findById(it).orElse(null) }.iterator()
+            return innerDelegate.referenceIds.map { id ->
+                reg.findById(id).orElseThrow { NoSuchElementException("Entity(id=$id) not found in registry") }
+            }.iterator()
         }
 
         operator fun getValue(thisRef: Any?, property: KProperty<*>): AggregateSetProxy<K, E> = this

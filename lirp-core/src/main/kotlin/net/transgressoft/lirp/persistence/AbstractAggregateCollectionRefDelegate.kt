@@ -27,8 +27,8 @@ import java.util.concurrent.atomic.AtomicReference
  * entities from a bound [Registry].
  *
  * Centralizes all shared behavior between ordered ([AggregateListRefDelegate]) and unique-set
- * ([AggregateSetRefDelegate]) collection references: registry binding, cascade execution
- * (CASCADE/RESTRICT/DETACH/NONE), and the [ReadOnlyProperty] contract.
+ * ([AggregateSetRefDelegate]) collection references: registry binding and cascade execution
+ * (CASCADE/RESTRICT/DETACH/NONE). Property delegation is handled by the proxy wrapper classes.
  *
  * Subclasses provide the concrete collection semantics by implementing [provideIds] and
  * [resolveAll], and by narrowing the [referenceIds] return type.

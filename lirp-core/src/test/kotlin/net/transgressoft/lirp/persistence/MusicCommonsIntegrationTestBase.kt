@@ -166,7 +166,7 @@ abstract class MusicCommonsIntegrationTestBase : FunSpec() {
 
         test("mutable collection adds nested playlist at runtime (self-referencing)") {
             val child = MutableAudioPlaylistEntity(20, "Child").also(playlistRepo::add)
-            val parent = MutableAudioPlaylistEntity(10, "Parentq").also(playlistRepo::add)
+            val parent = MutableAudioPlaylistEntity(10, "Parent").also(playlistRepo::add)
 
             parent.playlists.add(child)
 

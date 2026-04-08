@@ -65,7 +65,8 @@ class AggregateListProxy<K : Comparable<K>, E : IdentifiableEntity<K>>
         internal val innerDelegate: AggregateListRefDelegate<K, E>
     ) : AbstractList<E>(), AggregateCollectionRef<K, E> by innerDelegate, LirpDelegate {
 
-        override val size: Int get() = innerDelegate.referenceIds.size
+        override val size: Int
+            get() = if (innerDelegate.boundRegistryInternal() != null) innerDelegate.referenceIds.size else 0
 
         override fun get(index: Int): E {
             val ids = innerDelegate.referenceIds
