@@ -21,7 +21,7 @@ import net.transgressoft.lirp.entity.ReactiveEntity
 
 /**
  * A [MutationEvent] emitted on a parent (referencing) entity when a referenced child entity mutates
- * and bubble-up propagation is enabled for that reference.
+ * or a referenced collection changes, and bubble-up propagation is enabled for that reference.
  *
  * Bubble-up is opt-in per reference via
  * [@Aggregate(bubbleUp = true)][net.transgressoft.lirp.persistence.Aggregate].
@@ -32,13 +32,17 @@ import net.transgressoft.lirp.entity.ReactiveEntity
  * Propagation is single-level only: if `A` references `B` which references `C`, a mutation in `C`
  * notifies `B`'s subscribers but does not reach `A`'s subscribers.
  *
- * Subscribers can distinguish direct mutations ([MutationEvent]) from bubble-up events by checking
- * whether the received event is an instance of [AggregateMutationEvent]:
+ * [childEvent] can be either a [MutationEvent] (for property-level bubble-up from a referenced child
+ * entity) or a [CollectionChangeEvent] (for item-level diffs on a mutable aggregate collection).
+ * Subscribers can distinguish the two with a type check:
  *
  * ```kotlin
  * invoice.subscribe { event ->
  *     when (event) {
- *         is AggregateMutationEvent -> println("Child '${event.refName}' mutated")
+ *         is AggregateMutationEvent -> when (val child = event.childEvent) {
+ *             is MutationEvent<*, *> -> println("Child '${event.refName}' property mutated")
+ *             is CollectionChangeEvent<*> -> println("Collection '${event.refName}' changed: +${child.added.size} -${child.removed.size}")
+ *         }
  *         else -> println("Direct mutation on invoice")
  *     }
  * }
@@ -46,7 +50,7 @@ import net.transgressoft.lirp.entity.ReactiveEntity
  *
  * The [newEntity] and [oldEntity] properties inherited from [MutationEvent] represent the **parent**
  * entity's state at the time the bubble-up event was emitted, not the child entity's state.
- * The original child mutation is accessible via [childEvent].
+ * The original child event is accessible via [childEvent].
  *
  * @param K the type of the parent entity's ID, which must be [Comparable]
  * @param R the type of the parent entity
@@ -62,9 +66,9 @@ interface AggregateMutationEvent<K, R : ReactiveEntity<K, R>> : MutationEvent<K,
     val refName: String
 
     /**
-     * The original [MutationEvent] that was emitted by the referenced child entity.
+     * The original event that was emitted by the referenced child entity or collection.
      *
-     * Use this to access the child's previous and current state when reacting to a bubble-up event.
+     * For property mutations this is a [MutationEvent]; for collection changes this is a [CollectionChangeEvent].
      */
-    val childEvent: MutationEvent<*, *>
+    val childEvent: LirpEvent<*>
 }

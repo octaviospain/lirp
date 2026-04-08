@@ -176,7 +176,7 @@ val firstTrack: Track = playlist.tracks[0]
 val allTracks: List<Track> = playlist.tracks.toList()
 ```
 
-**Mutable example** — use `mutableAggregateList` or `mutableAggregateSet` when the collection must support runtime mutations. The property type is `MutableList<E>` / `MutableSet<E>`, providing the full standard collection API. Every mutation emits exactly one `MutationEvent` on the owning entity:
+**Mutable example** — use `mutableAggregateList` or `mutableAggregateSet` when the collection must support runtime mutations. The property type is `MutableList<E>` / `MutableSet<E>`, providing the full standard collection API. Every mutation emits exactly one event on the owning entity — an `AggregateMutationEvent` wrapping a `CollectionChangeEvent` with the added/removed diff:
 
 ```kotlin
 @Serializable
@@ -218,7 +218,7 @@ val iter = playlist.tracks.listIterator()
 val ids = (playlist.tracks as AggregateCollectionRef<*, *>).referenceIds
 ```
 
-**Bulk operations:** `addAll(collection)`, `removeAll(collection)`, and `retainAll(collection)` each emit exactly one `MutationEvent` regardless of how many elements are in the input — the backing ID store is updated atomically.
+**Bulk operations:** `addAll(collection)`, `removeAll(collection)`, and `retainAll(collection)` each emit exactly one `CollectionChangeEvent` (wrapped in `AggregateMutationEvent`) regardless of how many elements are in the input — the backing ID store is updated atomically.
 
 **Important notes:**
 - The delegate's `referenceIds` property (accessed via cast) is the live source of truth after mutations. For persistence, read from `(tracks as AggregateCollectionRef<*, *>).referenceIds` in your serializer or `toParams` method.
@@ -228,6 +228,62 @@ val ids = (playlist.tracks as AggregateCollectionRef<*, *>).referenceIds
 - Bubble-up propagation is not supported for collection references.
 
 **Cascade options:** `DETACH` (default for single refs), `CASCADE`, `RESTRICT`, `NONE` (default for collection refs).
+
+### Collection Change Events
+
+When a mutable aggregate collection is mutated, the owning entity emits an `AggregateMutationEvent` whose `childEvent` is a `CollectionChangeEvent<E>`. Unlike `ReactiveMutationEvent` (which carries before/after entity snapshots), `CollectionChangeEvent` carries a diff — exactly which elements were added and removed:
+
+| Operation | Event type | `added` | `removed` |
+|-----------|-----------|---------|-----------|
+| `add(e)` / `addAll(es)` | `ADD` | added elements | empty |
+| `remove(e)` / `removeAll(es)` | `REMOVE` | empty | removed elements |
+| `set(index, e)` | `REPLACE` | `[newElement]` | `[oldElement]` |
+| `clear()` | `CLEAR` | empty | all prior elements |
+
+Bulk operations (`addAll`, `removeAll`) emit a single event per call, not one per element. Clearing an already-empty collection emits no event.
+
+**3-tier subscription API:**
+
+```kotlin
+// All events — property mutations, collection changes, and bubble-up
+entity.subscribe { event -> ... }
+
+// Property mutations only (excludes AggregateMutationEvent)
+entity.subscribeToMutations { event ->
+    println("${event.oldEntity} -> ${event.newEntity}")
+}
+
+// Collection changes only (optionally filtered by collection property name)
+entity.subscribeToCollectionChanges { event ->
+    println("Type: ${event.type}, Added: ${event.added}, Removed: ${event.removed}")
+}
+
+// Filter to a specific collection
+entity.subscribeToCollectionChanges("tracks") { event ->
+    println("Tracks changed: +${event.added.size} -${event.removed.size}")
+}
+```
+
+**Java Consumer overloads:**
+
+```java
+// All collections
+CollectionChangeEventExtensionsKt.subscribeToCollectionChanges(entity, null,
+    (Consumer<CollectionChangeEvent<?>>) event ->
+        System.out.println("Added: " + event.getAdded()));
+
+// Specific collection
+CollectionChangeEventExtensionsKt.subscribeToCollectionChanges(entity, "tracks",
+    (Consumer<CollectionChangeEvent<?>>) event ->
+        System.out.println("Added: " + event.getAdded()));
+
+// Property mutations only
+CollectionChangeEventExtensionsKt.subscribeToMutations(entity,
+    (Consumer<ReactiveMutationEvent<Integer, MyEntity>>) event ->
+        System.out.println("Old: " + event.getOldEntity() + " New: " + event.getNewEntity()));
+```
+
+> **v2.4.0 migration note:** Collection mutations on `mutableAggregateList`/`mutableAggregateSet` no longer emit `ReactiveMutationEvent` with full entity snapshots. Subscribers that previously handled collection changes via the general `subscribe {}` callback must now handle `AggregateMutationEvent` with a `CollectionChangeEvent` childEvent, or use `subscribeToCollectionChanges`. `AggregateMutationEvent.childEvent` was widened from `MutationEvent<*, *>` to `LirpEvent<*>` — use `is` checks before casting.
 
 ## Entity Reactivity
 

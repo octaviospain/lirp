@@ -23,21 +23,20 @@ import net.transgressoft.lirp.entity.ReactiveEntity
  * Standard data class implementation of [AggregateMutationEvent].
  *
  * Emitted on a parent (referencing) entity's publisher when a referenced child entity mutates
- * and bubble-up propagation is enabled for that reference (`@Aggregate(bubbleUp = true)`).
+ * or a mutable aggregate collection changes, and bubble-up propagation is enabled for that
+ * reference (`@Aggregate(bubbleUp = true)`).
  *
  * The [newEntity] and [oldEntity] represent the **parent** entity's state at the time the
  * bubble-up event was emitted. Because the parent's own fields do not change during a child
- * mutation, both properties hold the same parent entity reference. Subscribers should access
- * [childEvent] to obtain the actual before/after diff on the child entity.
+ * mutation or collection change, both properties hold the same parent entity reference.
+ * Subscribers should inspect [childEvent] to determine the nature of the change:
  *
- * Example usage:
  * ```kotlin
  * invoice.subscribe { event ->
  *     when (event) {
- *         is AggregateMutationEvent -> {
- *             println("Child '${event.refName}' mutated")
- *             println("Old child: ${event.childEvent.oldEntity}")
- *             println("New child: ${event.childEvent.newEntity}")
+ *         is AggregateMutationEvent -> when (val child = event.childEvent) {
+ *             is MutationEvent<*, *> -> println("Child '${event.refName}' property mutated")
+ *             is CollectionChangeEvent<*> -> println("Collection '${event.refName}' changed: +${child.added.size} -${child.removed.size}")
  *         }
  *         else -> println("Direct mutation on invoice")
  *     }
@@ -50,12 +49,12 @@ import net.transgressoft.lirp.entity.ReactiveEntity
  * @property oldEntity the parent entity reference (same as [newEntity])
  * @property refName the property name of the [@Aggregate][net.transgressoft.lirp.persistence.Aggregate]
  *   annotated property that triggered the bubble-up propagation
- * @property childEvent the original [MutationEvent] emitted by the referenced child entity
+ * @property childEvent the original event emitted by the referenced child entity or collection
  */
 data class StandardAggregateMutationEvent<K, R>(
     override val newEntity: R,
     override val oldEntity: R,
     override val refName: String,
-    override val childEvent: MutationEvent<*, *>,
+    override val childEvent: LirpEvent<*>,
     override val type: MutationEvent.Type = MutationEvent.Type.MUTATE
 ) : AggregateMutationEvent<K, R> where K : Comparable<K>, R : ReactiveEntity<K, R>

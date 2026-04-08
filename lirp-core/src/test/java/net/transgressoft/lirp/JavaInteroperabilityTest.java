@@ -7,10 +7,13 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi;
 import kotlinx.coroutines.SupervisorKt;
 import kotlinx.coroutines.test.TestCoroutineDispatchersKt;
 import kotlinx.coroutines.test.TestCoroutineScheduler;
+import net.transgressoft.lirp.entity.CollectionChangeEventExtensionsKt;
 import net.transgressoft.lirp.event.AggregateMutationEvent;
+import net.transgressoft.lirp.event.CollectionChangeEvent;
 import net.transgressoft.lirp.event.CrudEvent;
 import net.transgressoft.lirp.event.MutationEvent;
 import net.transgressoft.lirp.event.ReactiveScope;
+import net.transgressoft.lirp.event.ReactiveMutationEvent;
 import net.transgressoft.lirp.persistence.BubbleUpOrderVolatileRepo;
 import net.transgressoft.lirp.persistence.Customer;
 import net.transgressoft.lirp.persistence.CustomerVolatileRepo;
@@ -41,6 +44,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.jupiter.api.Assertions.*;
@@ -595,6 +599,74 @@ class JavaInteroperabilityTest {
 
             assertTrue(removed);
             assertTrue(playlist.getAudioItems().getReferenceIds().isEmpty());
+        }
+    }
+
+    @Nested
+    @DisplayName("Subscription Extensions")
+    class SubscriptionExtensionTests {
+
+        LirpContext ctx;
+        AudioItemVolatileRepository trackRepo;
+        AudioPlaylistVolatileRepository playlistRepo;
+
+        @BeforeEach
+        void setUp() {
+            ctx = new LirpContext();
+            trackRepo = new AudioItemVolatileRepository(ctx);
+            playlistRepo = new AudioPlaylistVolatileRepository(ctx);
+        }
+
+        @AfterEach
+        void tearDown() {
+            ctx.close();
+        }
+
+        @Test
+        @DisplayName("subscribeToCollectionChanges Java Consumer overload receives CollectionChangeEvent")
+        void subscribeToCollectionChanges_Java_Consumer_receives_events() throws InterruptedException {
+            MutableAudioItem track = new MutableAudioItem(1, "Track 1");
+            trackRepo.add(track);
+            MutableAudioPlaylistEntity playlist = new MutableAudioPlaylistEntity(1, "Test Playlist", Collections.emptyList(), Collections.emptySet());
+            playlistRepo.add(playlist);
+
+            var latch = new CountDownLatch(1);
+            AtomicReference<CollectionChangeEvent<?>> receivedEvent = new AtomicReference<>(null);
+
+            CollectionChangeEventExtensionsKt.subscribeToCollectionChanges(playlist, null,
+                (Consumer<CollectionChangeEvent<?>>) event -> {
+                    receivedEvent.set(event);
+                    latch.countDown();
+                });
+
+            playlist.getAudioItems().add(track);
+            scheduler.advanceUntilIdle();
+
+            assertTrue(latch.await(2, SECONDS));
+            assertNotNull(receivedEvent.get());
+            assertEquals(CollectionChangeEvent.Type.ADD, receivedEvent.get().getType());
+        }
+
+        @Test
+        @DisplayName("subscribeToMutations Java Consumer overload receives ReactiveMutationEvent")
+        void subscribeToMutations_Java_Consumer_receives_events() throws InterruptedException {
+            var customer = new Customer(1, "Alice");
+
+            var latch = new CountDownLatch(1);
+            AtomicReference<ReactiveMutationEvent<?, ?>> receivedEvent = new AtomicReference<>(null);
+
+            CollectionChangeEventExtensionsKt.subscribeToMutations(customer,
+                (Consumer<ReactiveMutationEvent<Integer, Customer>>) event -> {
+                    receivedEvent.set(event);
+                    latch.countDown();
+                });
+
+            customer.updateName("Bob");
+            scheduler.advanceUntilIdle();
+
+            assertTrue(latch.await(2, SECONDS));
+            assertNotNull(receivedEvent.get());
+            assertInstanceOf(ReactiveMutationEvent.class, receivedEvent.get());
         }
     }
 

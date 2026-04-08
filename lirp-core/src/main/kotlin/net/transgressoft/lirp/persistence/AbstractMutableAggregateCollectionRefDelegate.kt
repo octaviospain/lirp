@@ -18,6 +18,8 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
+import net.transgressoft.lirp.event.CollectionChangeEvent
+import net.transgressoft.lirp.event.StandardCollectionChangeEvent
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
@@ -25,19 +27,15 @@ import kotlin.concurrent.withLock
  * Abstract base for mutable collection-typed aggregate reference delegates that lazily resolve a group
  * of entities from a bound [Registry] and allow runtime add/remove operations.
  *
- * Extends [AbstractAggregateCollectionRefDelegate] with a mutable backing ID store and mutation
- * callback injection for event emission.
+ * Extends [AbstractAggregateCollectionRefDelegate] with a mutable backing ID store and collection
+ * emission callback injection for event emission. Each mutation operation computes a per-operation
+ * diff (added/removed elements) and emits a [CollectionChangeEvent] through the
+ * [emitCollectionChangeEvent][net.transgressoft.lirp.entity.ReactiveEntityBase.emitCollectionChangeEvent]
+ * path, wrapped in an [AggregateMutationEvent][net.transgressoft.lirp.event.AggregateMutationEvent].
  *
  * **Thread safety:** A [ReentrantLock] guards all reads and writes to [backingIds].
- * The mutation callback is always invoked with the mutation action as a lambda so that
- * `mutateAndPublish` in [ReactiveEntityBase][net.transgressoft.lirp.entity.ReactiveEntityBase]
- * calls `clone()` BEFORE the action executes. This ensures the before/after comparison correctly
- * detects the change, enabling [MutationEvent][net.transgressoft.lirp.event.MutationEvent] emission.
- *
- * **Deep-copy requirement:** Entities using this delegate MUST deep-copy the backing ID
- * collection in their `clone()` implementation. Without a deep copy, the `mutateAndPublish`
- * equality check will always return true (entity before == entity after the mutation), silencing
- * all mutation events.
+ * The mutation is applied while the lock is held; the collection emission callback is invoked
+ * after the lock is released.
  *
  * @param K the type of the referenced entity's ID
  * @param E the referenced entity type
@@ -50,7 +48,7 @@ abstract class AbstractMutableAggregateCollectionRefDelegate<K : Comparable<K>, 
     protected val lock = ReentrantLock()
 
     @Volatile
-    private var mutationCallback: ((() -> Unit) -> Unit)? = null
+    protected var collectionEmissionCallback: ((CollectionChangeEvent<*>) -> Unit)? = null
 
     /**
      * The mutable backing ID collection, initialized from the initial IDs at construction time.
@@ -60,15 +58,11 @@ abstract class AbstractMutableAggregateCollectionRefDelegate<K : Comparable<K>, 
     protected abstract val backingIds: MutableCollection<K>
 
     /**
-     * Injects the mutation callback that triggers event emission on the owning entity.
-     * Called by [RegistryBase.bindEntityRefs] after registry binding.
-     *
-     * The callback receives the mutation action as a lambda executed INSIDE
-     * [ReactiveEntityBase.mutateAndPublish][net.transgressoft.lirp.entity.ReactiveEntityBase],
-     * so `clone()` is called before the mutation runs — enabling correct before/after event comparison.
+     * Injects the callback that emits a [CollectionChangeEvent] on the owning entity's publisher.
+     * Called by [RegistryBase.bindEntityRefs][net.transgressoft.lirp.persistence.RegistryBase] after registry binding.
      */
-    internal fun bindMutationCallback(callback: (() -> Unit) -> Unit) {
-        mutationCallback = callback
+    internal fun bindCollectionEmissionCallback(callback: (CollectionChangeEvent<*>) -> Unit) {
+        collectionEmissionCallback = callback
     }
 
     override fun provideIds(): Collection<K> = lock.withLock { ArrayList(backingIds) }
@@ -76,52 +70,40 @@ abstract class AbstractMutableAggregateCollectionRefDelegate<K : Comparable<K>, 
     override val referenceIds: Collection<K> get() = lock.withLock { ArrayList(backingIds) }
 
     /**
-     * Executes [action] on [backingIds] without returning a result, delegating to the mutation
-     * callback so that `mutateAndPublish` fires BEFORE the action modifies [backingIds].
-     *
-     * Used for indexed mutations (e.g., `add(index, element)`, `removeAt(index)`) where no Boolean
-     * result is needed. If no callback is bound, the action runs directly.
+     * Executes [action] on [backingIds] under the lock and returns the result.
+     * If [changed] is true and [eventBuilder] is provided, emits the [CollectionChangeEvent] after mutation.
      */
-    protected fun mutateVoid(action: MutableCollection<K>.() -> Unit) {
-        val cb = mutationCallback
-        if (cb != null) {
-            cb.invoke { lock.withLock { backingIds.action() } }
-        } else {
-            lock.withLock { backingIds.action() }
+    protected fun mutate(action: MutableCollection<K>.() -> Boolean, eventBuilder: (() -> CollectionChangeEvent<*>)? = null): Boolean {
+        val changed = lock.withLock { backingIds.action() }
+        if (changed && eventBuilder != null) {
+            collectionEmissionCallback?.invoke(eventBuilder())
         }
+        return changed
     }
 
     /**
-     * Executes [action] on [backingIds], delegating to the mutation callback so that
-     * `mutateAndPublish` fires BEFORE the action modifies [backingIds]. This ordering ensures
-     * `clone()` captures the pre-mutation state for event equality comparison.
-     *
-     * If no callback is bound (entity not yet added to a repository), the action runs directly.
+     * Executes [action] on [backingIds] under the lock without returning a result.
+     * If [eventBuilder] is provided, emits the [CollectionChangeEvent] after mutation.
      */
-    protected fun mutate(action: MutableCollection<K>.() -> Boolean): Boolean {
-        val cb = mutationCallback
-        return if (cb != null) {
-            var changed = false
-            cb.invoke {
-                lock.withLock {
-                    changed = backingIds.action()
-                }
-            }
-            changed
-        } else {
-            lock.withLock { backingIds.action() }
-        }
+    protected fun mutateVoid(action: MutableCollection<K>.() -> Unit, eventBuilder: (() -> CollectionChangeEvent<*>)? = null) {
+        lock.withLock { backingIds.action() }
+        eventBuilder?.let { collectionEmissionCallback?.invoke(it()) }
     }
 
     override fun clear() {
-        val cb = mutationCallback
-        if (cb != null) {
-            cb.invoke {
-                lock.withLock { backingIds.clear() }
-            }
-        } else {
-            lock.withLock { backingIds.clear() }
+        val removedEntities: List<*>
+        lock.withLock {
+            if (backingIds.isEmpty()) return
+            val reg = boundRegistry()
+            removedEntities =
+                if (reg != null) {
+                    ArrayList(backingIds).mapNotNull { reg.findById(it).orElse(null) }
+                } else {
+                    emptyList<Any>()
+                }
+            backingIds.clear()
         }
+        collectionEmissionCallback?.invoke(StandardCollectionChangeEvent.clear(removedEntities))
     }
 
     /**
@@ -138,31 +120,55 @@ abstract class AbstractMutableAggregateCollectionRefDelegate<K : Comparable<K>, 
 
     /**
      * Adds all [elements] to this collection in a single batch mutation, emitting exactly one
-     * [MutationEvent][net.transgressoft.lirp.event.MutationEvent] and one persistence update
-     * regardless of collection size.
+     * [CollectionChangeEvent] regardless of collection size.
      *
-     * Returns `true` if the collection was modified (at least one element was not already present).
+     * Returns `true` if the collection was modified. For list-backed collections, all elements
+     * are reported in the event. Subclasses with set semantics override to report only the
+     * elements actually added.
      */
     override fun addAll(elements: Collection<E>): Boolean {
         val ids = elements.map { it.id }
-        return mutate { addAll(ids) }
+        return mutate(
+            action = { addAll(ids) },
+            eventBuilder = { StandardCollectionChangeEvent.add(elements.toList()) }
+        )
     }
 
     /**
      * Removes all [elements] from this collection in a single batch mutation, emitting exactly one
-     * [MutationEvent][net.transgressoft.lirp.event.MutationEvent] and one persistence update
-     * regardless of collection size.
+     * [CollectionChangeEvent] regardless of collection size.
      *
-     * Returns `true` if the collection was modified (at least one element was present and removed).
+     * Returns `true` if the collection was modified. For list-backed collections, all elements
+     * are reported in the event. Subclasses with set semantics override to report only the
+     * elements actually removed.
      */
     override fun removeAll(elements: Collection<E>): Boolean {
         val ids = elements.map { it.id }
-        return mutate { removeAll(ids) }
+        return mutate(
+            action = { removeAll(ids) },
+            eventBuilder = { StandardCollectionChangeEvent.remove(elements.toList()) }
+        )
     }
 
     override fun retainAll(elements: Collection<E>): Boolean {
         val idsToKeep = elements.map { it.id }.toSet()
-        return mutate { retainAll(idsToKeep) }
+        var removedEntities: List<*> = emptyList<Any>()
+        val changed =
+            lock.withLock {
+                val reg = boundRegistry()
+                val idsToRemove = backingIds.filter { it !in idsToKeep }
+                removedEntities =
+                    if (reg != null) {
+                        idsToRemove.mapNotNull { reg.findById(it).orElse(null) }
+                    } else {
+                        emptyList<Any>()
+                    }
+                backingIds.retainAll(idsToKeep)
+            }
+        if (changed) {
+            collectionEmissionCallback?.invoke(StandardCollectionChangeEvent.remove(removedEntities))
+        }
+        return changed
     }
 
     override fun contains(element: E): Boolean = lock.withLock { element.id in backingIds }
