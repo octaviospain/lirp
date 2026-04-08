@@ -114,7 +114,6 @@ class MutableAggregateListProxy<K : Comparable<K>, E : IdentifiableEntity<K>>
         override fun set(index: Int, element: E): E {
             val old = get(index)
             innerDelegate.setAt(index, element.id)
-            modCount++
             return old
         }
 
@@ -157,8 +156,10 @@ class MutableAggregateListProxy<K : Comparable<K>, E : IdentifiableEntity<K>>
         }
 
         override fun clear() {
-            innerDelegate.clear()
-            modCount++
+            if (innerDelegate.size > 0) {
+                innerDelegate.clear()
+                modCount++
+            }
         }
 
         operator fun getValue(thisRef: Any?, property: KProperty<*>): MutableAggregateListProxy<K, E> = this

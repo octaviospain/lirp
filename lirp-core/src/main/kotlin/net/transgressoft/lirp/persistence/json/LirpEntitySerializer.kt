@@ -22,7 +22,6 @@ import net.transgressoft.lirp.persistence.AbstractMutableAggregateCollectionRefD
 import net.transgressoft.lirp.persistence.AggregateCollectionRef
 import net.transgressoft.lirp.persistence.MutableAggregateListProxy
 import net.transgressoft.lirp.persistence.MutableAggregateSetProxy
-import mu.KotlinLogging
 import kotlin.reflect.KClass
 import kotlin.reflect.KParameter
 import kotlin.reflect.KProperty1
@@ -64,8 +63,6 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
     private val kClass: KClass<E>,
     sampleInstance: E
 ) : KSerializer<E> {
-
-    private val logger = KotlinLogging.logger {}
 
     /**
      * Describes a constructor parameter that contributes to the serialized form.
@@ -165,13 +162,11 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
         if (idKType != null) {
             return serializer(idKType)
         }
-        // Last resort: Int — warn because this may silently corrupt Long/String keyed data
-        logger.warn {
-            "Could not determine aggregate ID type for property '${prop?.name}' on ${kClass.simpleName}; " +
-                "falling back to Int serializer. If your entity uses Long or String IDs, ensure the collection is " +
-                "non-empty at serializer construction time or the property's return type is resolvable."
-        }
-        return serializer(Int::class, emptyList(), false)
+        error(
+            "Could not determine aggregate ID type for property '${prop?.name}' on ${kClass.simpleName}. " +
+                "Build the serializer from a sample with at least one backing ID, or expose enough type " +
+                "information to resolve the aggregate key serializer."
+        )
     }
 
     override val descriptor: SerialDescriptor =
@@ -236,8 +231,9 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
         // Merge reactive delegate values that are also constructor params (e.g. `name`)
         val mergedParamValues = decoded.paramValues.toMutableMap()
         for ((name, param) in constructorDelegateParams) {
-            val value = decoded.reactiveValues[name]
-            if (value != null) mergedParamValues[param] = value
+            if (decoded.reactiveValues.containsKey(name)) {
+                mergedParamValues[param] = decoded.reactiveValues[name]
+            }
         }
 
         val entity = constructEntity(mergedParamValues)
