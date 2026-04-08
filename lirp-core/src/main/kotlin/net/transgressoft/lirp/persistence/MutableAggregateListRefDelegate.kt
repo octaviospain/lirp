@@ -18,6 +18,7 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
+import net.transgressoft.lirp.event.StandardCollectionChangeEvent
 import kotlin.concurrent.withLock
 import kotlin.reflect.KProperty
 
@@ -30,7 +31,7 @@ import kotlin.reflect.KProperty
  * construction time; subsequent mutations are reflected directly in [referenceIds].
  *
  * See [AbstractMutableAggregateCollectionRefDelegate] for shared behavior: locking,
- * mutation callback injection, and the deep-copy requirement.
+ * collection emission callback injection, and the diff-per-operation semantics.
  *
  * @param K the type of the referenced entity's ID
  * @param E the referenced entity type
@@ -43,9 +44,17 @@ internal class MutableAggregateListRefDelegate<K : Comparable<K>, E : Identifiab
 
     override val backingIds: MutableList<K> = ArrayList(initialIds)
 
-    override fun add(element: E): Boolean = mutate { add(element.id) }
+    override fun add(element: E): Boolean =
+        mutate(
+            action = { add(element.id) },
+            eventBuilder = { StandardCollectionChangeEvent.add(listOf(element)) }
+        )
 
-    override fun remove(element: E): Boolean = mutate { remove(element.id) }
+    override fun remove(element: E): Boolean =
+        mutate(
+            action = { remove(element.id) },
+            eventBuilder = { StandardCollectionChangeEvent.remove(listOf(element)) }
+        )
 
     override fun iterator(): MutableIterator<E> = resolveAll().toMutableList().iterator()
 
@@ -56,27 +65,38 @@ internal class MutableAggregateListRefDelegate<K : Comparable<K>, E : Identifiab
         return lock.withLock { ArrayList(backingIds) }.mapNotNull { reg.findById(it).orElse(null) }
     }
 
-    internal fun setAt(index: Int, id: K): Boolean =
-        mutate {
-            (this as MutableList<K>)[index] = id
-            true
-        }
+    internal fun setAt(index: Int, id: K, newElement: E, oldElement: E): Boolean =
+        mutate(
+            action = {
+                (this as MutableList<K>)[index] = id
+                true
+            },
+            eventBuilder = { StandardCollectionChangeEvent.replace(added = listOf(newElement), removed = listOf(oldElement)) }
+        )
 
-    internal fun addAt(index: Int, id: K) = mutateVoid { (this as MutableList<K>).add(index, id) }
+    internal fun addAt(index: Int, id: K, element: E) =
+        mutateVoid(
+            action = { (this as MutableList<K>).add(index, id) },
+            eventBuilder = { StandardCollectionChangeEvent.add(listOf(element)) }
+        )
 
-    internal fun removeAtIndex(index: Int): K {
+    internal fun removeAtIndex(index: Int, removedElement: E): K {
         var removed: K? = null
-        mutate {
-            removed = (this as MutableList<K>).removeAt(index)
-            true
-        }
+        mutate(
+            action = {
+                removed = (this as MutableList<K>).removeAt(index)
+                true
+            },
+            eventBuilder = { StandardCollectionChangeEvent.remove(listOf(removedElement)) }
+        )
         return removed!!
     }
 
-    internal fun addAllAt(index: Int, ids: List<K>) =
-        mutateVoid {
-            (this as MutableList<K>).addAll(index, ids)
-        }
+    internal fun addAllAt(index: Int, ids: List<K>, elements: List<E>) =
+        mutateVoid(
+            action = { (this as MutableList<K>).addAll(index, ids) },
+            eventBuilder = { StandardCollectionChangeEvent.add(elements) }
+        )
 }
 
 /**
@@ -84,7 +104,7 @@ internal class MutableAggregateListRefDelegate<K : Comparable<K>, E : Identifiab
  *
  * Holds [innerDelegate] for registry binding, ID tracking, and reactive event emission.
  * All indexed mutations ([set], [add], [removeAt]) route through the delegate's locked,
- * callback-aware helpers so that mutation events fire correctly.
+ * callback-aware helpers so that collection change events fire correctly.
  *
  * Inheriting from [AbstractMutableList] provides `subList()`, `listIterator()`, and bulk operations
  * for free — they all funnel through the four override methods defined here.
@@ -113,18 +133,18 @@ class MutableAggregateListProxy<K : Comparable<K>, E : IdentifiableEntity<K>>
 
         override fun set(index: Int, element: E): E {
             val old = get(index)
-            innerDelegate.setAt(index, element.id)
+            innerDelegate.setAt(index, element.id, newElement = element, oldElement = old)
             return old
         }
 
         override fun add(index: Int, element: E) {
-            innerDelegate.addAt(index, element.id)
+            innerDelegate.addAt(index, element.id, element)
             modCount++
         }
 
         override fun removeAt(index: Int): E {
             val old = get(index)
-            innerDelegate.removeAtIndex(index)
+            innerDelegate.removeAtIndex(index, old)
             modCount++
             return old
         }
@@ -138,7 +158,7 @@ class MutableAggregateListProxy<K : Comparable<K>, E : IdentifiableEntity<K>>
 
         override fun addAll(index: Int, elements: Collection<E>): Boolean {
             if (elements.isEmpty()) return false
-            innerDelegate.addAllAt(index, elements.map { it.id })
+            innerDelegate.addAllAt(index, elements.map { it.id }, elements.toList())
             modCount++
             return true
         }
@@ -156,7 +176,7 @@ class MutableAggregateListProxy<K : Comparable<K>, E : IdentifiableEntity<K>>
         }
 
         override fun clear() {
-            if (innerDelegate.size > 0) {
+            if (innerDelegate.isNotEmpty()) {
                 innerDelegate.clear()
                 modCount++
             }
@@ -170,15 +190,15 @@ class MutableAggregateListProxy<K : Comparable<K>, E : IdentifiableEntity<K>>
  *
  * The returned object is a [MutableList] proxy that wraps an internal delegate owning the mutable
  * backing ID list, initialized from [initialIds] at property delegation time. Add, remove, and
- * indexed mutation operations update the internal list and trigger mutation event emission on the
- * owning entity after registry binding. Duplicate IDs are allowed (bag semantics).
+ * indexed mutation operations update the internal list and trigger collection change event emission
+ * on the owning entity after registry binding. Duplicate IDs are allowed (bag semantics).
  *
  * IMPORTANT: Entities using this delegate MUST deep-copy the backing list field in `clone()`:
  * ```
  * copy(itemIds = ArrayList(items.referenceIds.toList()))
  * ```
- * Without a deep copy, the `mutateAndPublish` equality check will always return true and
- * mutation events will never be emitted.
+ * Without a deep copy, the backing ID list is shared between before and after snapshots, and
+ * equality checks may produce incorrect results.
  *
  * @param K the type of the referenced entity's ID, must be [Comparable]
  * @param E the referenced entity type, must extend [IdentifiableEntity]

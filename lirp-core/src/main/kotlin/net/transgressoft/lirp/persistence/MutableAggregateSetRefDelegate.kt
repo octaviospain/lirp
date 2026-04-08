@@ -18,6 +18,7 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
+import net.transgressoft.lirp.event.StandardCollectionChangeEvent
 import kotlin.concurrent.withLock
 import kotlin.reflect.KProperty
 
@@ -31,7 +32,7 @@ import kotlin.reflect.KProperty
  * construction time; subsequent mutations are reflected directly in [referenceIds].
  *
  * See [AbstractMutableAggregateCollectionRefDelegate] for shared behavior: locking,
- * mutation callback injection, and the deep-copy requirement.
+ * collection emission callback injection, and the diff-per-operation semantics.
  *
  * @param K the type of the referenced entity's ID
  * @param E the referenced entity type
@@ -44,9 +45,47 @@ internal class MutableAggregateSetRefDelegate<K : Comparable<K>, E : Identifiabl
 
     override val backingIds: MutableSet<K> = LinkedHashSet(initialIds)
 
-    override fun add(element: E): Boolean = mutate { add(element.id) }
+    override fun add(element: E): Boolean =
+        mutate(
+            action = { add(element.id) },
+            eventBuilder = { StandardCollectionChangeEvent.add(listOf(element)) }
+        )
 
-    override fun remove(element: E): Boolean = mutate { remove(element.id) }
+    override fun remove(element: E): Boolean =
+        mutate(
+            action = { remove(element.id) },
+            eventBuilder = { StandardCollectionChangeEvent.remove(listOf(element)) }
+        )
+
+    override fun addAll(elements: Collection<E>): Boolean {
+        val distinct = elements.distinctBy { it.id }
+        val ids = distinct.map { it.id }
+        val actuallyAdded: List<E>
+        val changed =
+            lock.withLock {
+                actuallyAdded = distinct.filter { it.id !in backingIds }
+                backingIds.addAll(ids)
+            }
+        if (changed && actuallyAdded.isNotEmpty()) {
+            collectionEmissionCallback?.invoke(StandardCollectionChangeEvent.add(actuallyAdded))
+        }
+        return changed
+    }
+
+    override fun removeAll(elements: Collection<E>): Boolean {
+        val distinct = elements.distinctBy { it.id }
+        val ids = distinct.map { it.id }
+        val actuallyRemoved: List<E>
+        val changed =
+            lock.withLock {
+                actuallyRemoved = distinct.filter { it.id in backingIds }
+                backingIds.removeAll(ids)
+            }
+        if (changed && actuallyRemoved.isNotEmpty()) {
+            collectionEmissionCallback?.invoke(StandardCollectionChangeEvent.remove(actuallyRemoved))
+        }
+        return changed
+    }
 
     override fun iterator(): MutableIterator<E> = resolveAll().toMutableList().iterator()
 
@@ -65,7 +104,7 @@ internal class MutableAggregateSetRefDelegate<K : Comparable<K>, E : Identifiabl
  *
  * Composes the inner delegate via [AggregateCollectionRef] delegation so that [referenceIds],
  * [resolveAll], and cascade operations are forwarded. [add] and [remove] route through the
- * delegate's locked, callback-aware mutation helpers so that reactive events fire correctly.
+ * delegate's locked, callback-aware mutation helpers so that collection change events fire correctly.
  *
  * The [iterator] takes a snapshot of IDs at the time of iteration; [MutableIterator.remove] removes
  * the entity from the backing ID set via the delegate's locked [remove] path.
@@ -118,8 +157,8 @@ class MutableAggregateSetProxy<K : Comparable<K>, E : IdentifiableEntity<K>>
  *
  * The returned object is a [MutableSet] proxy that wraps an internal delegate owning a mutable
  * backing ID set ([LinkedHashSet]), initialized from [initialIds] at property delegation time.
- * Add and remove operations update the internal set and trigger mutation event emission on the
- * owning entity after registry binding. Uniqueness is enforced — duplicate IDs are silently ignored.
+ * Add and remove operations update the internal set and trigger collection change event emission
+ * on the owning entity after registry binding. Uniqueness is enforced — duplicate IDs are silently ignored.
  *
  * See [mutableAggregateList] for details on `clone()` deep-copy requirements.
  *

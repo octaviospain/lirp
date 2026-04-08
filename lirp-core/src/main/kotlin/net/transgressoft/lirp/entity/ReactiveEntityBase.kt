@@ -17,7 +17,9 @@
 
 package net.transgressoft.lirp.entity
 
+import net.transgressoft.lirp.event.CollectionChangeEvent
 import net.transgressoft.lirp.event.FlowEventPublisher
+import net.transgressoft.lirp.event.LirpEvent
 import net.transgressoft.lirp.event.LirpEventPublisher
 import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.MutationEvent
@@ -222,13 +224,42 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
      * direct access to the correctly-typed `R` parameter, avoiding the type erasure problem
      * that arises when emitting from external (wildcard-typed) call sites.
      *
+     * Accepts any [LirpEvent] as [childEvent] — both [MutationEvent] for property-level bubble-up
+     * and [CollectionChangeEvent] for collection-level diffs.
+     *
      * @param refName the property name of the [@Aggregate][net.transgressoft.lirp.persistence.Aggregate]
      *   annotated property that triggered the bubble-up
-     * @param childEvent the original [MutationEvent] from the referenced child entity
+     * @param childEvent the original [LirpEvent] from the referenced child entity or collection
      */
     @Suppress("UNCHECKED_CAST")
-    internal fun emitBubbleUpEvent(refName: String, childEvent: MutationEvent<*, *>) {
+    internal fun emitBubbleUpEvent(refName: String, childEvent: LirpEvent<*>) {
         check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
+        val aggregateEvent =
+            StandardAggregateMutationEvent(
+                newEntity = this as R,
+                oldEntity = this as R,
+                refName = refName,
+                childEvent = childEvent
+            )
+        publisher.emitAsync(aggregateEvent)
+    }
+
+    /**
+     * Emits a [CollectionChangeEvent] wrapped in a [StandardAggregateMutationEvent] on this entity's publisher.
+     *
+     * Called by mutable aggregate collection delegates when items are added, removed, replaced, or cleared.
+     * Unlike [emitBubbleUpEvent], this method checks [shouldEmit] to avoid unnecessary work when no
+     * subscribers are registered.
+     *
+     * @param refName the property name of the mutable aggregate collection that changed
+     * @param childEvent the [CollectionChangeEvent] describing the diff
+     */
+    @Suppress("UNCHECKED_CAST")
+    internal fun emitCollectionChangeEvent(refName: String, childEvent: CollectionChangeEvent<*>) {
+        check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
+        if (eventsDisabled) return
+        lastDateModified = LocalDateTime.now()
+        if (!shouldEmit) return
         val aggregateEvent =
             StandardAggregateMutationEvent(
                 newEntity = this as R,
@@ -365,21 +396,6 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
             }
         }
         return result
-    }
-
-    /**
-     * Internal bridge for collection delegate mutation callback injection.
-     *
-     * Called by [net.transgressoft.lirp.persistence.RegistryBase] via a closure injected into mutable
-     * aggregate collection delegates after registry binding. The [mutationAction] lambda applies the
-     * `idSetter` write-back inside [mutateAndPublish], so the before/after equality check correctly
-     * detects the change: `clone()` captures the entity with OLD IDs, `mutationAction` updates them,
-     * and the resulting `entityBeforeChange != this` diff triggers [ReactiveMutationEvent] emission.
-     *
-     * @param mutationAction the mutation to apply inside [mutateAndPublish] (typically the `idSetter` call)
-     */
-    internal fun mutateForCollection(mutationAction: () -> Unit) {
-        mutateAndPublish { mutationAction() }
     }
 
     /**

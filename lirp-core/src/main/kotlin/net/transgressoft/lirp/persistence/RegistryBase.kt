@@ -289,13 +289,14 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
                 (inner as AbstractAggregateCollectionRefDelegate<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>)
                     .bindRegistry(registry as Registry<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>, context)
             }
-            // Inject mutation callback for mutable collection delegates after registry binding.
-            // The callback wraps the mutation action inside mutateForCollection so the backingIds
-            // update occurs inside mutateAndPublish, enabling correct before/after comparison
-            // for MutationEvent emission.
+            // Inject collection emission callback for mutable collection delegates after registry binding.
+            // The callback receives a CollectionChangeEvent and emits it wrapped in AggregateMutationEvent
+            // via ReactiveEntityBase.emitCollectionChangeEvent.
             val mutableInner = unwrapMutableDelegate(delegate)
             if (mutableInner != null && entity is ReactiveEntityBase<*, *>) {
-                mutableInner.bindMutationCallback { applyMutation -> entity.mutateForCollection(applyMutation) }
+                mutableInner.bindCollectionEmissionCallback { event ->
+                    entity.emitCollectionChangeEvent(entry.refName, event)
+                }
             }
         }
     }
