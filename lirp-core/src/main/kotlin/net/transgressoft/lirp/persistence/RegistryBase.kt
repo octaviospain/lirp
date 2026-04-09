@@ -25,6 +25,7 @@ import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
 import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.LirpEventPublisher
 import net.transgressoft.lirp.event.StandardCrudEvent.Read
+import net.transgressoft.lirp.persistence.FxScalarPropertyDelegate
 import mu.KotlinLogging
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
@@ -280,23 +281,39 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
             val typed = entry.delegateGetter(entity) as AggregateRefDelegate<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>
             typed.bindRegistry(registry as Registry<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>, context)
         }
+        bindCollectionRefs(entity)
+        bindFxScalarDelegates(entity)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun bindCollectionRefs(entity: T) {
         val collEntries = collectionRefEntries ?: return
         for (entry in collEntries) {
             val registry = context.registryFor(entry.referencedClass) ?: continue
             val delegate = entry.delegateGetter(entity)
             val inner = unwrapCollectionDelegate(delegate)
             if (inner != null) {
-                @Suppress("UNCHECKED_CAST")
                 (inner as AbstractAggregateCollectionRefDelegate<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>)
                     .bindRegistry(registry as Registry<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>, context)
             }
-            // Inject collection emission callback for mutable collection delegates after registry binding.
-            // The callback receives a CollectionChangeEvent and emits it wrapped in AggregateMutationEvent
-            // via ReactiveEntityBase.emitCollectionChangeEvent.
             val mutableInner = unwrapMutableDelegate(delegate)
             if (mutableInner != null && entity is ReactiveEntityBase<*, *>) {
                 mutableInner.bindCollectionEmissionCallback { event ->
                     entity.emitCollectionChangeEvent(entry.refName, event)
+                }
+            }
+            if (delegate is FxObservableCollectionProxy) {
+                delegate.syncLocalCache()
+            }
+        }
+    }
+
+    private fun bindFxScalarDelegates(entity: T) {
+        if (entity !is ReactiveEntityBase<*, *>) return
+        for ((_, delegate) in entity.delegateRegistry) {
+            if (delegate is FxScalarPropertyDelegate) {
+                delegate.bindMutationCallback { mutationBlock ->
+                    entity.emitFxScalarMutation(mutationBlock)
                 }
             }
         }

@@ -24,20 +24,37 @@ import net.transgressoft.lirp.persistence.Aggregate
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.LirpRepository
 import net.transgressoft.lirp.persistence.VolatileRepository
+import javafx.beans.property.BooleanProperty
+import javafx.beans.property.DoubleProperty
+import javafx.beans.property.IntegerProperty
+import javafx.beans.property.ObjectProperty
+import javafx.beans.property.StringProperty
 
 /**
- * Entity using [fxAggregateList] and [fxAggregateSet] delegates for integration testing
- * of the FxObservableCollectionProxy wiring through RegistryBase.
+ * Cohesive test entity exercising all lirp-fx delegate types: [reactiveProperty] for name,
+ * [fxString] / [fxInteger] / [fxBoolean] / [fxDouble] / [fxObject] scalar delegates,
+ * and [fxAggregateList] / [fxAggregateSet] collection delegates.
  */
 class FxAudioPlaylistEntity(
     override val id: Int,
     name: String,
+    initialYear: Int = 0,
+    initialActive: Boolean = false,
+    initialRating: Double = 0.0,
+    initialTag: String? = null,
+    initialDescription: String? = null,
     initialAudioItemIds: List<Int> = emptyList(),
     initialPlaylistIds: Set<Int> = emptySet()
 ) : ReactiveEntityBase<Int, FxAudioPlaylistEntity>(), IdentifiableEntity<Int> {
     override val uniqueId: String get() = "fx-audio-playlist-$id"
 
     var name: String by reactiveProperty(name)
+
+    val tagProperty: StringProperty by fxString(initialTag ?: "", dispatchToFxThread = false)
+    val yearProperty: IntegerProperty by fxInteger(initialYear, dispatchToFxThread = false)
+    val activeProperty: BooleanProperty by fxBoolean(initialActive, dispatchToFxThread = false)
+    val ratingProperty: DoubleProperty by fxDouble(initialRating, dispatchToFxThread = false)
+    val descriptionProperty: ObjectProperty<String?> by fxObject<String?>(initialDescription, dispatchToFxThread = false)
 
     @Aggregate(onDelete = CascadeAction.DETACH)
     val audioItems by fxAggregateList<Int, AudioItem>(initialAudioItemIds, dispatchToFxThread = false)
@@ -46,13 +63,22 @@ class FxAudioPlaylistEntity(
     val playlists by fxAggregateSet<Int, FxAudioPlaylistEntity>(initialPlaylistIds, dispatchToFxThread = false)
 
     override fun clone(): FxAudioPlaylistEntity =
-        FxAudioPlaylistEntity(id, name, audioItems.referenceIds.toList(), LinkedHashSet(playlists.referenceIds))
+        FxAudioPlaylistEntity(
+            id, name, yearProperty.get(), activeProperty.get(), ratingProperty.get(),
+            tagProperty.get(), descriptionProperty.get(),
+            audioItems.referenceIds.toList(), LinkedHashSet(playlists.referenceIds)
+        )
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is FxAudioPlaylistEntity) return false
         return id == other.id &&
             name == other.name &&
+            tagProperty.get() == other.tagProperty.get() &&
+            yearProperty.get() == other.yearProperty.get() &&
+            activeProperty.get() == other.activeProperty.get() &&
+            ratingProperty.get() == other.ratingProperty.get() &&
+            descriptionProperty.get() == other.descriptionProperty.get() &&
             audioItems.referenceIds == other.audioItems.referenceIds &&
             playlists.referenceIds == other.playlists.referenceIds
     }
@@ -60,12 +86,20 @@ class FxAudioPlaylistEntity(
     override fun hashCode(): Int {
         var result = id.hashCode()
         result = 31 * result + name.hashCode()
+        result = 31 * result + (tagProperty.get()?.hashCode() ?: 0)
+        result = 31 * result + yearProperty.get()
+        result = 31 * result + activeProperty.get().hashCode()
+        result = 31 * result + ratingProperty.get().hashCode()
+        result = 31 * result + (descriptionProperty.get()?.hashCode() ?: 0)
         result = 31 * result + audioItems.referenceIds.hashCode()
         result = 31 * result + playlists.referenceIds.hashCode()
         return result
     }
 
     override fun toString(): String = "FxAudioPlaylistEntity(id=$id, name='$name')"
+
+    /** Test-only bridge: exposes the protected [withEventsDisabled] for integration test assertions. */
+    fun <T> silently(action: () -> T): T = withEventsDisabled(action)
 }
 
 /**
@@ -79,7 +113,13 @@ class FxAudioPlaylistVolatileRepository :
     fun create(
         id: Int,
         name: String,
+        year: Int = 0,
+        active: Boolean = false,
+        rating: Double = 0.0,
+        tag: String? = null,
+        description: String? = null,
         audioItemIds: List<Int> = emptyList(),
         playlistIds: Set<Int> = emptySet()
-    ): FxAudioPlaylistEntity = FxAudioPlaylistEntity(id, name, audioItemIds, playlistIds).also(::add)
+    ): FxAudioPlaylistEntity =
+        FxAudioPlaylistEntity(id, name, year, active, rating, tag, description, audioItemIds, playlistIds).also(::add)
 }

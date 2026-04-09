@@ -8,8 +8,10 @@ ktlint {
     }
 }
 
-def osName = System.getProperty('os.name').toLowerCase()
-def fxPlatform = osName.contains('mac') ? 'mac' : osName.contains('win') ? 'win' : 'linux'
+def osName = System.getProperty('os.name').toLowerCase(Locale.ROOT)
+def osArch = System.getProperty('os.arch').toLowerCase(Locale.ROOT)
+def isArm64 = osArch.contains('aarch64') || osArch.contains('arm64')
+def fxPlatform = osName.contains('mac') ? (isArm64 ? 'mac-aarch64' : 'mac') : osName.contains('win') ? 'win' : 'linux'
 
 dependencies {
     api project(path: ':lirp-core')

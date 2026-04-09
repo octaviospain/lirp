@@ -97,7 +97,7 @@ ctx.close()                            // closes all repositories and connection
 
 No manual saves. No ORM session flushing. Property assignment _is_ persistence.
 
-Annotations are optional — convention-over-configuration infers table and column names from the class. Use `@PersistenceMapping` and `@PersistenceProperty` when you need to customize names, lengths, or precision. See the [wiki](https://github.com/octaviospain/lirp/wiki/SQL-Persistence) for full annotation reference.
+`@PersistenceMapping` on the entity class triggers KSP table definition generation for SQL persistence. Convention-over-configuration infers table and column names from the class — use `@PersistenceProperty` on individual properties when you need to customize names, lengths, or precision. See the [wiki](https://github.com/octaviospain/lirp/wiki/SQL-Persistence) for full annotation reference. These annotations are not needed for `VolatileRepository` or `JsonFileRepository`.
 
 ### Supported Persistence Targets
 
@@ -129,7 +129,9 @@ val bySku: Optional<Product> = repo.findFirstByIndex("sku", "SKU-001")
 
 ## Aggregate References
 
-Model DDD aggregate root relationships with the `@Aggregate` annotation and the `aggregate()`, `aggregateList()`, or `aggregateSet()` property delegates. A reference holds only the referenced entity's ID and resolves it lazily from the registered repository:
+Model DDD aggregate root relationships with the `@Aggregate` annotation and the `aggregate()`, `aggregateList()`, or `aggregateSet()` property delegates. The `@Aggregate` annotation is **required** on every aggregate reference property — the KSP processor uses it to generate the `_LirpRefAccessor` that `RegistryBase` needs at runtime for reference binding and cascade resolution. Without it, `RegistryBase` throws `IllegalStateException` when the entity is added to a repository.
+
+A reference holds only the referenced entity's ID and resolves it lazily from the registered repository:
 
 ```kotlin
 data class Product(override val id: Int, var name: String, val categoryId: Int) :
@@ -568,6 +570,57 @@ dependencies {
     implementation("org.openjfx:javafx-base:21")
 }
 ```
+
+### Scalar Property Delegates
+
+`lirp-fx` provides scalar property delegates that bridge lirp's reactive properties with JavaFX property types:
+
+```kotlin
+class MyEntity(override val id: Int, name: String, age: Int) :
+    ReactiveEntityBase<Int, MyEntity>(), IdentifiableEntity<Int> {
+
+    override val uniqueId: String get() = "my-entity-$id"
+
+    val nameProperty: StringProperty by fxString(name)
+    val ageProperty: IntegerProperty by fxInteger(age)
+    val activeProperty: BooleanProperty by fxBoolean(false)
+    val scoreProperty: DoubleProperty by fxDouble(0.0)
+    val tagProperty: ObjectProperty<String?> by fxObject<String?>(null)
+
+    override fun clone(): MyEntity = MyEntity(id, nameProperty.get(), ageProperty.get())
+}
+```
+
+When the entity is in a repository, setting a scalar property fires both a lirp `MutationEvent` and JavaFX `ChangeListener` notifications:
+
+```kotlin
+entity.nameProperty.set("Updated")  // Emits MutationEvent + fires ChangeListeners
+entity.nameProperty.addListener { _, old, new -> println("$old -> $new") }
+```
+
+Available factories: `fxString()`, `fxInteger()`, `fxDouble()`, `fxFloat()`, `fxLong()`, `fxBoolean()`, `fxObject<T>()`.
+
+**Java API:** Use `FxProperties` for static factory access:
+
+```java
+LirpStringProperty name = FxProperties.fxString("default", true);
+LirpIntegerProperty age = FxProperties.fxInteger(0, true);
+FxAggregateListProxy<Integer, Track> tracks = FxProperties.fxAggregateList(List.of(), true);
+```
+
+## Annotations Reference
+
+| Annotation | Target | Required when | Not needed for |
+|-----------|--------|--------------|----------------|
+| `@Aggregate` | aggregate reference properties | any `aggregate()`, `aggregateList()`, `aggregateSet()`, `mutableAggregateList()`, `mutableAggregateSet()`, `fxAggregateList()`, `fxAggregateSet()` delegate | `reactiveProperty()`, `fxString()`, `fxInteger()`, and other scalar property delegates |
+| `@PersistenceMapping` | entity class | SQL persistence via `SqlRepository` | `VolatileRepository`, `JsonFileRepository`, `lirp-fx` delegates |
+| `@PersistenceProperty` | entity property | customizing SQL column name, length, precision, or type | uses convention defaults when absent; not needed outside `SqlRepository` |
+| `@Indexed` | entity property | O(1) equality lookups via `findByIndex` | when only key-based lookups or full-scan predicates are needed |
+| `@LirpRepository` | repository class | auto-discovery via KSP-generated `LirpContext` registration | manual repository registration via `RegistryBase.registerRepository()` |
+
+**`@Aggregate`** triggers KSP generation of `_LirpRefAccessor`, which `RegistryBase` requires at runtime for reference binding and cascade resolution. Without it on an aggregate delegate property, `RegistryBase` throws `IllegalStateException`.
+
+**`@PersistenceMapping`** triggers KSP generation of `_LirpTableDef` for SQL schema creation. Convention-over-configuration infers table name from the class name; use `@PersistenceProperty` on individual properties to customize column details.
 
 ## Key Features
 
