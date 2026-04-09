@@ -530,6 +530,45 @@ VolatileRepository (class, lirp-core)                   — in-memory
 
 `PersistentRepository` is the marker interface for repositories that survive JVM lifetime. `PersistentRepositoryBase` provides the shared foundation for all durable backends: it auto-subscribes entities on add, cancels subscriptions on remove, guards mutating operations after close, and drives the debounced write pipeline. Every CRUD operation and entity mutation enqueues a `PendingOp`; a sliding-window debounce collapses the queue and calls `writePending()` on the subclass. `JsonFileRepository` rewrites the full JSON file; `SqlRepository` executes batch SQL in a single transaction.
 
+## JavaFX Integration (lirp-fx)
+
+The `lirp-fx` module bridges lirp's aggregate collection delegates with JavaFX `ObservableList` and `ObservableSet`. Use `fxAggregateList()` and `fxAggregateSet()` as drop-in replacements for `mutableAggregateList()` and `mutableAggregateSet()` when your entities participate in JavaFX data binding.
+
+```kotlin
+class Playlist(
+    override val id: Int,
+    name: String,
+    initialTrackIds: List<Int> = emptyList()
+) : ReactiveEntityBase<Int, Playlist>() {
+    override val uniqueId = "playlist-$id"
+
+    var name: String by reactiveProperty(name)
+
+    @Aggregate(onDelete = CascadeAction.DETACH)
+    val tracks by fxAggregateList<Int, Track>(initialTrackIds)
+
+    override fun clone() = Playlist(id, name, tracks.referenceIds.toList())
+}
+
+// Bind directly to a TableView — mutations fire both JavaFX ListChangeListener
+// notifications AND lirp CollectionChangeEvent on the entity's event stream.
+val tableView = TableView<Track>()
+tableView.items = playlist.tracks  // ObservableList<Track>
+```
+
+**Dual notification:** A single mutation fires both a JavaFX `ListChangeListener.Change` (or `SetChangeListener.Change`) and a lirp `CollectionChangeEvent` wrapped in an `AggregateMutationEvent`. UI bindings and domain event subscribers both stay in sync.
+
+**FX thread dispatch:** By default, JavaFX listener notifications are dispatched to the FX Application Thread via `Platform.runLater`. Pass `dispatchToFxThread = false` to dispatch on `ReactiveScope.flowScope` instead, consistent with how lirp events are dispatched asynchronously.
+
+**Dependency:** JavaFX is `compileOnly` -- you bring your own JavaFX version at runtime. Add `lirp-fx` alongside your existing JavaFX dependency:
+
+```kotlin
+dependencies {
+    implementation("net.transgressoft:lirp-fx:<version>")
+    implementation("org.openjfx:javafx-base:21")
+}
+```
+
 ## Key Features
 
 - **Transparent SQL persistence** — add an entity, change a property, and the database stays in sync automatically
@@ -540,6 +579,7 @@ VolatileRepository (class, lirp-core)                   — in-memory
 - **Convention-over-configuration** — KSP generates table definitions from entity classes; annotations only when you need customization
 - **JSON persistence** — debounced file writes via `JsonFileRepository`
 - **Repository-as-factory** — typed `create()` methods with automatic `@LirpRepository` registration
+- **JavaFX integration** — `fxAggregateList`/`fxAggregateSet` delegates bridging lirp collections with `ObservableList`/`ObservableSet`
 - **Full Java interoperability**
 
 ## Limitations and Design Trade-offs

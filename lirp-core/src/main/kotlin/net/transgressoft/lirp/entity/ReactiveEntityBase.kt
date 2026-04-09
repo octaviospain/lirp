@@ -27,6 +27,7 @@ import net.transgressoft.lirp.event.MutationEvent.Type.MUTATE
 import net.transgressoft.lirp.event.ReactiveMutationEvent
 import net.transgressoft.lirp.event.StandardAggregateMutationEvent
 import net.transgressoft.lirp.persistence.AggregateRefDelegate
+import net.transgressoft.lirp.persistence.FxObservableCollectionProxy
 import net.transgressoft.lirp.persistence.LirpDelegate
 import net.transgressoft.lirp.persistence.LirpRefAccessor
 import mu.KotlinLogging
@@ -433,6 +434,12 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
                     val delegate = typedProp.getDelegate(this)
                     if (delegate is LirpDelegate) {
                         map[prop.name] = delegate
+                    } else if (delegate is FxObservableCollectionProxy) {
+                        val inner = delegate.innerMutableProxy
+                        require(inner is LirpDelegate) {
+                            "Fx proxy delegate '${prop.name}' must expose a LirpDelegate inner proxy, got: ${inner::class.qualifiedName}"
+                        }
+                        map[prop.name] = inner
                     }
                 }
                 _delegateRegistry = map
