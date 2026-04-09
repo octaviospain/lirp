@@ -1,0 +1,58 @@
+apply plugin: 'com.google.devtools.ksp'
+
+description = 'LIRP FX - JavaFX Observable Collection Bridges'
+
+ktlint {
+    filter {
+        exclude { it.file.path.contains("/generated/") }
+    }
+}
+
+def osName = System.getProperty('os.name').toLowerCase()
+def fxPlatform = osName.contains('mac') ? 'mac' : osName.contains('win') ? 'win' : 'linux'
+
+dependencies {
+    api project(path: ':lirp-core')
+
+    compileOnly "org.openjfx:javafx-base:21:${fxPlatform}"
+    compileOnly "org.openjfx:javafx-graphics:21:${fxPlatform}"
+
+    testImplementation platform(libs.junit.bom)
+    testImplementation libs.bundles.kotest
+    testImplementation libs.junit.jupiter
+    testRuntimeOnly libs.junit.platform.launcher
+
+    testImplementation "org.openjfx:javafx-base:21:${fxPlatform}"
+    testImplementation "org.openjfx:javafx-graphics:21:${fxPlatform}"
+    testImplementation 'org.testfx:openjfx-monocle:21.0.2'
+
+    testImplementation files(project(':lirp-core').sourceSets.test.output)
+    testImplementation libs.coroutines.test
+    testImplementation libs.serialization.json
+
+    kspTest project(path: ':lirp-ksp')
+}
+
+tasks.withType(Test).configureEach {
+    def fxJars = configurations.testRuntimeClasspath.files
+            .findAll { it.name.contains('javafx') }
+            .collect { it.absolutePath }
+    def monocleJar = configurations.testRuntimeClasspath.files
+            .find { it.name.contains('monocle') }
+    if (monocleJar == null) {
+        throw new GradleException("Monocle JAR not found in testRuntimeClasspath")
+    }
+    def fxModulePath = fxJars.join(File.pathSeparator)
+    jvmArgs "--module-path=${fxModulePath}",
+            '--add-modules=javafx.graphics',
+            "--patch-module=javafx.graphics=${monocleJar.absolutePath}",
+            '--add-reads=javafx.graphics=ALL-UNNAMED',
+            '--add-opens=javafx.graphics/com.sun.glass.ui=ALL-UNNAMED',
+            '--add-opens=javafx.graphics/com.sun.glass.ui.monocle=ALL-UNNAMED',
+            '--add-opens=javafx.graphics/com.sun.javafx.tk=ALL-UNNAMED',
+            '--add-opens=javafx.graphics/com.sun.javafx.tk.quantum=ALL-UNNAMED',
+            '--add-exports=javafx.graphics/com.sun.javafx.application=ALL-UNNAMED',
+            '--add-exports=javafx.graphics/com.sun.javafx.util=ALL-UNNAMED',
+            '--add-exports=javafx.graphics/com.sun.glass.ui=ALL-UNNAMED',
+            '--add-exports=javafx.graphics/com.sun.glass.ui.monocle=ALL-UNNAMED'
+}

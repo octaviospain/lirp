@@ -26,6 +26,7 @@ jobs:
                 with:
                     java-version: 21
                     distribution: 'zulu'
+                    java-package: 'jdk+fx'
 
             -   name: Cache Gradle packages
                 uses: actions/cache@v4

@@ -221,6 +221,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
                 failFastIfDelegatePresent(entity.javaClass, AggregateRefDelegate::class.java, "LirpRefAccessor")
                 failFastIfDelegatePresent(entity.javaClass, AggregateCollectionRef::class.java, "LirpRefAccessor")
                 failFastIfDelegatePresent(entity.javaClass, MutableAggregateCollectionRef::class.java, "LirpRefAccessor")
+                failFastIfDelegatePresent(entity.javaClass, FxObservableCollectionProxy::class.java, "LirpRefAccessor")
                 collectionRefEntries = emptyList()
                 refEntries = emptyList()
             }
@@ -308,6 +309,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
             is AggregateListProxy<*, *> -> delegate.innerDelegate
             is AggregateSetProxy<*, *> -> delegate.innerDelegate
             is AbstractAggregateCollectionRefDelegate<*, *> -> delegate
+            is FxObservableCollectionProxy -> unwrapCollectionDelegate(delegate.innerMutableProxy)
             else -> null
         }
 
@@ -316,6 +318,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
             is MutableAggregateListProxy<*, *> -> delegate.innerDelegate
             is MutableAggregateSetProxy<*, *> -> delegate.innerDelegate
             is AbstractMutableAggregateCollectionRefDelegate<*, *> -> delegate
+            is FxObservableCollectionProxy -> unwrapMutableDelegate(delegate.innerMutableProxy)
             else -> null
         }
 

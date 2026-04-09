@@ -1,2 +1,2 @@
 rootProject.name = 'lirp'
-include 'lirp-api', 'lirp-core', 'lirp-ksp', 'lirp-sql'
+include 'lirp-api', 'lirp-core', 'lirp-ksp', 'lirp-sql', 'lirp-fx'
