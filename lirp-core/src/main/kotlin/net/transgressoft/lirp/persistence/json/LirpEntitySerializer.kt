@@ -20,11 +20,13 @@ package net.transgressoft.lirp.persistence.json
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.persistence.AbstractMutableAggregateCollectionRefDelegate
 import net.transgressoft.lirp.persistence.AggregateCollectionRef
+import net.transgressoft.lirp.persistence.FxScalarPropertyDelegate
 import net.transgressoft.lirp.persistence.MutableAggregateListProxy
 import net.transgressoft.lirp.persistence.MutableAggregateSetProxy
 import kotlin.reflect.KClass
 import kotlin.reflect.KParameter
 import kotlin.reflect.KProperty1
+import kotlin.reflect.full.createType
 import kotlin.reflect.full.memberProperties
 import kotlin.reflect.full.primaryConstructor
 import kotlin.reflect.jvm.isAccessible
@@ -33,7 +35,6 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.descriptors.buildClassSerialDescriptor
-import kotlinx.serialization.descriptors.element
 import kotlinx.serialization.encoding.CompositeDecoder
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
@@ -90,6 +91,11 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
             override val name: String,
             override val serializer: KSerializer<Any?>
         ) : DelegateInfo
+
+        data class FxScalar(
+            override val name: String,
+            override val serializer: KSerializer<Any?>
+        ) : DelegateInfo
     }
 
     private val constructorParams: List<ConstructorParamInfo>
@@ -122,25 +128,32 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
                 .filter { param -> param.name != null && param.name in delegateNames }
                 .associateBy { it.name!! }
 
-        // Collect delegate infos preserving the order from memberProperties (kotlin-reflect preserves declaration order)
+        // Collect delegate infos preserving the order from memberProperties (kotlin-reflect preserves declaration order).
         delegateInfos =
             registry.entries.map { (name, delegate) ->
                 val prop = memberProps[name]
-                if (delegate is AggregateCollectionRef<*, *>) {
-                    val idSerializer = resolveAggregateIdSerializer(delegate, prop)
-                    @Suppress("UNCHECKED_CAST")
-                    DelegateInfo.AggregateCollection(name, ListSerializer(idSerializer) as KSerializer<Any?>)
-                } else {
-                    val typedProp =
-                        requireNotNull(prop) {
-                            "Cannot find member property '$name' on ${kClass.simpleName}"
-                        }
-                    @Suppress("UNCHECKED_CAST")
-                    DelegateInfo.ReactiveProperty(
-                        name,
-                        serializer(typedProp.returnType),
-                        typedProp as KProperty1<Any, Any?>
-                    )
+                when {
+                    delegate is AggregateCollectionRef<*, *> -> {
+                        val idSerializer = resolveAggregateIdSerializer(delegate, prop)
+                        @Suppress("UNCHECKED_CAST")
+                        DelegateInfo.AggregateCollection(name, ListSerializer(idSerializer) as KSerializer<Any?>)
+                    }
+                    delegate is FxScalarPropertyDelegate -> {
+                        @Suppress("UNCHECKED_CAST")
+                        DelegateInfo.FxScalar(name, resolveFxScalarSerializer(delegate, prop) as KSerializer<Any?>)
+                    }
+                    else -> {
+                        val typedProp =
+                            requireNotNull(prop) {
+                                "Cannot find member property '$name' on ${kClass.simpleName}"
+                            }
+                        @Suppress("UNCHECKED_CAST")
+                        DelegateInfo.ReactiveProperty(
+                            name,
+                            serializer(typedProp.returnType),
+                            typedProp as KProperty1<Any, Any?>
+                        )
+                    }
                 }
             }
     }
@@ -167,6 +180,34 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
                 "Build the serializer from a sample with at least one backing ID, or expose enough type " +
                 "information to resolve the aggregate key serializer."
         )
+    }
+
+    /**
+     * Resolves the value-level serializer for an [FxScalarPropertyDelegate]. The delegate wraps a
+     * JavaFX property whose underlying value type is determined from the property return type name.
+     * Falls back to the current value's runtime type when the property type isn't recognized.
+     */
+    private fun resolveFxScalarSerializer(
+        delegate: FxScalarPropertyDelegate,
+        prop: KProperty1<E, *>?
+    ): KSerializer<*> {
+        val qualifiedName = (prop?.returnType?.classifier as? KClass<*>)?.qualifiedName ?: ""
+        return when {
+            qualifiedName.endsWith("StringProperty") -> serializer<String?>()
+            qualifiedName.endsWith("IntegerProperty") -> serializer<Int>()
+            qualifiedName.endsWith("DoubleProperty") -> serializer<Double>()
+            qualifiedName.endsWith("FloatProperty") -> serializer<Float>()
+            qualifiedName.endsWith("LongProperty") -> serializer<Long>()
+            qualifiedName.endsWith("BooleanProperty") -> serializer<Boolean>()
+            qualifiedName.endsWith("ObjectProperty") -> {
+                val typeArg = prop?.returnType?.arguments?.firstOrNull()?.type
+                if (typeArg != null) serializer(typeArg) else serializer<String?>()
+            }
+            else -> {
+                val value = delegate.javaClass.getMethod("get").invoke(delegate)
+                if (value != null) serializer(value::class.createType()) else serializer<String?>()
+            }
+        }
     }
 
     override val descriptor: SerialDescriptor =
@@ -212,6 +253,15 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
                             )
                     composite.encodeSerializableElement(descriptor, index++, info.serializer, delegate.referenceIds.toList())
                 }
+                is DelegateInfo.FxScalar -> {
+                    val delegate =
+                        registry[info.name]
+                            ?: throw IllegalStateException(
+                                "Fx scalar delegate '${info.name}' not found in registry for ${kClass.simpleName}"
+                            )
+                    val fxValue = delegate.javaClass.getMethod("get").invoke(delegate)
+                    composite.encodeSerializableElement(descriptor, index++, info.serializer, fxValue)
+                }
             }
         }
 
@@ -240,6 +290,7 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
         entity.withEventsDisabledForClone {
             restoreReactiveProperties(entity, decoded.reactiveValues)
             restoreAggregateIds(entity, decoded.aggregateIds)
+            restoreFxScalarProperties(entity, decoded.fxScalarValues)
         }
         return entity
     }
@@ -247,7 +298,8 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
     private data class DecodedFields(
         val paramValues: Map<KParameter, Any?>,
         val reactiveValues: Map<String, Any?>,
-        val aggregateIds: Map<String, List<Any?>>
+        val aggregateIds: Map<String, List<Any?>>,
+        val fxScalarValues: Map<String, Any?>
     )
 
     @Suppress("UNCHECKED_CAST")
@@ -259,6 +311,7 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
         val paramValues = mutableMapOf<KParameter, Any?>()
         val aggregateIds = mutableMapOf<String, List<Any?>>()
         val reactiveValues = mutableMapOf<String, Any?>()
+        val fxScalarValues = mutableMapOf<String, Any?>()
 
         loop@ while (true) {
             val elementIndex = composite.decodeElementIndex(descriptor)
@@ -277,10 +330,13 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
                 is DelegateInfo.AggregateCollection ->
                     aggregateIds[delegateInfo.name] =
                         composite.decodeSerializableElement(descriptor, elementIndex, delegateInfo.serializer) as List<Any?>
+                is DelegateInfo.FxScalar ->
+                    fxScalarValues[delegateInfo.name] =
+                        composite.decodeSerializableElement(descriptor, elementIndex, delegateInfo.serializer)
                 null -> composite.decodeSerializableElement(descriptor, elementIndex, serializer<Any?>())
             }
         }
-        return DecodedFields(paramValues, reactiveValues, aggregateIds)
+        return DecodedFields(paramValues, reactiveValues, aggregateIds, fxScalarValues)
     }
 
     private fun constructEntity(paramValues: Map<KParameter, Any?>): E {
@@ -316,6 +372,17 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
                     else -> continue
                 }
             mutableDelegate.setBackingIds(ids as Collection<Nothing>)
+        }
+    }
+
+    private fun restoreFxScalarProperties(entity: E, fxScalarValues: Map<String, Any?>) {
+        val registry = entity.delegateRegistry
+        for ((name, decodedValue) in fxScalarValues) {
+            val delegate = registry[name] ?: continue
+            if (delegate !is FxScalarPropertyDelegate) continue
+            val setMethod = delegate.javaClass.methods.find { it.name == "set" } ?: continue
+            setMethod.isAccessible = true
+            setMethod.invoke(delegate, decodedValue)
         }
     }
 }

@@ -61,3 +61,74 @@ fun <K : Comparable<K>, E : IdentifiableEntity<K>> fxAggregateSet(
     dispatchToFxThread: Boolean = true
 ): FxAggregateSetProxy<K, E> =
     FxAggregateSetProxy(mutableAggregateSet(initialIds), dispatchToFxThread)
+
+/**
+ * Creates a [LirpStringProperty] delegate with an optional initial value.
+ *
+ * @param initialValue the initial string value; defaults to `""`
+ * @param dispatchToFxThread when `true` (default), RegistryBase dispatches mutation notifications
+ *   to the JavaFX Application Thread
+ */
+fun fxString(initialValue: String = "", dispatchToFxThread: Boolean = true): LirpStringProperty =
+    LirpStringProperty(initialValue, dispatchToFxThread)
+
+/**
+ * Creates a [LirpIntegerProperty] delegate with an optional initial value.
+ *
+ * @param initialValue the initial integer value; defaults to `0`
+ * @param dispatchToFxThread when `true` (default), RegistryBase dispatches mutation notifications
+ *   to the JavaFX Application Thread
+ */
+fun fxInteger(initialValue: Int = 0, dispatchToFxThread: Boolean = true): LirpIntegerProperty =
+    LirpIntegerProperty(initialValue, dispatchToFxThread)
+
+/**
+ * Creates a [LirpDoubleProperty] delegate with an optional initial value.
+ *
+ * @param initialValue the initial double value; defaults to `0.0`
+ * @param dispatchToFxThread when `true` (default), RegistryBase dispatches mutation notifications
+ *   to the JavaFX Application Thread
+ */
+fun fxDouble(initialValue: Double = 0.0, dispatchToFxThread: Boolean = true): LirpDoubleProperty =
+    LirpDoubleProperty(initialValue, dispatchToFxThread)
+
+/**
+ * Creates a [LirpFloatProperty] delegate with an optional initial value.
+ *
+ * @param initialValue the initial float value; defaults to `0.0f`
+ * @param dispatchToFxThread when `true` (default), RegistryBase dispatches mutation notifications
+ *   to the JavaFX Application Thread
+ */
+fun fxFloat(initialValue: Float = 0.0f, dispatchToFxThread: Boolean = true): LirpFloatProperty =
+    LirpFloatProperty(initialValue, dispatchToFxThread)
+
+/**
+ * Creates a [LirpLongProperty] delegate with an optional initial value.
+ *
+ * @param initialValue the initial long value; defaults to `0L`
+ * @param dispatchToFxThread when `true` (default), RegistryBase dispatches mutation notifications
+ *   to the JavaFX Application Thread
+ */
+fun fxLong(initialValue: Long = 0L, dispatchToFxThread: Boolean = true): LirpLongProperty =
+    LirpLongProperty(initialValue, dispatchToFxThread)
+
+/**
+ * Creates a [LirpBooleanProperty] delegate with an optional initial value.
+ *
+ * @param initialValue the initial boolean value; defaults to `false`
+ * @param dispatchToFxThread when `true` (default), RegistryBase dispatches mutation notifications
+ *   to the JavaFX Application Thread
+ */
+fun fxBoolean(initialValue: Boolean = false, dispatchToFxThread: Boolean = true): LirpBooleanProperty =
+    LirpBooleanProperty(initialValue, dispatchToFxThread)
+
+/**
+ * Creates a [LirpObjectProperty] delegate with an optional nullable initial value.
+ *
+ * @param T the type of the wrapped object; nullable is supported
+ * @param initialValue the initial value; defaults to `null`
+ * @param dispatchToFxThread when `true` (default), RegistryBase dispatches mutation notifications
+ *   to the JavaFX Application Thread
+ */
+fun <T> fxObject(initialValue: T? = null, dispatchToFxThread: Boolean = true): LirpObjectProperty<T> =
+    LirpObjectProperty(initialValue, dispatchToFxThread)

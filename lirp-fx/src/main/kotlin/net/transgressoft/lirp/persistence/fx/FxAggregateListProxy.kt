@@ -63,6 +63,13 @@ class FxAggregateListProxy<K : Comparable<K>, E : IdentifiableEntity<K>>(
     // Enables snapshotting for JavaFX Change notifications without requiring registry resolution.
     private val localElements = ArrayList<E>()
 
+    override fun syncLocalCache() {
+        localElements.clear()
+        for (i in 0 until innerProxy.size) {
+            localElements.add(innerProxy[i])
+        }
+    }
+
     override fun get(index: Int): E = localElements[index]
 
     override val size: Int get() = localElements.size

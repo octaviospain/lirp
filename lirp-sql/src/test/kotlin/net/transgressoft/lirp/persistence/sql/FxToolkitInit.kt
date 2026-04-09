@@ -15,15 +15,36 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>. *
  ******************************************************************************/
 
-package net.transgressoft.lirp.persistence
+package net.transgressoft.lirp.persistence.sql
+
+import javafx.application.Platform
 
 /**
- * Marker interface for all LIRP property delegates that participate in the framework's
- * runtime delegate introspection. Implemented by reactive property delegates and all
- * aggregate collection reference delegates.
- *
- * The [ReactiveEntityBase.delegateRegistry][net.transgressoft.lirp.entity.ReactiveEntityBase]
- * discovers instances of this interface by scanning `memberProperties` via kotlin-reflect,
- * enabling framework-level serialization without KSP code generation.
+ * Headless JavaFX toolkit initializer for test environments.
+ * Uses Monocle as the glass platform to avoid requiring a display.
  */
-interface LirpDelegate
+object FxToolkitInit {
+
+    @Volatile
+    private var initialized = false
+
+    fun ensureInitialized() {
+        if (initialized)
+            return
+        synchronized(this) {
+            if (initialized)
+                return
+            System.setProperty("java.awt.headless", "true")
+            System.setProperty("glass.platform", "Monocle")
+            System.setProperty("monocle.platform", "Headless")
+            System.setProperty("prism.order", "sw")
+            try {
+                Platform.startup {}
+            } catch (_: IllegalStateException) {
+                // Toolkit already initialized
+            }
+            Platform.setImplicitExit(false)
+            initialized = true
+        }
+    }
+}

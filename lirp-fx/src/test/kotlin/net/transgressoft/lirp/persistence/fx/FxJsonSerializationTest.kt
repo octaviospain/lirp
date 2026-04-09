@@ -33,9 +33,11 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.serialization.json.Json
 
 /**
- * Tests verifying JSON serialization round-trips for entities using [fxAggregateList]
- * and [fxAggregateSet] delegates. Fx proxies wrap mutable aggregate delegates whose
- * backing IDs must serialize/deserialize identically to non-fx aggregates.
+ * Tests verifying JSON serialization round-trips for entities using [fxAggregateList],
+ * [fxAggregateSet], and fx scalar delegates. Fx proxies wrap mutable aggregate delegates whose
+ * backing IDs must serialize/deserialize identically to non-fx aggregates. Fx scalar delegates
+ * are included in serialization — their values are carried by constructor parameters and
+ * serialized/deserialized as part of the entity's JSON representation.
  */
 @DisplayName("FxJsonSerializationTest")
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -58,7 +60,7 @@ class FxJsonSerializationTest : StringSpec({
     }
 
     "serializes entity with fxAggregateList as ID list only" {
-        val entity = FxAudioPlaylistEntity(1, "My Playlist", listOf(10, 20))
+        val entity = FxAudioPlaylistEntity(1, "My Playlist", initialAudioItemIds = listOf(10, 20))
 
         val encoded = json.encodeToString(serializer, entity)
 
@@ -94,7 +96,7 @@ class FxJsonSerializationTest : StringSpec({
     }
 
     "deserializes entity preserving fxAggregateList IDs and collection facade" {
-        val original = FxAudioPlaylistEntity(5, "Round Trip", listOf(10, 20, 30))
+        val original = FxAudioPlaylistEntity(5, "Round Trip", initialAudioItemIds = listOf(10, 20, 30))
 
         val encoded = json.encodeToString(serializer, original)
         val decoded = json.decodeFromString(serializer, encoded)
@@ -120,7 +122,7 @@ class FxJsonSerializationTest : StringSpec({
     }
 
     "round-trip preserves list order" {
-        val original = FxAudioPlaylistEntity(1, "Ordered", listOf(30, 10, 20))
+        val original = FxAudioPlaylistEntity(1, "Ordered", initialAudioItemIds = listOf(30, 10, 20))
 
         val encoded = json.encodeToString(serializer, original)
         val decoded = json.decodeFromString(serializer, encoded)
@@ -129,7 +131,7 @@ class FxJsonSerializationTest : StringSpec({
     }
 
     "round-trip after mutation preserves updated state" {
-        val entity = FxAudioPlaylistEntity(1, "Mutable", listOf(10))
+        val entity = FxAudioPlaylistEntity(1, "Mutable", initialAudioItemIds = listOf(10))
         entity.name = "Updated Name"
 
         val encoded = json.encodeToString(serializer, entity)
@@ -140,7 +142,7 @@ class FxJsonSerializationTest : StringSpec({
     }
 
     "round-trip with both collections populated and facade intact" {
-        val original = FxAudioPlaylistEntity(1, "Full", listOf(10, 20), setOf(2, 3))
+        val original = FxAudioPlaylistEntity(1, "Full", initialAudioItemIds = listOf(10, 20), initialPlaylistIds = setOf(2, 3))
 
         val encoded = json.encodeToString(serializer, original)
         val decoded = json.decodeFromString(serializer, encoded)
@@ -151,5 +153,53 @@ class FxJsonSerializationTest : StringSpec({
         decoded.audioItems.shouldBeInstanceOf<FxAggregateListProxy<*, *>>()
         decoded.playlists.referenceIds shouldBe setOf(2, 3)
         decoded.playlists.shouldBeInstanceOf<FxAggregateSetProxy<*, *>>()
+    }
+
+    "serializes fx scalar delegate values in JSON" {
+        val entity =
+            FxAudioPlaylistEntity(
+                1, "Scalars", initialYear = 2025, initialActive = true,
+                initialRating = 4.5, initialTag = "rock", initialDescription = "Best of"
+            )
+
+        val encoded = json.encodeToString(serializer, entity)
+
+        encoded shouldContain "\"tagProperty\": \"rock\""
+        encoded shouldContain "\"yearProperty\": 2025"
+        encoded shouldContain "\"activeProperty\": true"
+        encoded shouldContain "\"ratingProperty\": 4.5"
+        encoded shouldContain "\"descriptionProperty\": \"Best of\""
+        encoded shouldContain "\"name\": \"Scalars\""
+    }
+
+    "round-trip preserves fx scalar delegate values" {
+        val original =
+            FxAudioPlaylistEntity(
+                1, "Complete", initialYear = 2024, initialActive = true,
+                initialRating = 9.5, initialTag = "jazz", initialDescription = "Classic",
+                initialAudioItemIds = listOf(10, 20), initialPlaylistIds = setOf(2)
+            )
+
+        val encoded = json.encodeToString(serializer, original)
+        val decoded = json.decodeFromString(serializer, encoded)
+
+        decoded.id shouldBe 1
+        decoded.name shouldBe "Complete"
+        decoded.tagProperty.get() shouldBe "jazz"
+        decoded.yearProperty.get() shouldBe 2024
+        decoded.activeProperty.get() shouldBe true
+        decoded.ratingProperty.get() shouldBe 9.5
+        decoded.descriptionProperty.get() shouldBe "Classic"
+        decoded.audioItems.referenceIds shouldBe listOf(10, 20)
+        decoded.playlists.referenceIds shouldBe setOf(2)
+    }
+
+    "round-trip preserves null fx object property" {
+        val original = FxAudioPlaylistEntity(1, "NullDesc", initialDescription = null)
+
+        val encoded = json.encodeToString(serializer, original)
+        val decoded = json.decodeFromString(serializer, encoded)
+
+        decoded.descriptionProperty.get() shouldBe null
     }
 })

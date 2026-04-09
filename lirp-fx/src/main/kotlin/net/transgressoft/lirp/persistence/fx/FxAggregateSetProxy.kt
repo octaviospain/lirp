@@ -59,6 +59,11 @@ class FxAggregateSetProxy<K : Comparable<K>, E : IdentifiableEntity<K>>(
     private val invalidationListeners = CopyOnWriteArrayList<InvalidationListener>()
     private val setChangeListeners = CopyOnWriteArrayList<SetChangeListener<in E>>()
 
+    override fun syncLocalCache() {
+        localElements.clear()
+        localElements.addAll(innerProxy.resolveAll())
+    }
+
     // Local element cache maintained in parallel with the inner proxy's backing IDs.
     // Enables iteration and snapshotting without requiring registry resolution.
     private val localElements = LinkedHashSet<E>()

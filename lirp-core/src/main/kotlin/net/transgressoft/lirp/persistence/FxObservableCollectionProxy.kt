@@ -36,4 +36,14 @@ interface FxObservableCollectionProxy {
      * Typed as [Any] to avoid importing concrete fx proxy types in lirp-core.
      */
     val innerMutableProxy: Any
+
+    /**
+     * Synchronizes the local element cache with the resolved entities from the bound registry.
+     *
+     * Called by [RegistryBase.bindEntityRefs] after the inner delegate's registry is bound,
+     * ensuring the fx proxy's local cache reflects the current backing IDs. Without this,
+     * proxies constructed from IDs only (e.g. from SQL deserialization) would have an empty
+     * local cache, causing operations like [remove] and [get] to malfunction.
+     */
+    fun syncLocalCache()
 }

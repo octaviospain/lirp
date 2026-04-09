@@ -271,6 +271,35 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
         publisher.emitAsync(aggregateEvent)
     }
 
+    /**
+     * Emits a [ReactiveMutationEvent] triggered by a JavaFX scalar property delegate mutation.
+     *
+     * Called by fx scalar property delegates via a callback injected by RegistryBase. The supplied
+     * [mutationBlock] contains the `super.set(newValue)` call on the underlying Simple*Property.
+     * This method wraps it in a clone-before-mutation sequence: it captures the entity state before
+     * [mutationBlock] executes, then emits a [ReactiveMutationEvent] after if subscribers are present.
+     *
+     * Respects the [eventsDisabled] flag — when events are suppressed (e.g., during [clone]),
+     * the mutation still executes but no event is published.
+     *
+     * @param mutationBlock the lambda that performs the actual property mutation (super.set call)
+     */
+    @Suppress("UNCHECKED_CAST")
+    internal fun emitFxScalarMutation(mutationBlock: () -> Unit) {
+        check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
+        if (eventsDisabled) {
+            mutationBlock()
+            return
+        }
+        val entityBeforeChange = clone()
+        mutationBlock()
+        lastDateModified = LocalDateTime.now()
+        if (shouldEmit) {
+            log.trace { "Firing fx scalar mutation event from $entityBeforeChange to $this" }
+            publisher.emitAsync(ReactiveMutationEvent(this as R, entityBeforeChange as R))
+        }
+    }
+
     override fun subscribe(action: suspend (MutationEvent<K, R>) -> Unit): LirpEventSubscription<in LirpEntity, MutationEvent.Type, MutationEvent<K, R>> {
         check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
         return publisher.subscribe(action)
@@ -386,8 +415,8 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
         val result = mutationAction()
         if (entityBeforeChange == this) {
             log.warn {
-                "Attempt to publish update event from a mutation when object comparison was false. " +
-                    "Consider implementing equals() and hashcode() that implies a mutation in instance variables affected by the mutationAction"
+                "Attempt to publish update event from a mutation when the entity state did not change. " +
+                    "Consider implementing equals() and hashCode() that reflects all mutable properties affected by the mutationAction."
             }
         } else {
             lastDateModified = LocalDateTime.now()
@@ -429,9 +458,27 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
                 @Suppress("UNCHECKED_CAST")
                 for (prop in this::class.memberProperties) {
                     val typedProp = prop as? KProperty1<ReactiveEntityBase<*, *>, *> ?: continue
-                    // isAccessible is required for private entity classes (e.g. in test files)
-                    typedProp.isAccessible = true
-                    val delegate = typedProp.getDelegate(this)
+                    // isAccessible is required for private entity classes (e.g. in test files).
+                    // Some properties (e.g. @Transient-backed properties in data classes) may throw
+                    // KotlinReflectionInternalError (an Error, not Exception) — skip them safely
+                    // since they cannot be delegate-backed.
+                    try {
+                        typedProp.isAccessible = true
+                    } catch (e: Error) {
+                        if (e is VirtualMachineError || e is LinkageError) throw e
+                        continue
+                    } catch (_: Exception) {
+                        continue
+                    }
+                    val delegate =
+                        try {
+                            typedProp.getDelegate(this)
+                        } catch (e: Error) {
+                            if (e is VirtualMachineError || e is LinkageError) throw e
+                            continue
+                        } catch (_: Exception) {
+                            continue
+                        }
                     if (delegate is LirpDelegate) {
                         map[prop.name] = delegate
                     } else if (delegate is FxObservableCollectionProxy) {
