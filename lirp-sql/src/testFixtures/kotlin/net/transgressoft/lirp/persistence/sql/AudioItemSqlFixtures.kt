@@ -20,17 +20,17 @@ package net.transgressoft.lirp.persistence.sql
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.ColumnDef
 import net.transgressoft.lirp.persistence.ColumnType
+import net.transgressoft.lirp.persistence.DefaultAudioPlaylist
 import net.transgressoft.lirp.persistence.LirpRegistryInfo
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.MutableAudioPlaylist
-import net.transgressoft.lirp.persistence.MutableAudioPlaylistEntity
 import com.zaxxer.hikari.HikariDataSource
 import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.Table
 
 /**
- * SQL table definition for [AudioItem], mapping the [id] and [title] fields
+ * SQL table definition for [AudioItem], mapping the [id], [title], and [albumName] fields
  * to their respective SQL columns.
  */
 object AudioItemSqlTableDef : SqlTableDef<AudioItem> {
@@ -38,7 +38,8 @@ object AudioItemSqlTableDef : SqlTableDef<AudioItem> {
     override val columns =
         listOf(
             ColumnDef("id", ColumnType.IntType, nullable = false, primaryKey = true),
-            ColumnDef("title", ColumnType.VarcharType(500), nullable = false, primaryKey = false)
+            ColumnDef("title", ColumnType.VarcharType(500), nullable = false, primaryKey = false),
+            ColumnDef("album_name", ColumnType.VarcharType(255), nullable = false, primaryKey = false)
         )
 
     @Suppress("UNCHECKED_CAST")
@@ -46,7 +47,8 @@ object AudioItemSqlTableDef : SqlTableDef<AudioItem> {
         val cols = table.columns.associateBy { it.name }
         return MutableAudioItem(
             row[cols["id"]!! as Column<Int>],
-            row[cols["title"]!! as Column<String>]
+            row[cols["title"]!! as Column<String>],
+            row[cols["album_name"]!! as Column<String>]
         )
     }
 
@@ -54,7 +56,8 @@ object AudioItemSqlTableDef : SqlTableDef<AudioItem> {
         val cols = table.columns.associateBy { it.name }
         return mapOf(
             cols["id"]!! to entity.id,
-            cols["title"]!! to entity.title
+            cols["title"]!! to entity.title,
+            cols["album_name"]!! to entity.albumName
         )
     }
 }
@@ -87,13 +90,12 @@ object AudioPlaylistSqlTableDef : SqlTableDef<MutableAudioPlaylist> {
         val parsedPlaylistIds =
             if (playlistIdsText.isBlank()) emptySet()
             else playlistIdsText.split(",").mapNotNull { it.trim().toIntOrNull() }.toSet()
-        return MutableAudioPlaylistEntity(row[cols["id"]!! as Column<Int>], row[cols["name"]!! as Column<String>], parsedAudioItemIds, parsedPlaylistIds)
+        return DefaultAudioPlaylist(row[cols["id"]!! as Column<Int>], row[cols["name"]!! as Column<String>], parsedAudioItemIds, parsedPlaylistIds)
     }
 
     override fun toParams(entity: MutableAudioPlaylist, table: Table): Map<Column<*>, Any?> {
         val cols = table.columns.associateBy { it.name }
-        // Access audioItems/playlists via cast to the concrete entity which has the delegate properties
-        val concrete = entity as MutableAudioPlaylistEntity
+        val concrete = entity as DefaultAudioPlaylist
         return mapOf(
             cols["id"]!! to entity.id,
             cols["name"]!! to entity.name,

@@ -20,8 +20,8 @@ package net.transgressoft.lirp.persistence.json
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.persistence.AbstractMutableAggregateCollectionRefDelegate
 import net.transgressoft.lirp.persistence.AudioItem
-import net.transgressoft.lirp.persistence.MutableAggregateListProxy
-import net.transgressoft.lirp.persistence.MutableAggregateSetProxy
+import net.transgressoft.lirp.persistence.MutableAggregateList
+import net.transgressoft.lirp.persistence.MutableAggregateSet
 import net.transgressoft.lirp.persistence.mutableAggregateList
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldContainExactly
@@ -236,8 +236,8 @@ private fun <K : Comparable<K>> ReactiveEntityBase<*, *>.setDelegateIds(delegate
     val raw = delegateRegistry[delegateName]
     val delegate: AbstractMutableAggregateCollectionRefDelegate<K, *>? =
         when (raw) {
-            is MutableAggregateListProxy<*, *> -> raw.innerDelegate as AbstractMutableAggregateCollectionRefDelegate<K, *>
-            is MutableAggregateSetProxy<*, *> -> raw.innerDelegate as AbstractMutableAggregateCollectionRefDelegate<K, *>
+            is MutableAggregateList<*, *> -> raw.innerDelegate as AbstractMutableAggregateCollectionRefDelegate<K, *>
+            is MutableAggregateSet<*, *> -> raw.innerDelegate as AbstractMutableAggregateCollectionRefDelegate<K, *>
             is AbstractMutableAggregateCollectionRefDelegate<*, *> -> raw as AbstractMutableAggregateCollectionRefDelegate<K, *>
             else -> null
         }

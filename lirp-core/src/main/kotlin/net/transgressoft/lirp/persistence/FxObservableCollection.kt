@@ -17,23 +17,28 @@
 
 package net.transgressoft.lirp.persistence
 
+import net.transgressoft.lirp.entity.IdentifiableEntity
+
 /**
- * Marker interface for JavaFX observable collection proxies that wrap a mutable aggregate
- * collection delegate. Implemented by `FxAggregateListProxy` and `FxAggregateSetProxy`
+ * Marker interface for JavaFX observable collections that wrap a mutable aggregate
+ * collection delegate. Implemented by [FxAggregateList] and [FxAggregateSet]
  * from the `lirp-fx` module.
  *
- * [RegistryBase] uses this interface to detect fx proxies in [RegistryBase.bindEntityRefs]
+ * [RegistryBase] uses this interface to detect fx collections in [RegistryBase.bindEntityRefs]
  * without creating a circular module dependency between `lirp-core` and `lirp-fx`.
- * The [innerMutableProxy] property exposes the wrapped proxy (either [MutableAggregateListProxy]
- * or [MutableAggregateSetProxy]) so that RegistryBase can reach the internal delegate for
+ * The [innerMutableProxy] property exposes the wrapped collection (either [MutableAggregateList]
+ * or [MutableAggregateSet]) so that RegistryBase can reach the internal delegate for
  * registry binding and collection emission callback injection.
+ *
+ * @param K the entity ID type, must be [Comparable]
+ * @param E the entity type
  */
-interface FxObservableCollectionProxy {
+interface FxObservableCollection<K : Comparable<K>, E : IdentifiableEntity<K>> {
     /**
-     * The wrapped mutable aggregate proxy.
+     * The wrapped mutable aggregate collection.
      *
-     * Will be either a [MutableAggregateListProxy] or [MutableAggregateSetProxy] instance.
-     * Typed as [Any] to avoid importing concrete fx proxy types in lirp-core.
+     * Will be either a [MutableAggregateList] or [MutableAggregateSet] instance.
+     * Typed as [Any] to avoid importing concrete fx collection types in lirp-core.
      */
     val innerMutableProxy: Any
 

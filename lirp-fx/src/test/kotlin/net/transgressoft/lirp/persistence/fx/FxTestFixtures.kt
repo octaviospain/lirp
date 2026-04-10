@@ -103,6 +103,63 @@ class FxAudioPlaylistEntity(
 }
 
 /**
+ * Fx-aware audio item entity extending the core [AudioItem] interface with JavaFX property
+ * delegates for [title] and [albumName]. Used for projection map and fx integration tests.
+ */
+class FxAudioItem(
+    override val id: Int,
+    title: String,
+    albumName: String = ""
+) : ReactiveEntityBase<Int, AudioItem>(), AudioItem {
+    override val uniqueId: String get() = "fx-audio-item-$id"
+
+    val titleProperty: StringProperty by fxString(title, dispatchToFxThread = false)
+    val albumNameProperty: StringProperty by fxString(albumName, dispatchToFxThread = false)
+
+    override var title: String
+        get() = titleProperty.get()
+        set(value) {
+            titleProperty.set(value)
+        }
+
+    override var albumName: String
+        get() = albumNameProperty.get()
+        set(value) {
+            albumNameProperty.set(value)
+        }
+
+    override fun compareTo(other: AudioItem): Int = id.compareTo(other.id)
+
+    override fun clone(): FxAudioItem = FxAudioItem(id, title, albumName)
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is FxAudioItem) return false
+        return id == other.id && title == other.title && albumName == other.albumName
+    }
+
+    override fun hashCode(): Int {
+        var result = id.hashCode()
+        result = 31 * result + title.hashCode()
+        result = 31 * result + albumName.hashCode()
+        return result
+    }
+
+    override fun toString(): String = "FxAudioItem(id=$id, title='$title', albumName='$albumName')"
+}
+
+/**
+ * In-memory repository for [FxAudioItem] entities used in projection map integration tests.
+ */
+@LirpRepository
+class FxAudioItemVolatileRepository :
+    VolatileRepository<Int, AudioItem>("FxAudioItems") {
+
+    fun create(id: Int, title: String, albumName: String = ""): FxAudioItem =
+        FxAudioItem(id, title, albumName).also(::add)
+}
+
+/**
  * Repository for [FxAudioPlaylistEntity] entities. Uses [LirpContext.default] and the
  * public [VolatileRepository] constructor. KSP generates the accessor for delegate discovery.
  */

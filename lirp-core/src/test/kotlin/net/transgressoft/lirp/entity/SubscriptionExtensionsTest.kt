@@ -24,8 +24,8 @@ import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
 import net.transgressoft.lirp.persistence.AudioPlaylistVolatileRepository
+import net.transgressoft.lirp.persistence.DefaultAudioPlaylist
 import net.transgressoft.lirp.persistence.LirpContext
-import net.transgressoft.lirp.persistence.MutableAudioPlaylistEntity
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
@@ -47,19 +47,15 @@ class SubscriptionExtensionsTest : StringSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()
     val testScope = CoroutineScope(testDispatcher)
-    lateinit var previousFlowScope: CoroutineScope
-    lateinit var previousIoScope: CoroutineScope
 
     beforeSpec {
-        previousFlowScope = ReactiveScope.flowScope
-        previousIoScope = ReactiveScope.ioScope
         ReactiveScope.flowScope = testScope
         ReactiveScope.ioScope = testScope
     }
 
     afterSpec {
-        ReactiveScope.flowScope = previousFlowScope
-        ReactiveScope.ioScope = previousIoScope
+        ReactiveScope.resetDefaultFlowScope()
+        ReactiveScope.resetDefaultIoScope()
     }
 
     lateinit var ctx: LirpContext
@@ -78,12 +74,12 @@ class SubscriptionExtensionsTest : StringSpec({
 
     "subscribeToCollectionChanges receives ADD event from mutableAggregateList" {
         val t1 = trackRepo.create(1, "Track 1")
-        val playlist = MutableAudioPlaylistEntity(1, "Test").also(playlistRepo::add)
+        val playlist = DefaultAudioPlaylist(1, "Test").also(playlistRepo::add)
 
         val receivedEvent = AtomicReference<CollectionChangeEvent<*>>(null)
         val latch = CountDownLatch(1)
 
-        playlist.subscribeToCollectionChanges { event ->
+        playlist.subscribeToCollectionChanges(AudioItem::class) { event ->
             receivedEvent.set(event)
             latch.countDown()
         }
@@ -94,18 +90,17 @@ class SubscriptionExtensionsTest : StringSpec({
         val collectionEvent = receivedEvent.get()
         collectionEvent.shouldBeInstanceOf<CollectionChangeEvent<*>>()
         collectionEvent.type shouldBe CollectionChangeEvent.Type.ADD
-        @Suppress("UNCHECKED_CAST")
-        (collectionEvent as CollectionChangeEvent<AudioItem>).added shouldBe listOf(t1)
+        collectionEvent.added shouldBe listOf(t1)
     }
 
     "subscribeToCollectionChanges with refName filters to named collection only" {
         val t1 = trackRepo.create(1, "Track 1")
-        val playlist = MutableAudioPlaylistEntity(1, "Test").also(playlistRepo::add)
+        val playlist = DefaultAudioPlaylist(1, "Test").also(playlistRepo::add)
 
         val receivedEvent = AtomicReference<CollectionChangeEvent<*>>(null)
         val latch = CountDownLatch(1)
 
-        playlist.subscribeToCollectionChanges(refName = "audioItems") { event ->
+        playlist.subscribeToCollectionChanges(AudioItem::class, "audioItems") { event ->
             receivedEvent.set(event)
             latch.countDown()
         }
@@ -118,13 +113,13 @@ class SubscriptionExtensionsTest : StringSpec({
     }
 
     "subscribeToCollectionChanges with refName does not receive events from other collections" {
-        val subPlaylist = MutableAudioPlaylistEntity(2, "Sub").also(playlistRepo::add)
-        val parent = MutableAudioPlaylistEntity(1, "Parent").also(playlistRepo::add)
+        val subPlaylist = DefaultAudioPlaylist(2, "Sub").also(playlistRepo::add)
+        val parent = DefaultAudioPlaylist(1, "Parent").also(playlistRepo::add)
 
         var eventCount = 0
 
         // Subscribe only to audioItems, but mutate playlists
-        parent.subscribeToCollectionChanges(refName = "audioItems") { _ ->
+        parent.subscribeToCollectionChanges(AudioItem::class, "audioItems") { _ ->
             eventCount++
         }
 
@@ -135,8 +130,27 @@ class SubscriptionExtensionsTest : StringSpec({
         eventCount shouldBe 0
     }
 
+    "typed subscribeToCollectionChanges delivers CollectionChangeEvent with concrete element type" {
+        val t1 = trackRepo.create(1, "Track 1")
+        val playlist = DefaultAudioPlaylist(1, "Test").also(playlistRepo::add)
+
+        val receivedItems = mutableListOf<AudioItem>()
+        val latch = CountDownLatch(1)
+
+        playlist.subscribeToCollectionChanges(AudioItem::class, "audioItems") { event ->
+            receivedItems.addAll(event.added)
+            latch.countDown()
+        }
+
+        playlist.audioItems.add(t1)
+
+        latch.await(2, TimeUnit.SECONDS) shouldBe true
+        receivedItems.size shouldBe 1
+        receivedItems[0].id shouldBe 1
+    }
+
     "subscribeToMutations receives ReactiveMutationEvent for property change" {
-        val playlist = MutableAudioPlaylistEntity(1, "Original Name").also(playlistRepo::add)
+        val playlist = DefaultAudioPlaylist(1, "Original Name").also(playlistRepo::add)
 
         val receivedEvent = AtomicReference<ReactiveMutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
@@ -154,7 +168,7 @@ class SubscriptionExtensionsTest : StringSpec({
 
     "subscribeToMutations does not receive AggregateMutationEvent from collection mutation" {
         val t1 = trackRepo.create(1, "Track 1")
-        val playlist = MutableAudioPlaylistEntity(1, "Test").also(playlistRepo::add)
+        val playlist = DefaultAudioPlaylist(1, "Test").also(playlistRepo::add)
 
         var mutationEventCount = 0
 
@@ -172,7 +186,7 @@ class SubscriptionExtensionsTest : StringSpec({
 
     "subscribe receives both property mutations and collection change events" {
         val t1 = trackRepo.create(1, "Track 1")
-        val playlist = MutableAudioPlaylistEntity(1, "Original Name").also(playlistRepo::add)
+        val playlist = DefaultAudioPlaylist(1, "Original Name").also(playlistRepo::add)
 
         val receivedEvents = mutableListOf<Any>()
         val latch = CountDownLatch(2)

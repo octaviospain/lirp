@@ -38,7 +38,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 
 /**
- * Tests for [MutableAggregateListProxy] and [MutableAggregateSetProxy], validating
+ * Tests for [MutableAggregateList] and [MutableAggregateSet], validating
  * all proxy behaviors: lazy resolution per-access (D-01/D-02), indexed mutations (D-03),
  * replace at index (D-03), indexed removal (D-03), live sub-list and list-iterator views (D-07),
  * iterator().remove on set proxy (D-02), NoSuchElementException on unresolvable ID (D-05),
@@ -76,7 +76,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
     "mutableAggregateList resolves added entities from registry" {
         val t1 = trackRepo.create(1, "Track 1")
         val t2 = trackRepo.create(2, "Track 2")
-        val playlist = MutableAudioPlaylistEntity(1, "Test").also(playlistRepo::add)
+        val playlist = DefaultAudioPlaylist(1, "Test").also(playlistRepo::add)
 
         playlist.audioItems.add(t1)
         playlist.audioItems.add(t2)
@@ -86,14 +86,14 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
 
     // CORE-01 additional: resolveAll() returns empty list before registry binding
     "mutableAggregateList returns empty before registry binding" {
-        val playlist = MutableAudioPlaylistEntity(1, "Unbound")
+        val playlist = DefaultAudioPlaylist(1, "Unbound")
 
         playlist.audioItems.resolveAll() shouldBe emptyList()
     }
 
     "mutableAggregateSet enforces uniqueness" {
-        val p1 = MutableAudioPlaylistEntity(1, "P1").also(playlistRepo::add)
-        val group = MutableAudioPlaylistEntity(100, "Group").also(playlistRepo::add)
+        val p1 = DefaultAudioPlaylist(1, "P1").also(playlistRepo::add)
+        val group = DefaultAudioPlaylist(100, "Group").also(playlistRepo::add)
 
         group.playlists.add(p1) shouldBe true
         group.playlists.add(p1) shouldBe false
@@ -102,7 +102,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
 
     "add updates delegate backing ID collection" {
         val t1 = trackRepo.create(1, "T1")
-        val playlist = MutableAudioPlaylistEntity(1, "Test").also(playlistRepo::add)
+        val playlist = DefaultAudioPlaylist(1, "Test").also(playlistRepo::add)
 
         playlist.audioItems.add(t1)
 
@@ -112,7 +112,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
     "remove updates delegate backing ID collection" {
         val t1 = trackRepo.create(1, "T1")
         val playlist =
-            MutableAudioPlaylistEntity(1, "Test", listOf(1))
+            DefaultAudioPlaylist(1, "Test", listOf(1))
                 .also(playlistRepo::add)
 
         playlist.audioItems.remove(t1)
@@ -124,7 +124,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         trackRepo.create(1, "T1")
         trackRepo.create(2, "T2")
         val playlist =
-            MutableAudioPlaylistEntity(1, "Test", listOf(1, 2))
+            DefaultAudioPlaylist(1, "Test", listOf(1, 2))
                 .also(playlistRepo::add)
 
         playlist.audioItems.clear()
@@ -133,14 +133,14 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
     }
 
     "clone produces independent copy of mutable list field" {
-        val playlist = MutableAudioPlaylistEntity(1, "Test", listOf(1, 2))
+        val playlist = DefaultAudioPlaylist(1, "Test", listOf(1, 2))
         val cloned = playlist.clone()
 
         (cloned.audioItems.referenceIds !== playlist.audioItems.referenceIds) shouldBe true
     }
 
     "concurrent coroutine adds produce no lost updates" {
-        val playlist = MutableAudioPlaylistEntity(1, "Concurrent").also(playlistRepo::add)
+        val playlist = DefaultAudioPlaylist(1, "Concurrent").also(playlistRepo::add)
         (1..1000).forEach { trackRepo.create(it, "Track $it") }
 
         runTest {
@@ -162,7 +162,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
 
     "MutationEvent emitted after add on mutable list" {
         val t1 = trackRepo.create(1, "T1")
-        val playlist = MutableAudioPlaylistEntity(1, "Test").also(playlistRepo::add)
+        val playlist = DefaultAudioPlaylist(1, "Test").also(playlistRepo::add)
         val events = Collections.synchronizedList(mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>())
 
         playlist.subscribe { events.add(it) }
@@ -180,21 +180,21 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         playlist.lastDateModified shouldBeGreaterThan beforeModified
     }
 
-    "MutableAggregateListProxy get(index) resolves entity from registry" {
+    "MutableAggregateList get(index) resolves entity from registry" {
         val t1 = trackRepo.create(1, "Track 1")
         trackRepo.create(2, "Track 2")
         val t3 = trackRepo.create(3, "Track 3")
         val playlist =
-            MutableAudioPlaylistEntity(1, "Test", listOf(1, 2, 3))
+            DefaultAudioPlaylist(1, "Test", listOf(1, 2, 3))
                 .also(playlistRepo::add)
 
         playlist.audioItems[0] shouldBe t1
         playlist.audioItems[2] shouldBe t3
     }
 
-    "MutableAggregateListProxy get(index) throws IndexOutOfBoundsException for invalid index" {
+    "MutableAggregateList get(index) throws IndexOutOfBoundsException for invalid index" {
         val playlist =
-            MutableAudioPlaylistEntity(1, "Test", listOf(1, 2))
+            DefaultAudioPlaylist(1, "Test", listOf(1, 2))
                 .also(playlistRepo::add)
 
         shouldThrow<IndexOutOfBoundsException> {
@@ -202,10 +202,10 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         }
     }
 
-    "MutableAggregateListProxy get(index) throws NoSuchElementException for unresolvable ID" {
+    "MutableAggregateList get(index) throws NoSuchElementException for unresolvable ID" {
         // ID 999 is not in trackRepo
         val playlist =
-            MutableAudioPlaylistEntity(1, "Test", listOf(999))
+            DefaultAudioPlaylist(1, "Test", listOf(999))
                 .also(playlistRepo::add)
 
         shouldThrow<NoSuchElementException> {
@@ -213,11 +213,11 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         }
     }
 
-    "MutableAggregateListProxy set(index, element) replaces entity and emits MutationEvent" {
+    "MutableAggregateList set(index, element) replaces entity and emits MutationEvent" {
         trackRepo.create(1, "Track 1")
         val t2 = trackRepo.create(2, "Track 2")
         val playlist =
-            MutableAudioPlaylistEntity(1, "Test", listOf(1))
+            DefaultAudioPlaylist(1, "Test", listOf(1))
                 .also(playlistRepo::add)
         val events = Collections.synchronizedList(mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>())
         playlist.subscribe { events.add(it) }
@@ -231,12 +231,12 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         events shouldHaveSize 1
     }
 
-    "MutableAggregateListProxy add(index, element) inserts at position and emits MutationEvent" {
+    "MutableAggregateList add(index, element) inserts at position and emits MutationEvent" {
         val t1 = trackRepo.create(1, "Track 1")
         val t2 = trackRepo.create(2, "Track 2")
         val t3 = trackRepo.create(3, "Track 3")
         val playlist =
-            MutableAudioPlaylistEntity(1, "Test", listOf(1, 3))
+            DefaultAudioPlaylist(1, "Test", listOf(1, 3))
                 .also(playlistRepo::add)
         val events = Collections.synchronizedList(mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>())
         playlist.subscribe { events.add(it) }
@@ -249,12 +249,12 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         events shouldHaveSize 1
     }
 
-    "MutableAggregateListProxy removeAt(index) removes by position and emits MutationEvent" {
+    "MutableAggregateList removeAt(index) removes by position and emits MutationEvent" {
         val t1 = trackRepo.create(1, "Track 1")
         val t2 = trackRepo.create(2, "Track 2")
         val t3 = trackRepo.create(3, "Track 3")
         val playlist =
-            MutableAudioPlaylistEntity(1, "Test", listOf(1, 2, 3))
+            DefaultAudioPlaylist(1, "Test", listOf(1, 2, 3))
                 .also(playlistRepo::add)
         val events = Collections.synchronizedList(mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>())
         playlist.subscribe { events.add(it) }
@@ -268,13 +268,13 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         events shouldHaveSize 1
     }
 
-    "MutableAggregateListProxy subList() returns live view that emits events on mutation" {
+    "MutableAggregateList subList() returns live view that emits events on mutation" {
         val t1 = trackRepo.create(1, "Track 1")
         val t2 = trackRepo.create(2, "Track 2")
         val t3 = trackRepo.create(3, "Track 3")
         val tNew = trackRepo.create(4, "Track 4")
         val playlist =
-            MutableAudioPlaylistEntity(1, "Test", listOf(1, 2, 3))
+            DefaultAudioPlaylist(1, "Test", listOf(1, 2, 3))
                 .also(playlistRepo::add)
         val events = Collections.synchronizedList(mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>())
         playlist.subscribe { events.add(it) }
@@ -288,12 +288,12 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         events shouldHaveSize 1
     }
 
-    "MutableAggregateListProxy listIterator() set emits MutationEvent" {
+    "MutableAggregateList listIterator() set emits MutationEvent" {
         trackRepo.create(1, "Track 1")
         trackRepo.create(2, "Track 2")
         val t3 = trackRepo.create(3, "Track 3")
         val playlist =
-            MutableAudioPlaylistEntity(1, "Test", listOf(1, 2))
+            DefaultAudioPlaylist(1, "Test", listOf(1, 2))
                 .also(playlistRepo::add)
         val events = Collections.synchronizedList(mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>())
         playlist.subscribe { events.add(it) }
@@ -308,11 +308,11 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         events shouldHaveSize 1
     }
 
-    "MutableAggregateSetProxy iterator().remove() removes entity and emits MutationEvent" {
-        val p1 = MutableAudioPlaylistEntity(1, "P1").also(playlistRepo::add)
-        val p2 = MutableAudioPlaylistEntity(2, "P2").also(playlistRepo::add)
+    "MutableAggregateSet iterator().remove() removes entity and emits MutationEvent" {
+        val p1 = DefaultAudioPlaylist(1, "P1").also(playlistRepo::add)
+        val p2 = DefaultAudioPlaylist(2, "P2").also(playlistRepo::add)
         val group =
-            MutableAudioPlaylistEntity(100, "Group", initialPlaylistIds = setOf(1, 2))
+            DefaultAudioPlaylist(100, "Group", initialPlaylistIds = setOf(1, 2))
                 .also(playlistRepo::add)
         val events = Collections.synchronizedList(mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>())
         group.subscribe { events.add(it) }
@@ -327,10 +327,10 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         events shouldHaveSize 1
     }
 
-    "MutableAggregateListProxy resolve-per-call returns updated entity after registry change" {
+    "MutableAggregateList resolve-per-call returns updated entity after registry change" {
         val track = trackRepo.create(1, "Original Title")
         val playlist =
-            MutableAudioPlaylistEntity(1, "Test", listOf(1))
+            DefaultAudioPlaylist(1, "Test", listOf(1))
                 .also(playlistRepo::add)
 
         playlist.audioItems[0].title shouldBe "Original Title"
@@ -346,7 +346,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         trackRepo.create(1, "T1")
         trackRepo.create(2, "T2")
         val playlist =
-            MutableAudioPlaylistEntity(1, "Test", listOf(1, 2))
+            DefaultAudioPlaylist(1, "Test", listOf(1, 2))
                 .also(playlistRepo::add)
 
         val ids = (playlist.audioItems as AggregateCollectionRef<*, *>).referenceIds

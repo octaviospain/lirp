@@ -105,7 +105,7 @@ class FxJsonSerializationTest : StringSpec({
         decoded.name shouldBe "Round Trip"
         decoded.audioItems.referenceIds shouldBe listOf(10, 20, 30)
         decoded.audioItems.shouldBeInstanceOf<ObservableList<*>>()
-        decoded.audioItems.shouldBeInstanceOf<FxAggregateListProxy<*, *>>()
+        decoded.audioItems.shouldBeInstanceOf<FxAggregateList<*, *>>()
     }
 
     "deserializes entity preserving fxAggregateSet IDs and collection facade" {
@@ -118,7 +118,7 @@ class FxJsonSerializationTest : StringSpec({
         decoded.name shouldBe "With Sets"
         decoded.playlists.referenceIds shouldBe setOf(2, 3)
         decoded.playlists.shouldBeInstanceOf<ObservableSet<*>>()
-        decoded.playlists.shouldBeInstanceOf<FxAggregateSetProxy<*, *>>()
+        decoded.playlists.shouldBeInstanceOf<FxAggregateSet<*, *>>()
     }
 
     "round-trip preserves list order" {
@@ -150,9 +150,9 @@ class FxJsonSerializationTest : StringSpec({
         decoded.id shouldBe 1
         decoded.name shouldBe "Full"
         decoded.audioItems.referenceIds shouldBe listOf(10, 20)
-        decoded.audioItems.shouldBeInstanceOf<FxAggregateListProxy<*, *>>()
+        decoded.audioItems.shouldBeInstanceOf<FxAggregateList<*, *>>()
         decoded.playlists.referenceIds shouldBe setOf(2, 3)
-        decoded.playlists.shouldBeInstanceOf<FxAggregateSetProxy<*, *>>()
+        decoded.playlists.shouldBeInstanceOf<FxAggregateSet<*, *>>()
     }
 
     "serializes fx scalar delegate values in JSON" {

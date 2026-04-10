@@ -34,12 +34,12 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
- * Tests for [FxAggregateSetProxy] verifying JavaFX [SetChangeListener.Change] notifications,
+ * Tests for [FxAggregateSet] verifying JavaFX [SetChangeListener.Change] notifications,
  * per-element change semantics, dispatch thread behavior, and type compatibility with
  * [ObservableSet] and [AggregateCollectionRef].
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-class FxAggregateSetProxyTest : StringSpec({
+class FxAggregateSetTest : StringSpec({
 
     val testScope = CoroutineScope(UnconfinedTestDispatcher())
 
@@ -52,13 +52,13 @@ class FxAggregateSetProxyTest : StringSpec({
         ReactiveScope.resetDefaultFlowScope()
     }
 
-    "FxAggregateSetProxy returns correct size after add" {
+    "FxAggregateSet returns correct size after add" {
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         proxy.add(MutableAudioItem(1, "Song A"))
         proxy.size shouldBe 1
     }
 
-    "FxAggregateSetProxy fires SetChangeListener per element on add" {
+    "FxAggregateSet fires SetChangeListener per element on add" {
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         val changes = mutableListOf<SetChangeListener.Change<out AudioItem>>()
         proxy.addListener(SetChangeListener(changes::add))
@@ -71,7 +71,7 @@ class FxAggregateSetProxyTest : StringSpec({
         changes[0].elementAdded shouldBe item
     }
 
-    "FxAggregateSetProxy fires SetChangeListener per element on remove" {
+    "FxAggregateSet fires SetChangeListener per element on remove" {
         val item = MutableAudioItem(1, "Song A")
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         proxy.add(item)
@@ -86,7 +86,7 @@ class FxAggregateSetProxyTest : StringSpec({
         changes[0].elementRemoved shouldBe item
     }
 
-    "FxAggregateSetProxy fires one Change per element on addAll" {
+    "FxAggregateSet fires one Change per element on addAll" {
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         val testItems = listOf(MutableAudioItem(1, "A"), MutableAudioItem(2, "B"), MutableAudioItem(3, "C"))
         val changes = mutableListOf<SetChangeListener.Change<out AudioItem>>()
@@ -98,7 +98,7 @@ class FxAggregateSetProxyTest : StringSpec({
         changes.all { it.wasAdded() } shouldBe true
     }
 
-    "FxAggregateSetProxy fires one Change per element on clear" {
+    "FxAggregateSet fires one Change per element on clear" {
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         proxy.add(MutableAudioItem(1, "A"))
         proxy.add(MutableAudioItem(2, "B"))
@@ -112,7 +112,7 @@ class FxAggregateSetProxyTest : StringSpec({
         changes.all { it.wasRemoved() } shouldBe true
     }
 
-    "FxAggregateSetProxy fires listeners on flowScope when dispatchToFxThread=false" {
+    "FxAggregateSet fires listeners on flowScope when dispatchToFxThread=false" {
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         var listenerFired = false
 
@@ -123,7 +123,7 @@ class FxAggregateSetProxyTest : StringSpec({
         listenerFired shouldBe true
     }
 
-    "FxAggregateSetProxy fires listeners on FX thread when dispatchToFxThread=true" {
+    "FxAggregateSet fires listeners on FX thread when dispatchToFxThread=true" {
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = true)
         val latch = CountDownLatch(1)
         var wasFxThread = false
@@ -141,22 +141,22 @@ class FxAggregateSetProxyTest : StringSpec({
         wasFxThread shouldBe true
     }
 
-    "FxAggregateSetProxy implements ObservableSet" {
+    "FxAggregateSet implements ObservableSet" {
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         proxy.shouldBeInstanceOf<ObservableSet<AudioItem>>()
     }
 
-    "FxAggregateSetProxy implements AggregateCollectionRef" {
+    "FxAggregateSet implements AggregateCollectionRef" {
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         proxy.shouldBeInstanceOf<AggregateCollectionRef<Int, AudioItem>>()
     }
 
-    "FxAggregateSetProxy supports property delegation via getValue" {
+    "FxAggregateSet supports property delegation via getValue" {
         val proxy by fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
-        proxy.shouldBeInstanceOf<FxAggregateSetProxy<Int, AudioItem>>()
+        proxy.shouldBeInstanceOf<FxAggregateSet<Int, AudioItem>>()
     }
 
-    "FxAggregateSetProxy iterator remove fires Change" {
+    "FxAggregateSet iterator remove fires Change" {
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         val item1 = MutableAudioItem(1, "A")
         val item2 = MutableAudioItem(2, "B")
@@ -174,7 +174,7 @@ class FxAggregateSetProxyTest : StringSpec({
         proxy.size shouldBe 1
     }
 
-    "FxAggregateSetProxy iterator throws on remove before next" {
+    "FxAggregateSet iterator throws on remove before next" {
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         proxy.add(MutableAudioItem(1, "A"))
 
@@ -183,7 +183,7 @@ class FxAggregateSetProxyTest : StringSpec({
         exception.shouldBeInstanceOf<IllegalStateException>()
     }
 
-    "FxAggregateSetProxy removeAll fires one Change per removed element" {
+    "FxAggregateSet removeAll fires one Change per removed element" {
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         val item1 = MutableAudioItem(1, "A")
         val item2 = MutableAudioItem(2, "B")
@@ -200,7 +200,7 @@ class FxAggregateSetProxyTest : StringSpec({
         proxy.size shouldBe 1
     }
 
-    "FxAggregateSetProxy retainAll removes non-matching elements" {
+    "FxAggregateSet retainAll removes non-matching elements" {
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         val item1 = MutableAudioItem(1, "A")
         val item2 = MutableAudioItem(2, "B")
@@ -218,7 +218,7 @@ class FxAggregateSetProxyTest : StringSpec({
         changes.all { it.wasRemoved() } shouldBe true
     }
 
-    "FxAggregateSetProxy contains returns correct result" {
+    "FxAggregateSet contains returns correct result" {
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         val item = MutableAudioItem(1, "A")
 
@@ -227,7 +227,7 @@ class FxAggregateSetProxyTest : StringSpec({
         proxy.contains(item) shouldBe true
     }
 
-    "FxAggregateSetProxy invalidation listeners fire on changes" {
+    "FxAggregateSet invalidation listeners fire on changes" {
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         var invalidated = false
 
@@ -238,7 +238,7 @@ class FxAggregateSetProxyTest : StringSpec({
         invalidated shouldBe true
     }
 
-    "FxAggregateSetProxy removeListener removes set change listener" {
+    "FxAggregateSet removeListener removes set change listener" {
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         val changes = mutableListOf<SetChangeListener.Change<out AudioItem>>()
         val listener = SetChangeListener(changes::add)
@@ -250,7 +250,7 @@ class FxAggregateSetProxyTest : StringSpec({
         changes.size shouldBe 0
     }
 
-    "FxAggregateSetProxy removeListener removes invalidation listener" {
+    "FxAggregateSet removeListener removes invalidation listener" {
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         var count = 0
         val listener = javafx.beans.InvalidationListener { count++ }
@@ -262,7 +262,7 @@ class FxAggregateSetProxyTest : StringSpec({
         count shouldBe 0
     }
 
-    "FxAggregateSetProxy add duplicate returns false" {
+    "FxAggregateSet add duplicate returns false" {
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         val item = MutableAudioItem(1, "A")
 
@@ -271,12 +271,12 @@ class FxAggregateSetProxyTest : StringSpec({
         proxy.size shouldBe 1
     }
 
-    "FxAggregateSetProxy remove non-existing returns false" {
+    "FxAggregateSet remove non-existing returns false" {
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         proxy.remove(MutableAudioItem(1, "A")) shouldBe false
     }
 
-    "FxAggregateSetProxy clear on empty set is no-op" {
+    "FxAggregateSet clear on empty set is no-op" {
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         val changes = mutableListOf<SetChangeListener.Change<out AudioItem>>()
         proxy.addListener(SetChangeListener(changes::add))

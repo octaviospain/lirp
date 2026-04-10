@@ -18,9 +18,10 @@ import net.transgressoft.lirp.persistence.BubbleUpOrderVolatileRepo;
 import net.transgressoft.lirp.persistence.Customer;
 import net.transgressoft.lirp.persistence.CustomerVolatileRepo;
 import net.transgressoft.lirp.persistence.LirpContext;
+import net.transgressoft.lirp.persistence.AudioItem;
 import net.transgressoft.lirp.persistence.AudioItemVolatileRepository;
 import net.transgressoft.lirp.persistence.MutableAudioItem;
-import net.transgressoft.lirp.persistence.MutableAudioPlaylistEntity;
+import net.transgressoft.lirp.persistence.DefaultAudioPlaylist;
 import net.transgressoft.lirp.persistence.AudioPlaylistVolatileRepository;
 import net.transgressoft.lirp.persistence.OrderVolatileRepo;
 import net.transgressoft.lirp.persistence.ReactiveEntityReference;
@@ -577,7 +578,7 @@ class JavaInteroperabilityTest {
         void javaAddsEntityToMutableAggregateListViaGetAudioItemsAdd() {
             MutableAudioItem track = new MutableAudioItem(1, "Track 1");
             trackRepo.add(track);
-            MutableAudioPlaylistEntity playlist = new MutableAudioPlaylistEntity(1, "Test Playlist", Collections.emptyList(), Collections.emptySet());
+            DefaultAudioPlaylist playlist = new DefaultAudioPlaylist(1, "Test Playlist", Collections.emptyList(), Collections.emptySet());
             playlistRepo.add(playlist);
 
             boolean added = playlist.getAudioItems().add(track);
@@ -592,7 +593,7 @@ class JavaInteroperabilityTest {
         void javaRemovesEntityFromMutableAggregateListViaGetAudioItemsRemove() {
             MutableAudioItem track = new MutableAudioItem(1, "Track 1");
             trackRepo.add(track);
-            MutableAudioPlaylistEntity playlist = new MutableAudioPlaylistEntity(1, "Test Playlist", List.of(1), Collections.emptySet());
+            DefaultAudioPlaylist playlist = new DefaultAudioPlaylist(1, "Test Playlist", List.of(1), Collections.emptySet());
             playlistRepo.add(playlist);
 
             boolean removed = playlist.getAudioItems().remove(track);
@@ -627,14 +628,14 @@ class JavaInteroperabilityTest {
         void subscribeToCollectionChanges_Java_Consumer_receives_events() throws InterruptedException {
             MutableAudioItem track = new MutableAudioItem(1, "Track 1");
             trackRepo.add(track);
-            MutableAudioPlaylistEntity playlist = new MutableAudioPlaylistEntity(1, "Test Playlist", Collections.emptyList(), Collections.emptySet());
+            DefaultAudioPlaylist playlist = new DefaultAudioPlaylist(1, "Test Playlist", Collections.emptyList(), Collections.emptySet());
             playlistRepo.add(playlist);
 
             var latch = new CountDownLatch(1);
             AtomicReference<CollectionChangeEvent<?>> receivedEvent = new AtomicReference<>(null);
 
-            CollectionChangeEventExtensionsKt.subscribeToCollectionChanges(playlist, null,
-                (Consumer<CollectionChangeEvent<?>>) event -> {
+            CollectionChangeEventExtensionsKt.subscribeToCollectionChanges(playlist, AudioItem.class, null,
+                (Consumer<CollectionChangeEvent<AudioItem>>) event -> {
                     receivedEvent.set(event);
                     latch.countDown();
                 });

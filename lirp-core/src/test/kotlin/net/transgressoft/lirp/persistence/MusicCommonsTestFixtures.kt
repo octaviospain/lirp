@@ -41,11 +41,12 @@ import kotlinx.serialization.KSerializer
 // ---------------------------------------------------------------------------
 
 /**
- * Reactive audio item with a mutable [title] property. Mirrors
+ * Reactive audio item with mutable [title] and [albumName] properties. Mirrors
  * `music-commons:ReactiveAudioItem` with its self-referencing type parameter.
  */
 interface ReactiveAudioItem<I : ReactiveAudioItem<I>> : ReactiveEntity<Int, I>, Comparable<I> {
     var title: String
+    var albumName: String
 }
 
 /**
@@ -57,29 +58,41 @@ interface AudioItem : ReactiveAudioItem<AudioItem> {
 }
 
 /**
- * Concrete mutable audio item entity backed by [reactiveProperty] for [title].
+ * Concrete mutable audio item entity backed by [reactiveProperty] for [title] and [albumName].
  *
  * Not declared `internal` so it is accessible from the lirp-sql testFixtures source set.
  */
-class MutableAudioItem(override val id: Int, title: String) : ReactiveEntityBase<Int, AudioItem>(), AudioItem {
-    override val uniqueId: String get() = "audio-item-$id"
+class MutableAudioItem
+    @JvmOverloads
+    constructor(
+        override val id: Int,
+        title: String,
+        albumName: String = ""
+    ) : ReactiveEntityBase<Int, AudioItem>(), AudioItem {
+        override val uniqueId: String get() = "audio-item-$id"
 
-    override var title: String by reactiveProperty(title)
+        override var title: String by reactiveProperty(title)
+        override var albumName: String by reactiveProperty(albumName)
 
-    override fun compareTo(other: AudioItem): Int = id.compareTo(other.id)
+        override fun compareTo(other: AudioItem): Int = id.compareTo(other.id)
 
-    override fun clone(): MutableAudioItem = MutableAudioItem(id, title)
+        override fun clone(): MutableAudioItem = MutableAudioItem(id, title, albumName)
 
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other !is MutableAudioItem) return false
-        return id == other.id && title == other.title
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is MutableAudioItem) return false
+            return id == other.id && title == other.title && albumName == other.albumName
+        }
+
+        override fun hashCode(): Int {
+            var result = id.hashCode()
+            result = 31 * result + title.hashCode()
+            result = 31 * result + albumName.hashCode()
+            return result
+        }
+
+        override fun toString(): String = "MutableAudioItem(id=$id, title='$title', albumName='$albumName')"
     }
-
-    override fun hashCode(): Int = 31 * id.hashCode() + title.hashCode()
-
-    override fun toString(): String = "MutableAudioItem(id=$id, title='$title')"
-}
 
 // ---------------------------------------------------------------------------
 // Playlist hierarchy
@@ -134,7 +147,7 @@ abstract class MutablePlaylistBase<I : ReactiveAudioItem<I>, P : ReactiveAudioPl
  *
  * Not declared `internal` so it is accessible from the lirp-sql testFixtures source set.
  */
-class MutableAudioPlaylistEntity(
+class DefaultAudioPlaylist(
     id: Int,
     name: String,
     initialAudioItemIds: List<Int> = emptyList(),
@@ -148,12 +161,12 @@ class MutableAudioPlaylistEntity(
     @Aggregate(onDelete = CascadeAction.DETACH)
     override val playlists by mutableAggregateSet<Int, MutableAudioPlaylist>(initialPlaylistIds)
 
-    override fun clone(): MutableAudioPlaylistEntity =
-        MutableAudioPlaylistEntity(id, name, audioItems.referenceIds.toList(), LinkedHashSet(playlists.referenceIds))
+    override fun clone(): DefaultAudioPlaylist =
+        DefaultAudioPlaylist(id, name, audioItems.referenceIds.toList(), LinkedHashSet(playlists.referenceIds))
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
-        if (other !is MutableAudioPlaylistEntity) return false
+        if (other !is DefaultAudioPlaylist) return false
         return id == other.id &&
             name == other.name &&
             audioItems.referenceIds == other.audioItems.referenceIds &&
@@ -168,7 +181,7 @@ class MutableAudioPlaylistEntity(
         return result
     }
 
-    override fun toString(): String = "MutableAudioPlaylistEntity(id=$id, name='$name')"
+    override fun toString(): String = "DefaultAudioPlaylist(id=$id, name='$name')"
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +240,7 @@ class AudioItemVolatileRepository internal constructor(context: LirpContext) :
     VolatileRepository<Int, AudioItem>(context, "AudioItems") {
         constructor() : this(LirpContext.default)
 
-        fun create(id: Int, title: String): AudioItem = MutableAudioItem(id, title).also(::add)
+        fun create(id: Int, title: String, albumName: String = ""): AudioItem = MutableAudioItem(id, title, albumName).also(::add)
     }
 
 /**
@@ -240,7 +253,7 @@ class DefaultAudioLibrary internal constructor(repository: Repository<Int, Audio
         constructor(context: LirpContext) : this(AudioItemVolatileRepository(context))
         constructor() : this(LirpContext.default)
 
-        fun create(id: Int, title: String): AudioItem = MutableAudioItem(id, title).also(::add)
+        fun create(id: Int, title: String, albumName: String = ""): AudioItem = MutableAudioItem(id, title, albumName).also(::add)
     }
 
 // ---------------------------------------------------------------------------
@@ -305,7 +318,7 @@ class DefaultPlaylistHierarchy internal constructor(repository: Repository<Int, 
             audioItemIds: List<Int> = emptyList(),
             playlistIds: Set<Int> = emptySet()
         ): MutableAudioPlaylist =
-            MutableAudioPlaylistEntity(id, name, audioItemIds, playlistIds)
+            DefaultAudioPlaylist(id, name, audioItemIds, playlistIds)
     }
 
 // ---------------------------------------------------------------------------

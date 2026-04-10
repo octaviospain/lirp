@@ -47,20 +47,16 @@ class FxScalarRegistryIntegrationTest : StringSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()
     val testScope = CoroutineScope(testDispatcher)
-    lateinit var previousFlowScope: CoroutineScope
-    lateinit var previousIoScope: CoroutineScope
 
     beforeSpec {
         FxToolkitInit.ensureInitialized()
-        previousFlowScope = ReactiveScope.flowScope
-        previousIoScope = ReactiveScope.ioScope
         ReactiveScope.flowScope = testScope
         ReactiveScope.ioScope = testScope
     }
 
     afterSpec {
-        ReactiveScope.flowScope = previousFlowScope
-        ReactiveScope.ioScope = previousIoScope
+        ReactiveScope.resetDefaultFlowScope()
+        ReactiveScope.resetDefaultIoScope()
     }
 
     lateinit var trackRepo: AudioItemVolatileRepository

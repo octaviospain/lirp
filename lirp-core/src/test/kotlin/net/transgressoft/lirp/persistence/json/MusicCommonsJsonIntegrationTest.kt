@@ -21,11 +21,11 @@ import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.AudioItemJsonFileRepository
 import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
+import net.transgressoft.lirp.persistence.DefaultAudioPlaylist
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.MusicCommonsIntegrationTestBase
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.MutableAudioPlaylist
-import net.transgressoft.lirp.persistence.MutableAudioPlaylistEntity
 import net.transgressoft.lirp.persistence.PlaylistHierarchyJsonFileRepository
 import net.transgressoft.lirp.persistence.Repository
 import io.kotest.core.annotation.DisplayName
@@ -82,7 +82,7 @@ class MusicCommonsJsonIntegrationTest : MusicCommonsIntegrationTestBase() {
     @Suppress("UNCHECKED_CAST")
     override fun createPlaylistRepo(ctx: LirpContext): Repository<Int, MutableAudioPlaylist> {
         playlistFile = File.createTempFile("playlists", ".json").also { it.deleteOnExit() }
-        val serializer = MapSerializer(Int.serializer(), lirpSerializer(MutableAudioPlaylistEntity(0, ""))) as KSerializer<Map<Int, MutableAudioPlaylist>>
+        val serializer = MapSerializer(Int.serializer(), lirpSerializer(DefaultAudioPlaylist(0, ""))) as KSerializer<Map<Int, MutableAudioPlaylist>>
         return PlaylistHierarchyJsonFileRepository(ctx, playlistFile, serializer)
     }
 
@@ -105,8 +105,8 @@ class MusicCommonsJsonIntegrationTest : MusicCommonsIntegrationTestBase() {
                     audioItemRepo.add(it)
                 }
 
-            val child = MutableAudioPlaylistEntity(20, "Child Playlist").also(playlistRepo::add)
-            val parent = MutableAudioPlaylistEntity(10, "Parent Playlist", listOf(1, 2), setOf(20)).also(playlistRepo::add)
+            val child = DefaultAudioPlaylist(20, "Child Playlist").also(playlistRepo::add)
+            val parent = DefaultAudioPlaylist(10, "Parent Playlist", listOf(1, 2), setOf(20)).also(playlistRepo::add)
 
             flushPendingWrites()
 
@@ -137,7 +137,7 @@ class MusicCommonsJsonIntegrationTest : MusicCommonsIntegrationTestBase() {
                 MutableAudioItem(2, "Song 2").also {
                     audioItemRepo.add(it)
                 }
-            val playlist = MutableAudioPlaylistEntity(10, "Dynamic").also(playlistRepo::add)
+            val playlist = DefaultAudioPlaylist(10, "Dynamic").also(playlistRepo::add)
             flushPendingWrites()
 
             playlist.audioItems.add(item1)
@@ -154,7 +154,7 @@ class MusicCommonsJsonIntegrationTest : MusicCommonsIntegrationTestBase() {
                 MutableAudioItem(1, "Persisted Track").also {
                     audioItemRepo.add(it)
                 }
-            val playlist = MutableAudioPlaylistEntity(10, "Persisted Playlist", listOf(1)).also(playlistRepo::add)
+            val playlist = DefaultAudioPlaylist(10, "Persisted Playlist", listOf(1)).also(playlistRepo::add)
             flushPendingWrites()
             ctx.close()
 
@@ -168,7 +168,7 @@ class MusicCommonsJsonIntegrationTest : MusicCommonsIntegrationTestBase() {
 
             val playlistSerializer =
                 MapSerializer(
-                    Int.serializer(), lirpSerializer(MutableAudioPlaylistEntity(0, ""))
+                    Int.serializer(), lirpSerializer(DefaultAudioPlaylist(0, ""))
                 ) as KSerializer<Map<Int, MutableAudioPlaylist>>
             val reloadedRepo = PlaylistHierarchyJsonFileRepository(ctx2, playlistFile, playlistSerializer)
             flushPendingWrites()
@@ -184,16 +184,16 @@ class MusicCommonsJsonIntegrationTest : MusicCommonsIntegrationTestBase() {
 
         @Suppress("UNCHECKED_CAST")
         test("JSON round-trip preserves self-referencing playlist aggregates after reload") {
-            val subA = MutableAudioPlaylistEntity(20, "Sub A").also(playlistRepo::add)
-            val subB = MutableAudioPlaylistEntity(30, "Sub B").also(playlistRepo::add)
-            val parent = MutableAudioPlaylistEntity(10, "Parent", emptyList(), setOf(20, 30)).also(playlistRepo::add)
+            val subA = DefaultAudioPlaylist(20, "Sub A").also(playlistRepo::add)
+            val subB = DefaultAudioPlaylist(30, "Sub B").also(playlistRepo::add)
+            val parent = DefaultAudioPlaylist(10, "Parent", emptyList(), setOf(20, 30)).also(playlistRepo::add)
             flushPendingWrites()
             ctx.close()
 
             val ctx2 = LirpContext()
             val playlistSerializer =
                 MapSerializer(
-                    Int.serializer(), lirpSerializer(MutableAudioPlaylistEntity(0, ""))
+                    Int.serializer(), lirpSerializer(DefaultAudioPlaylist(0, ""))
                 ) as KSerializer<Map<Int, MutableAudioPlaylist>>
             // JsonFileRepository self-registers in ctx2; playlists self-reference via the same repo
             val reloadedRepo = PlaylistHierarchyJsonFileRepository(ctx2, playlistFile, playlistSerializer)

@@ -38,7 +38,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Integration tests verifying that RegistryBase correctly unwraps fx proxies via
- * [FxObservableCollectionProxy][net.transgressoft.lirp.persistence.FxObservableCollectionProxy],
+ * [FxObservableCollection][net.transgressoft.lirp.persistence.FxObservableCollection],
  * enabling dual notification: lirp [CollectionChangeEvent] and JavaFX listener callbacks
  * fire for the same mutation.
  */
@@ -48,20 +48,16 @@ class FxRegistryIntegrationTest : StringSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()
     val testScope = CoroutineScope(testDispatcher)
-    lateinit var previousFlowScope: CoroutineScope
-    lateinit var previousIoScope: CoroutineScope
 
     beforeSpec {
         FxToolkitInit.ensureInitialized()
-        previousFlowScope = ReactiveScope.flowScope
-        previousIoScope = ReactiveScope.ioScope
         ReactiveScope.flowScope = testScope
         ReactiveScope.ioScope = testScope
     }
 
     afterSpec {
-        ReactiveScope.flowScope = previousFlowScope
-        ReactiveScope.ioScope = previousIoScope
+        ReactiveScope.resetDefaultFlowScope()
+        ReactiveScope.resetDefaultIoScope()
     }
 
     lateinit var trackRepo: AudioItemVolatileRepository
@@ -83,7 +79,7 @@ class FxRegistryIntegrationTest : StringSpec({
         val lirpEvent = AtomicReference<CollectionChangeEvent<*>>(null)
         val latch = CountDownLatch(1)
 
-        playlist.subscribeToCollectionChanges {
+        playlist.subscribeToCollectionChanges(AudioItem::class) {
             lirpEvent.set(it)
             latch.countDown()
         }
@@ -103,7 +99,7 @@ class FxRegistryIntegrationTest : StringSpec({
         val lirpEvent = AtomicReference<CollectionChangeEvent<*>>(null)
         val latch = CountDownLatch(1)
 
-        playlist1.subscribeToCollectionChanges {
+        playlist1.subscribeToCollectionChanges(FxAudioPlaylistEntity::class) {
             lirpEvent.set(it)
             latch.countDown()
         }
@@ -126,7 +122,7 @@ class FxRegistryIntegrationTest : StringSpec({
         val lirpEvent = AtomicReference<CollectionChangeEvent<*>>(null)
         val latch = CountDownLatch(1)
 
-        playlist.subscribeToCollectionChanges {
+        playlist.subscribeToCollectionChanges(AudioItem::class) {
             lirpEvent.set(it)
             latch.countDown()
         }
@@ -155,7 +151,7 @@ class FxRegistryIntegrationTest : StringSpec({
         val lirpEvent = AtomicReference<CollectionChangeEvent<*>>(null)
         val latch = CountDownLatch(1)
 
-        playlist1.subscribeToCollectionChanges {
+        playlist1.subscribeToCollectionChanges(FxAudioPlaylistEntity::class) {
             lirpEvent.set(it)
             latch.countDown()
         }

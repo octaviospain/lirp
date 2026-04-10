@@ -22,11 +22,11 @@ import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
 import net.transgressoft.lirp.persistence.BubbleUpOrder
 import net.transgressoft.lirp.persistence.CustomerVolatileRepo
+import net.transgressoft.lirp.persistence.DefaultAudioPlaylist
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpRepository
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.MutableAudioPlaylist
-import net.transgressoft.lirp.persistence.MutableAudioPlaylistEntity
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempfile
 import io.kotest.matchers.collections.shouldContainExactly
@@ -237,7 +237,7 @@ class AggregateJsonPersistenceTest : FunSpec({
 
         testDispatcher.scheduler.advanceUntilIdle()
 
-        val reloaded = playlistRepo2.findById(100).get() as MutableAudioPlaylistEntity
+        val reloaded = playlistRepo2.findById(100).get() as DefaultAudioPlaylist
         reloaded.audioItems.resolveAll().map { it.id } shouldContainExactly listOf(1, 2)
 
         ctx2.close()
@@ -266,7 +266,7 @@ class AggregateJsonPersistenceTest : FunSpec({
 
         testDispatcher.scheduler.advanceUntilIdle()
 
-        val reloaded = playlistRepo2.findById(100).get() as MutableAudioPlaylistEntity
+        val reloaded = playlistRepo2.findById(100).get() as DefaultAudioPlaylist
         reloaded.audioItems.resolveAll().map { it.id } shouldContainExactly listOf(3, 1, 2)
 
         ctx2.close()
@@ -290,7 +290,7 @@ class AggregateJsonPersistenceTest : FunSpec({
 
         testDispatcher.scheduler.advanceUntilIdle()
 
-        val reloaded = playlistRepo2.findById(100).get() as MutableAudioPlaylistEntity
+        val reloaded = playlistRepo2.findById(100).get() as DefaultAudioPlaylist
         reloaded.audioItems.resolveAll().size shouldBe 0
 
         ctx2.close()
@@ -298,7 +298,7 @@ class AggregateJsonPersistenceTest : FunSpec({
 })
 
 /**
- * JSON-backed repository for [MutableAudioPlaylistEntity] entities, used in tests that verify
+ * JSON-backed repository for [DefaultAudioPlaylist] entities, used in tests that verify
  * mutable aggregate list persistence round-trips.
  */
 @LirpRepository
@@ -311,15 +311,15 @@ class MutableAudioPlaylistJsonFileRepository internal constructor(
         context,
         file,
         @Suppress("UNCHECKED_CAST")
-        (MapSerializer(Int.serializer(), lirpSerializer(MutableAudioPlaylistEntity(0, ""))) as KSerializer<Map<Int, MutableAudioPlaylist>>),
+        (MapSerializer(Int.serializer(), lirpSerializer(DefaultAudioPlaylist(0, ""))) as KSerializer<Map<Int, MutableAudioPlaylist>>),
         serializationDelay = serializationDelayMs.milliseconds,
         loadOnInit = loadOnInit
     ) {
     constructor(file: File, serializationDelayMs: Long = 50L, loadOnInit: Boolean = true) :
         this(LirpContext.default, file, serializationDelayMs, loadOnInit)
 
-    fun create(id: Int, name: String, audioItemIds: List<Int> = emptyList()): MutableAudioPlaylistEntity =
-        MutableAudioPlaylistEntity(id, name, audioItemIds).also(::add)
+    fun create(id: Int, name: String, audioItemIds: List<Int> = emptyList()): DefaultAudioPlaylist =
+        DefaultAudioPlaylist(id, name, audioItemIds).also(::add)
 }
 
 /**

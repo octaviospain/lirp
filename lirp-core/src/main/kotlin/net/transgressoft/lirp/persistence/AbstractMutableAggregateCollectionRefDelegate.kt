@@ -20,6 +20,7 @@ package net.transgressoft.lirp.persistence
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.CollectionChangeEvent
 import net.transgressoft.lirp.event.StandardCollectionChangeEvent
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
@@ -65,29 +66,59 @@ abstract class AbstractMutableAggregateCollectionRefDelegate<K : Comparable<K>, 
         collectionEmissionCallback = callback
     }
 
+    /**
+     * Secondary callbacks for projection maps that receive the full [CollectionChangeEvent] for each mutation.
+     * Supports multiple concurrent projections on the same source without overwriting each other.
+     * Invoked after [collectionEmissionCallback] via [notifyProjection].
+     */
+    private val projectionCallbacks = CopyOnWriteArrayList<(CollectionChangeEvent<*>) -> Unit>()
+
+    /**
+     * Registers [callback] as a projection listener that will receive [CollectionChangeEvent]s after each mutation.
+     */
+    internal fun addProjectionCallback(callback: (CollectionChangeEvent<*>) -> Unit) {
+        projectionCallbacks.add(callback)
+    }
+
+    /**
+     * Forwards the [CollectionChangeEvent] to all registered [projectionCallbacks].
+     * Called by [mutate] and [mutateVoid] after the main emission callback.
+     */
+    internal fun notifyProjection(event: CollectionChangeEvent<*>) {
+        projectionCallbacks.forEach { it(event) }
+    }
+
     override fun provideIds(): Collection<K> = lock.withLock { ArrayList(backingIds) }
 
     override val referenceIds: Collection<K> get() = lock.withLock { ArrayList(backingIds) }
 
     /**
      * Executes [action] on [backingIds] under the lock and returns the result.
-     * If [changed] is true and [eventBuilder] is provided, emits the [CollectionChangeEvent] after mutation.
+     * If [changed] is true and [eventBuilder] is provided, emits the [CollectionChangeEvent] after mutation
+     * and forwards the diff to [projectionCallback] if one is registered.
      */
     protected fun mutate(action: MutableCollection<K>.() -> Boolean, eventBuilder: (() -> CollectionChangeEvent<*>)? = null): Boolean {
         val changed = lock.withLock { backingIds.action() }
         if (changed && eventBuilder != null) {
-            collectionEmissionCallback?.invoke(eventBuilder())
+            val event = eventBuilder()
+            collectionEmissionCallback?.invoke(event)
+            notifyProjection(event)
         }
         return changed
     }
 
     /**
      * Executes [action] on [backingIds] under the lock without returning a result.
-     * If [eventBuilder] is provided, emits the [CollectionChangeEvent] after mutation.
+     * If [eventBuilder] is provided, emits the [CollectionChangeEvent] after mutation
+     * and forwards the diff to [projectionCallback] if one is registered.
      */
     protected fun mutateVoid(action: MutableCollection<K>.() -> Unit, eventBuilder: (() -> CollectionChangeEvent<*>)? = null) {
         lock.withLock { backingIds.action() }
-        eventBuilder?.let { collectionEmissionCallback?.invoke(it()) }
+        eventBuilder?.let {
+            val event = it()
+            collectionEmissionCallback?.invoke(event)
+            notifyProjection(event)
+        }
     }
 
     override fun clear() {
@@ -103,7 +134,9 @@ abstract class AbstractMutableAggregateCollectionRefDelegate<K : Comparable<K>, 
                 }
             backingIds.clear()
         }
-        collectionEmissionCallback?.invoke(StandardCollectionChangeEvent.clear(removedEntities))
+        val clearEvent = StandardCollectionChangeEvent.clear(removedEntities)
+        collectionEmissionCallback?.invoke(clearEvent)
+        notifyProjection(clearEvent)
     }
 
     /**
@@ -166,7 +199,9 @@ abstract class AbstractMutableAggregateCollectionRefDelegate<K : Comparable<K>, 
                 backingIds.retainAll(idsToKeep)
             }
         if (changed) {
-            collectionEmissionCallback?.invoke(StandardCollectionChangeEvent.remove(removedEntities))
+            val event = StandardCollectionChangeEvent.remove(removedEntities)
+            collectionEmissionCallback?.invoke(event)
+            notifyProjection(event)
         }
         return changed
     }

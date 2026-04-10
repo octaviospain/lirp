@@ -23,6 +23,7 @@ import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.ReactiveMutationEvent
 import java.util.function.Consumer
+import kotlin.reflect.KClass
 
 // Extension functions providing a 3-tier subscription API for ReactiveEntity:
 // - subscribe — all events (property mutations, collection changes, bubble-up)
@@ -35,37 +36,60 @@ import java.util.function.Consumer
  *
  * Filters the entity's event stream to [AggregateMutationEvent] instances whose [childEvent][AggregateMutationEvent.childEvent]
  * is a [CollectionChangeEvent]. When [refName] is provided, only events for that specific collection are delivered.
+ * Only events whose elements are instances of [elementType] are delivered, providing runtime type safety.
  *
+ * ```kotlin
+ * playlist.subscribeToCollectionChanges(AudioItem::class, "audioItems") { event ->
+ *     for (added in event.added) { /* added is AudioItem — no cast needed */ }
+ * }
+ *
+ * playlist.subscribeToCollectionChanges(MutableAudioPlaylist::class, "playlists") { event ->
+ *     for (added in event.added) { /* added is MutableAudioPlaylist */ }
+ * }
+ * ```
+ *
+ * @param E the element type of the collection change event
+ * @param elementType the element class for type-safe event delivery and runtime filtering
  * @param refName optional collection property name to filter on (e.g., "audioItems"). If null, receives events from all collections.
  * @param action the suspend function invoked for each matching collection change event
  * @return a subscription handle that can be cancelled to stop receiving events
  */
-fun <K : Comparable<K>, R : ReactiveEntity<K, R>> ReactiveEntity<K, R>.subscribeToCollectionChanges(
+@Suppress("UNCHECKED_CAST")
+fun <K : Comparable<K>, R : ReactiveEntity<K, R>, E : Any> ReactiveEntity<K, R>.subscribeToCollectionChanges(
+    elementType: KClass<E>,
     refName: String? = null,
-    action: suspend (CollectionChangeEvent<*>) -> Unit
+    action: suspend (CollectionChangeEvent<E>) -> Unit
 ): LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>> =
     subscribe { event ->
         if (event is AggregateMutationEvent<*, *> &&
             event.childEvent is CollectionChangeEvent<*> &&
-            (refName == null || event.refName == refName)
+            (refName == null || event.refName == refName) &&
+            (event.childEvent as CollectionChangeEvent<*>).added.all { it == null || elementType.isInstance(it) }
         ) {
-            @Suppress("UNCHECKED_CAST")
-            action(event.childEvent as CollectionChangeEvent<*>)
+            action(event.childEvent as CollectionChangeEvent<E>)
         }
     }
 
 /**
- * Java-friendly overload of [subscribeToCollectionChanges] using a [Consumer] callback.
+ * Java-friendly overload of [subscribeToCollectionChanges] using a [Consumer] callback and [Class] instead of [KClass].
  *
+ * ```java
+ * CollectionChangeEventExtensionsKt.subscribeToCollectionChanges(playlist, AudioItem.class, "audioItems",
+ *     event -> { for (AudioItem added : event.getAdded()) { ... } });
+ * ```
+ *
+ * @param E the element type of the collection change event
+ * @param elementType the Java class for type-safe event delivery and runtime filtering
  * @param refName optional collection property name to filter on. Pass null for all collections.
  * @param action the consumer invoked for each matching collection change event
  * @return a subscription handle that can be cancelled to stop receiving events
  */
-fun <K : Comparable<K>, R : ReactiveEntity<K, R>> ReactiveEntity<K, R>.subscribeToCollectionChanges(
+fun <K : Comparable<K>, R : ReactiveEntity<K, R>, E : Any> ReactiveEntity<K, R>.subscribeToCollectionChanges(
+    elementType: Class<E>,
     refName: String?,
-    action: Consumer<CollectionChangeEvent<*>>
+    action: Consumer<CollectionChangeEvent<E>>
 ): LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>> =
-    subscribeToCollectionChanges(refName) { event -> action.accept(event) }
+    subscribeToCollectionChanges(elementType.kotlin, refName) { event -> action.accept(event) }
 
 /**
  * Subscribes to direct property mutation events on this entity, excluding aggregate/collection events.
