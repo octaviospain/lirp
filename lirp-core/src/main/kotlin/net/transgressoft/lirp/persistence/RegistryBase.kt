@@ -222,7 +222,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
                 failFastIfDelegatePresent(entity.javaClass, AggregateRefDelegate::class.java, "LirpRefAccessor")
                 failFastIfDelegatePresent(entity.javaClass, AggregateCollectionRef::class.java, "LirpRefAccessor")
                 failFastIfDelegatePresent(entity.javaClass, MutableAggregateCollectionRef::class.java, "LirpRefAccessor")
-                failFastIfDelegatePresent(entity.javaClass, FxObservableCollectionProxy::class.java, "LirpRefAccessor")
+                failFastIfDelegatePresent(entity.javaClass, FxObservableCollection::class.java, "LirpRefAccessor")
                 collectionRefEntries = emptyList()
                 refEntries = emptyList()
             }
@@ -302,7 +302,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
                     entity.emitCollectionChangeEvent(entry.refName, event)
                 }
             }
-            if (delegate is FxObservableCollectionProxy) {
+            if (delegate is FxObservableCollection<*, *>) {
                 delegate.syncLocalCache()
             }
         }
@@ -321,21 +321,21 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
 
     private fun unwrapCollectionDelegate(delegate: Any?): AbstractAggregateCollectionRefDelegate<*, *>? =
         when (delegate) {
-            is MutableAggregateListProxy<*, *> -> delegate.innerDelegate
-            is MutableAggregateSetProxy<*, *> -> delegate.innerDelegate
+            is MutableAggregateList<*, *> -> delegate.innerDelegate
+            is MutableAggregateSet<*, *> -> delegate.innerDelegate
             is AggregateListProxy<*, *> -> delegate.innerDelegate
             is AggregateSetProxy<*, *> -> delegate.innerDelegate
             is AbstractAggregateCollectionRefDelegate<*, *> -> delegate
-            is FxObservableCollectionProxy -> unwrapCollectionDelegate(delegate.innerMutableProxy)
+            is FxObservableCollection<*, *> -> unwrapCollectionDelegate(delegate.innerMutableProxy)
             else -> null
         }
 
     private fun unwrapMutableDelegate(delegate: Any?): AbstractMutableAggregateCollectionRefDelegate<*, *>? =
         when (delegate) {
-            is MutableAggregateListProxy<*, *> -> delegate.innerDelegate
-            is MutableAggregateSetProxy<*, *> -> delegate.innerDelegate
+            is MutableAggregateList<*, *> -> delegate.innerDelegate
+            is MutableAggregateSet<*, *> -> delegate.innerDelegate
             is AbstractMutableAggregateCollectionRefDelegate<*, *> -> delegate
-            is FxObservableCollectionProxy -> unwrapMutableDelegate(delegate.innerMutableProxy)
+            is FxObservableCollection<*, *> -> unwrapMutableDelegate(delegate.innerMutableProxy)
             else -> null
         }
 

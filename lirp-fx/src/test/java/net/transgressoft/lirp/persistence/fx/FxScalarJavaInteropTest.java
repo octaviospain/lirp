@@ -84,7 +84,7 @@ class FxScalarJavaInteropTest {
     class CollectionFactoryTests {
 
         @Test
-        @DisplayName("FxProperties.fxAggregateList() creates FxAggregateListProxy")
+        @DisplayName("FxProperties.fxAggregateList() creates FxAggregateList")
         void aggregateListFactory() {
             var list = FxProperties.<Integer, AudioItem>fxAggregateList(List.of(), true);
             assertNotNull(list);
@@ -92,7 +92,7 @@ class FxScalarJavaInteropTest {
         }
 
         @Test
-        @DisplayName("FxProperties.fxAggregateSet() creates FxAggregateSetProxy")
+        @DisplayName("FxProperties.fxAggregateSet() creates FxAggregateSet")
         void aggregateSetFactory() {
             var set = FxProperties.<Integer, AudioItem>fxAggregateSet(Set.of(), true);
             assertNotNull(set);

@@ -45,19 +45,15 @@ internal class CollectionChangeEventTest : StringSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()
     val testScope = CoroutineScope(testDispatcher)
-    lateinit var previousFlowScope: CoroutineScope
-    lateinit var previousIoScope: CoroutineScope
 
     beforeSpec {
-        previousFlowScope = ReactiveScope.flowScope
-        previousIoScope = ReactiveScope.ioScope
         ReactiveScope.flowScope = testScope
         ReactiveScope.ioScope = testScope
     }
 
     afterSpec {
-        ReactiveScope.flowScope = previousFlowScope
-        ReactiveScope.ioScope = previousIoScope
+        ReactiveScope.resetDefaultFlowScope()
+        ReactiveScope.resetDefaultIoScope()
     }
 
     lateinit var ctx: LirpContext
@@ -76,7 +72,7 @@ internal class CollectionChangeEventTest : StringSpec({
 
     "add(element) on mutableAggregateList emits ADD CollectionChangeEvent with the added element" {
         val t1 = trackRepo.create(1, "Track 1")
-        val playlist = MutableAudioPlaylistEntity(1, "Test").also(playlistRepo::add)
+        val playlist = DefaultAudioPlaylist(1, "Test").also(playlistRepo::add)
 
         val receivedEvent = AtomicReference<AggregateMutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
@@ -103,7 +99,7 @@ internal class CollectionChangeEventTest : StringSpec({
 
     "remove(element) on mutableAggregateList emits REMOVE CollectionChangeEvent with the removed element" {
         val t1 = trackRepo.create(1, "Track 1")
-        val playlist = MutableAudioPlaylistEntity(1, "Test", listOf(1)).also(playlistRepo::add)
+        val playlist = DefaultAudioPlaylist(1, "Test", listOf(1)).also(playlistRepo::add)
 
         val receivedEvent = AtomicReference<AggregateMutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
@@ -131,7 +127,7 @@ internal class CollectionChangeEventTest : StringSpec({
     "set(index, element) on mutableAggregateList emits REPLACE CollectionChangeEvent with old and new elements" {
         val t1 = trackRepo.create(1, "Track 1")
         val t2 = trackRepo.create(2, "Track 2")
-        val playlist = MutableAudioPlaylistEntity(1, "Test", listOf(1)).also(playlistRepo::add)
+        val playlist = DefaultAudioPlaylist(1, "Test", listOf(1)).also(playlistRepo::add)
 
         val receivedEvent = AtomicReference<AggregateMutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
@@ -159,7 +155,7 @@ internal class CollectionChangeEventTest : StringSpec({
     "addAll(elements) emits single ADD CollectionChangeEvent with all added elements" {
         val t1 = trackRepo.create(1, "Track 1")
         val t2 = trackRepo.create(2, "Track 2")
-        val playlist = MutableAudioPlaylistEntity(1, "Test").also(playlistRepo::add)
+        val playlist = DefaultAudioPlaylist(1, "Test").also(playlistRepo::add)
 
         val receivedEvents = mutableListOf<AggregateMutationEvent<*, *>>()
         val latch = CountDownLatch(1)
@@ -187,7 +183,7 @@ internal class CollectionChangeEventTest : StringSpec({
     "removeAll(elements) emits single REMOVE CollectionChangeEvent with all removed elements" {
         val t1 = trackRepo.create(1, "Track 1")
         val t2 = trackRepo.create(2, "Track 2")
-        val playlist = MutableAudioPlaylistEntity(1, "Test", listOf(1, 2)).also(playlistRepo::add)
+        val playlist = DefaultAudioPlaylist(1, "Test", listOf(1, 2)).also(playlistRepo::add)
 
         val receivedEvents = mutableListOf<AggregateMutationEvent<*, *>>()
         val latch = CountDownLatch(1)
@@ -215,7 +211,7 @@ internal class CollectionChangeEventTest : StringSpec({
     "clear() emits CLEAR CollectionChangeEvent with all removed entities" {
         val t1 = trackRepo.create(1, "Track 1")
         val t2 = trackRepo.create(2, "Track 2")
-        val playlist = MutableAudioPlaylistEntity(1, "Test", listOf(1, 2)).also(playlistRepo::add)
+        val playlist = DefaultAudioPlaylist(1, "Test", listOf(1, 2)).also(playlistRepo::add)
 
         val receivedEvent = AtomicReference<AggregateMutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
@@ -241,7 +237,7 @@ internal class CollectionChangeEventTest : StringSpec({
     }
 
     "clear() on empty collection does not emit any event" {
-        val playlist = MutableAudioPlaylistEntity(1, "Test").also(playlistRepo::add)
+        val playlist = DefaultAudioPlaylist(1, "Test").also(playlistRepo::add)
 
         var eventCount = 0
         playlist.subscribe { event ->
@@ -259,7 +255,7 @@ internal class CollectionChangeEventTest : StringSpec({
 
     "collection mutation does not emit ReactiveMutationEvent" {
         val t1 = trackRepo.create(1, "Track 1")
-        val playlist = MutableAudioPlaylistEntity(1, "Test").also(playlistRepo::add)
+        val playlist = DefaultAudioPlaylist(1, "Test").also(playlistRepo::add)
 
         var reactiveMutationCount = 0
         playlist.subscribe { event ->
@@ -277,8 +273,8 @@ internal class CollectionChangeEventTest : StringSpec({
     }
 
     "add(element) on mutableAggregateSet emits ADD CollectionChangeEvent" {
-        val p1 = MutableAudioPlaylistEntity(1, "P1").also(playlistRepo::add)
-        val group = MutableAudioPlaylistEntity(100, "Group").also(playlistRepo::add)
+        val p1 = DefaultAudioPlaylist(1, "P1").also(playlistRepo::add)
+        val group = DefaultAudioPlaylist(100, "Group").also(playlistRepo::add)
 
         val receivedEvent = AtomicReference<AggregateMutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
@@ -305,7 +301,7 @@ internal class CollectionChangeEventTest : StringSpec({
 
     "AggregateMutationEvent.refName matches the collection property name" {
         val t1 = trackRepo.create(1, "Track 1")
-        val playlist = MutableAudioPlaylistEntity(1, "Test").also(playlistRepo::add)
+        val playlist = DefaultAudioPlaylist(1, "Test").also(playlistRepo::add)
 
         val receivedEvent = AtomicReference<AggregateMutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)

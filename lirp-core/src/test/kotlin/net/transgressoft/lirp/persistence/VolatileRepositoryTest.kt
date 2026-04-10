@@ -358,13 +358,13 @@ internal class VolatileRepositoryTest : FunSpec({
 
             val t1 = trackRepo.create(1, "Track A")
             val t2 = trackRepo.create(2, "Track B")
-            val playlist = MutableAudioPlaylistEntity(1, "My Playlist").also(playlistRepo::add)
+            val playlist = DefaultAudioPlaylist(1, "My Playlist").also(playlistRepo::add)
 
             playlist.audioItems.add(t1)
             playlist.audioItems.add(t2)
 
             playlistRepo.findById(1).shouldBePresent {
-                (it as MutableAudioPlaylistEntity).audioItems.referenceIds shouldContainExactly listOf(1, 2)
+                (it as DefaultAudioPlaylist).audioItems.referenceIds shouldContainExactly listOf(1, 2)
                 it.audioItems.resolveAll() shouldContainExactly listOf(t1, t2)
             }
         }
@@ -377,19 +377,19 @@ internal class VolatileRepositoryTest : FunSpec({
             val t2 = trackRepo.create(2, "T2")
             trackRepo.create(3, "T3")
             val playlist =
-                MutableAudioPlaylistEntity(1, "Playlist", listOf(1, 2, 3))
+                DefaultAudioPlaylist(1, "Playlist", listOf(1, 2, 3))
                     .also(playlistRepo::add)
 
             playlist.audioItems.remove(t2)
 
             playlistRepo.findById(1).shouldBePresent {
-                (it as MutableAudioPlaylistEntity).audioItems.referenceIds shouldContainExactly listOf(1, 3)
+                (it as DefaultAudioPlaylist).audioItems.referenceIds shouldContainExactly listOf(1, 3)
             }
 
             playlist.audioItems.clear()
 
             playlistRepo.findById(1).shouldBePresent {
-                (it as MutableAudioPlaylistEntity).audioItems.referenceIds shouldBe emptyList()
+                (it as DefaultAudioPlaylist).audioItems.referenceIds shouldBe emptyList()
             }
         }
 
@@ -400,12 +400,12 @@ internal class VolatileRepositoryTest : FunSpec({
             val t1 = trackRepo.create(1, "T1")
             val t2 = trackRepo.create(2, "T2")
             val t3 = trackRepo.create(3, "T3")
-            val playlist = MutableAudioPlaylistEntity(1, "Bulk Add").also(playlistRepo::add)
+            val playlist = DefaultAudioPlaylist(1, "Bulk Add").also(playlistRepo::add)
 
             playlist.audioItems.addAll(listOf(t1, t2, t3))
 
             playlistRepo.findById(1).shouldBePresent {
-                (it as MutableAudioPlaylistEntity).audioItems.referenceIds shouldContainExactly listOf(1, 2, 3)
+                (it as DefaultAudioPlaylist).audioItems.referenceIds shouldContainExactly listOf(1, 2, 3)
                 it.audioItems.resolveAll() shouldContainExactly listOf(t1, t2, t3)
             }
         }
@@ -418,13 +418,13 @@ internal class VolatileRepositoryTest : FunSpec({
             val t2 = trackRepo.create(2, "T2")
             val t3 = trackRepo.create(3, "T3")
             val playlist =
-                MutableAudioPlaylistEntity(1, "Bulk Remove", listOf(1, 2, 3))
+                DefaultAudioPlaylist(1, "Bulk Remove", listOf(1, 2, 3))
                     .also(playlistRepo::add)
 
             playlist.audioItems.removeAll(setOf(t1, t3))
 
             playlistRepo.findById(1).shouldBePresent {
-                (it as MutableAudioPlaylistEntity).audioItems.referenceIds shouldContainExactly listOf(2)
+                (it as DefaultAudioPlaylist).audioItems.referenceIds shouldContainExactly listOf(2)
                 it.audioItems.resolveAll() shouldContainExactly listOf(t2)
             }
         }
@@ -440,7 +440,7 @@ internal class VolatileRepositoryTest : FunSpec({
             val t1 = trackRepo.create(1, "T1")
             val t2 = trackRepo.create(2, "T2")
             val t3 = trackRepo.create(3, "T3")
-            val playlist = MutableAudioPlaylistEntity(1, "Bulk Add").also(playlistRepo::add)
+            val playlist = DefaultAudioPlaylist(1, "Bulk Add").also(playlistRepo::add)
 
             playlist.subscribe { events.add(it) }
 
@@ -462,7 +462,7 @@ internal class VolatileRepositoryTest : FunSpec({
             val t2 = trackRepo.create(2, "T2")
             val t3 = trackRepo.create(3, "T3")
             val playlist =
-                MutableAudioPlaylistEntity(1, "Bulk Remove", listOf(1, 2, 3))
+                DefaultAudioPlaylist(1, "Bulk Remove", listOf(1, 2, 3))
                     .also(playlistRepo::add)
 
             playlist.subscribe { events.add(it) }
@@ -480,7 +480,7 @@ internal class VolatileRepositoryTest : FunSpec({
                     mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>()
                 )
 
-            val playlist = MutableAudioPlaylistEntity(1, "Empty Add").also(playlistRepo::add)
+            val playlist = DefaultAudioPlaylist(1, "Empty Add").also(playlistRepo::add)
 
             playlist.subscribe { events.add(it) }
 
@@ -500,7 +500,7 @@ internal class VolatileRepositoryTest : FunSpec({
                 )
 
             val unrelated = trackRepo.create(99, "Unrelated")
-            val playlist = MutableAudioPlaylistEntity(1, "No Match Remove").also(playlistRepo::add)
+            val playlist = DefaultAudioPlaylist(1, "No Match Remove").also(playlistRepo::add)
 
             playlist.subscribe { events.add(it) }
 
@@ -518,10 +518,10 @@ internal class VolatileRepositoryTest : FunSpec({
                     mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>()
                 )
 
-            val p1 = MutableAudioPlaylistEntity(1, "P1").also(sharedRepo::add)
-            val p2 = MutableAudioPlaylistEntity(2, "P2").also(sharedRepo::add)
-            val p3 = MutableAudioPlaylistEntity(3, "P3").also(sharedRepo::add)
-            val group = MutableAudioPlaylistEntity(100, "Group").also(sharedRepo::add)
+            val p1 = DefaultAudioPlaylist(1, "P1").also(sharedRepo::add)
+            val p2 = DefaultAudioPlaylist(2, "P2").also(sharedRepo::add)
+            val p3 = DefaultAudioPlaylist(3, "P3").also(sharedRepo::add)
+            val group = DefaultAudioPlaylist(100, "Group").also(sharedRepo::add)
 
             group.subscribe { events.add(it) }
 
@@ -540,7 +540,7 @@ internal class VolatileRepositoryTest : FunSpec({
                 )
 
             val t1 = trackRepo.create(1, "Track")
-            val playlist = MutableAudioPlaylistEntity(1, "Test").also(playlistRepo::add)
+            val playlist = DefaultAudioPlaylist(1, "Test").also(playlistRepo::add)
 
             playlist.subscribe { events.add(it) }
 
@@ -560,7 +560,7 @@ internal class VolatileRepositoryTest : FunSpec({
 
             val t1 = trackRepo.create(1, "Track")
             val playlist =
-                MutableAudioPlaylistEntity(1, "Test", listOf(1))
+                DefaultAudioPlaylist(1, "Test", listOf(1))
                     .also(playlistRepo::add)
 
             playlist.subscribe { events.add(it) }
@@ -581,7 +581,7 @@ internal class VolatileRepositoryTest : FunSpec({
 
             trackRepo.create(1, "T1")
             val playlist =
-                MutableAudioPlaylistEntity(1, "Test", listOf(1))
+                DefaultAudioPlaylist(1, "Test", listOf(1))
                     .also(playlistRepo::add)
 
             playlist.subscribe { events.add(it) }
@@ -599,29 +599,29 @@ internal class VolatileRepositoryTest : FunSpec({
             val t1 = trackRepo.create(1, "Track 1")
             val t2 = trackRepo.create(2, "Track 2")
             val t3 = trackRepo.create(3, "Track 3")
-            val pl1 = MutableAudioPlaylistEntity(1, "Playlist A").also(playlistRepo::add)
-            val pl2 = MutableAudioPlaylistEntity(2, "Playlist B").also(playlistRepo::add)
+            val pl1 = DefaultAudioPlaylist(1, "Playlist A").also(playlistRepo::add)
+            val pl2 = DefaultAudioPlaylist(2, "Playlist B").also(playlistRepo::add)
 
             pl1.audioItems.addAll(listOf(t1, t2))
             pl2.audioItems.addAll(listOf(t2, t3))
 
-            playlistRepo.findById(1).shouldBePresent { (it as MutableAudioPlaylistEntity).audioItems.referenceIds shouldContainExactly listOf(1, 2) }
-            playlistRepo.findById(2).shouldBePresent { (it as MutableAudioPlaylistEntity).audioItems.referenceIds shouldContainExactly listOf(2, 3) }
+            playlistRepo.findById(1).shouldBePresent { (it as DefaultAudioPlaylist).audioItems.referenceIds shouldContainExactly listOf(1, 2) }
+            playlistRepo.findById(2).shouldBePresent { (it as DefaultAudioPlaylist).audioItems.referenceIds shouldContainExactly listOf(2, 3) }
         }
 
         test("set-based mutable aggregate maintains uniqueness across repository operations") {
             val sharedRepo = AudioPlaylistVolatileRepository(ctx)
 
-            val p1 = MutableAudioPlaylistEntity(1, "P1").also(sharedRepo::add)
-            val p2 = MutableAudioPlaylistEntity(2, "P2").also(sharedRepo::add)
-            val group = MutableAudioPlaylistEntity(100, "Group").also(sharedRepo::add)
+            val p1 = DefaultAudioPlaylist(1, "P1").also(sharedRepo::add)
+            val p2 = DefaultAudioPlaylist(2, "P2").also(sharedRepo::add)
+            val group = DefaultAudioPlaylist(100, "Group").also(sharedRepo::add)
 
             group.playlists.add(p1)
             group.playlists.add(p2)
             group.playlists.add(p1) // duplicate
 
             sharedRepo.findById(100).shouldBePresent {
-                (it as MutableAudioPlaylistEntity).playlists.referenceIds shouldContainExactlyInAnyOrder setOf(1, 2)
+                (it as DefaultAudioPlaylist).playlists.referenceIds shouldContainExactlyInAnyOrder setOf(1, 2)
             }
         }
 
@@ -637,7 +637,7 @@ internal class VolatileRepositoryTest : FunSpec({
             val t2 = trackRepo.create(2, "T2")
             val t3 = trackRepo.create(3, "T3")
             val playlist =
-                MutableAudioPlaylistEntity(1, "Retain", listOf(1, 2, 3))
+                DefaultAudioPlaylist(1, "Retain", listOf(1, 2, 3))
                     .also(playlistRepo::add)
 
             playlist.subscribe { events.add(it) }

@@ -20,8 +20,8 @@ package net.transgressoft.lirp.persistence.fx
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.AggregateCollectionRef
-import net.transgressoft.lirp.persistence.FxObservableCollectionProxy
-import net.transgressoft.lirp.persistence.MutableAggregateListProxy
+import net.transgressoft.lirp.persistence.FxObservableCollection
+import net.transgressoft.lirp.persistence.MutableAggregateList
 import javafx.application.Platform
 import javafx.beans.InvalidationListener
 import javafx.collections.ListChangeListener
@@ -31,7 +31,7 @@ import kotlin.reflect.KProperty
 import kotlinx.coroutines.launch
 
 /**
- * JavaFX-observable proxy that wraps a [MutableAggregateListProxy] and implements both
+ * JavaFX-observable list that wraps a [MutableAggregateList] and implements both
  * [ObservableList] and [AggregateCollectionRef].
  *
  * Mutations to this list fire [ListChangeListener.Change] notifications automatically.
@@ -46,13 +46,13 @@ import kotlinx.coroutines.launch
  *
  * @param K the entity ID type
  * @param E the entity type
- * @param innerProxy the wrapped lirp mutable aggregate list proxy
+ * @param innerProxy the wrapped lirp mutable aggregate list
  * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
  */
-class FxAggregateListProxy<K : Comparable<K>, E : IdentifiableEntity<K>>(
-    val innerProxy: MutableAggregateListProxy<K, E>,
+class FxAggregateList<K : Comparable<K>, E : IdentifiableEntity<K>>(
+    val innerProxy: MutableAggregateList<K, E>,
     val dispatchToFxThread: Boolean = true
-) : AbstractMutableList<E>(), ObservableList<E>, AggregateCollectionRef<K, E> by innerProxy, FxObservableCollectionProxy {
+) : AbstractMutableList<E>(), ObservableList<E>, AggregateCollectionRef<K, E> by innerProxy, FxObservableCollection<K, E> {
 
     override val innerMutableProxy: Any get() = innerProxy
 
@@ -209,7 +209,7 @@ class FxAggregateListProxy<K : Comparable<K>, E : IdentifiableEntity<K>>(
         invalidationListeners.remove(listener)
     }
 
-    operator fun getValue(thisRef: Any?, property: KProperty<*>): FxAggregateListProxy<K, E> = this
+    operator fun getValue(thisRef: Any?, property: KProperty<*>): FxAggregateList<K, E> = this
 
     private fun fireChange(change: ListChangeListener.Change<E>) {
         val notify = {

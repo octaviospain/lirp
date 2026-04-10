@@ -19,7 +19,6 @@ package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.persistence.AggregateSetProxy
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
@@ -61,8 +60,8 @@ internal class AggregateSetCascadeTest : StringSpec({
     }
 
     "CASCADE on set ref removes all referenced entities from their repository" {
-        playlistRepo.add(MutableAudioPlaylistEntity(10, "Mix A"))
-        playlistRepo.add(MutableAudioPlaylistEntity(20, "Mix B"))
+        playlistRepo.add(DefaultAudioPlaylist(10, "Mix A"))
+        playlistRepo.add(DefaultAudioPlaylist(20, "Mix B"))
         playlistRepo.size() shouldBe 2
 
         val groupRepo = CascadeMusicPlaylistGroupRepo(ctx)
@@ -76,8 +75,8 @@ internal class AggregateSetCascadeTest : StringSpec({
     }
 
     "CASCADE on set ref skips already-removed entities with warning" {
-        playlistRepo.add(MutableAudioPlaylistEntity(10, "Mix A"))
-        playlistRepo.add(MutableAudioPlaylistEntity(20, "Mix B"))
+        playlistRepo.add(DefaultAudioPlaylist(10, "Mix A"))
+        playlistRepo.add(DefaultAudioPlaylist(20, "Mix B"))
 
         val groupRepo = CascadeMusicPlaylistGroupRepo(ctx)
         val group1 = groupRepo.create(id = 100, playlistIds = setOf(10, 20))
@@ -102,7 +101,7 @@ internal class AggregateSetCascadeTest : StringSpec({
     }
 
     "RESTRICT on set ref blocks parent removal when a referenced entity is still referenced" {
-        playlistRepo.add(MutableAudioPlaylistEntity(10, "Mix"))
+        playlistRepo.add(DefaultAudioPlaylist(10, "Mix"))
 
         val restrictGroupRepo = RestrictMusicPlaylistGroupRepo(ctx)
         val group1 = restrictGroupRepo.create(id = 100, playlistIds = setOf(10))
@@ -117,7 +116,7 @@ internal class AggregateSetCascadeTest : StringSpec({
     }
 
     "RESTRICT on set ref allows removal when no external references exist" {
-        playlistRepo.add(MutableAudioPlaylistEntity(10, "Mix"))
+        playlistRepo.add(DefaultAudioPlaylist(10, "Mix"))
 
         val restrictGroupRepo = RestrictMusicPlaylistGroupRepo(ctx)
         val group = restrictGroupRepo.create(id = 100, playlistIds = setOf(10))
@@ -137,7 +136,7 @@ internal class AggregateSetCascadeTest : StringSpec({
     }
 
     "DETACH on set ref is a no-op" {
-        playlistRepo.add(MutableAudioPlaylistEntity(10, "Mix"))
+        playlistRepo.add(DefaultAudioPlaylist(10, "Mix"))
 
         val detachGroupRepo = DetachMusicPlaylistGroupRepo(ctx)
         val group = detachGroupRepo.create(id = 100, playlistIds = setOf(10))
@@ -148,8 +147,8 @@ internal class AggregateSetCascadeTest : StringSpec({
     }
 
     "NONE on set ref is a no-op" {
-        playlistRepo.add(MutableAudioPlaylistEntity(10, "Mix A"))
-        playlistRepo.add(MutableAudioPlaylistEntity(20, "Mix B"))
+        playlistRepo.add(DefaultAudioPlaylist(10, "Mix A"))
+        playlistRepo.add(DefaultAudioPlaylist(20, "Mix B"))
 
         val noneGroupRepo = NoneMusicPlaylistGroupRepo(ctx)
         val group = noneGroupRepo.create(id = 100, playlistIds = setOf(10, 20))

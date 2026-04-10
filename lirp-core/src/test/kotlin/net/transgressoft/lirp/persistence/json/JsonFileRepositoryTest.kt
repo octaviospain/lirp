@@ -5,10 +5,10 @@ import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
 import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
+import net.transgressoft.lirp.persistence.DefaultAudioPlaylist
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpDeserializationException
 import net.transgressoft.lirp.persistence.MutableAudioItem
-import net.transgressoft.lirp.persistence.MutableAudioPlaylistEntity
 import net.transgressoft.lirp.persistence.PersistentRepositoryBase
 import io.kotest.assertions.json.shouldEqualJson
 import io.kotest.assertions.nondeterministic.eventually
@@ -695,7 +695,7 @@ class JsonFileRepositoryTest : DescribeSpec({
             val playlistRepo2 = MutableAudioPlaylistJsonFileRepository(ctx2, file, 10L)
 
             playlistRepo2.findById(1).shouldBePresent {
-                (it as MutableAudioPlaylistEntity).audioItems.referenceIds shouldContainExactly listOf(1, 2, 3)
+                (it as DefaultAudioPlaylist).audioItems.referenceIds shouldContainExactly listOf(1, 2, 3)
                 it.audioItems.resolveAll() shouldHaveSize 3
             }
 
@@ -725,7 +725,7 @@ class JsonFileRepositoryTest : DescribeSpec({
             trackRepo2.add(MutableAudioItem(3, "T3"))
             val playlistRepo2 = MutableAudioPlaylistJsonFileRepository(ctx2, file, 10L)
 
-            val reloaded = playlistRepo2.findById(1).get() as MutableAudioPlaylistEntity
+            val reloaded = playlistRepo2.findById(1).get() as DefaultAudioPlaylist
             reloaded.audioItems.referenceIds shouldContainExactly listOf(1, 2)
 
             playlistRepo2.close()
@@ -829,7 +829,7 @@ class JsonFileRepositoryTest : DescribeSpec({
             val playlistRepo2 = MutableAudioPlaylistJsonFileRepository(ctx2, file, 10L)
 
             playlistRepo2.findById(1).shouldBePresent {
-                (it as MutableAudioPlaylistEntity).audioItems.referenceIds shouldContainExactly listOf(10, 20, 30)
+                (it as DefaultAudioPlaylist).audioItems.referenceIds shouldContainExactly listOf(10, 20, 30)
             }
 
             playlistRepo2.close()

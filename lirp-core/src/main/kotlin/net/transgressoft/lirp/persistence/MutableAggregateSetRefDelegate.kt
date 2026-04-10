@@ -67,7 +67,9 @@ internal class MutableAggregateSetRefDelegate<K : Comparable<K>, E : Identifiabl
                 backingIds.addAll(ids)
             }
         if (changed && actuallyAdded.isNotEmpty()) {
-            collectionEmissionCallback?.invoke(StandardCollectionChangeEvent.add(actuallyAdded))
+            val event = StandardCollectionChangeEvent.add(actuallyAdded)
+            collectionEmissionCallback?.invoke(event)
+            notifyProjection(event)
         }
         return changed
     }
@@ -82,7 +84,9 @@ internal class MutableAggregateSetRefDelegate<K : Comparable<K>, E : Identifiabl
                 backingIds.removeAll(ids)
             }
         if (changed && actuallyRemoved.isNotEmpty()) {
-            collectionEmissionCallback?.invoke(StandardCollectionChangeEvent.remove(actuallyRemoved))
+            val event = StandardCollectionChangeEvent.remove(actuallyRemoved)
+            collectionEmissionCallback?.invoke(event)
+            notifyProjection(event)
         }
         return changed
     }
@@ -100,7 +104,7 @@ internal class MutableAggregateSetRefDelegate<K : Comparable<K>, E : Identifiabl
 }
 
 /**
- * Proxy that exposes a [MutableAggregateSetRefDelegate] as a standard [MutableSet].
+ * Mutable set that exposes a [MutableAggregateSetRefDelegate] as a standard [MutableSet].
  *
  * Composes the inner delegate via [AggregateCollectionRef] delegation so that [referenceIds],
  * [resolveAll], and cascade operations are forwarded. [add] and [remove] route through the
@@ -112,7 +116,7 @@ internal class MutableAggregateSetRefDelegate<K : Comparable<K>, E : Identifiabl
  * @param K the type of the referenced entity's ID
  * @param E the referenced entity type
  */
-class MutableAggregateSetProxy<K : Comparable<K>, E : IdentifiableEntity<K>>
+class MutableAggregateSet<K : Comparable<K>, E : IdentifiableEntity<K>>
     internal constructor(
         internal val innerDelegate: MutableAggregateSetRefDelegate<K, E>
     ) : AbstractMutableSet<E>(),
@@ -149,13 +153,13 @@ class MutableAggregateSetProxy<K : Comparable<K>, E : IdentifiableEntity<K>>
             }
         }
 
-        operator fun getValue(thisRef: Any?, property: KProperty<*>): MutableAggregateSetProxy<K, E> = this
+        operator fun getValue(thisRef: Any?, property: KProperty<*>): MutableAggregateSet<K, E> = this
     }
 
 /**
  * Creates a property delegate for a mutable unique-set aggregate collection reference.
  *
- * The returned object is a [MutableSet] proxy that wraps an internal delegate owning a mutable
+ * The returned object is a [MutableSet] that wraps an internal delegate owning a mutable
  * backing ID set ([LinkedHashSet]), initialized from [initialIds] at property delegation time.
  * Add and remove operations update the internal set and trigger collection change event emission
  * on the owning entity after registry binding. Uniqueness is enforced — duplicate IDs are silently ignored.
@@ -169,4 +173,4 @@ class MutableAggregateSetProxy<K : Comparable<K>, E : IdentifiableEntity<K>>
  */
 fun <K : Comparable<K>, E : IdentifiableEntity<K>> mutableAggregateSet(
     initialIds: Set<K> = emptySet()
-): MutableAggregateSetProxy<K, E> = MutableAggregateSetProxy(MutableAggregateSetRefDelegate(initialIds))
+): MutableAggregateSet<K, E> = MutableAggregateSet(MutableAggregateSetRefDelegate(initialIds))

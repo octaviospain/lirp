@@ -20,8 +20,8 @@ package net.transgressoft.lirp.persistence.fx
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.AggregateCollectionRef
-import net.transgressoft.lirp.persistence.FxObservableCollectionProxy
-import net.transgressoft.lirp.persistence.MutableAggregateSetProxy
+import net.transgressoft.lirp.persistence.FxObservableCollection
+import net.transgressoft.lirp.persistence.MutableAggregateSet
 import javafx.application.Platform
 import javafx.beans.InvalidationListener
 import javafx.collections.ObservableSet
@@ -31,7 +31,7 @@ import kotlin.reflect.KProperty
 import kotlinx.coroutines.launch
 
 /**
- * JavaFX-observable proxy that wraps a [MutableAggregateSetProxy] and implements both
+ * JavaFX-observable set that wraps a [MutableAggregateSet] and implements both
  * [ObservableSet] and [AggregateCollectionRef].
  *
  * Mutations to this set fire [SetChangeListener.Change] notifications automatically.
@@ -46,13 +46,13 @@ import kotlinx.coroutines.launch
  *
  * @param K the entity ID type
  * @param E the entity type
- * @param innerProxy the wrapped lirp mutable aggregate set proxy
+ * @param innerProxy the wrapped lirp mutable aggregate set
  * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
  */
-class FxAggregateSetProxy<K : Comparable<K>, E : IdentifiableEntity<K>>(
-    val innerProxy: MutableAggregateSetProxy<K, E>,
+class FxAggregateSet<K : Comparable<K>, E : IdentifiableEntity<K>>(
+    val innerProxy: MutableAggregateSet<K, E>,
     val dispatchToFxThread: Boolean = true
-) : AbstractMutableSet<E>(), ObservableSet<E>, AggregateCollectionRef<K, E> by innerProxy, FxObservableCollectionProxy {
+) : AbstractMutableSet<E>(), ObservableSet<E>, AggregateCollectionRef<K, E> by innerProxy, FxObservableCollection<K, E> {
 
     override val innerMutableProxy: Any get() = innerProxy
 
@@ -82,7 +82,7 @@ class FxAggregateSetProxy<K : Comparable<K>, E : IdentifiableEntity<K>>(
 
             override fun remove() {
                 val element = lastReturned ?: throw IllegalStateException("next() not yet called or already removed")
-                this@FxAggregateSetProxy.remove(element)
+                this@FxAggregateSet.remove(element)
                 lastReturned = null
             }
         }
@@ -166,7 +166,7 @@ class FxAggregateSetProxy<K : Comparable<K>, E : IdentifiableEntity<K>>(
         setChangeListeners.remove(listener)
     }
 
-    operator fun getValue(thisRef: Any?, property: KProperty<*>): FxAggregateSetProxy<K, E> = this
+    operator fun getValue(thisRef: Any?, property: KProperty<*>): FxAggregateSet<K, E> = this
 
     private fun fireChange(change: SetChangeListener.Change<E>) {
         val notify = {

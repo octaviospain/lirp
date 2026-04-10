@@ -18,13 +18,14 @@
 package net.transgressoft.lirp.persistence.fx
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
+import net.transgressoft.lirp.persistence.FxObservableCollection
 import net.transgressoft.lirp.persistence.mutableAggregateList
 import net.transgressoft.lirp.persistence.mutableAggregateSet
 
 /**
  * Creates a property delegate for a JavaFX-observable mutable ordered aggregate collection reference.
  *
- * Returns an [FxAggregateListProxy] that implements both [javafx.collections.ObservableList] and
+ * Returns an [FxAggregateList] that implements both [javafx.collections.ObservableList] and
  * lirp's [net.transgressoft.lirp.persistence.AggregateCollectionRef]. Mutations fire
  * [javafx.collections.ListChangeListener.Change] notifications automatically.
  *
@@ -38,13 +39,13 @@ import net.transgressoft.lirp.persistence.mutableAggregateSet
 fun <K : Comparable<K>, E : IdentifiableEntity<K>> fxAggregateList(
     initialIds: List<K> = emptyList(),
     dispatchToFxThread: Boolean = true
-): FxAggregateListProxy<K, E> =
-    FxAggregateListProxy(mutableAggregateList(initialIds), dispatchToFxThread)
+): FxAggregateList<K, E> =
+    FxAggregateList(mutableAggregateList(initialIds), dispatchToFxThread)
 
 /**
  * Creates a property delegate for a JavaFX-observable mutable unique-set aggregate collection reference.
  *
- * Returns an [FxAggregateSetProxy] that implements both [javafx.collections.ObservableSet] and
+ * Returns an [FxAggregateSet] that implements both [javafx.collections.ObservableSet] and
  * lirp's [net.transgressoft.lirp.persistence.AggregateCollectionRef]. Mutations fire
  * [javafx.collections.SetChangeListener.Change] notifications automatically, with one Change
  * per element per the JavaFX [javafx.collections.SetChangeListener] contract.
@@ -59,8 +60,8 @@ fun <K : Comparable<K>, E : IdentifiableEntity<K>> fxAggregateList(
 fun <K : Comparable<K>, E : IdentifiableEntity<K>> fxAggregateSet(
     initialIds: Set<K> = emptySet(),
     dispatchToFxThread: Boolean = true
-): FxAggregateSetProxy<K, E> =
-    FxAggregateSetProxy(mutableAggregateSet(initialIds), dispatchToFxThread)
+): FxAggregateSet<K, E> =
+    FxAggregateSet(mutableAggregateSet(initialIds), dispatchToFxThread)
 
 /**
  * Creates a [LirpStringProperty] delegate with an optional initial value.
@@ -132,3 +133,36 @@ fun fxBoolean(initialValue: Boolean = false, dispatchToFxThread: Boolean = true)
  */
 fun <T> fxObject(initialValue: T? = null, dispatchToFxThread: Boolean = true): LirpObjectProperty<T> =
     LirpObjectProperty(initialValue, dispatchToFxThread)
+
+/**
+ * Creates a read-only [javafx.collections.ObservableMap] projection delegate that groups entities
+ * from an [FxObservableCollection] source by a secondary key.
+ *
+ * The returned [FxProjectionMap] lazily initializes on the first Kotlin `by`-delegation
+ * access, subscribing to the source collection's change listener and building initial state
+ * from the source's current contents. Subsequent adds and removes fire incremental
+ * [javafx.collections.MapChangeListener.Change] notifications per affected bucket key.
+ *
+ * Keys are maintained in natural sorted order via a [java.util.TreeMap] backing.
+ * The projected map is read-only; calling `put` or `remove` on it throws [UnsupportedOperationException].
+ *
+ * Usage:
+ * ```kotlin
+ * val audioItemsByAlbum by fxProjectionMap(::audioItems, AudioItem::albumName)
+ * ```
+ *
+ * @param K the entity ID type
+ * @param PK the projection key type, must be [Comparable]
+ * @param E the entity type
+ * @param sourceRef lambda returning the source [FxObservableCollection] (supports `::property` syntax)
+ * @param keyExtractor grouping function that extracts the projection key from an entity
+ * @param dispatchToFxThread when `true` (default), dispatches notifications to the FX Application Thread;
+ *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
+ * @return a read-only projection map delegate incrementally updated from the source collection
+ */
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> fxProjectionMap(
+    sourceRef: () -> FxObservableCollection<K, E>,
+    keyExtractor: (E) -> PK,
+    dispatchToFxThread: Boolean = true
+): FxProjectionMap<K, PK, E> =
+    FxProjectionMap(sourceRef, keyExtractor, dispatchToFxThread)

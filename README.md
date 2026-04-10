@@ -255,13 +255,13 @@ entity.subscribeToMutations { event ->
     println("${event.oldEntity} -> ${event.newEntity}")
 }
 
-// Collection changes only (optionally filtered by collection property name)
-entity.subscribeToCollectionChanges { event ->
+// Collection changes — type-safe with element class
+entity.subscribeToCollectionChanges(Track::class) { event ->
     println("Type: ${event.type}, Added: ${event.added}, Removed: ${event.removed}")
 }
 
 // Filter to a specific collection
-entity.subscribeToCollectionChanges("tracks") { event ->
+entity.subscribeToCollectionChanges(Track::class, "tracks") { event ->
     println("Tracks changed: +${event.added.size} -${event.removed.size}")
 }
 ```
@@ -269,14 +269,14 @@ entity.subscribeToCollectionChanges("tracks") { event ->
 **Java Consumer overloads:**
 
 ```java
-// All collections
-CollectionChangeEventExtensionsKt.subscribeToCollectionChanges(entity, null,
-    (Consumer<CollectionChangeEvent<?>>) event ->
+// All collections — type-safe with element class
+CollectionChangeEventExtensionsKt.subscribeToCollectionChanges(entity, Track.class, null,
+    (Consumer<CollectionChangeEvent<Track>>) event ->
         System.out.println("Added: " + event.getAdded()));
 
 // Specific collection
-CollectionChangeEventExtensionsKt.subscribeToCollectionChanges(entity, "tracks",
-    (Consumer<CollectionChangeEvent<?>>) event ->
+CollectionChangeEventExtensionsKt.subscribeToCollectionChanges(entity, Track.class, "tracks",
+    (Consumer<CollectionChangeEvent<Track>>) event ->
         System.out.println("Added: " + event.getAdded()));
 
 // Property mutations only
@@ -605,9 +605,74 @@ Available factories: `fxString()`, `fxInteger()`, `fxDouble()`, `fxFloat()`, `fx
 ```java
 LirpStringProperty name = FxProperties.fxString("default", true);
 LirpIntegerProperty age = FxProperties.fxInteger(0, true);
-FxAggregateListProxy<Integer, Track> tracks = FxProperties.fxAggregateList(List.of(), true);
+FxAggregateList<Integer, Track> tracks = FxProperties.fxAggregateList(List.of(), true);
 ```
 
+### Projection Maps
+
+Derive a read-only `Map<PK, List<E>>` from an existing `aggregateList` or `aggregateSet` delegate, grouping entities by a secondary key:
+
+```kotlin
+class AudioLibrary(
+    override val id: Int,
+    initialAudioItemIds: List<Int> = emptyList()
+) : ReactiveEntityBase<Int, AudioLibrary>() {
+    override val uniqueId = "audio-library-$id"
+
+    @Aggregate(onDelete = CascadeAction.DETACH)
+    val audioItems by mutableAggregateList<Int, AudioItem>(initialAudioItemIds)
+
+    val byTitle: Map<String, List<AudioItem>>
+        by projectionMap(::audioItems) { it.title }
+
+    override fun clone() = AudioLibrary(id, audioItems.referenceIds.toList())
+}
+```
+
+The projection lazily initializes on the first access and groups entities using a `TreeMap` for natural sorted key order. When the source is a `mutableAggregateList` or `mutableAggregateSet`, the projection auto-updates incrementally whenever entities are added or removed — no manual notification required:
+
+```kotlin
+val newItem = MutableAudioItem(42, "Blues")
+library.audioItems.add(newItem)
+// The projection updates automatically
+```
+
+- `onChange` — optional callback invoked after each projection change with the current map state
+
+The returned map is read-only (`Collections.unmodifiableMap`). All mutations flow through the source collection.
+
+### FX Projection Maps
+
+Derive a read-only `ObservableMap<PK, List<E>>` from an existing `fxAggregateList` or `fxAggregateSet` delegate, grouping entities by a secondary key:
+
+```kotlin
+class AudioLibrary(
+    override val id: Int,
+    initialAudioItemIds: List<Int> = emptyList()
+) : ReactiveEntityBase<Int, AudioLibrary>() {
+    override val uniqueId = "audio-library-$id"
+
+    @Aggregate(onDelete = CascadeAction.DETACH)
+    val audioItems by fxAggregateList<Int, AudioItem>(initialAudioItemIds, dispatchToFxThread = false)
+
+    val byAlbum: ObservableMap<String, List<AudioItem>>
+        by fxProjectionMap(::audioItems, AudioItem::albumName)
+
+    override fun clone() = AudioLibrary(id, audioItems.referenceIds.toList())
+}
+```
+
+The projection updates incrementally when the source collection changes, firing targeted `MapChangeListener` events per affected group key only. Keys iterate in natural sorted order via a `TreeMap` backing. The returned map is read-only — calling `put` or `remove` throws `UnsupportedOperationException`.
+
+Java callers use the static factory and access the map directly on the returned `FxProjectionMap`, which implements `ObservableMap`:
+
+```java
+FxProjectionMap<Integer, String, AudioItem> byAlbum =
+    FxProperties.fxProjectionMap(() -> audioItems, AudioItem::getAlbumName, false);
+byAlbum.addListener((MapChangeListener<String, List<AudioItem>>) change -> { ... });
+int count = byAlbum.size();
+List<AudioItem> albums = byAlbum.get("Album A");
+```
 ## Annotations Reference
 
 | Annotation | Target | Required when | Not needed for |
@@ -632,7 +697,8 @@ FxAggregateListProxy<Integer, Track> tracks = FxProperties.fxAggregateList(List.
 - **Convention-over-configuration** — KSP generates table definitions from entity classes; annotations only when you need customization
 - **JSON persistence** — debounced file writes via `JsonFileRepository`
 - **Repository-as-factory** — typed `create()` methods with automatic `@LirpRepository` registration
-- **JavaFX integration** — `fxAggregateList`/`fxAggregateSet` delegates bridging lirp collections with `ObservableList`/`ObservableSet`
+- **JavaFX integration** — `fxAggregateList`/`fxAggregateSet` delegates bridging lirp collections with `ObservableList`/`ObservableSet`; `fxProjectionMap` for read-only grouped `ObservableMap` projections
+- **Non-FX projection maps** — `projectionMap` in `lirp-core` groups entities into a standard `Map<PK, List<E>>` with no JavaFX dependency, suitable for Android, Compose Multiplatform, and server-side consumers
 - **Full Java interoperability**
 
 ## Limitations and Design Trade-offs

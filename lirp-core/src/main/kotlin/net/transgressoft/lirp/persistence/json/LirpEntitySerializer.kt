@@ -21,8 +21,8 @@ import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.persistence.AbstractMutableAggregateCollectionRefDelegate
 import net.transgressoft.lirp.persistence.AggregateCollectionRef
 import net.transgressoft.lirp.persistence.FxScalarPropertyDelegate
-import net.transgressoft.lirp.persistence.MutableAggregateListProxy
-import net.transgressoft.lirp.persistence.MutableAggregateSetProxy
+import net.transgressoft.lirp.persistence.MutableAggregateList
+import net.transgressoft.lirp.persistence.MutableAggregateSet
 import kotlin.reflect.KClass
 import kotlin.reflect.KParameter
 import kotlin.reflect.KProperty1
@@ -366,8 +366,8 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
             // Unwrap proxy layer to reach the backing ID delegate
             val mutableDelegate =
                 when (delegate) {
-                    is MutableAggregateListProxy<*, *> -> delegate.innerDelegate
-                    is MutableAggregateSetProxy<*, *> -> delegate.innerDelegate
+                    is MutableAggregateList<*, *> -> delegate.innerDelegate
+                    is MutableAggregateSet<*, *> -> delegate.innerDelegate
                     is AbstractMutableAggregateCollectionRefDelegate<*, *> -> delegate
                     else -> continue
                 }

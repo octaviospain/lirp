@@ -83,6 +83,7 @@ object FxSqlTestItemTableDef : SqlTableDef<FxSqlTestItem> {
 /**
  * Test entity combining fx scalar delegates ([fxString], [fxInteger], [fxBoolean], [fxDouble],
  * [fxObject]) with an [fxAggregateList] collection delegate for SQL persistence testing.
+ * The [groupProperty] field is used in projection map tests as the grouping key.
  */
 class FxSqlTestEntity(
     override val id: Int,
@@ -91,7 +92,8 @@ class FxSqlTestEntity(
     initialActive: Boolean = false,
     initialRating: Double = 0.0,
     initialTag: String? = null,
-    initialItemIds: List<Int> = emptyList()
+    initialItemIds: List<Int> = emptyList(),
+    initialGroup: String = ""
 ) : ReactiveEntityBase<Int, FxSqlTestEntity>(), IdentifiableEntity<Int> {
     override val uniqueId: String get() = "fx-sql-test-$id"
 
@@ -100,6 +102,7 @@ class FxSqlTestEntity(
     val activeProperty: BooleanProperty by fxBoolean(initialActive, dispatchToFxThread = false)
     val ratingProperty: DoubleProperty by fxDouble(initialRating, dispatchToFxThread = false)
     val tagProperty: ObjectProperty<String?> by fxObject<String?>(initialTag, dispatchToFxThread = false)
+    val groupProperty: StringProperty by fxString(initialGroup, dispatchToFxThread = false)
 
     @Aggregate(onDelete = CascadeAction.NONE)
     val items by fxAggregateList<Int, FxSqlTestItem>(initialItemIds, dispatchToFxThread = false)
@@ -107,7 +110,8 @@ class FxSqlTestEntity(
     override fun clone(): FxSqlTestEntity =
         FxSqlTestEntity(
             id, nameProperty.get(), yearProperty.get(), activeProperty.get(),
-            ratingProperty.get(), tagProperty.get(), items.referenceIds.toList()
+            ratingProperty.get(), tagProperty.get(), items.referenceIds.toList(),
+            groupProperty.get()
         )
 
     override fun equals(other: Any?): Boolean {
@@ -119,6 +123,7 @@ class FxSqlTestEntity(
             activeProperty.get() == other.activeProperty.get() &&
             ratingProperty.get() == other.ratingProperty.get() &&
             tagProperty.get() == other.tagProperty.get() &&
+            groupProperty.get() == other.groupProperty.get() &&
             items.referenceIds == other.items.referenceIds
     }
 
@@ -129,6 +134,7 @@ class FxSqlTestEntity(
         result = 31 * result + activeProperty.get().hashCode()
         result = 31 * result + ratingProperty.get().hashCode()
         result = 31 * result + (tagProperty.get()?.hashCode() ?: 0)
+        result = 31 * result + groupProperty.get().hashCode()
         result = 31 * result + items.referenceIds.hashCode()
         return result
     }
@@ -147,7 +153,8 @@ object FxSqlTestEntityTableDef : SqlTableDef<FxSqlTestEntity> {
             ColumnDef("active", ColumnType.BooleanType, nullable = false, primaryKey = false),
             ColumnDef("rating", ColumnType.DoubleType, nullable = false, primaryKey = false),
             ColumnDef("tag", ColumnType.TextType, nullable = true, primaryKey = false),
-            ColumnDef("item_ids", ColumnType.TextType, nullable = false, primaryKey = false)
+            ColumnDef("item_ids", ColumnType.TextType, nullable = false, primaryKey = false),
+            ColumnDef("group_name", ColumnType.VarcharType(200), nullable = false, primaryKey = false)
         )
 
     @Suppress("UNCHECKED_CAST")
@@ -165,7 +172,8 @@ object FxSqlTestEntityTableDef : SqlTableDef<FxSqlTestEntity> {
             row[cols["active"]!! as Column<Boolean>],
             row[cols["rating"]!! as Column<Double>],
             row[cols["tag"]!! as Column<String?>],
-            parsedIds
+            parsedIds,
+            row[cols["group_name"]!! as Column<String>]
         )
     }
 
@@ -178,7 +186,8 @@ object FxSqlTestEntityTableDef : SqlTableDef<FxSqlTestEntity> {
             cols["active"]!! to entity.activeProperty.get(),
             cols["rating"]!! to entity.ratingProperty.get(),
             cols["tag"]!! to entity.tagProperty.get(),
-            cols["item_ids"]!! to entity.items.referenceIds.joinToString(",")
+            cols["item_ids"]!! to entity.items.referenceIds.joinToString(","),
+            cols["group_name"]!! to entity.groupProperty.get()
         )
     }
 }

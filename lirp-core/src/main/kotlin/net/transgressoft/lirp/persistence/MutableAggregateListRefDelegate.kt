@@ -100,7 +100,7 @@ internal class MutableAggregateListRefDelegate<K : Comparable<K>, E : Identifiab
 }
 
 /**
- * Proxy that exposes a [MutableAggregateListRefDelegate] as a standard [MutableList].
+ * Mutable list that exposes a [MutableAggregateListRefDelegate] as a standard [MutableList].
  *
  * Holds [innerDelegate] for registry binding, ID tracking, and reactive event emission.
  * All indexed mutations ([set], [add], [removeAt]) route through the delegate's locked,
@@ -110,12 +110,12 @@ internal class MutableAggregateListRefDelegate<K : Comparable<K>, E : Identifiab
  * for free — they all funnel through the four override methods defined here.
  *
  * Implements [LirpDelegate] so that [RegistryBase] and [LirpEntitySerializer] can detect and
- * unwrap this proxy to reach the inner delegate.
+ * unwrap this collection to reach the inner delegate.
  *
  * @param K the type of the referenced entity's ID
  * @param E the referenced entity type
  */
-class MutableAggregateListProxy<K : Comparable<K>, E : IdentifiableEntity<K>>
+class MutableAggregateList<K : Comparable<K>, E : IdentifiableEntity<K>>
     internal constructor(
         internal val innerDelegate: MutableAggregateListRefDelegate<K, E>
     ) : AbstractMutableList<E>(), AggregateCollectionRef<K, E> by innerDelegate, LirpDelegate {
@@ -182,13 +182,13 @@ class MutableAggregateListProxy<K : Comparable<K>, E : IdentifiableEntity<K>>
             }
         }
 
-        operator fun getValue(thisRef: Any?, property: KProperty<*>): MutableAggregateListProxy<K, E> = this
+        operator fun getValue(thisRef: Any?, property: KProperty<*>): MutableAggregateList<K, E> = this
     }
 
 /**
  * Creates a property delegate for a mutable ordered aggregate collection reference.
  *
- * The returned object is a [MutableList] proxy that wraps an internal delegate owning the mutable
+ * The returned object is a [MutableList] that wraps an internal delegate owning the mutable
  * backing ID list, initialized from [initialIds] at property delegation time. Add, remove, and
  * indexed mutation operations update the internal list and trigger collection change event emission
  * on the owning entity after registry binding. Duplicate IDs are allowed (bag semantics).
@@ -207,4 +207,4 @@ class MutableAggregateListProxy<K : Comparable<K>, E : IdentifiableEntity<K>>
  */
 fun <K : Comparable<K>, E : IdentifiableEntity<K>> mutableAggregateList(
     initialIds: List<K> = emptyList()
-): MutableAggregateListProxy<K, E> = MutableAggregateListProxy(MutableAggregateListRefDelegate(initialIds))
+): MutableAggregateList<K, E> = MutableAggregateList(MutableAggregateListRefDelegate(initialIds))
