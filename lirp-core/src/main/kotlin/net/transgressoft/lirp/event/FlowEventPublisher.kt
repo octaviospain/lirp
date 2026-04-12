@@ -28,7 +28,6 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
@@ -286,7 +285,7 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
 
             val job =
                 flowScope.launch {
-                    changesFlow.collectLatest { event ->
+                    changesFlow.collect { event ->
                         subscriber.onNext(event)
                     }
                 }
@@ -320,7 +319,7 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
             @Suppress("kotlin:S6311")
             val job =
                 flowScope.launch {
-                    changesFlow.collectLatest { event ->
+                    changesFlow.collect { event ->
                         action(event)
                     }
                 }
@@ -347,7 +346,7 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
             @Suppress("kotlin:S6311")
             val job =
                 flowScope.launch {
-                    changesFlow.collectLatest { event ->
+                    changesFlow.collect { event ->
                         if (event.type in eventTypes) {
                             action(event)
                         }

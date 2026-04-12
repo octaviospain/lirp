@@ -31,6 +31,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Flow
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.function.Consumer
@@ -45,6 +46,7 @@ import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 @ExperimentalCoroutinesApi
 class FlowEventPublisherTest : DescribeSpec({
@@ -539,6 +541,46 @@ class FlowEventPublisherTest : DescribeSpec({
             }
 
             subscription.cancel()
+        }
+
+        it("slow subscriber receives all events without dropping") {
+            val defaultScope = CoroutineScope(Dispatchers.Default)
+            val previousFlowScope = ReactiveScope.flowScope
+            ReactiveScope.flowScope = defaultScope
+            try {
+                val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("SlowPublisher")
+                publisher.activateEvents(CREATE)
+
+                val received = CopyOnWriteArrayList<CrudEvent<String, TestEntity>>()
+
+                val subscription =
+                    publisher.subscribe { event ->
+                        delay(50.milliseconds)
+                        received.add(event)
+                    }
+
+                try {
+                    repeat(5) { i ->
+                        publisher.emitAsync(Create(TestEntity("entity-$i")))
+                        delay(10.milliseconds)
+                    }
+
+                    withTimeout(5000.milliseconds) {
+                        while (received.size < 5) {
+                            delay(10.milliseconds)
+                        }
+                    }
+
+                    received.size shouldBe 5
+                    received.any { it.entities.values.first().id == "entity-0" } shouldBe true
+                    received.any { it.entities.values.first().id == "entity-4" } shouldBe true
+                } finally {
+                    subscription.cancel()
+                    publisher.close()
+                }
+            } finally {
+                ReactiveScope.flowScope = previousFlowScope
+            }
         }
 
         it("late subscriber receives no historical events (no replay)") {

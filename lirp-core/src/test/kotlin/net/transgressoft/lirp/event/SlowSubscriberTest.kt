@@ -38,9 +38,9 @@ import kotlinx.coroutines.launch
 const val SLOW_DELAY_MS = 50L
 
 /**
- * Spacing between paced emissions. Must be significantly larger than [SLOW_DELAY_MS] to ensure
- * `collectLatest` does not cancel in-progress slow handlers on loaded CI environments where
- * coroutine scheduling adds variable overhead.
+ * Spacing between paced emissions. Must be larger than [SLOW_DELAY_MS] to ensure
+ * each event completes processing before the next arrives, avoiding backpressure
+ * on loaded CI environments where coroutine scheduling adds variable overhead.
  */
 private const val PACED_INTERVAL_MS = 120L
 
@@ -55,10 +55,9 @@ private const val EVENT_COUNT = 60
  * Each subscriber runs in its own independent coroutine: `delay()` in one subscriber only
  * suspends that coroutine, leaving other subscribers and the emitter unaffected.
  *
- * Note: [FlowEventPublisher.subscribe] uses `collectLatest` internally. With real dispatcher
- * and burst emission, `collectLatest` will restart the slow subscriber's handler for each
- * new event (since the handler delay exceeds the inter-event gap). This is expected behavior —
- * tests verify emission speed and the relative delivery advantage of the fast subscriber.
+ * Note: [FlowEventPublisher.subscribe] uses `collect` internally, processing events
+ * sequentially. Each event is fully handled before the next is delivered to that subscriber.
+ * Tests verify emission speed and the relative delivery advantage of the fast subscriber.
  *
  * To verify completeness (all events received by both subscribers), events are emitted
  * with spacing greater than [SLOW_DELAY_MS], ensuring each event fully completes in both
@@ -142,7 +141,7 @@ class SlowSubscriberTest : DescribeSpec({
                     slowLatch.countDown()
                 }
 
-            // Emit with spacing slightly above SLOW_DELAY_MS so collectLatest does not cancel any handler.
+            // Emit with spacing slightly above SLOW_DELAY_MS so each event completes before the next arrives.
             // This still proves emission is much faster than if blocking occurred.
             val pacedIntervalMs = PACED_INTERVAL_MS
             val emitter =
