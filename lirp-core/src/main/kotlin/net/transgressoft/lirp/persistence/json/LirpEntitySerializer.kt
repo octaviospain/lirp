@@ -148,6 +148,8 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
                 when {
                     delegate is AggregateCollectionRef<*, *> -> {
                         val idSerializer = resolveAggregateIdSerializer(delegate, prop)
+                        // Safe: idSerializer resolves the aggregate's declared ID type. kotlinx-serialization's composite
+                        // encoder accepts KSerializer<Any?> at the element level — the runtime value matches the declared type.
                         @Suppress("UNCHECKED_CAST")
                         DelegateInfo.AggregateCollection(name, ListSerializer(idSerializer) as KSerializer<Any?>)
                     }
@@ -156,6 +158,8 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
                         val setMethod = delegate.javaClass.requireMethod("set", 1)
                         getMethod.isAccessible = true
                         setMethod.isAccessible = true
+                        // Safe: resolveFxScalarSerializer returns a serializer matching the delegate's declared value type.
+                        // KSerializer<Any?> is required by the composite encoder; the runtime type is always correct.
                         @Suppress("UNCHECKED_CAST")
                         DelegateInfo.FxScalar(name, resolveFxScalarSerializer(delegate, prop) as KSerializer<Any?>, getMethod, setMethod)
                     }
@@ -166,6 +170,8 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
                             }
                         val setValueMethod = delegate::class.java.requireMethod("setValue", 3)
                         setValueMethod.isAccessible = true
+                        // Safe: typedProp is looked up from kClass.memberProperties by name. The entity instance passed to
+                        // property.get() is always of type E, so KProperty1<Any, Any?> is a safe widening cast.
                         @Suppress("UNCHECKED_CAST")
                         DelegateInfo.ReactiveProperty(
                             name,
@@ -180,6 +186,8 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
     }
 
     @OptIn(ExperimentalSerializationApi::class)
+    // Safe: return type is erased to KSerializer<Any?> for the composite encoder. The actual serializer
+    // is resolved from the aggregate's declared ID type (Int, Long, String, UUID) — runtime match is guaranteed.
     @Suppress("UNCHECKED_CAST")
     private fun resolveAggregateIdSerializer(
         delegate: AggregateCollectionRef<*, *>,
@@ -241,6 +249,8 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
             }
         }
 
+    // Safe: constructorParams and delegateInfos are built from the same entity class E during init.
+    // All property reads and serializer invocations operate on the concrete entity type.
     @Suppress("UNCHECKED_CAST")
     override fun serialize(encoder: Encoder, value: E) {
         val composite = encoder.beginStructure(descriptor)
@@ -289,6 +299,8 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
         composite.endStructure(descriptor)
     }
 
+    // Safe: symmetric to serialize — decoder uses the same descriptor and serializers built from class E.
+    // Decoded values are passed to the primary constructor which enforces the correct types.
     @Suppress("UNCHECKED_CAST")
     override fun deserialize(decoder: Decoder): E {
         val composite = decoder.beginStructure(descriptor)
@@ -323,6 +335,8 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
         val fxScalarValues: Map<String, Any?>
     )
 
+    // Safe: each decodeSerializableElement call uses the serializer from the matching DelegateInfo/ConstructorParamInfo,
+    // which was built from the declared property types. The cast to List<Any?> / Any? matches the serializer's output type.
     @Suppress("UNCHECKED_CAST")
     private fun decodeElements(
         composite: CompositeDecoder,
@@ -377,6 +391,8 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
         }
     }
 
+    // Safe: Nothing is used as the bottom type to satisfy Collection<K> with erased K. The actual collection
+    // contains correctly-typed ID values verified by resolveAggregateIdSerializer during init.
     @Suppress("UNCHECKED_CAST")
     private fun restoreAggregateIds(entity: E, aggregateIds: Map<String, List<Any?>>) {
         val registry = entity.delegateRegistry

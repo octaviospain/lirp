@@ -28,6 +28,7 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.comparables.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
+import java.time.LocalDateTime
 import java.util.Collections
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -168,8 +169,12 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         playlist.subscribe { events.add(it) }
         val beforeModified = playlist.lastDateModified
 
-        // Small sleep to allow lastDateModified to advance (it is based on LocalDateTime.now())
-        Thread.sleep(10)
+        // Bounded spin-wait until system clock advances past the captured timestamp.
+        // LocalDateTime.now() reads wall-clock time, not virtual time, so advanceTimeBy cannot be used.
+        val deadline = System.currentTimeMillis() + 500
+        while (LocalDateTime.now() <= beforeModified && System.currentTimeMillis() < deadline) {
+            Thread.sleep(1)
+        }
 
         playlist.audioItems.add(t1)
 

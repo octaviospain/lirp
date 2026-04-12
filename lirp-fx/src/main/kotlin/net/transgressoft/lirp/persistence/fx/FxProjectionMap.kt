@@ -118,6 +118,8 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
         }
     }
 
+    // Safe: FxProjectionMap<PK, K, E> is constructed with a source typed as FxAggregateList<K, E> or FxAggregateSet<K, E>.
+    // The wildcard erasure at the call site is a consequence of the sealed-source pattern; the concrete type matches K, E.
     @Suppress("UNCHECKED_CAST")
     private fun subscribeToList(source: FxAggregateList<*, *>) {
         val typedSource = source as FxAggregateList<K, E>
@@ -133,6 +135,7 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
         populateInitialState(initialElements)
     }
 
+    // Safe: same as subscribeToList — the source FxAggregateSet<*, *> was constructed with matching K, E type parameters.
     @Suppress("UNCHECKED_CAST")
     private fun subscribeToSet(source: FxAggregateSet<*, *>) {
         val typedSource = source as FxAggregateSet<K, E>
@@ -214,6 +217,8 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
         return innerObservableMap.size
     }
 
+    // Safe: ObservableMap declares MutableSet<MutableEntry> but the returned set is unmodifiable via Collections.unmodifiableSet.
+    // Callers cannot mutate through this view; the cast satisfies the interface contract without exposing true mutability.
     @Suppress("UNCHECKED_CAST")
     override val entries: MutableSet<MutableMap.MutableEntry<PK, List<E>>> get() {
         initialize()
@@ -221,12 +226,16 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
         return Collections.unmodifiableSet(snapshot) as MutableSet<MutableMap.MutableEntry<PK, List<E>>>
     }
 
+    // Safe: same as entries — Collections.unmodifiableSet wraps the keys. The MutableSet return type is required by
+    // ObservableMap's interface but the returned set throws UnsupportedOperationException on mutation attempts.
     @Suppress("UNCHECKED_CAST")
     override val keys: MutableSet<PK> get() {
         initialize()
         return Collections.unmodifiableSet(innerObservableMap.keys) as MutableSet<PK>
     }
 
+    // Safe: same as entries/keys — Collections.unmodifiableCollection wraps the values. The MutableCollection return type
+    // is required by ObservableMap's interface but the returned collection is effectively immutable.
     @Suppress("UNCHECKED_CAST")
     override val values: MutableCollection<List<E>> get() {
         initialize()
