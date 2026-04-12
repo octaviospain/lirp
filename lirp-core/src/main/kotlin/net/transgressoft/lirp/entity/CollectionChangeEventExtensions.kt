@@ -54,7 +54,6 @@ import kotlin.reflect.KClass
  * @param action the suspend function invoked for each matching collection change event
  * @return a subscription handle that can be cancelled to stop receiving events
  */
-@Suppress("UNCHECKED_CAST")
 fun <K : Comparable<K>, R : ReactiveEntity<K, R>, E : Any> ReactiveEntity<K, R>.subscribeToCollectionChanges(
     elementType: KClass<E>,
     refName: String? = null,
@@ -63,10 +62,16 @@ fun <K : Comparable<K>, R : ReactiveEntity<K, R>, E : Any> ReactiveEntity<K, R>.
     subscribe { event ->
         if (event is AggregateMutationEvent<*, *> &&
             event.childEvent is CollectionChangeEvent<*> &&
-            (refName == null || event.refName == refName) &&
-            (event.childEvent as CollectionChangeEvent<*>).added.all { it == null || elementType.isInstance(it) }
+            (refName == null || event.refName == refName)
         ) {
-            action(event.childEvent as CollectionChangeEvent<E>)
+            val child = event.childEvent as CollectionChangeEvent<*>
+            val matchesElementType =
+                child.added.all { elementType.isInstance(it) } &&
+                    child.removed.all { elementType.isInstance(it) }
+            if (matchesElementType) {
+                @Suppress("UNCHECKED_CAST") // Safe: both added and removed verified via isInstance() above
+                action(child as CollectionChangeEvent<E>)
+            }
         }
     }
 
@@ -105,6 +110,8 @@ fun <K : Comparable<K>, R : ReactiveEntity<K, R>> ReactiveEntity<K, R>.subscribe
 ): LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>> =
     subscribe { event ->
         if (event is ReactiveMutationEvent<*, *>) {
+            // Safe: the event is verified to be ReactiveMutationEvent<*, *> by the enclosing is-check.
+            // K and R are bound by the receiver's ReactiveEntity<K, R> type, so the cast is type-safe.
             @Suppress("UNCHECKED_CAST")
             action(event as ReactiveMutationEvent<K, R>)
         }

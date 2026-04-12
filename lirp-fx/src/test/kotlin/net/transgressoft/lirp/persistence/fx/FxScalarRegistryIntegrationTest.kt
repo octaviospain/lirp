@@ -196,7 +196,9 @@ class FxScalarRegistryIntegrationTest : StringSpec({
 
         entity.tagProperty.set("changed")
 
-        Thread.sleep(200)
+        // Drain pending coroutines — entity is standalone (not in a repository), so no publisher
+        // is active. advanceUntilIdle() confirms no event delivery is pending.
+        testDispatcher.scheduler.advanceUntilIdle()
         entity.tagProperty.get() shouldBe "changed"
         receivedEvent.get() shouldBe null
     }

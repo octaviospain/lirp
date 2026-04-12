@@ -167,6 +167,8 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                     is PendingInsert ->
                         table.insert { stmt ->
                             tableDef.toParams(op.entity, table).forEach { (col, value) ->
+                                // Safe: col was registered by ExposedTableInterpreter from the declared LirpTableDef column type.
+                                // Exposed erases Column<T> to Column<*> at the statement-builder level; Column<Any?> is the canonical workaround.
                                 @Suppress("UNCHECKED_CAST")
                                 stmt[col as Column<Any?>] = value
                             }
@@ -175,6 +177,8 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                         if (op.entities.isNotEmpty()) {
                             table.batchInsert(op.entities, shouldReturnGeneratedValues = false) { entity ->
                                 tableDef.toParams(entity, table).forEach { (col, value) ->
+                                    // Safe: col was registered by ExposedTableInterpreter from the declared LirpTableDef column type.
+                                    // Exposed erases Column<T> to Column<*> at the statement-builder level; Column<Any?> is the canonical workaround.
                                     @Suppress("UNCHECKED_CAST")
                                     this[col as Column<Any?>] = value
                                 }
@@ -183,16 +187,22 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                     }
                     is PendingUpdate ->
                         table.update({
+                            // Safe: pkCol is the primary key column registered by ExposedTableInterpreter. Exposed's
+                            // eq() operator requires Column<Any?> due to statement-builder type erasure.
                             @Suppress("UNCHECKED_CAST")
                             (pkCol as Column<Any?>).eq(op.entity.id)
                         }) { stmt ->
                             tableDef.toParams(op.entity, table).forEach { (col, value) ->
+                                // Safe: col was registered by ExposedTableInterpreter from the declared LirpTableDef column type.
+                                // Exposed erases Column<T> to Column<*> at the statement-builder level; Column<Any?> is the canonical workaround.
                                 @Suppress("UNCHECKED_CAST")
                                 stmt[col as Column<Any?>] = value
                             }
                         }
                     is PendingDelete ->
                         table.deleteWhere {
+                            // Safe: pkCol is the primary key column registered by ExposedTableInterpreter. Exposed's
+                            // eq() operator requires Column<Any?> due to statement-builder type erasure.
                             @Suppress("UNCHECKED_CAST")
                             (pkCol as Column<Any?>).eq(op.id)
                         }
@@ -202,6 +212,8 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                         // Acceptable for typical batch sizes (tens of IDs) produced by the collapse algorithm.
                         op.ids.forEach { id ->
                             table.deleteWhere {
+                                // Safe: pkCol is the primary key column registered by ExposedTableInterpreter. Exposed's
+                                // eq() operator requires Column<Any?> due to statement-builder type erasure.
                                 @Suppress("UNCHECKED_CAST")
                                 (pkCol as Column<Any?>).eq(id)
                             }

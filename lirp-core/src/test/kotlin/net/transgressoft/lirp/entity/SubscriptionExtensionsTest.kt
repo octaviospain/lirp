@@ -125,8 +125,9 @@ class SubscriptionExtensionsTest : StringSpec({
 
         parent.playlists.add(subPlaylist)
 
-        // Wait briefly to confirm no event arrives for the filtered-out collection
-        Thread.sleep(200)
+        // Drain pending coroutines — UnconfinedTestDispatcher executes eagerly,
+        // so any event that would fire has already fired after this call
+        testDispatcher.scheduler.advanceUntilIdle()
         eventCount shouldBe 0
     }
 
@@ -179,8 +180,8 @@ class SubscriptionExtensionsTest : StringSpec({
         playlist.audioItems.add(t1)
         playlist.audioItems.remove(t1)
 
-        // Wait briefly to confirm no ReactiveMutationEvent arrives for collection ops
-        Thread.sleep(200)
+        // Drain pending coroutines — any ReactiveMutationEvent that would fire has already fired
+        testDispatcher.scheduler.advanceUntilIdle()
         mutationEventCount shouldBe 0
     }
 
