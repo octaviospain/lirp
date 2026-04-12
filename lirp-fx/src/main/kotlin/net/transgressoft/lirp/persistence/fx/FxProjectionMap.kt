@@ -30,6 +30,8 @@ import javafx.collections.SetChangeListener
 import java.util.Collections
 import java.util.TreeMap
 import kotlin.reflect.KProperty
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 
 /**
@@ -58,7 +60,11 @@ import kotlinx.coroutines.launch
  *
  * When [dispatchToFxThread] is `true` (the default), map change notifications are dispatched
  * to the JavaFX Application Thread via [Platform.runLater] when fired from a background thread.
- * When `false`, notifications fire asynchronously on [ReactiveScope.flowScope].
+ * This is the recommended mode for thread-safe access — all mutations are marshaled to the
+ * single FX Application Thread.
+ *
+ * When `false`, notifications and mutations are serialized through a Channel-based sequential
+ * processor on [ReactiveScope.flowScope], ensuring no concurrent map access.
  *
  * @param K the entity ID type, must be [Comparable]
  * @param PK the projection key type, must be [Comparable] (used as [TreeMap] key)
@@ -77,6 +83,23 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
     @Volatile
     private var initialized = false
 
+    private val mutationChannel: Channel<() -> Unit>? =
+        if (!dispatchToFxThread) Channel(Channel.UNLIMITED) else null
+
+    private val initBarrier: CompletableDeferred<Unit>? =
+        if (!dispatchToFxThread) CompletableDeferred() else null
+
+    init {
+        mutationChannel?.let { channel ->
+            ReactiveScope.flowScope.launch {
+                initBarrier?.await()
+                for (action in channel) {
+                    action()
+                }
+            }
+        }
+    }
+
     private fun initialize() {
         if (initialized) return
         synchronized(this) {
@@ -90,6 +113,7 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
                             "but received: ${source::class.qualifiedName}"
                     )
             }
+            initBarrier?.complete(Unit)
             initialized = true
         }
     }
@@ -97,8 +121,6 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
     @Suppress("UNCHECKED_CAST")
     private fun subscribeToList(source: FxAggregateList<*, *>) {
         val typedSource = source as FxAggregateList<K, E>
-        val initialElements = typedSource.toList().ifEmpty { typedSource.innerProxy.resolveAll().toList() }
-        populateInitialState(initialElements)
         typedSource.addListener(
             ListChangeListener { change ->
                 while (change.next()) {
@@ -107,19 +129,21 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
                 }
             }
         )
+        val initialElements = typedSource.toList().ifEmpty { typedSource.innerProxy.resolveAll().toList() }
+        populateInitialState(initialElements)
     }
 
     @Suppress("UNCHECKED_CAST")
     private fun subscribeToSet(source: FxAggregateSet<*, *>) {
         val typedSource = source as FxAggregateSet<K, E>
-        val initialElements = typedSource.toList().ifEmpty { typedSource.innerProxy.resolveAll().toList() }
-        populateInitialState(initialElements)
         typedSource.addListener(
             SetChangeListener { change ->
                 if (change.wasAdded()) handleAdded(listOf(change.elementAdded as E))
                 if (change.wasRemoved()) handleRemoved(listOf(change.elementRemoved as E))
             }
         )
+        val initialElements = typedSource.toList().ifEmpty { typedSource.innerProxy.resolveAll().toList() }
+        populateInitialState(initialElements)
     }
 
     private fun freezeBucket(elements: List<E>): List<E> = java.util.Collections.unmodifiableList(ArrayList(elements))
@@ -138,8 +162,10 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
         for (element in elements) {
             val key = keyExtractor(element)
             mutateMap {
-                val updated = freezeBucket((innerObservableMap[key] ?: emptyList()) + element)
-                innerObservableMap[key] = updated
+                val current = innerObservableMap[key] ?: emptyList()
+                if (element !in current) {
+                    innerObservableMap[key] = freezeBucket(current + element)
+                }
             }
         }
     }
@@ -175,13 +201,10 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
 
     private fun mutateMap(action: () -> Unit) {
         if (dispatchToFxThread) {
-            if (Platform.isFxApplicationThread()) {
-                action()
-            } else {
-                Platform.runLater(action)
-            }
+            if (Platform.isFxApplicationThread()) action()
+            else Platform.runLater(action)
         } else {
-            ReactiveScope.flowScope.launch { action() }
+            mutationChannel!!.trySend(action)
         }
     }
 
