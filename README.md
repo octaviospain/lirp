@@ -562,6 +562,15 @@ tableView.items = playlist.tracks  // ObservableList<Track>
 
 **FX thread dispatch:** By default, JavaFX listener notifications are dispatched to the FX Application Thread via `Platform.runLater`. Pass `dispatchToFxThread = false` to dispatch on `ReactiveScope.flowScope` instead, consistent with how lirp events are dispatched asynchronously.
 
+**Lazy-snapshot mode:** For collections with 10k+ entities, pass `lazySnapshot = true` to eliminate the in-memory element cache. In this mode, `size`, `get(index)`, and iteration resolve entities from the registry on demand instead of maintaining a parallel reference list — halving the memory footprint for large collections. All mutation operations and `ListChangeListener`/`SetChangeListener` notifications work identically to the default mode. The trade-off is per-access registry lookup latency instead of a cache hit, which is acceptable when memory savings outweigh lookup cost.
+
+```kotlin
+@Aggregate(onDelete = CascadeAction.DETACH)
+val items by fxAggregateList<Int, AudioItem>(lazySnapshot = true)
+```
+
+Precondition: lazy-snapshot mode requires registry binding — the entity must be added to a repository before any structural access (`get`, iteration, `size`) resolves entities. This is the same precondition that applies to all aggregate collection delegates; eager mode hides it by caching references at `addAll`-time.
+
 **Dependency:** JavaFX is `compileOnly` -- you bring your own JavaFX version at runtime. Add `lirp-fx` alongside your existing JavaFX dependency:
 
 ```kotlin
