@@ -30,7 +30,7 @@ import net.transgressoft.lirp.persistence.AggregateRefDelegate
 import net.transgressoft.lirp.persistence.FxObservableCollection
 import net.transgressoft.lirp.persistence.LirpDelegate
 import net.transgressoft.lirp.persistence.LirpRefAccessor
-import mu.KotlinLogging
+import io.github.oshai.kotlinlogging.KotlinLogging
 import java.time.LocalDateTime
 import java.util.concurrent.Flow
 import java.util.concurrent.atomic.AtomicReference

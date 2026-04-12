@@ -19,7 +19,7 @@ package net.transgressoft.lirp.persistence.sql
 
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
-import org.testcontainers.containers.MariaDBContainer
+import org.testcontainers.mariadb.MariaDBContainer
 
 /**
  * Shared Testcontainers MariaDB 11 container and [HikariDataSource] factory for integration tests.

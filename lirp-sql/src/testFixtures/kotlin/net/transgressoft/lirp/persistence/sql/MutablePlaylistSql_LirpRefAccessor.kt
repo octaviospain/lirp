@@ -14,7 +14,8 @@ import net.transgressoft.lirp.persistence.RefEntry
  * check in [RegistryBase.discoverRefs].
  */
 @Suppress("ktlint:standard:class-naming")
-class `MutablePlaylistSql_LirpRefAccessor` : LirpRefAccessor<MutablePlaylistSql> {
+@SuppressWarnings("kotlin:S101")
+class MutablePlaylistSql_LirpRefAccessor : LirpRefAccessor<MutablePlaylistSql> {
     override val entries: List<RefEntry<*, MutablePlaylistSql>> = emptyList()
 
     override val collectionEntries: List<CollectionRefEntry<*, MutablePlaylistSql>> =
