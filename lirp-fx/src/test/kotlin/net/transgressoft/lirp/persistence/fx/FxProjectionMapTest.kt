@@ -25,6 +25,8 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import javafx.beans.InvalidationListener
 import javafx.collections.MapChangeListener
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -312,5 +314,59 @@ class FxProjectionMapTest : StringSpec({
         projection.removeListener(listener)
         source.add(1, FxAudioItem(2, "T2", "Rock"))
         invalidationCount shouldBe 1
+    }
+
+    "FxProjectionMap does not lose source mutations occurring during initialization" {
+        val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
+
+        val preloaded = (1..5).map { FxAudioItem(it, "Pre-$it", "Jazz") }
+        source.addAll(preloaded)
+
+        val concurrentItem = FxAudioItem(99, "Concurrent", "Rock")
+
+        val initStarted = CountDownLatch(1)
+        val mutationDone = CountDownLatch(1)
+
+        val mutator =
+            Thread {
+                initStarted.await(5, TimeUnit.SECONDS)
+                source.add(source.size, concurrentItem)
+                mutationDone.countDown()
+            }
+        mutator.start()
+
+        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+
+        initStarted.countDown()
+        mutationDone.await(5, TimeUnit.SECONDS)
+
+        val jazzCount = projection["Jazz"]?.size ?: 0
+        val rockCount = projection["Rock"]?.size ?: 0
+
+        jazzCount shouldBe 5
+        rockCount shouldBe 1
+        mutator.join(5000)
+    }
+
+    "FxProjectionMap with dispatchToFxThread=false serializes rapid mutations without loss" {
+        val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
+        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+
+        // Trigger initialization
+        projection.size
+
+        // Rapidly add 20 items across 4 albums
+        val items =
+            (1..20).map { i ->
+                val album = listOf("Jazz", "Rock", "Blues", "Pop")[i % 4]
+                FxAudioItem(i, "Track-$i", album)
+            }
+        items.forEach { source.add(source.size, it) }
+
+        projection.size shouldBe 4
+        projection["Jazz"]!!.size shouldBe 5
+        projection["Rock"]!!.size shouldBe 5
+        projection["Blues"]!!.size shouldBe 5
+        projection["Pop"]!!.size shouldBe 5
     }
 })

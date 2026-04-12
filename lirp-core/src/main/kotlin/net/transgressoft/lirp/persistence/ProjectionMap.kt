@@ -39,6 +39,12 @@ import kotlin.reflect.KProperty
  *
  * The map is read-only. All mutations flow through the source collection.
  *
+ * **Thread safety:** This class is not thread-safe. All mutations — whether through
+ * direct source collection operations or the [onChange] callback — must be invoked
+ * from a single thread or externally synchronized. The dominant use case (lirp-core
+ * [MutableAggregateList]/[MutableAggregateSet] projection callbacks) satisfies this
+ * contract naturally, as collection mutations are serialized by the caller.
+ *
  * @param K the entity ID type, must be [Comparable]
  * @param PK the projection key type, must be [Comparable] (used as [TreeMap] key)
  * @param E the entity type
