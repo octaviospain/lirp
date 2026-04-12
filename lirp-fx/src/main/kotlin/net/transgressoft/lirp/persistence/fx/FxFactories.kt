@@ -34,13 +34,17 @@ import net.transgressoft.lirp.persistence.mutableAggregateSet
  * @param initialIds initial referenced entity IDs
  * @param dispatchToFxThread when `true` (default), dispatches listener notifications to the FX Application Thread;
  *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
+ * @param lazySnapshot when `true`, the returned collection operates in lazy-snapshot mode where structural access
+ *   resolves from the registry on demand instead of maintaining a local element cache. Reduces memory for large
+ *   (10k+) collections. Requires registry binding before use. Defaults to `false`.
  * @return an ObservableList property delegate backed by a lirp mutable aggregate list
  */
 fun <K : Comparable<K>, E : IdentifiableEntity<K>> fxAggregateList(
     initialIds: List<K> = emptyList(),
-    dispatchToFxThread: Boolean = true
+    dispatchToFxThread: Boolean = true,
+    lazySnapshot: Boolean = false
 ): FxAggregateList<K, E> =
-    FxAggregateList(mutableAggregateList(initialIds), dispatchToFxThread)
+    FxAggregateList(mutableAggregateList(initialIds), dispatchToFxThread, lazySnapshot)
 
 /**
  * Creates a property delegate for a JavaFX-observable mutable unique-set aggregate collection reference.
@@ -55,13 +59,17 @@ fun <K : Comparable<K>, E : IdentifiableEntity<K>> fxAggregateList(
  * @param initialIds initial referenced entity IDs
  * @param dispatchToFxThread when `true` (default), dispatches listener notifications to the FX Application Thread;
  *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
+ * @param lazySnapshot when `true`, the returned collection operates in lazy-snapshot mode where structural access
+ *   resolves from the registry on demand instead of maintaining a local element cache. Reduces memory for large
+ *   (10k+) collections. Requires registry binding before use. Defaults to `false`.
  * @return an ObservableSet property delegate backed by a lirp mutable aggregate set
  */
 fun <K : Comparable<K>, E : IdentifiableEntity<K>> fxAggregateSet(
     initialIds: Set<K> = emptySet(),
-    dispatchToFxThread: Boolean = true
+    dispatchToFxThread: Boolean = true,
+    lazySnapshot: Boolean = false
 ): FxAggregateSet<K, E> =
-    FxAggregateSet(mutableAggregateSet(initialIds), dispatchToFxThread)
+    FxAggregateSet(mutableAggregateSet(initialIds), dispatchToFxThread, lazySnapshot)
 
 /**
  * Creates a [LirpStringProperty] delegate with an optional initial value.

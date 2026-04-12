@@ -44,14 +44,24 @@ import kotlinx.coroutines.launch
  * on a background thread. When `false`, listeners fire asynchronously on [ReactiveScope.flowScope],
  * consistent with how lirp events are dispatched.
  *
+ * When [lazySnapshot] is `true`, the local element cache (`localElements`) is never populated.
+ * Instead, all structural access (`size`, `iterator`, `contains`) delegates to [innerProxy], which
+ * resolves entities through the registry on demand. This eliminates the memory duplication of
+ * maintaining a parallel entity reference set, making it suitable for large (10k+) collections.
+ * Precondition: lazy-snapshot mode requires registry binding before any structural access;
+ * attempting iteration before the registry is bound throws [NoSuchElementException].
+ *
  * @param K the entity ID type
  * @param E the entity type
  * @param innerProxy the wrapped lirp mutable aggregate set
  * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
+ * @param lazySnapshot when `true`, structural access resolves from the registry on demand instead of
+ *   maintaining a local element cache; reduces memory for large collections; defaults to `false`
  */
 class FxAggregateSet<K : Comparable<K>, E : IdentifiableEntity<K>>(
     val innerProxy: MutableAggregateSet<K, E>,
-    val dispatchToFxThread: Boolean = true
+    val dispatchToFxThread: Boolean = true,
+    val lazySnapshot: Boolean = false
 ) : AbstractMutableSet<E>(), ObservableSet<E>, AggregateCollectionRef<K, E> by innerProxy, FxObservableCollection<K, E> {
 
     override val innerMutableProxy: Any get() = innerProxy
@@ -59,18 +69,37 @@ class FxAggregateSet<K : Comparable<K>, E : IdentifiableEntity<K>>(
     private val invalidationListeners = CopyOnWriteArrayList<InvalidationListener>()
     private val setChangeListeners = CopyOnWriteArrayList<SetChangeListener<in E>>()
 
+    // Local element cache maintained in parallel with the inner proxy's backing IDs.
+    // Enables iteration and snapshotting without requiring registry resolution.
+    // When lazySnapshot is true, this is never populated (zero allocation placeholder).
+    private val localElements = if (lazySnapshot) LinkedHashSet<E>(0) else LinkedHashSet<E>()
+
     override fun syncLocalCache() {
+        if (lazySnapshot) return
         localElements.clear()
         localElements.addAll(innerProxy.resolveAll())
     }
 
-    // Local element cache maintained in parallel with the inner proxy's backing IDs.
-    // Enables iteration and snapshotting without requiring registry resolution.
-    private val localElements = LinkedHashSet<E>()
-
-    override val size: Int get() = localElements.size
+    override val size: Int get() = if (lazySnapshot) innerProxy.size else localElements.size
 
     override fun iterator(): MutableIterator<E> {
+        if (lazySnapshot) {
+            val snapshot = ArrayList(innerProxy.resolveAll())
+            return object : MutableIterator<E> {
+                private val delegate = snapshot.iterator()
+                private var lastReturned: E? = null
+
+                override fun hasNext() = delegate.hasNext()
+
+                override fun next(): E = delegate.next().also { lastReturned = it }
+
+                override fun remove() {
+                    val element = lastReturned ?: throw IllegalStateException("next() not yet called or already removed")
+                    this@FxAggregateSet.remove(element)
+                    lastReturned = null
+                }
+            }
+        }
         val snapshot = ArrayList(localElements)
         return object : MutableIterator<E> {
             private val delegate = snapshot.iterator()
@@ -88,12 +117,12 @@ class FxAggregateSet<K : Comparable<K>, E : IdentifiableEntity<K>>(
         }
     }
 
-    override fun contains(element: E): Boolean = element in localElements
+    override fun contains(element: E): Boolean = if (lazySnapshot) innerProxy.contains(element) else element in localElements
 
     override fun add(element: E): Boolean {
         val changed = innerProxy.add(element)
         if (changed) {
-            localElements.add(element)
+            if (!lazySnapshot) localElements.add(element)
             fireAdded(element)
         }
         return changed
@@ -102,7 +131,7 @@ class FxAggregateSet<K : Comparable<K>, E : IdentifiableEntity<K>>(
     override fun remove(element: E): Boolean {
         val changed = innerProxy.remove(element)
         if (changed) {
-            localElements.remove(element)
+            if (!lazySnapshot) localElements.remove(element)
             fireRemoved(element)
         }
         return changed
@@ -113,7 +142,7 @@ class FxAggregateSet<K : Comparable<K>, E : IdentifiableEntity<K>>(
         for (element in elements) {
             val changed = innerProxy.add(element)
             if (changed) {
-                localElements.add(element)
+                if (!lazySnapshot) localElements.add(element)
                 fireAdded(element)
                 anyChanged = true
             }
@@ -126,7 +155,7 @@ class FxAggregateSet<K : Comparable<K>, E : IdentifiableEntity<K>>(
         for (element in elements) {
             val changed = innerProxy.remove(element)
             if (changed) {
-                localElements.remove(element)
+                if (!lazySnapshot) localElements.remove(element)
                 fireRemoved(element)
                 anyChanged = true
             }
@@ -135,18 +164,27 @@ class FxAggregateSet<K : Comparable<K>, E : IdentifiableEntity<K>>(
     }
 
     override fun retainAll(elements: Collection<E>): Boolean {
-        val toRemove = localElements.filter { it !in elements }
+        val toRemove = if (lazySnapshot) innerProxy.resolveAll().filter { it !in elements } else localElements.filter { it !in elements }
         if (toRemove.isEmpty()) return false
         return removeAll(toRemove)
     }
 
     override fun clear() {
-        val snapshot = ArrayList(localElements)
-        if (snapshot.isEmpty()) return
-        innerProxy.clear()
-        localElements.clear()
-        for (element in snapshot) {
-            fireRemoved(element)
+        if (lazySnapshot) {
+            val snapshot = ArrayList(innerProxy.resolveAll())
+            if (snapshot.isEmpty()) return
+            innerProxy.clear()
+            for (element in snapshot) {
+                fireRemoved(element)
+            }
+        } else {
+            val snapshot = ArrayList(localElements)
+            if (snapshot.isEmpty()) return
+            innerProxy.clear()
+            localElements.clear()
+            for (element in snapshot) {
+                fireRemoved(element)
+            }
         }
     }
 
