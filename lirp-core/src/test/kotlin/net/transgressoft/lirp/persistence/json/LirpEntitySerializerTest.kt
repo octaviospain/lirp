@@ -20,9 +20,12 @@ package net.transgressoft.lirp.persistence.json
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.persistence.AbstractMutableAggregateCollectionRefDelegate
 import net.transgressoft.lirp.persistence.AudioItem
+import net.transgressoft.lirp.persistence.FxScalarPropertyDelegate
+import net.transgressoft.lirp.persistence.LirpDelegate
 import net.transgressoft.lirp.persistence.MutableAggregateList
 import net.transgressoft.lirp.persistence.MutableAggregateSet
 import net.transgressoft.lirp.persistence.mutableAggregateList
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
@@ -228,7 +231,51 @@ class LirpEntitySerializerTest : StringSpec({
         decoded[1]?.name shouldBe "Alice"
         decoded[2]?.name shouldBe "Bob"
     }
+
+    "LirpEntitySerializer init fails when FxScalar delegate lacks expected get method" {
+        val entity = SimpleDelegate(1)
+        val brokenFxDelegate = BrokenFxScalarDelegate()
+        injectDelegate(entity, "broken", brokenFxDelegate)
+
+        shouldThrow<IllegalStateException> {
+            lirpSerializer(entity)
+        }.message shouldContain "Expected exactly one 'get' method with 0 parameters"
+    }
+
+    "LirpEntitySerializer init fails when reactive delegate lacks member property" {
+        val entity = SimpleDelegate(1)
+        val orphanDelegate = OrphanReactiveDelegate()
+        injectDelegate(entity, "ghost", orphanDelegate)
+
+        shouldThrow<IllegalArgumentException> {
+            lirpSerializer(entity)
+        }.message shouldContain "Cannot find member property 'ghost'"
+    }
 })
+
+/**
+ * FxScalarPropertyDelegate without get()/set() — triggers requireMethod error during serializer init.
+ */
+private class BrokenFxScalarDelegate : FxScalarPropertyDelegate, LirpDelegate {
+    override fun bindMutationCallback(callback: (() -> Unit) -> Unit) {}
+}
+
+/**
+ * A non-FxScalar, non-aggregate LirpDelegate with no matching member property — triggers requireNotNull error.
+ */
+private class OrphanReactiveDelegate : LirpDelegate
+
+/** Injects a fake delegate into an entity's delegate registry via reflection. */
+private fun injectDelegate(entity: ReactiveEntityBase<*, *>, name: String, delegate: LirpDelegate) {
+    // Force the registry to be built first
+    entity.delegateRegistry
+    // Replace the cached _delegateRegistry with a copy that includes the fake delegate
+    val field = ReactiveEntityBase::class.java.getDeclaredField("_delegateRegistry")
+    field.isAccessible = true
+    @Suppress("UNCHECKED_CAST")
+    val existing = field.get(entity) as Map<String, LirpDelegate>
+    field.set(entity, existing + (name to delegate))
+}
 
 /** Test helper to set backing IDs on a named delegate via the entity's delegateRegistry. */
 @Suppress("UNCHECKED_CAST")

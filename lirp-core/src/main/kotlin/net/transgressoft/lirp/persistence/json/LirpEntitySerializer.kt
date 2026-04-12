@@ -23,6 +23,7 @@ import net.transgressoft.lirp.persistence.AggregateCollectionRef
 import net.transgressoft.lirp.persistence.FxScalarPropertyDelegate
 import net.transgressoft.lirp.persistence.MutableAggregateList
 import net.transgressoft.lirp.persistence.MutableAggregateSet
+import java.lang.reflect.Method
 import kotlin.reflect.KClass
 import kotlin.reflect.KParameter
 import kotlin.reflect.KProperty1
@@ -84,7 +85,8 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
         data class ReactiveProperty(
             override val name: String,
             override val serializer: KSerializer<Any?>,
-            val property: KProperty1<Any, Any?>
+            val property: KProperty1<Any, Any?>,
+            val setValueMethod: Method
         ) : DelegateInfo
 
         data class AggregateCollection(
@@ -94,12 +96,15 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
 
         data class FxScalar(
             override val name: String,
-            override val serializer: KSerializer<Any?>
+            override val serializer: KSerializer<Any?>,
+            val getMethod: Method,
+            val setMethod: Method
         ) : DelegateInfo
     }
 
     private val constructorParams: List<ConstructorParamInfo>
     private val delegateInfos: List<DelegateInfo>
+    private val delegateInfosByName: Map<String, DelegateInfo>
 
     /**
      * Constructor parameters that are also reactive delegate properties (e.g. `name` passed to
@@ -109,6 +114,14 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
     private val constructorDelegateParams: Map<String, KParameter>
 
     init {
+        fun Class<*>.requireMethod(name: String, parameterCount: Int): Method =
+            methods.singleOrNull { method ->
+                method.name == name &&
+                    method.parameterCount == parameterCount &&
+                    !method.isBridge &&
+                    !method.isSynthetic
+            } ?: error("Expected exactly one '$name' method with $parameterCount parameters on ${this.name}")
+
         val registry = sampleInstance.delegateRegistry
         val delegateNames = registry.keys.toSet()
         val memberProps = kClass.memberProperties.associateBy { it.name }
@@ -139,23 +152,31 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
                         DelegateInfo.AggregateCollection(name, ListSerializer(idSerializer) as KSerializer<Any?>)
                     }
                     delegate is FxScalarPropertyDelegate -> {
+                        val getMethod = delegate.javaClass.requireMethod("get", 0)
+                        val setMethod = delegate.javaClass.requireMethod("set", 1)
+                        getMethod.isAccessible = true
+                        setMethod.isAccessible = true
                         @Suppress("UNCHECKED_CAST")
-                        DelegateInfo.FxScalar(name, resolveFxScalarSerializer(delegate, prop) as KSerializer<Any?>)
+                        DelegateInfo.FxScalar(name, resolveFxScalarSerializer(delegate, prop) as KSerializer<Any?>, getMethod, setMethod)
                     }
                     else -> {
                         val typedProp =
                             requireNotNull(prop) {
                                 "Cannot find member property '$name' on ${kClass.simpleName}"
                             }
+                        val setValueMethod = delegate::class.java.requireMethod("setValue", 3)
+                        setValueMethod.isAccessible = true
                         @Suppress("UNCHECKED_CAST")
                         DelegateInfo.ReactiveProperty(
                             name,
                             serializer(typedProp.returnType),
-                            typedProp as KProperty1<Any, Any?>
+                            typedProp as KProperty1<Any, Any?>,
+                            setValueMethod
                         )
                     }
                 }
             }
+        delegateInfosByName = delegateInfos.associateBy { it.name }
     }
 
     @OptIn(ExperimentalSerializationApi::class)
@@ -259,7 +280,7 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
                             ?: throw IllegalStateException(
                                 "Fx scalar delegate '${info.name}' not found in registry for ${kClass.simpleName}"
                             )
-                    val fxValue = delegate.javaClass.getMethod("get").invoke(delegate)
+                    val fxValue = info.getMethod.invoke(delegate)
                     composite.encodeSerializableElement(descriptor, index++, info.serializer, fxValue)
                 }
             }
@@ -350,11 +371,9 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
     private fun restoreReactiveProperties(entity: E, reactiveValues: Map<String, Any?>) {
         val registry = entity.delegateRegistry
         for ((name, decodedValue) in reactiveValues) {
+            val info = delegateInfosByName[name] as? DelegateInfo.ReactiveProperty ?: continue
             val delegate = registry[name] ?: continue
-            val prop = kClass.memberProperties.find { it.name == name } ?: continue
-            val setMethod = delegate::class.java.methods.find { it.name == "setValue" } ?: continue
-            setMethod.isAccessible = true
-            setMethod.invoke(delegate, entity, prop, decodedValue)
+            info.setValueMethod.invoke(delegate, entity, info.property, decodedValue)
         }
     }
 
@@ -378,11 +397,10 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
     private fun restoreFxScalarProperties(entity: E, fxScalarValues: Map<String, Any?>) {
         val registry = entity.delegateRegistry
         for ((name, decodedValue) in fxScalarValues) {
+            val info = delegateInfosByName[name] as? DelegateInfo.FxScalar ?: continue
             val delegate = registry[name] ?: continue
             if (delegate !is FxScalarPropertyDelegate) continue
-            val setMethod = delegate.javaClass.methods.find { it.name == "set" } ?: continue
-            setMethod.isAccessible = true
-            setMethod.invoke(delegate, decodedValue)
+            info.setMethod.invoke(delegate, decodedValue)
         }
     }
 }
