@@ -2,14 +2,14 @@
 kotlin = "2.3.10"
 ksp = "2.3.6"
 coroutines = "1.10.2"
-kotest = "6.1.7"
-exposed = "1.1.1"
-hikari = "6.3.0"
-testcontainers = "1.21.3"
+kotest = "6.1.11"
+exposed = "1.2.0"
+hikari = "7.0.2"
+testcontainers = "2.0.4"
 kctfork = "0.12.1"
-postgresql = "42.7.6"
-mysql = "9.3.0"
-mariadb = "3.5.7"
+postgresql = "42.7.10"
+mysql = "9.6.0"
+mariadb = "3.5.8"
 
 [libraries]
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
@@ -22,7 +22,7 @@ coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test" }
 
 ksp-api = { module = "com.google.devtools.ksp:symbol-processing-api", version.ref = "ksp" }
 
-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version = "1.10.0" }
+serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version = "1.11.0" }
 
 kotest-runner-junit6 = { module = "io.kotest:kotest-runner-junit6", version.ref = "kotest" }
 kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
@@ -37,13 +37,13 @@ exposed-kotlin-datetime = { module = "org.jetbrains.exposed:exposed-kotlin-datet
 
 hikari = { module = "com.zaxxer:HikariCP", version.ref = "hikari" }
 
-testcontainers-postgresql = { module = "org.testcontainers:postgresql", version.ref = "testcontainers" }
-testcontainers-mysql = { module = "org.testcontainers:mysql", version.ref = "testcontainers" }
-testcontainers-mariadb = { module = "org.testcontainers:mariadb", version.ref = "testcontainers" }
+testcontainers-postgresql = { module = "org.testcontainers:testcontainers-postgresql", version.ref = "testcontainers" }
+testcontainers-mysql = { module = "org.testcontainers:testcontainers-mysql", version.ref = "testcontainers" }
+testcontainers-mariadb = { module = "org.testcontainers:testcontainers-mariadb", version.ref = "testcontainers" }
 
 kctfork-ksp = { module = "dev.zacsweers.kctfork:ksp", version.ref = "kctfork" }
 
-h2 = { module = "com.h2database:h2", version = "2.3.232" }
+h2 = { module = "com.h2database:h2", version = "2.4.240" }
 postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
 mysql = { module = "com.mysql:mysql-connector-j", version.ref = "mysql" }
 mariadb = { module = "org.mariadb.jdbc:mariadb-java-client", version.ref = "mariadb" }
@@ -51,7 +51,7 @@ mockk = { module = "io.mockk:mockk", version = "1.14.9" }
 logback-core = { module = "ch.qos.logback:logback-core", version = "1.5.32" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version = "1.5.32" }
 jsr305 = { module = "com.google.code.findbugs:jsr305", version = "3.0.2" }
-kotlin-logging = { module = "io.github.microutils:kotlin-logging-jvm", version = "3.0.5" }
+kotlin-logging = { module = "io.github.oshai:kotlin-logging-jvm", version = "7.0.14" }
 
 junit-bom = { module = "org.junit:junit-bom", version = "6.0.3" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }

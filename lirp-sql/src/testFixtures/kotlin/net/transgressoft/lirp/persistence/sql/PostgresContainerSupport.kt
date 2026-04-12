@@ -19,7 +19,7 @@ package net.transgressoft.lirp.persistence.sql
 
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
-import org.testcontainers.containers.PostgreSQLContainer
+import org.testcontainers.postgresql.PostgreSQLContainer
 
 /**
  * Shared Testcontainers PostgreSQL container and [HikariDataSource] factory for integration tests.

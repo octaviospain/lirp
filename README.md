@@ -101,14 +101,14 @@ No manual saves. No ORM session flushing. Property assignment _is_ persistence.
 
 ### Supported Persistence Targets
 
-| Target | Module | Status |
-|--------|--------|--------|
-| PostgreSQL | `lirp-sql` | Supported |
-| MySQL | `lirp-sql` | Supported |
-| MariaDB | `lirp-sql` | Supported |
-| JSON file | `lirp-core` | Supported |
-| MS SQL Server | `lirp-sql` | Planned |
-| Oracle | `lirp-sql` | Planned |
+| Target | Module | Status      |
+|--------|--------|-------------|
+| PostgreSQL | `lirp-sql` | Supported   |
+| MySQL | `lirp-sql` | Supported   |
+| MariaDB | `lirp-sql` | Supported   |
+| JSON file | `lirp-core` | Supported   |
+| MS SQL Server | `lirp-sql` | Not tested  |
+| Oracle | `lirp-sql` | Not tested |
 
 ## Secondary Indexes
 

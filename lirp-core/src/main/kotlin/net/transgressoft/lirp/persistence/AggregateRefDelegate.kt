@@ -24,7 +24,7 @@ import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.event.AggregateMutationEvent
 import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.MutationEvent
-import mu.KotlinLogging
+import io.github.oshai.kotlinlogging.KotlinLogging
 import java.util.Optional
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.properties.ReadOnlyProperty

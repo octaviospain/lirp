@@ -22,7 +22,7 @@ import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpDeserializationException
 import net.transgressoft.lirp.persistence.PendingOp
 import net.transgressoft.lirp.persistence.PersistentRepositoryBase
-import mu.KotlinLogging
+import io.github.oshai.kotlinlogging.KotlinLogging
 import java.io.File
 import java.util.Objects
 import java.util.concurrent.ConcurrentHashMap

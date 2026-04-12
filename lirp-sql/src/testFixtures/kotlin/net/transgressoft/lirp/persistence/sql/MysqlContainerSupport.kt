@@ -19,7 +19,7 @@ package net.transgressoft.lirp.persistence.sql
 
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
-import org.testcontainers.containers.MySQLContainer
+import org.testcontainers.mysql.MySQLContainer
 
 /**
  * Shared Testcontainers MySQL 8.0 container and [HikariDataSource] factory for integration tests.

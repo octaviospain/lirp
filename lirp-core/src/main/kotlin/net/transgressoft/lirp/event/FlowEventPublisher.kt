@@ -18,7 +18,7 @@
 package net.transgressoft.lirp.event
 
 import net.transgressoft.lirp.entity.LirpEntity
-import mu.KotlinLogging
+import io.github.oshai.kotlinlogging.KotlinLogging
 import java.util.concurrent.Flow
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
