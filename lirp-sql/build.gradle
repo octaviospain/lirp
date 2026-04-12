@@ -57,11 +57,7 @@ dependencies {
     integrationTestRuntimeOnly libs.mysql
     integrationTestRuntimeOnly libs.mariadb
 
-    // lirp-fx compiled classes for fx delegate SQL persistence tests.
-    // Uses file path instead of project() to avoid KSP plugin evaluation triggering
-    // Gradle configuration hierarchy mutation on apiElements.
-    testImplementation files("${rootProject.projectDir}/lirp-fx/build/classes/kotlin/main")
-    testImplementation files("${rootProject.projectDir}/lirp-fx/build/resources/main")
+    testImplementation project(':lirp-fx')
 
     // JavaFX for fx delegate SQL persistence tests
     testImplementation "org.openjfx:javafx-base:21:${fxPlatform}"
@@ -84,11 +80,6 @@ dependencies {
     // Consume testFixtures from both test and integrationTest
     testImplementation testFixtures(project(':lirp-sql'))
     integrationTestImplementation testFixtures(project(':lirp-sql'))
-}
-
-// Ensure lirp-fx is compiled before lirp-sql tests
-tasks.named('compileTestKotlin').configure {
-    dependsOn ':lirp-fx:compileKotlin', ':lirp-fx:processResources'
 }
 
 tasks.register('integrationTest', Test) {
