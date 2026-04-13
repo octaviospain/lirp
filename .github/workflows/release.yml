@@ -2,6 +2,16 @@ name: Manual Release to Maven Central
 
 on:
     workflow_dispatch:
+        inputs:
+            version-increment:
+                description: 'Version increment strategy'
+                required: true
+                default: 'incrementMinor'
+                type: choice
+                options:
+                    - incrementPatch
+                    - incrementMinor
+                    - incrementMajor
 
 jobs:
     release:
@@ -39,7 +49,7 @@ jobs:
                         ${{ runner.os }}-gradle-
 
             -   name: Build and Test
-                run: ./gradlew build
+                run: ./gradlew build -PversionIncrement=${{ inputs.version-increment }}
 
             -   name: Release
                 env:
@@ -50,6 +60,6 @@ jobs:
                     ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
                     ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_PASSWORD }}
                 run: |
-                    ./gradlew createRelease
+                    ./gradlew createRelease -PversionIncrement=${{ inputs.version-increment }}
                     git push --tags origin HEAD
-                    ./gradlew publishToMavenCentral
+                    ./gradlew publishToMavenCentral -PversionIncrement=${{ inputs.version-increment }}
