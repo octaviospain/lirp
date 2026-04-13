@@ -83,16 +83,17 @@ class HighConcurrencyStressTest : DescribeSpec({
                 }
             writers.joinAll()
 
-            // Bounded wait — no Thread.sleep or fixed delays; 45 s is generous for CI
-            for ((queue, latch) in subscribers) {
-                latch.await(45, TimeUnit.SECONDS) shouldBe true
-                queue.size shouldBe TOTAL_EVENTS
+            try {
+                // Bounded wait — no Thread.sleep or fixed delays; 45 s is generous for CI
+                for ((queue, latch) in subscribers) {
+                    latch.await(45, TimeUnit.SECONDS) shouldBe true
+                    queue.size shouldBe TOTAL_EVENTS
+                }
+                repository.size() shouldBe TOTAL_EVENTS
+            } finally {
+                subscriptions.forEach { it.cancel() }
+                repository.close()
             }
-
-            repository.size() shouldBe TOTAL_EVENTS
-
-            subscriptions.forEach { it.cancel() }
-            repository.close()
         }
 
         it("delivers all MutationEvents to 250 subscribers without loss").config(timeout = 60.seconds) {
@@ -135,14 +136,16 @@ class HighConcurrencyStressTest : DescribeSpec({
                 }
             writers.joinAll()
 
-            // Bounded wait per subscriber; 45 s is generous for CI
-            for ((queue, latch) in subscribers) {
-                latch.await(45, TimeUnit.SECONDS) shouldBe true
-                queue.size shouldBe TOTAL_EVENTS
+            try {
+                // Bounded wait per subscriber; 45 s is generous for CI
+                for ((queue, latch) in subscribers) {
+                    latch.await(45, TimeUnit.SECONDS) shouldBe true
+                    queue.size shouldBe TOTAL_EVENTS
+                }
+            } finally {
+                subscriptions.forEach { it.cancel() }
+                publisher.close()
             }
-
-            subscriptions.forEach { it.cancel() }
-            publisher.close()
         }
     }
 })

@@ -134,7 +134,7 @@ check.dependsOn integrationTest
 
 jacocoTestReport {
     dependsOn test, integrationTest
-    // Use fileTree so the report generates successfully even when only `test` ran
-    // (e.g. gradle test without integrationTest). Missing .exec files are silently skipped.
+    // Use fileTree so missing JaCoCo .exec files are skipped gracefully.
+    // Note: `jacocoTestReport` still depends on both `test` and `integrationTest` (line 136).
     executionData fileTree(buildDir).include('jacoco/*.exec')
 }
