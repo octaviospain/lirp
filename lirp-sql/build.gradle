@@ -11,6 +11,7 @@ ktlint {
 sourceSets {
     integrationTest {
         kotlin.srcDirs = ['src/integrationTest/kotlin']
+        java.srcDirs = ['src/integrationTest/java']
         resources.srcDirs = ['src/integrationTest/resources']
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
@@ -133,8 +134,7 @@ check.dependsOn integrationTest
 
 jacocoTestReport {
     dependsOn test, integrationTest
-    executionData.from(
-        tasks.named('test').map { it.extensions.getByType(JacocoTaskExtension).destinationFile },
-        tasks.named('integrationTest').map { it.extensions.getByType(JacocoTaskExtension).destinationFile }
-    )
+    // Use fileTree so the report generates successfully even when only `test` ran
+    // (e.g. gradle test without integrationTest). Missing .exec files are silently skipped.
+    executionData fileTree(buildDir).include('jacoco/*.exec')
 }
