@@ -63,11 +63,13 @@ class FxAggregateConcurrentMutationTest : StringSpec({
             }
         }
 
-        latch.await(10, TimeUnit.SECONDS) shouldBe true
-        executor.shutdown()
-
-        list.size shouldBe 200
-        list.referenceIds.toSet().size shouldBe 200
+        try {
+            latch.await(10, TimeUnit.SECONDS) shouldBe true
+            list.size shouldBe 200
+            list.referenceIds.toSet().size shouldBe 200
+        } finally {
+            executor.shutdownNow()
+        }
     }
 
     "FxAggregateSet serialized mutations produce no lost updates" {
@@ -82,11 +84,13 @@ class FxAggregateConcurrentMutationTest : StringSpec({
             }
         }
 
-        latch.await(10, TimeUnit.SECONDS) shouldBe true
-        executor.shutdown()
-
-        set.size shouldBe 200
-        set.referenceIds.size shouldBe 200
+        try {
+            latch.await(10, TimeUnit.SECONDS) shouldBe true
+            set.size shouldBe 200
+            set.referenceIds.size shouldBe 200
+        } finally {
+            executor.shutdownNow()
+        }
     }
 
     "FxAggregateList serialized interleaved add and remove produce correct final state" {
@@ -113,10 +117,12 @@ class FxAggregateConcurrentMutationTest : StringSpec({
             }
         }
 
-        latch.await(10, TimeUnit.SECONDS) shouldBe true
-        executor.shutdown()
-
-        list.size shouldBe 50
-        list.all { it.id % 2 == 0 } shouldBe true
+        try {
+            latch.await(10, TimeUnit.SECONDS) shouldBe true
+            list.size shouldBe 50
+            list.all { it.id % 2 == 0 } shouldBe true
+        } finally {
+            executor.shutdownNow()
+        }
     }
 })
