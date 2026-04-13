@@ -414,9 +414,8 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
         val entityBeforeChange = clone()
         val result = mutationAction()
         if (entityBeforeChange == this) {
-            log.warn {
-                "Attempt to publish update event from a mutation when the entity state did not change. " +
-                    "Consider implementing equals() and hashCode() that reflects all mutable properties affected by the mutationAction."
+            log.debug {
+                "No-change mutation on ${this::class.java.simpleName}(id=$id) — event skipped"
             }
         } else {
             lastDateModified = LocalDateTime.now()
