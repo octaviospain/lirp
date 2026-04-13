@@ -466,6 +466,14 @@ The serializer encodes constructor parameters first, then delegate properties in
 
 Entities with `@Serializable` continue to use their plugin-generated serializer — `LirpEntitySerializer` is opt-in and does not affect existing code.
 
+#### KSP-Accelerated FxScalar Serialization
+
+When `lirp-ksp` is applied, entities with `fxString()`, `fxInteger()`, and other FxScalar delegates get a generated `{ClassName}_LirpFxScalarAccessor` class. `LirpEntitySerializer` discovers this class at runtime via `Class.forName` and uses the direct lambda accessors it provides — no `java.lang.reflect.Method` invocations and no `--add-opens` JVM flags required.
+
+When the generated accessor is not present (e.g., `lirp-ksp` is not applied), then the serializer falls back to reflection and logs a deprecation warning at startup. The `--add-opens` flags in `build.gradle` are required only for this reflection fallback path.
+
+The `LirpAccessorValidationProcessor` enforces consistency at compile time: if an entity has `@Indexed` or FxScalar delegates, it verifies that the corresponding generated accessors exist in the same compilation round. Missing accessors produce a KSP build error identifying the entity and the missing class — no runtime surprises.
+
 ### Manual Serializers
 
 For entities annotated with `@Serializable`, supply the Kotlin Serialization serializer directly. For polymorphic entity hierarchies, use `TransEntityPolymorphicSerializer`.
@@ -695,6 +703,8 @@ List<AudioItem> albums = byAlbum.get("Album A");
 **`@Aggregate`** triggers KSP generation of `_LirpRefAccessor`, which `RegistryBase` requires at runtime for reference binding and cascade resolution. Without it on an aggregate delegate property, `RegistryBase` throws `IllegalStateException`.
 
 **`@PersistenceMapping`** triggers KSP generation of `_LirpTableDef` for SQL schema creation. Convention-over-configuration infers table name from the class name; use `@PersistenceProperty` on individual properties to customize column details.
+
+**FxScalar delegates** (`fxString()`, `fxInteger()`, `fxDouble()`, `fxFloat()`, `fxLong()`, `fxBoolean()`, `fxObject()`) trigger KSP generation of `_LirpFxScalarAccessor` when the entity is processed by `lirp-ksp`. The generated accessor provides direct get/set lambdas and compile-time resolved `KSerializer` instances for each FxScalar property, eliminating the `java.lang.reflect.Method` access that `LirpEntitySerializer` would otherwise require. No annotation is needed — KSP detects FxScalar properties automatically by type.
 
 ## Key Features
 
