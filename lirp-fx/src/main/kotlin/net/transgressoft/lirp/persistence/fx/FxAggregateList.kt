@@ -189,7 +189,7 @@ class FxAggregateList<K : Comparable<K>, E : IdentifiableEntity<K>>(
 
     override fun clear() {
         if (lazySnapshot) {
-            if (innerProxy.size == 0) return
+            if (innerProxy.isEmpty()) return
             val snapshot = innerProxy.resolveAll().toList()
             innerProxy.clear()
             modCount++

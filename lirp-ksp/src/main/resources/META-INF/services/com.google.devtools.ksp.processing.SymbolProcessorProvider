@@ -2,3 +2,5 @@ net.transgressoft.lirp.ksp.IndexedProcessorProvider
 net.transgressoft.lirp.ksp.ReactiveEntityRefProcessorProvider
 net.transgressoft.lirp.ksp.LirpRepositoryProcessorProvider
 net.transgressoft.lirp.ksp.TableDefProcessorProvider
+net.transgressoft.lirp.ksp.FxScalarAccessorProcessorProvider
+net.transgressoft.lirp.ksp.LirpAccessorValidationProcessorProvider

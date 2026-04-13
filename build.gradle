@@ -130,6 +130,9 @@ subprojects {
     }
 
     tasks.withType(Test).configureEach {
+        // These --add-opens flags are required only for the reflection fallback path in
+        // LirpEntitySerializer when entities are NOT processed by KSP. Once all entities use
+        // KSP-generated LirpFxScalarAccessor, these flags can be removed.
         jvmArgs '--add-opens=java.base/java.lang=ALL-UNNAMED',
                 '--add-opens=java.base/sun.nio.ch=ALL-UNNAMED',
                 '--add-opens=java.base/java.io=ALL-UNNAMED'
