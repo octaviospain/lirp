@@ -25,6 +25,7 @@ import org.openjdk.jmh.annotations.Warmup
 import org.openjdk.jmh.infra.Blackhole
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Compares [SqlRepository] against plain Hibernate [EntityManager] for equivalent CRUD operations,
@@ -51,6 +52,7 @@ open class ComparativeJpaBenchmark {
     lateinit var em: EntityManager
 
     val trialCounter = AtomicInteger(0)
+    val addIdGen = AtomicLong(0L)
 
     @Setup(Level.Trial)
     fun setup() {
@@ -87,6 +89,7 @@ open class ComparativeJpaBenchmark {
             )
         }
         em.transaction.commit()
+        addIdGen.set(entityCount.toLong())
     }
 
     @TearDown(Level.Trial)
@@ -102,7 +105,7 @@ open class ComparativeJpaBenchmark {
     @BenchmarkMode(Mode.Throughput)
     @OutputTimeUnit(TimeUnit.SECONDS)
     fun sqlRepoAdd(bh: Blackhole) {
-        val id = entityCount + System.nanoTime().toInt()
+        val id = addIdGen.getAndIncrement().toInt()
         bh.consume(sqlRepo.add(BenchmarkEntity(id, "new-$id")))
     }
 
@@ -111,7 +114,7 @@ open class ComparativeJpaBenchmark {
     @BenchmarkMode(Mode.Throughput)
     @OutputTimeUnit(TimeUnit.SECONDS)
     fun jpaAdd(bh: Blackhole) {
-        val id = entityCount + System.nanoTime().toInt()
+        val id = addIdGen.getAndIncrement().toInt()
         em.transaction.begin()
         val entity =
             JpaBenchmarkEntity().apply {
@@ -132,11 +135,19 @@ open class ComparativeJpaBenchmark {
         bh.consume(sqlRepo.findById(entityCount / 2))
     }
 
-    /** Finds an entity by ID via JPA [EntityManager.find]. Paired with [sqlRepoFindById]. */
+    /**
+     * Finds an entity by ID via JPA [EntityManager.find]. Paired with [sqlRepoFindById].
+     *
+     * [em.clear] is called before each lookup to evict the L1 persistence context cache,
+     * ensuring the measurement reflects a true database round-trip rather than an in-memory
+     * cache hit. This makes the comparison with SqlRepository's in-memory lookup symmetrical
+     * in intent: both are measured against their respective optimised read paths.
+     */
     @Benchmark
     @BenchmarkMode(Mode.SampleTime)
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
     fun jpaFindById(bh: Blackhole) {
+        em.clear()
         bh.consume(em.find(JpaBenchmarkEntity::class.java, entityCount / 2))
     }
 }

@@ -80,8 +80,11 @@ open class MemoryProfilingBenchmark {
      * Measures the incremental heap cost of registering an entity into a [VolatileRepository]
      * that carries secondary-index metadata (per D-09).
      *
-     * Compares the object graph before and after repository registration to isolate the
-     * overhead from index structures, ref bindings, and event subscriptions.
+     * Compares the entity's standalone object graph size against the full repository graph size
+     * after registration. Note that [repoBytes] includes the repository's own baseline overhead
+     * (internal maps, event publisher, etc.) in addition to the per-entity index cost; it is
+     * the delta between consecutive calls (or against an empty-repo baseline) that isolates the
+     * true per-entity index overhead.
      */
     @Benchmark
     fun heapWithSecondaryIndex(bh: Blackhole) {
