@@ -1,0 +1,55 @@
+plugins {
+    id 'kotlin'
+    id 'me.champeau.jmh' version '0.7.3'
+}
+
+description = 'LIRP Benchmark - JMH microbenchmarks and comparative analysis (not published)'
+
+dependencies {
+    jmh project(':lirp-core')
+    jmh project(':lirp-sql')
+    jmh libs.jmh.core
+    jmh libs.jmh.generator.annprocess
+    jmh libs.jol.core
+    jmh libs.h2
+    jmh libs.spring.data.jpa
+    jmh libs.hibernate.core
+    jmh libs.jakarta.persistence.api
+    jmh libs.serialization.json
+    jmh platform(libs.exposed.bom)
+    jmh libs.bundles.exposed
+    jmh libs.hikari
+    jmh libs.logback.core
+    jmh libs.logback.classic
+}
+
+jmh {
+    warmupIterations = project.hasProperty('jmh.warmupIterations') ? project.property('jmh.warmupIterations').toInteger() : 5
+    iterations = project.hasProperty('jmh.iterations') ? project.property('jmh.iterations').toInteger() : 10
+    fork = project.hasProperty('jmh.fork') ? project.property('jmh.fork').toInteger() : 1
+    if (project.hasProperty('jmh.includes')) {
+        includes = [project.property('jmh.includes')]
+    }
+    resultFormat = 'JSON'
+    resultsFile = project.file('build/reports/jmh/results.json')
+    jvmArgs = [
+        '--add-opens=java.base/java.lang=ALL-UNNAMED',
+        '--add-opens=java.base/java.lang.reflect=ALL-UNNAMED',
+        '--add-opens=java.base/java.util=ALL-UNNAMED',
+        '--add-opens=java.base/sun.nio.ch=ALL-UNNAMED',
+        '--add-opens=java.base/java.io=ALL-UNNAMED'
+    ]
+}
+
+// Benchmark module is never published to Maven Central
+tasks.withType(PublishToMavenRepository).configureEach { enabled = false }
+tasks.withType(PublishToMavenLocal).configureEach { enabled = false }
+
+// No API docs for benchmark code
+tasks.matching { it.name.startsWith('dokka') }.configureEach { enabled = false }
+
+// Exclude from SonarCloud analysis
+sonar { skipProject = true }
+
+// JaCoCo test report not applicable for JMH benchmarks
+tasks.matching { it.name == 'jacocoTestReport' }.configureEach { enabled = false }

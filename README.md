@@ -733,7 +733,62 @@ lirp's in-memory-first architecture has trade-offs that influence where it fits 
 
 **Not suited for:** analytics workloads, high-cardinality datasets, or services requiring cross-instance consistency.
 
-Performance benchmarks comparing lirp's throughput and latency against direct JDBC and other persistence frameworks are planned — see [#69](https://github.com/octaviospain/lirp/issues/69).
+## Performance
+
+Benchmarks were run with JMH 1.37 on OpenJDK 21.0.10, 13th Gen Intel Core i7-13700, 62 GB RAM. All repository benchmarks use H2 in-memory databases with per-trial isolation. See the [Performance Benchmarks wiki page](https://github.com/octaviospain/lirp/wiki/Performance-Benchmarks) for full results, environment specs, and comparative analysis.
+
+### Key Numbers (at 10,000 entities)
+
+| Repository | Operation | Result |
+|-----------|-----------|--------|
+| `VolatileRepository` | add() throughput | 271,877 ops/s |
+| `VolatileRepository` | findById() p50 | 27 ns |
+| `SqlRepository` | add() throughput | 92,151 ops/s |
+| `SqlRepository` | findById() p50 | 27 ns |
+| `SqlRepository` | mutation-flush p50 | 63,767 µs (full batch write) |
+| `JsonFileRepository` | add() throughput | 97,720 ops/s |
+| `JsonFileRepository` | mutation-flush p50 | 66,978 µs (full file write) |
+
+### Why add() is Fast
+
+`add()` on `SqlRepository` and `JsonFileRepository` enqueues the entity in-memory immediately and returns — the SQL INSERT or JSON file write happens asynchronously via the debounced write pipeline (100 ms window, 1 s max delay). This is why add() throughput is comparable to `VolatileRepository`: all three repositories share the same O(1) in-memory write path.
+
+### SqlRepository vs Direct JDBC vs JPA/Hibernate
+
+lirp `SqlRepository` measured against raw `java.sql.PreparedStatement` (zero-overhead baseline) and JPA/Hibernate, all using H2 in-memory databases.
+
+**findById() p50 — read latency:**
+
+| Operation | lirp SqlRepository | Direct JDBC | JPA/Hibernate |
+|-----------|-------------------|-------------|---------------|
+| findById() p50 | **27 ns** | 960 ns | 1,000 ns |
+| findById() ratio | baseline | 35x slower | 37x slower |
+
+lirp's in-memory `ConcurrentHashMap` lookup eliminates the SQL round-trip entirely — 35x faster than raw JDBC and 37x faster than JPA/Hibernate at all entity counts.
+
+**add() throughput — write throughput:**
+
+| Operation | lirp SqlRepository | Direct JDBC | JPA/Hibernate |
+|-----------|-------------------|-------------|---------------|
+| add() at 10K entities | 93,776 ops/s | 517,435 ops/s | 915 ops/s |
+| vs JDBC | 5.5x lower (deferred) | baseline | 565x lower |
+| vs JPA | ~100x faster | ~565x faster | baseline |
+
+lirp's `add()` is deferred — no SQL I/O per call. JDBC's single-row autoCommit is faster per individual insert, but lirp writes all inserts as a single batch transaction, dramatically reducing I/O pressure at scale. JPA's per-call `persist()` + `flush()` is 565x slower than JDBC.
+
+### SqlRepository vs JPA/Hibernate (add, 10K entities)
+
+`SqlRepository` achieves ~85,921 ops/s vs Hibernate JPA ~915 ops/s — a ~94x throughput advantage — because lirp batches SQL writes while JPA commits a transaction per call.
+
+### Initialization Time
+
+| Entity Count | VolatileRepository | SqlRepository | JsonFileRepository |
+|-------------|-------------------|---------------|-------------------|
+| 1,000       | 12 ms             | 33 ms         | 24 ms             |
+| 10,000      | 41 ms             | 81 ms         | 108 ms            |
+| 50,000      | 212 ms            | 397 ms        | 408 ms            |
+
+See the full head-to-head results in [Section 5 of the Performance Benchmarks wiki](https://github.com/octaviospain/lirp/wiki/Performance-Benchmarks#section-5--lirp-sqlrepository-vs-direct-jdbc-zero-overhead-baseline).
 
 ## Documentation
 
