@@ -151,10 +151,12 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
 
     /**
      * The timestamp when this entity was last modified.
+     *
      * Automatically updated whenever a property is changed via [mutateAndPublish].
+     * Public setter enables KSP-generated `SqlTableDef.fromRow()` to restore the persisted timestamp
+     * when loading entities from a database.
      */
     override var lastDateModified: LocalDateTime = LocalDateTime.now()
-        protected set
 
     /**
      * A flow of entity change events that collectors can observe.
