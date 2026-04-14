@@ -48,9 +48,13 @@ private const val LOCAL_DATE_TIME_FQN = "java.time.LocalDateTime"
  * properties annotated with [@PersistenceProperty][net.transgressoft.lirp.persistence.PersistenceProperty].
  *
  * The generated objects conditionally implement either [SqlTableDef][net.transgressoft.lirp.persistence.sql.SqlTableDef]
- * (when `lirp-sql` is on the KSP classpath) or [LirpTableDef][net.transgressoft.lirp.persistence.LirpTableDef]
- * (descriptor-only, when `lirp-sql` is absent). Per D-06, this check uses
- * `resolver.getClassDeclarationByName` at KSP compile time.
+ * (when `lirp-sql` is available) or [LirpTableDef][net.transgressoft.lirp.persistence.LirpTableDef]
+ * (descriptor-only, when `lirp-sql` is absent).
+ *
+ * SQL mode detection uses two mechanisms (either triggers `SqlTableDef` generation):
+ * 1. `resolver.getClassDeclarationByName` — works when `lirp-sql` is a project dependency (monorepo)
+ * 2. KSP option `lirp.sql=true` — required for external Maven consumers where the resolver cannot
+ *    see binary dependencies. Set via `ksp { arg("lirp.sql", "true") }` in `build.gradle`.
  *
  * When generating `SqlTableDef` implementations, the processor emits typed `fromRow` and `toParams`
  * methods with correct Java↔Kotlin type conversions for UUID, Date, DateTime, and Enum properties.
@@ -60,7 +64,8 @@ private const val LOCAL_DATE_TIME_FQN = "java.time.LocalDateTime"
  */
 class TableDefProcessor(
     private val codeGenerator: CodeGenerator,
-    private val logger: KSPLogger
+    private val logger: KSPLogger,
+    private val options: Map<String, String> = emptyMap()
 ) : SymbolProcessor {
 
     override fun process(resolver: Resolver): List<KSAnnotated> {
@@ -88,11 +93,15 @@ class TableDefProcessor(
             classes.add(parent)
         }
 
-        // Per D-06: detect SqlTableDef availability at KSP compile time via resolver
+        // Detect SqlTableDef availability via resolver (monorepo) or KSP option (external consumers).
+        // The resolver approach works when lirp-sql is a project dependency. For external Maven
+        // consumers, the resolver cannot find SqlTableDef from binary JARs; the ksp { arg("lirp.sql", "true") }
+        // option acts as an explicit opt-in for SqlTableDef generation.
         val sqlTableDefAvailable =
             resolver.getClassDeclarationByName(
                 resolver.getKSNameFromString(SQL_TABLE_DEF_FQN)
-            ) != null
+            ) != null ||
+                options["lirp.sql"]?.toBoolean() == true
 
         for (classDecl in classes) {
             generateTableDef(classDecl, sqlTableDefAvailable)
@@ -108,6 +117,9 @@ class TableDefProcessor(
 
         val tableName = resolveTableName(classDecl, className)
         val columns = collectColumns(classDecl)
+        val constructorParamNames =
+            classDecl.primaryConstructor?.parameters
+                ?.mapNotNull { it.name?.asString() }?.toSet() ?: emptySet()
 
         // Generate SqlTableDef only when all non-PK columns are mutable (settable via property setter).
         // Entities with immutable (val) non-PK properties require a full constructor call that
@@ -124,7 +136,7 @@ class TableDefProcessor(
         file.write(
             buildString {
                 appendPackageAndImports(packageName, canGenerateSqlMapping, columns)
-                appendObjectBody(tableDefName, className, tableName, canGenerateSqlMapping, columns)
+                appendObjectBody(tableDefName, className, tableName, canGenerateSqlMapping, columns, constructorParamNames)
             }.toByteArray()
         )
         file.close()
@@ -158,6 +170,8 @@ class TableDefProcessor(
 
     private fun StringBuilder.appendConditionalTypeImports(columns: List<ColumnMeta>) {
         if (columns.any { it.typeFqn == UUID_FQN }) {
+            appendLine("import kotlin.uuid.ExperimentalUuidApi")
+            appendLine("import kotlin.uuid.toJavaUuid")
             appendLine("import kotlin.uuid.toKotlinUuid")
         }
         if (columns.any { it.typeFqn == LOCAL_DATE_FQN }) {
@@ -167,6 +181,9 @@ class TableDefProcessor(
         if (columns.any { it.typeFqn == LOCAL_DATE_TIME_FQN }) {
             appendLine("import kotlinx.datetime.toJavaLocalDateTime")
             appendLine("import kotlinx.datetime.toKotlinLocalDateTime")
+        }
+        if (columns.any { it.typeExpression.startsWith("ColumnType.DecimalType") }) {
+            appendLine("import java.math.BigDecimal")
         }
         columns.filter { it.isEnum }.map { it.typeFqn }.distinct().forEach { fqn ->
             appendLine("import $fqn")
@@ -178,9 +195,13 @@ class TableDefProcessor(
         className: String,
         tableName: String,
         canGenerateSqlMapping: Boolean,
-        columns: List<ColumnMeta>
+        columns: List<ColumnMeta>,
+        constructorParamNames: Set<String> = emptySet()
     ) {
         appendLine("/** KSP-generated table descriptor for [$className]. */")
+        if (canGenerateSqlMapping && columns.any { it.typeFqn == UUID_FQN }) {
+            appendLine("@OptIn(ExperimentalUuidApi::class)")
+        }
         val superType = if (canGenerateSqlMapping) "SqlTableDef<$className>" else "LirpTableDef<$className>"
         appendLine("public object $tableDefName : $superType {")
         appendLine("    override val tableName: String = \"$tableName\"")
@@ -195,28 +216,32 @@ class TableDefProcessor(
         appendLine("    )")
         if (canGenerateSqlMapping) {
             appendLine()
-            appendFromRow(className, columns)
+            appendFromRow(className, columns, constructorParamNames)
             appendLine()
             appendToParams(className, columns)
         }
         appendLine("}")
     }
 
-    private fun StringBuilder.appendFromRow(className: String, columns: List<ColumnMeta>) {
-        val pkCol = columns.firstOrNull { it.isPrimaryKey }
-        val nonPkCols = columns.filter { !it.isPrimaryKey }
+    private fun StringBuilder.appendFromRow(
+        className: String,
+        columns: List<ColumnMeta>,
+        constructorParamNames: Set<String>
+    ) {
+        val constructorCols = columns.filter { it.propertyName in constructorParamNames }
+        val setterCols = columns.filter { it.propertyName !in constructorParamNames }
 
         appendLine("    override fun fromRow(row: ResultRow, table: Table): $className {")
-        if (pkCol != null) {
-            val pkAccess = buildRowAccess(pkCol)
-            appendLine("        val entity = $className($pkAccess)")
-            for (col in nonPkCols) {
+        if (constructorCols.isEmpty()) {
+            logger.error("Entity $className has no constructor parameters matching columns; cannot generate fromRow")
+            appendLine("        error(\"Entity $className missing constructor columns\")")
+        } else {
+            val ctorArgs = constructorCols.joinToString(", ") { buildRowAccess(it) }
+            appendLine("        val entity = $className($ctorArgs)")
+            for (col in setterCols) {
                 val rowAccess = buildRowAccess(col)
                 appendLine("        entity.${col.propertyName} = $rowAccess")
             }
-        } else {
-            logger.error("Entity $className has no primary key 'id' property; cannot generate fromRow")
-            appendLine("        error(\"Entity $className missing primary key\")")
         }
         appendLine("        return entity")
         appendLine("    }")
@@ -225,9 +250,16 @@ class TableDefProcessor(
     private fun buildRowAccess(col: ColumnMeta): String {
         val rawAccess = "row[table.columns.first { it.name == \"${col.name}\" }]"
         return when {
-            col.typeFqn == UUID_FQN -> "$rawAccess as kotlin.uuid.Uuid"
+            col.typeFqn == UUID_FQN && col.nullable -> "($rawAccess as? kotlin.uuid.Uuid)?.toJavaUuid()"
+            col.typeFqn == UUID_FQN -> "($rawAccess as kotlin.uuid.Uuid).toJavaUuid()"
+            col.typeFqn == LOCAL_DATE_FQN && col.nullable -> "($rawAccess as? kotlinx.datetime.LocalDate)?.toJavaLocalDate()"
             col.typeFqn == LOCAL_DATE_FQN -> "($rawAccess as kotlinx.datetime.LocalDate).toJavaLocalDate()"
+            col.typeFqn == LOCAL_DATE_TIME_FQN && col.nullable -> "($rawAccess as? kotlinx.datetime.LocalDateTime)?.toJavaLocalDateTime()"
             col.typeFqn == LOCAL_DATE_TIME_FQN -> "($rawAccess as kotlinx.datetime.LocalDateTime).toJavaLocalDateTime()"
+            col.isEnum && col.nullable -> {
+                val enumSimpleName = col.typeFqn.substringAfterLast(".")
+                "($rawAccess as? String)?.let { enumValueOf<$enumSimpleName>(it) }"
+            }
             col.isEnum -> {
                 val enumSimpleName = col.typeFqn.substringAfterLast(".")
                 "enumValueOf<$enumSimpleName>($rawAccess as String)"
@@ -254,9 +286,13 @@ class TableDefProcessor(
     private fun buildEntityAccess(col: ColumnMeta): String {
         val prop = "entity.${col.propertyName}"
         return when {
+            col.typeFqn == UUID_FQN && col.nullable -> "$prop?.toKotlinUuid()"
             col.typeFqn == UUID_FQN -> "$prop.toKotlinUuid()"
+            col.typeFqn == LOCAL_DATE_FQN && col.nullable -> "$prop?.toKotlinLocalDate()"
             col.typeFqn == LOCAL_DATE_FQN -> "$prop.toKotlinLocalDate()"
+            col.typeFqn == LOCAL_DATE_TIME_FQN && col.nullable -> "$prop?.toKotlinLocalDateTime()"
             col.typeFqn == LOCAL_DATE_TIME_FQN -> "$prop.toKotlinLocalDateTime()"
+            col.isEnum && col.nullable -> "$prop?.name"
             col.isEnum -> "$prop.name"
             else -> prop
         }

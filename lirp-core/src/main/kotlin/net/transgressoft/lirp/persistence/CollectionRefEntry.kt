@@ -41,7 +41,7 @@ import net.transgressoft.lirp.entity.CascadeAction
  *   entity types with different K types.
  * @property referencedClass the [Class] of the referenced entity type, used for registry lookup
  * @property cascadeAction the [CascadeAction] to execute when the owning entity is deleted;
- *   defaults to [CascadeAction.NONE] per design decision D-06
+ *   defaults to [CascadeAction.NONE]
  * @property isOrdered `true` if the reference is ordered and allows duplicates (List semantics);
  *   `false` if the reference enforces uniqueness (Set semantics)
  */

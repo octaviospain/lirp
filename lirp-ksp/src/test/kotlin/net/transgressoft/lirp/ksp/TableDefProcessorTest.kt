@@ -82,7 +82,7 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "tableName: String = \"minimal_entity\""
         content shouldContain "ColumnType.IntType"
         content shouldContain "primaryKey = true"
-        content shouldContain "object MinimalEntity_LirpTableDef : LirpTableDef<MinimalEntity>"
+        content shouldContain "object MinimalEntity_LirpTableDef : SqlTableDef<MinimalEntity>"
     }
 
     test("generates _LirpTableDef with annotation overrides for table name and column config") {
@@ -412,6 +412,8 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "ColumnType.UuidType"
         content shouldContain "primaryKey = true"
         content shouldContain "tableName: String = \"uuid_key_entity\""
+        content shouldContain "SqlTableDef<UuidKeyEntity>"
+        content shouldContain "toJavaUuid()"
     }
 
     test("generates nullable columns for entity with all nullable non-PK properties") {
