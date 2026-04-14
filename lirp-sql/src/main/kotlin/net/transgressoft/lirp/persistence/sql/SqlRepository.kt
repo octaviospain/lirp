@@ -42,7 +42,10 @@ import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.jetbrains.exposed.v1.jdbc.update
+import java.util.UUID
 import javax.sql.DataSource
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.toKotlinUuid
 
 /**
  * SQL-backed reactive repository using JetBrains Exposed and HikariCP connection pooling.
@@ -190,7 +193,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                             // Safe: pkCol is the primary key column registered by ExposedTableInterpreter. Exposed's
                             // eq() operator requires Column<Any?> due to statement-builder type erasure.
                             @Suppress("UNCHECKED_CAST")
-                            (pkCol as Column<Any?>).eq(op.entity.id)
+                            (pkCol as Column<Any?>).eq(toExposedId(op.entity.id))
                         }) { stmt ->
                             tableDef.toParams(op.entity, table).forEach { (col, value) ->
                                 // Safe: col was registered by ExposedTableInterpreter from the declared LirpTableDef column type.
@@ -204,7 +207,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                             // Safe: pkCol is the primary key column registered by ExposedTableInterpreter. Exposed's
                             // eq() operator requires Column<Any?> due to statement-builder type erasure.
                             @Suppress("UNCHECKED_CAST")
-                            (pkCol as Column<Any?>).eq(op.id)
+                            (pkCol as Column<Any?>).eq(toExposedId(op.id))
                         }
                     is PendingBatchDelete -> {
                         // Use individual deleteWhere per ID within the same transaction to avoid
@@ -215,7 +218,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                                 // Safe: pkCol is the primary key column registered by ExposedTableInterpreter. Exposed's
                                 // eq() operator requires Column<Any?> due to statement-builder type erasure.
                                 @Suppress("UNCHECKED_CAST")
-                                (pkCol as Column<Any?>).eq(id)
+                                (pkCol as Column<Any?>).eq(toExposedId(id))
                             }
                         }
                     }
@@ -265,5 +268,13 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                 }
             return HikariDataSource(config)
         }
+
+        /**
+         * Converts a `java.util.UUID` to `kotlin.uuid.Uuid` for Exposed column operations.
+         * Exposed 1.x uses `kotlin.uuid.Uuid` natively; entity IDs may be `java.util.UUID`.
+         */
+        @OptIn(ExperimentalUuidApi::class)
+        private fun toExposedId(id: Any): Any =
+            if (id is UUID) id.toKotlinUuid() else id
     }
 }

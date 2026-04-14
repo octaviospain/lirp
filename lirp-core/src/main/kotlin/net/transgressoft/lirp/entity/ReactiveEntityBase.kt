@@ -348,7 +348,11 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
      * Executes [action] with event emission suppressed, restoring the previous state afterward.
      *
      * Equivalent to wrapping the action between [disableEvents] and [enableEvents], but
-     * guarantees restoration even if the action throws.
+     * guarantees restoration even if the action throws. Common use cases:
+     *
+     * - Clone implementations that copy all properties without triggering mutation events
+     * - Batch property initialization from deserialized or database-loaded state
+     * - Framework-level operations that need to set multiple properties atomically
      *
      * ```
      * override fun clone(): MyEntity = MyEntity(id).apply {
@@ -365,7 +369,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
      * @see disableEvents
      * @see enableEvents
      */
-    protected inline fun <T> withEventsDisabled(action: () -> T): T {
+    inline fun <T> withEventsDisabled(action: () -> T): T {
         val wasDisabled = eventsDisabled
         eventsDisabled = true
         try {
@@ -428,17 +432,13 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     }
 
     /**
-     * Public bridge exposing [withEventsDisabled] for framework-level operations like
-     * [LirpEntitySerializer][net.transgressoft.lirp.persistence.json.LirpEntitySerializer]
-     * deserialization and user-written clone implementations.
-     *
-     * Provides the same event-suppression guarantee as [withEventsDisabled] while keeping that
-     * method protected for subclass use.
+     * Alias for [withEventsDisabled] retained for binary compatibility with code compiled
+     * against earlier LIRP versions where [withEventsDisabled] was protected.
      *
      * @param action the block to execute with events disabled
      * @return the result of [action]
      */
-    internal fun <T> withEventsDisabledForClone(action: () -> T): T = withEventsDisabled(action)
+    fun <T> withEventsDisabledForClone(action: () -> T): T = withEventsDisabled(action)
 
     @Volatile
     private var _delegateRegistry: Map<String, LirpDelegate>? = null
