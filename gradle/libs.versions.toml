@@ -10,6 +10,11 @@ kctfork = "0.12.1"
 postgresql = "42.7.10"
 mysql = "9.6.0"
 mariadb = "3.5.8"
+jmh = "1.37"
+jol = "0.17"
+springDataJpa = "3.4.7"
+hibernate = "6.6.17.Final"
+jakartaPersistence = "3.2.0"
 
 [libraries]
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
@@ -56,6 +61,13 @@ kotlin-logging = { module = "io.github.oshai:kotlin-logging-jvm", version = "7.0
 junit-bom = { module = "org.junit:junit-bom", version = "6.0.3" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+
+jmh-core = { module = "org.openjdk.jmh:jmh-core", version.ref = "jmh" }
+jmh-generator-annprocess = { module = "org.openjdk.jmh:jmh-generator-annprocess", version.ref = "jmh" }
+jol-core = { module = "org.openjdk.jol:jol-core", version.ref = "jol" }
+spring-data-jpa = { module = "org.springframework.data:spring-data-jpa", version.ref = "springDataJpa" }
+hibernate-core = { module = "org.hibernate.orm:hibernate-core", version.ref = "hibernate" }
+jakarta-persistence-api = { module = "jakarta.persistence:jakarta.persistence-api", version.ref = "jakartaPersistence" }
 
 [bundles]
 kotest = ["kotest-runner-junit6", "kotest-assertions-core", "kotest-assertions-json", "kotest-property"]
