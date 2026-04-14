@@ -17,5 +17,5 @@ open class BenchmarkEntity(
     override val uniqueId: String get() = "bench-$id"
     var name: String by reactiveProperty(label)
 
-    override fun clone(): BenchmarkEntity = BenchmarkEntity(id, label)
+    override fun clone(): BenchmarkEntity = BenchmarkEntity(id, label).also { it.name = name }
 }

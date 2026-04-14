@@ -26,6 +26,7 @@ import org.openjdk.jmh.annotations.Warmup
 import org.openjdk.jmh.infra.Blackhole
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Compares [SqlRepository] against direct JetBrains Exposed [transaction] blocks for equivalent
@@ -55,6 +56,7 @@ open class ComparativeExposedBenchmark {
 
     // Unique DB names per trial to avoid H2 schema accumulation between parameter sets
     val trialCounter = AtomicInteger(0)
+    val addIdGen = AtomicLong(0L)
 
     @Setup(Level.Trial)
     fun setup() {
@@ -93,6 +95,7 @@ open class ComparativeExposedBenchmark {
                 }
             }
         }
+        addIdGen.set(entityCount.toLong())
     }
 
     @TearDown(Level.Trial)
@@ -106,14 +109,14 @@ open class ComparativeExposedBenchmark {
     /** Adds a new entity via SqlRepository. Paired with [directExposedAdd]. */
     @Benchmark
     fun sqlRepoAdd(bh: Blackhole) {
-        val id = entityCount + System.nanoTime().toInt()
+        val id = addIdGen.getAndIncrement().toInt()
         bh.consume(sqlRepo.add(BenchmarkEntity(id, "new-$id")))
     }
 
     /** Adds a new row via direct Exposed transaction. Paired with [sqlRepoAdd]. */
     @Benchmark
     fun directExposedAdd(bh: Blackhole) {
-        val id = entityCount + System.nanoTime().toInt()
+        val id = addIdGen.getAndIncrement().toInt()
         bh.consume(
             transaction(db = exposedDb) {
                 exposedTable.insert {

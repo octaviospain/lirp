@@ -20,6 +20,7 @@ import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 
@@ -37,7 +38,7 @@ import kotlinx.serialization.builtins.serializer
  *
  * **Mutation flush:** [mutationFlush] forces a synchronous flush via [JsonFileRepository.close]
  * to measure the full mutation-to-disk round-trip (Pitfall 3 mitigation). The repository is
- * re-opened in the next trial setup.
+ * re-opened immediately after close so subsequent invocations within the same trial remain valid.
  */
 @State(Scope.Benchmark)
 @Fork(1)
@@ -51,19 +52,16 @@ open class JsonRepoBenchmark {
     lateinit var jsonFile: File
     lateinit var repo: JsonFileRepository<Int, BenchmarkEntity>
 
+    // Cached at field level to avoid recreating the serializer on every mutationFlush invocation
+    val mapSerializer: KSerializer<Map<Int, BenchmarkEntity>> =
+        MapSerializer(Int.serializer(), lirpSerializer(BenchmarkEntity(0, "sample")))
+
     private val nextId = AtomicInteger()
 
     @Setup(Level.Trial)
     fun setup() {
         val tempDir = Files.createTempDirectory("lirp-bench-json").toFile()
         jsonFile = File(tempDir, "benchmark.json").also { it.createNewFile() }
-
-        val mapSerializer =
-            @Suppress("UNCHECKED_CAST")
-            (
-                MapSerializer(Int.serializer(), lirpSerializer(BenchmarkEntity(0, "sample")))
-                    as kotlinx.serialization.KSerializer<Map<Int, BenchmarkEntity>>
-            )
 
         repo = JsonFileRepository(jsonFile, mapSerializer)
         repeat(entityCount) { i -> repo.add(BenchmarkEntity(i, "entity-$i")) }
@@ -104,7 +102,8 @@ open class JsonRepoBenchmark {
      *
      * Mutates the name property of the middle entity, then forces a synchronous flush by calling
      * [JsonFileRepository.close]. This bypasses the debounce timer to capture the true end-to-end
-     * write latency. The repository is re-opened via [setup] for the next trial.
+     * write latency. The repository is re-opened immediately after close so subsequent invocations
+     * within the same trial remain valid.
      *
      * Note: because close() is called here, [tearDown] guards against double-close gracefully.
      */
@@ -119,12 +118,6 @@ open class JsonRepoBenchmark {
             repo.close()
             bh.consume(entity)
             // Re-open for subsequent invocations within the same trial
-            val mapSerializer =
-                @Suppress("UNCHECKED_CAST")
-                (
-                    MapSerializer(Int.serializer(), lirpSerializer(BenchmarkEntity(0, "sample")))
-                        as kotlinx.serialization.KSerializer<Map<Int, BenchmarkEntity>>
-                )
             repo = JsonFileRepository(jsonFile, mapSerializer)
         }
     }

@@ -48,7 +48,8 @@ open class ComparativeJsonSerializationBenchmark {
     lateinit var repoJsonFile: File
     lateinit var tempDir: File
 
-    lateinit var rawEntities: Map<Int, SerializableBenchmarkEntity>
+    // Kept as a mutable map to avoid allocating a full copy per rawSerializationMutationWrite invocation
+    lateinit var rawEntities: MutableMap<Int, SerializableBenchmarkEntity>
     lateinit var rawJsonFile: File
 
     val trialCounter = AtomicInteger(0)
@@ -71,9 +72,9 @@ open class ComparativeJsonSerializationBenchmark {
         jsonRepo = JsonFileRepository(repoJsonFile, BenchmarkEntityMapSerializer.instance)
         repeat(entityCount) { i -> jsonRepo.add(BenchmarkEntity(i, "entity-$i")) }
 
-        // Raw serialization side: pre-built entity map
+        // Raw serialization side: pre-built mutable entity map
         rawEntities =
-            (0 until entityCount).associateWith { i ->
+            (0 until entityCount).associateWithTo(LinkedHashMap()) { i ->
                 SerializableBenchmarkEntity(i, "entity-$i", "entity-$i")
             }
         rawJsonFile = File(tempDir, "raw-$trial.json").also { it.createNewFile() }
@@ -85,11 +86,16 @@ open class ComparativeJsonSerializationBenchmark {
         tempDir.deleteRecursively()
     }
 
-    /** Adds a new entity to [JsonFileRepository]. Paired with [rawSerializationWrite]. */
+    /**
+     * Adds a new entity to [JsonFileRepository] and immediately removes it to keep the
+     * repository size stable across invocations. Paired with [rawSerializationWrite].
+     */
     @Benchmark
     fun jsonRepoAdd(bh: Blackhole) {
-        val id = entityCount + System.nanoTime().toInt()
-        bh.consume(jsonRepo.add(BenchmarkEntity(id, "new-$id")))
+        val entity = BenchmarkEntity(entityCount + System.nanoTime().toInt(), "new")
+        val result = jsonRepo.add(entity)
+        jsonRepo.remove(entity)
+        bh.consume(result)
     }
 
     /**
@@ -103,25 +109,32 @@ open class ComparativeJsonSerializationBenchmark {
         bh.consume(jsonString.length)
     }
 
-    /** Mutates an entity in [JsonFileRepository] and closes to force flush. Paired with [rawSerializationMutationWrite]. */
+    /**
+     * Mutates an entity in [JsonFileRepository] and closes the repository to force a
+     * synchronous flush of the debounce pipeline. The repository is reopened afterwards
+     * so subsequent invocations within the same trial remain valid.
+     * Paired with [rawSerializationMutationWrite].
+     */
     @Benchmark
     fun jsonRepoMutationFlush(bh: Blackhole) {
         val optional = jsonRepo.findById(entityCount / 2)
         if (optional.isPresent) optional.get().name = "mutated-${System.nanoTime()}"
-        // Close forces the debounce pipeline to flush synchronously
+        // Force synchronous flush — measures full mutation-to-disk round-trip
+        jsonRepo.close()
         bh.consume(optional)
+        // Re-open for subsequent invocations within the same trial
+        jsonRepo = JsonFileRepository(repoJsonFile, BenchmarkEntityMapSerializer.instance)
     }
 
     /**
-     * Mutates the raw entity map and serializes the full state to a file.
+     * Mutates an entry in the shared mutable map and serializes the full state to a file.
      * Paired with [jsonRepoMutationFlush].
      */
     @Benchmark
     fun rawSerializationMutationWrite(bh: Blackhole) {
         val id = entityCount / 2
-        val updated = rawEntities.toMutableMap()
-        updated[id] = SerializableBenchmarkEntity(id, "entity-$id", "mutated-${System.nanoTime()}")
-        val jsonString = json.encodeToString(rawSerializer, updated)
+        rawEntities[id] = SerializableBenchmarkEntity(id, "entity-$id", "mutated-${System.nanoTime()}")
+        val jsonString = json.encodeToString(rawSerializer, rawEntities)
         rawJsonFile.writeText(jsonString)
         bh.consume(jsonString.length)
     }

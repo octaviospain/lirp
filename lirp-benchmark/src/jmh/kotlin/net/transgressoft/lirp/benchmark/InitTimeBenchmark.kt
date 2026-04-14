@@ -100,7 +100,9 @@ open class InitTimeBenchmark {
      * Measures [VolatileRepository] cold-start initialization: create repository and add [entityCount] entities.
      *
      * VolatileRepository has no persistent backing store, so initialization is a pure in-memory
-     * add loop. This serves as the baseline for the other two initialization benchmarks.
+     * add loop rather than a load-from-storage operation. This makes it an insertion baseline,
+     * not a load baseline like [initSql] and [initJson], which construct from pre-populated stores.
+     * It still serves as a useful lower bound on repository construction cost.
      */
     @Benchmark
     fun initVolatile(bh: Blackhole) {
@@ -122,9 +124,6 @@ open class InitTimeBenchmark {
         val repo = SqlRepository(sqlDataSource, BenchmarkEntityTableDef)
         bh.consume(repo.size())
         repo.close()
-
-        // Re-populate for the next invocation (SingleShotTime runs once per fork,
-        // but setup() ensures rows exist before the benchmark starts)
     }
 
     /**
