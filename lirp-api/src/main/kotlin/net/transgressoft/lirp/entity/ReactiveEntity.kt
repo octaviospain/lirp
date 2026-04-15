@@ -90,6 +90,31 @@ interface ReactiveEntity<K, R : ReactiveEntity<K, R>> :
         LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>
 
     /**
+     * Executes [action] with event emission suppressed, restoring the previous state afterward.
+     *
+     * Equivalent to wrapping the action between disabling and re-enabling event publishing, but
+     * guarantees restoration even if the action throws. Common use cases:
+     *
+     * - Clone implementations that copy all properties without triggering mutation events
+     * - Batch property initialization from deserialized or database-loaded state
+     * - Framework-level operations that need to set multiple properties atomically
+     *
+     * ```
+     * override fun clone(): MyEntity = MyEntity(id).apply {
+     *     withEventsDisabled {
+     *         name = this@MyEntity.name
+     *         price = this@MyEntity.price
+     *     }
+     * }
+     * ```
+     *
+     * @param T The return type of the action
+     * @param action The block to execute with events disabled
+     * @return The result of the action
+     */
+    fun <T> withEventsDisabled(action: () -> T): T
+
+    /**
      * Permanently closes this entity and releases its publisher resources.
      *
      * After closing [subscribe] throw [IllegalStateException]. Idempotent: subsequent calls are safe no-ops.

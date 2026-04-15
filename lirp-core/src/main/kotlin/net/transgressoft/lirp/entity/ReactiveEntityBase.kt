@@ -346,32 +346,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
         eventsDisabled = false
     }
 
-    /**
-     * Executes [action] with event emission suppressed, restoring the previous state afterward.
-     *
-     * Equivalent to wrapping the action between [disableEvents] and [enableEvents], but
-     * guarantees restoration even if the action throws. Common use cases:
-     *
-     * - Clone implementations that copy all properties without triggering mutation events
-     * - Batch property initialization from deserialized or database-loaded state
-     * - Framework-level operations that need to set multiple properties atomically
-     *
-     * ```
-     * override fun clone(): MyEntity = MyEntity(id).apply {
-     *     withEventsDisabled {
-     *         name = this@MyEntity.name
-     *         price = this@MyEntity.price
-     *     }
-     * }
-     * ```
-     *
-     * @param T The return type of the action
-     * @param action The block to execute with events disabled
-     * @return The result of the action
-     * @see disableEvents
-     * @see enableEvents
-     */
-    inline fun <T> withEventsDisabled(action: () -> T): T {
+    override fun <T> withEventsDisabled(action: () -> T): T {
         val wasDisabled = eventsDisabled
         eventsDisabled = true
         try {
