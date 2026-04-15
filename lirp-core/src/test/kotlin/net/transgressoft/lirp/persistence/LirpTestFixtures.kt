@@ -465,13 +465,36 @@ class DelegatingCustomerRepo(
 }
 
 /**
- * Delegation-based repository wrapper for [Order] entities.
+ * Test entity with an optional (nullable FK) aggregate reference to [Customer].
  *
- * Demonstrates the manual registration pattern for a second entity type. The `init` block calls
- * [RegistryBase.registerRepository] to register the delegate [VolatileRepository]
- * into [LirpContext.default]. Calling [close] deregisters from the context first,
- * then closes the delegate.
+ * Used in [AggregateRefResolutionTest] to verify that [optionalAggregate] returns
+ * [Optional.empty] when the FK is null and resolves correctly when set.
  */
+@Serializable
+data class OptionalRefOrder(
+    override val id: Long,
+    var customerId: Int? = null
+) : ReactiveEntityBase<Long, OptionalRefOrder>() {
+    override val uniqueId: String get() = "optional-order-$id"
+
+    @Aggregate(bubbleUp = false, onDelete = CascadeAction.DETACH)
+    val customer by optionalAggregate<Int, Customer> { customerId }
+
+    override fun clone(): OptionalRefOrder = copy()
+}
+
+/** Test repository for [OptionalRefOrder] entities. */
+@LirpRepository
+class OptionalRefOrderVolatileRepo internal constructor(
+    context: LirpContext
+) : VolatileRepository<Long, OptionalRefOrder>(context, "OptionalRefOrders") {
+    constructor() : this(LirpContext.default)
+
+    fun create(id: Long, customerId: Int? = null): OptionalRefOrder =
+        OptionalRefOrder(id, customerId).also { add(it) }
+}
+
+/** Delegation-based repository wrapper for [Order] entities. */
 class DelegatingOrderRepo(
     private val delegate: VolatileRepository<Long, Order>
 ) : Repository<Long, Order> by delegate, AutoCloseable {
