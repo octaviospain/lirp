@@ -104,6 +104,39 @@ internal class AggregateRefResolutionTest : FunSpec({
         order.customer.resolve().shouldBeEmpty()
     }
 
+    test("optionalAggregate resolve returns empty when FK is null") {
+        val optionalRepo = OptionalRefOrderVolatileRepo(ctx)
+        val order = optionalRepo.create(id = 200L, customerId = null)
+
+        order.customer.resolve().shouldBeEmpty()
+    }
+
+    test("optionalAggregate resolve returns entity when FK is set") {
+        val optionalRepo = OptionalRefOrderVolatileRepo(ctx)
+        customerRepo.create(id = 5, name = "Charlie")
+        val order = optionalRepo.create(id = 200L, customerId = 5)
+
+        order.customer.resolve().shouldBePresent { it.name shouldBe "Charlie" }
+    }
+
+    test("optionalAggregate isOptional returns true") {
+        val order = OptionalRefOrder(id = 200L, customerId = null)
+        (order.customer as AggregateRefDelegate<*, *>).isOptional shouldBe true
+    }
+
+    test("optionalAggregate referenceId throws when FK is null") {
+        val order = OptionalRefOrder(id = 200L, customerId = null)
+        io.kotest.assertions.throwables.shouldThrow<IllegalStateException> {
+            order.customer.referenceId
+        }
+    }
+
+    test("optionalAggregate resolve returns empty before registry binding") {
+        val order = OptionalRefOrder(id = 200L, customerId = 5)
+        // Not added to any repo — delegate not bound
+        order.customer.resolve().shouldBeEmpty()
+    }
+
     test("cross-context isolation: order in context B cannot resolve customer registered only in context A") {
         val ctxA = LirpContext()
         val ctxB = LirpContext()

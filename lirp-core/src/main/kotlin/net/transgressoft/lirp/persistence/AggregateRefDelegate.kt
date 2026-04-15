@@ -82,10 +82,16 @@ import kotlin.reflect.KProperty
  * @param idProvider lambda that returns the current referenced entity ID from the owning entity
  */
 class AggregateRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
-    private val idProvider: () -> K
+    private val idFn: () -> K?,
+    private val _isOptional: Boolean = false
 ) : ReactiveEntityReference<K, E>, ReadOnlyProperty<Any?, ReactiveEntityReference<K, E>> {
 
     private val log = KotlinLogging.logger {}
+
+    private fun currentId(): K? = idFn()
+
+    /** Whether this delegate wraps a nullable FK reference created via [optionalAggregate]. */
+    val isOptional: Boolean get() = _isOptional
 
     /**
      * The bound registry used to look up the referenced entity by ID.
@@ -130,7 +136,9 @@ class AggregateRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
     @Volatile
     private var bubbleUpRefName: String? = null
 
-    override val referenceId: K get() = idProvider()
+    override val referenceId: K get() =
+        currentId()
+            ?: error("referenceId accessed on optional aggregate with null FK — use resolve() instead")
 
     /**
      * Binds this delegate to the registry that holds the referenced entity type, and associates
@@ -165,7 +173,7 @@ class AggregateRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
     @Suppress("UNCHECKED_CAST")
     override fun resolve(): Optional<E> {
         val reg = registryRef.get() ?: return Optional.empty()
-        val currentId = idProvider()
+        val currentId = currentId() ?: return Optional.empty()
         // Lazy re-wire: if the reference ID changed since last wiring, attempt to re-subscribe.
         // bubbleUpParent != null acts as proxy for "bubble-up was configured" to skip re-wire overhead
         // for delegates that do not use bubble-up.
@@ -200,10 +208,11 @@ class AggregateRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
     fun wireBubbleUp(parentEntity: ReactiveEntity<*, *>, refName: String) {
         bubbleUpParent = parentEntity
         bubbleUpRefName = refName
+        val currentId = currentId() ?: return
         val referencedEntity =
             resolve().orElse(null) ?: run {
                 // Entity not found yet — record the ID so resolve() will re-wire when entity appears
-                lastWiredId.set(idProvider())
+                lastWiredId.set(currentId)
                 return
             }
         // Bubble-up only makes sense for ReactiveEntity children (which can emit mutation events)
@@ -212,7 +221,7 @@ class AggregateRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
         val newSub = createBubbleUpSubscription(referencedEntity, parentEntity, refName)
         val oldSub = bubbleUpSubscription.getAndSet(newSub)
         oldSub?.cancel()
-        lastWiredId.set(idProvider())
+        lastWiredId.set(currentId)
     }
 
     /**
@@ -256,14 +265,15 @@ class AggregateRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
     }
 
     private fun doCascade() {
+        val currentId = currentId() ?: return
         val repo = registryRef.get()
         if (repo !is Repository<*, *>) {
-            log.warn { "Cannot execute CASCADE: bound registry is not a Repository for ${idProvider()}" }
+            log.warn { "Cannot execute CASCADE: bound registry is not a Repository for $currentId" }
             return
         }
         val referencedEntity = resolve().orElse(null)
         if (referencedEntity == null) {
-            log.warn { "Entity(id=${idProvider()}) already removed by prior cascade" }
+            log.warn { "Entity(id=$currentId) already removed by prior cascade" }
             return
         }
         // Check for cycle: if the referenced entity has any CASCADE reference pointing back to
@@ -274,7 +284,7 @@ class AggregateRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
     }
 
     private fun doRestrict(owningEntity: Any) {
-        val targetId = idProvider()
+        val targetId = currentId() ?: return
         val ctx = context ?: return
         // Find which entity class this registry manages by matching against the context's registry map
         val targetClass =
@@ -414,4 +424,33 @@ class AggregateRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
  */
 fun <K : Comparable<K>, E : IdentifiableEntity<K>> aggregate(
     idProvider: () -> K
-): AggregateRefDelegate<K, E> = AggregateRefDelegate(idProvider)
+): AggregateRefDelegate<K, E> = AggregateRefDelegate(idFn = idProvider)
+
+/**
+ * Creates a property delegate for an optional aggregate reference where the FK may be null.
+ *
+ * Behaves identically to [aggregate] except that [resolve] returns [Optional.empty][java.util.Optional.empty]
+ * when the [idProvider] returns null, instead of throwing. Cascade and bubble-up operations
+ * are safely skipped when the FK is null.
+ *
+ * Common for self-referential hierarchies (e.g., parent-child tenant trees) and optional
+ * foreign key relationships.
+ *
+ * **Requires KSP** — annotate the delegated property with [@Aggregate][Aggregate]
+ * so the KSP processor generates the required `{ClassName}_LirpRefAccessor` class.
+ *
+ * Example:
+ * ```kotlin
+ * @Aggregate(onDelete = CascadeAction.DETACH)
+ * @Transient
+ * val parentTenant by optionalAggregate<UUID, Tenant> { parentTenantId }
+ * ```
+ *
+ * @param K the type of the referenced entity's ID, must be [Comparable]
+ * @param E the referenced entity type, must extend [IdentifiableEntity]
+ * @param idProvider lambda returning the current ID of the referenced entity, or null if unset
+ * @return an [AggregateRefDelegate] that handles null IDs gracefully
+ */
+fun <K : Comparable<K>, E : IdentifiableEntity<K>> optionalAggregate(
+    idProvider: () -> K?
+): AggregateRefDelegate<K, E> = AggregateRefDelegate(idFn = idProvider, _isOptional = true)
