@@ -21,6 +21,7 @@ import com.tschuchort.compiletesting.JvmCompilationResult
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
 import com.tschuchort.compiletesting.configureKsp
+import com.tschuchort.compiletesting.kspProcessorOptions
 import com.tschuchort.compiletesting.sourcesGeneratedBySymbolProcessor
 import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.FunSpec
@@ -40,13 +41,19 @@ import org.junit.jupiter.api.DisplayName
 @DisplayName("TableDefProcessor")
 internal class TableDefProcessorTest : FunSpec({
 
-    fun compileWithProcessor(vararg sources: SourceFile): JvmCompilationResult {
+    fun compileWithProcessor(
+        vararg sources: SourceFile,
+        options: Map<String, String> = emptyMap()
+    ): JvmCompilationResult {
         val compilation =
             KotlinCompilation().apply {
                 this.sources = sources.toList()
                 inheritClassPath = true
             }
         compilation.configureKsp { withCompilation = true }
+        if (options.isNotEmpty()) {
+            compilation.kspProcessorOptions.putAll(options)
+        }
         compilation.symbolProcessorProviders += TableDefProcessorProvider()
         return compilation.compile()
     }
@@ -500,5 +507,28 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "name = \"name\""
         content shouldNotContain "transient_field"
         content shouldNotContain "transientField"
+    }
+
+    test("generates SqlTableDef when lirp.sql option is set to true") {
+        val source =
+            SourceFile.kotlin(
+                "OptionEntity.kt",
+                """
+                package test
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class OptionEntity(val id: Int) {
+                    var label: String = ""
+                }
+                """
+            )
+        val result = compileWithProcessor(source, options = mapOf("lirp.sql" to "true"))
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("OptionEntity_LirpTableDef.kt")
+        content shouldContain "SqlTableDef<OptionEntity>"
+        content shouldContain "override fun fromRow(row: ResultRow, table: Table): OptionEntity"
+        content shouldContain "override fun toParams(entity: OptionEntity, table: Table)"
     }
 })
