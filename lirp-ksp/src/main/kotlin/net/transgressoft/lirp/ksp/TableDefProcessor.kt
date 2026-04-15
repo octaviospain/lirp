@@ -117,14 +117,22 @@ class TableDefProcessor(
 
         val tableName = resolveTableName(classDecl, className)
         val columns = collectColumns(classDecl)
+        // Ordered constructor parameter names — preserves declaration order for correct fromRow() generation.
         val constructorParamNames =
             classDecl.primaryConstructor?.parameters
-                ?.mapNotNull { it.name?.asString() }?.toSet() ?: emptySet()
+                ?.mapNotNull { it.name?.asString() } ?: emptyList()
+        val columnNames = columns.map { it.propertyName }.toSet()
+        val unmappedCtorParams = constructorParamNames.filter { it !in columnNames }
 
-        // Generate SqlTableDef only when all non-PK columns are mutable (settable via property setter).
-        // Entities with immutable (val) non-PK properties require a full constructor call that
-        // the id-only construction pattern cannot satisfy; fall back to descriptor-only LirpTableDef.
-        val canGenerateSqlMapping = sqlTableDefAvailable && columns.filter { !it.isPrimaryKey }.all { it.isMutable }
+        // Generate SqlTableDef only when: (1) all non-PK columns are mutable, and (2) every constructor
+        // parameter maps to a known column. Unmapped params would produce invalid constructor calls.
+        val canGenerateSqlMapping =
+            sqlTableDefAvailable &&
+                columns.filter { !it.isPrimaryKey }.all { it.isMutable } &&
+                unmappedCtorParams.isEmpty()
+        if (unmappedCtorParams.isNotEmpty() && sqlTableDefAvailable) {
+            logger.warn("$className: constructor params $unmappedCtorParams have no matching columns; falling back to LirpTableDef")
+        }
 
         val file =
             codeGenerator.createNewFile(
@@ -196,7 +204,7 @@ class TableDefProcessor(
         tableName: String,
         canGenerateSqlMapping: Boolean,
         columns: List<ColumnMeta>,
-        constructorParamNames: Set<String> = emptySet()
+        constructorParamNames: List<String> = emptyList()
     ) {
         appendLine("/** KSP-generated table descriptor for [$className]. */")
         if (canGenerateSqlMapping && columns.any { it.typeFqn == UUID_FQN }) {
@@ -226,22 +234,20 @@ class TableDefProcessor(
     private fun StringBuilder.appendFromRow(
         className: String,
         columns: List<ColumnMeta>,
-        constructorParamNames: Set<String>
+        constructorParamNames: List<String>
     ) {
-        val constructorCols = columns.filter { it.propertyName in constructorParamNames }
-        val setterCols = columns.filter { it.propertyName !in constructorParamNames }
+        val columnsByName = columns.associateBy { it.propertyName }
+        // Preserve constructor parameter declaration order for correct positional arguments
+        val orderedCtorCols = constructorParamNames.mapNotNull { columnsByName[it] }
+        val ctorParamNameSet = constructorParamNames.toSet()
+        val setterCols = columns.filter { it.propertyName !in ctorParamNameSet }
 
         appendLine("    override fun fromRow(row: ResultRow, table: Table): $className {")
-        if (constructorCols.isEmpty()) {
-            logger.error("Entity $className has no constructor parameters matching columns; cannot generate fromRow")
-            appendLine("        error(\"Entity $className missing constructor columns\")")
-        } else {
-            val ctorArgs = constructorCols.joinToString(", ") { buildRowAccess(it) }
-            appendLine("        val entity = $className($ctorArgs)")
-            for (col in setterCols) {
-                val rowAccess = buildRowAccess(col)
-                appendLine("        entity.${col.propertyName} = $rowAccess")
-            }
+        val ctorArgs = orderedCtorCols.joinToString(", ") { buildRowAccess(it) }
+        appendLine("        val entity = $className($ctorArgs)")
+        for (col in setterCols) {
+            val rowAccess = buildRowAccess(col)
+            appendLine("        entity.${col.propertyName} = $rowAccess")
         }
         appendLine("        return entity")
         appendLine("    }")
