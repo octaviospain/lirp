@@ -32,8 +32,10 @@ dependencies {
     api project(path: ':lirp-api')
     api project(path: ':lirp-core')
 
-    implementation platform(libs.exposed.bom)
-    implementation libs.bundles.exposed
+    api platform(libs.exposed.bom)
+    api libs.exposed.core
+    api libs.exposed.kotlin.datetime
+    implementation libs.exposed.jdbc
     implementation libs.hikari
     runtimeOnly libs.postgresql
     runtimeOnly libs.mysql
