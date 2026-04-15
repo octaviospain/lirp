@@ -510,6 +510,9 @@ internal class TableDefProcessorTest : FunSpec({
     }
 
     test("generates SqlTableDef when lirp.sql option is set to true") {
+        // In monorepo tests, the resolver also detects SqlTableDef from the classpath.
+        // Full option-only isolation is validated by lirp-fleet-poc where lirp-sql is a
+        // binary Maven dependency and the resolver cannot detect SqlTableDef.
         val source =
             SourceFile.kotlin(
                 "OptionEntity.kt",
@@ -530,5 +533,151 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "SqlTableDef<OptionEntity>"
         content shouldContain "override fun fromRow(row: ResultRow, table: Table): OptionEntity"
         content shouldContain "override fun toParams(entity: OptionEntity, table: Table)"
+    }
+
+    test("generates nullable UUID, LocalDate, LocalDateTime, and enum conversions in fromRow and toParams") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "NullableTypesEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import java.util.UUID
+                import java.time.LocalDate
+                import java.time.LocalDateTime
+
+                enum class Status { ACTIVE, INACTIVE }
+
+                @PersistenceMapping
+                class NullableTypesEntity(override val id: UUID) : ReactiveEntityBase<UUID, NullableTypesEntity>() {
+                    var parentId: UUID? by reactiveProperty(null)
+                    var startDate: LocalDate? by reactiveProperty(null)
+                    var modifiedAt: LocalDateTime? by reactiveProperty(null)
+                    var status: Status? by reactiveProperty(null)
+                    var label: String? by reactiveProperty(null)
+                    override val uniqueId: String get() = id.toString()
+                    override fun clone() = NullableTypesEntity(id)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("NullableTypesEntity_LirpTableDef.kt")
+        content shouldContain "SqlTableDef<NullableTypesEntity>"
+        content shouldContain "@OptIn(ExperimentalUuidApi::class)"
+        // Nullable UUID conversions
+        content shouldContain "as? kotlin.uuid.Uuid)?.toJavaUuid()"
+        content shouldContain "entity.parentId?.toKotlinUuid()"
+        // Non-null UUID PK conversion
+        content shouldContain "as kotlin.uuid.Uuid).toJavaUuid()"
+        content shouldContain "entity.id.toKotlinUuid()"
+        // Nullable LocalDate conversions
+        content shouldContain "as? kotlinx.datetime.LocalDate)?.toJavaLocalDate()"
+        content shouldContain "entity.startDate?.toKotlinLocalDate()"
+        // Nullable LocalDateTime conversions
+        content shouldContain "as? kotlinx.datetime.LocalDateTime)?.toJavaLocalDateTime()"
+        content shouldContain "entity.modifiedAt?.toKotlinLocalDateTime()"
+        // Nullable enum conversions
+        content shouldContain """as? String)?.let { enumValueOf<Status>(it) }"""
+        content shouldContain "entity.status?.name"
+        // Nullable String
+        content shouldContain "as? String"
+    }
+
+    test("generates BigDecimal import and correct column type for DecimalType properties") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "DecimalEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.PersistenceProperty
+                import java.math.BigDecimal
+
+                @PersistenceMapping
+                class DecimalEntity(val id: Int) {
+                    @PersistenceProperty(precision = 10, scale = 2)
+                    var price: BigDecimal = BigDecimal.ZERO
+
+                    @PersistenceProperty(precision = 14, scale = 4)
+                    var rate: BigDecimal? = null
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("DecimalEntity_LirpTableDef.kt")
+        content shouldContain "SqlTableDef<DecimalEntity>"
+        content shouldContain "import java.math.BigDecimal"
+        content shouldContain "ColumnType.DecimalType(10, 2)"
+        content shouldContain "ColumnType.DecimalType(14, 4)"
+        content shouldContain "as BigDecimal"
+        content shouldContain "as? BigDecimal"
+    }
+
+    test("generates correct ordered multi-param constructor call in fromRow") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "MultiParamEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import java.util.UUID
+
+                @PersistenceMapping
+                class MultiParamEntity(
+                    override val id: UUID,
+                    tenantId: UUID
+                ) : ReactiveEntityBase<UUID, MultiParamEntity>() {
+                    var tenantId: UUID by reactiveProperty(tenantId)
+                    var name: String by reactiveProperty("")
+                    override val uniqueId: String get() = id.toString()
+                    override fun clone() = MultiParamEntity(id, tenantId)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("MultiParamEntity_LirpTableDef.kt")
+        content shouldContain "SqlTableDef<MultiParamEntity>"
+        // Constructor args in declaration order: id first, tenantId second
+        content shouldContain "val entity = MultiParamEntity("
+        content shouldContain "entity.name ="
+        // tenantId should be in constructor, not a setter call
+        content shouldNotContain "entity.tenantId ="
+    }
+
+    test("falls back to LirpTableDef when constructor param has no matching column") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "UnmappedCtorEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.PersistenceIgnore
+
+                @PersistenceMapping
+                class UnmappedCtorEntity(val id: Int, @PersistenceIgnore val transientParam: String) {
+                    var name: String = ""
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("UnmappedCtorEntity_LirpTableDef.kt")
+        // Should fall back to LirpTableDef since transientParam is excluded from columns
+        content shouldContain "LirpTableDef<UnmappedCtorEntity>"
+        content shouldNotContain "SqlTableDef"
+        content shouldNotContain "fromRow"
     }
 })
