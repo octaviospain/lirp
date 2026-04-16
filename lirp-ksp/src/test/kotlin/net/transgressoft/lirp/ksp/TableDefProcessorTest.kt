@@ -509,30 +509,61 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldNotContain "transientField"
     }
 
-    test("generates SqlTableDef when lirp.sql option is set to true") {
-        // In monorepo tests, the resolver also detects SqlTableDef from the classpath.
-        // Full option-only isolation is validated by lirp-fleet-poc where lirp-sql is a
-        // binary Maven dependency and the resolver cannot detect SqlTableDef.
+    test("generates SqlTableDef via resolver detection without KSP options") {
+        // Verifies that SqlTableDef generation works through resolver.getClassDeclarationByName()
+        // alone, which is the sole detection mechanism after D-04 removed options["lirp.sql"].
+        // In monorepo tests, inheritClassPath = true means the resolver finds SqlTableDef.
+        // For external consumers, the net.transgressoft.lirp.sql Gradle plugin adds lirp-sql
+        // to the ksp configuration so the resolver finds it as well.
         val source =
             SourceFile.kotlin(
-                "OptionEntity.kt",
+                "ResolverDetectedEntity.kt",
                 """
                 package test
                 import net.transgressoft.lirp.persistence.PersistenceMapping
 
                 @PersistenceMapping
-                class OptionEntity(val id: Int) {
+                class ResolverDetectedEntity(val id: Int) {
                     var label: String = ""
                 }
                 """
             )
-        val result = compileWithProcessor(source, options = mapOf("lirp.sql" to "true"))
+        // No options passed — resolver-only detection
+        val result = compileWithProcessor(source)
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("OptionEntity_LirpTableDef.kt")
-        content shouldContain "SqlTableDef<OptionEntity>"
-        content shouldContain "override fun fromRow(row: ResultRow, table: Table): OptionEntity"
-        content shouldContain "override fun toParams(entity: OptionEntity, table: Table)"
+        val content = result.generatedFileContent("ResolverDetectedEntity_LirpTableDef.kt")
+        content shouldContain "SqlTableDef<ResolverDetectedEntity>"
+        content shouldContain "override fun fromRow(row: ResultRow, table: Table): ResolverDetectedEntity"
+        content shouldContain "override fun toParams(entity: ResolverDetectedEntity, table: Table)"
+    }
+
+    test("documents monorepo behavior: resolver still generates SqlTableDef without options") {
+        // In monorepo tests with inheritClassPath = true, the resolver always finds SqlTableDef.
+        // This test documents the expected behavior: even without any KSP options, the resolver
+        // detects SqlTableDef and generates SqlTableDef (not LirpTableDef).
+        // The LirpTableDef fallback path (with info diagnostic log) is exercised only when
+        // lirp-sql is genuinely absent from the classpath, which cannot be easily simulated
+        // in the monorepo test harness without stripping lirp-sql from the test compilation.
+        val source =
+            SourceFile.kotlin(
+                "FallbackEntity.kt",
+                """
+                package test
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class FallbackEntity(val id: Int) {
+                    var name: String = ""
+                }
+                """
+            )
+        val result = compileWithProcessor(source, options = emptyMap())
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        // In monorepo, resolver finds SqlTableDef — so SqlTableDef is still generated
+        val content = result.generatedFileContent("FallbackEntity_LirpTableDef.kt")
+        content shouldContain "SqlTableDef<FallbackEntity>"
     }
 
     test("generates nullable UUID, LocalDate, LocalDateTime, and enum conversions in fromRow and toParams") {

@@ -1,0 +1,22 @@
+plugins {
+    id 'java-gradle-plugin'
+}
+
+description = 'LIRP Gradle Plugin - Auto-configures KSP classpath for SqlTableDef generation'
+
+gradlePlugin {
+    plugins {
+        lirpSql {
+            id = 'net.transgressoft.lirp.sql'
+            implementationClass = 'net.transgressoft.lirp.gradle.LirpSqlPlugin'
+        }
+    }
+}
+
+dependencies {
+    testImplementation gradleTestKit()
+    testImplementation platform(libs.junit.bom)
+    testImplementation libs.bundles.kotest
+    testImplementation libs.junit.jupiter
+    testRuntimeOnly libs.junit.platform.launcher
+}

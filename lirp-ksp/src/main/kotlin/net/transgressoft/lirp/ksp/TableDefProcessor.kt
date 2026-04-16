@@ -51,21 +51,24 @@ private const val LOCAL_DATE_TIME_FQN = "java.time.LocalDateTime"
  * (when `lirp-sql` is available) or [LirpTableDef][net.transgressoft.lirp.persistence.LirpTableDef]
  * (descriptor-only, when `lirp-sql` is absent).
  *
- * SQL mode detection uses two mechanisms (either triggers `SqlTableDef` generation):
- * 1. `resolver.getClassDeclarationByName` — works when `lirp-sql` is a project dependency (monorepo)
- * 2. KSP option `lirp.sql=true` — required for external Maven consumers where the resolver cannot
- *    see binary dependencies. Set via `ksp { arg("lirp.sql", "true") }` in `build.gradle`.
+ * SQL mode detection relies solely on `resolver.getClassDeclarationByName` to check if
+ * [SqlTableDef][net.transgressoft.lirp.persistence.sql.SqlTableDef] is on the KSP resolver's classpath.
+ * For monorepo consumers, the resolver finds `SqlTableDef` because `lirp-sql` is a project dependency.
+ * For external consumers, the `net.transgressoft.lirp.sql` Gradle plugin adds `lirp-sql` to the `ksp`
+ * configuration, making the resolver find it as well.
+ *
+ * When `lirp-sql` is not detected, an info-level diagnostic is logged once per processing round
+ * and `LirpTableDef` generation is used as fallback.
  *
  * When generating `SqlTableDef` implementations, the processor emits typed `fromRow` and `toParams`
- * methods with correct Java↔Kotlin type conversions for UUID, Date, DateTime, and Enum properties.
+ * methods with correct Java-to-Kotlin type conversions for UUID, Date, DateTime, and Enum properties.
  *
  * Both annotation entry points are supported: a class-level `@PersistenceMapping` and a property-level
  * `@PersistenceProperty` on a class without `@PersistenceMapping` both trigger generation.
  */
 class TableDefProcessor(
     private val codeGenerator: CodeGenerator,
-    private val logger: KSPLogger,
-    private val options: Map<String, String> = emptyMap()
+    private val logger: KSPLogger
 ) : SymbolProcessor {
 
     override fun process(resolver: Resolver): List<KSAnnotated> {
@@ -93,15 +96,21 @@ class TableDefProcessor(
             classes.add(parent)
         }
 
-        // Detect SqlTableDef availability via resolver (monorepo) or KSP option (external consumers).
-        // The resolver approach works when lirp-sql is a project dependency. For external Maven
-        // consumers, the resolver cannot find SqlTableDef from binary JARs; the ksp { arg("lirp.sql", "true") }
-        // option acts as an explicit opt-in for SqlTableDef generation.
+        // Detect SqlTableDef availability via resolver only. The resolver finds SqlTableDef when
+        // lirp-sql is a project dependency (monorepo) or when the net.transgressoft.lirp.sql
+        // Gradle plugin adds lirp-sql to the ksp configuration (external consumers).
+        // Maven users must add lirp-sql as a processor dependency in the KSP Maven plugin config.
         val sqlTableDefAvailable =
             resolver.getClassDeclarationByName(
                 resolver.getKSNameFromString(SQL_TABLE_DEF_FQN)
-            ) != null ||
-                options["lirp.sql"]?.toBoolean() == true
+            ) != null
+
+        if (!sqlTableDefAvailable) {
+            logger.info(
+                "lirp-sql not detected on classpath — generating LirpTableDef. " +
+                    "Add lirp-sql dependency and apply the net.transgressoft.lirp.sql Gradle plugin for SqlTableDef generation."
+            )
+        }
 
         for (classDecl in classes) {
             generateTableDef(classDecl, sqlTableDefAvailable)

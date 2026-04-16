@@ -92,8 +92,9 @@ subprojects {
     }
 
     afterEvaluate {
-        tasks.named('generateMetadataFileForMavenPublication') {
-            dependsOn tasks.named('dokkaJavadocJar')
+        def metadataTask = tasks.findByName('generateMetadataFileForMavenPublication')
+        if (metadataTask != null) {
+            metadataTask.dependsOn tasks.named('dokkaJavadocJar')
         }
     }
 
