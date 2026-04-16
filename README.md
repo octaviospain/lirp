@@ -523,6 +523,93 @@ dependencies {
 
 **Requirements:** JVM 17+, Kotlin 2.3.10
 
+### External Consumer Setup (Gradle)
+
+Add the LIRP Gradle plugin alongside the KSP plugin to get automatic `SqlTableDef` generation.
+
+Since the plugin is published to Maven Central (not the Gradle Plugin Portal), add `mavenCentral()`
+to `pluginManagement` repositories in your `settings.gradle`:
+
+```groovy
+// settings.gradle
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+```
+
+Then apply the plugin in your `build.gradle`:
+
+```groovy
+plugins {
+    id 'org.jetbrains.kotlin.jvm' version 'X.Y.Z'
+    id 'com.google.devtools.ksp' version 'X.Y.Z'
+    id 'net.transgressoft.lirp.sql' version 'X.Y.Z'
+}
+
+dependencies {
+    implementation 'net.transgressoft:lirp-sql:X.Y.Z'
+    ksp 'net.transgressoft:lirp-ksp:X.Y.Z'
+}
+```
+
+The `net.transgressoft.lirp.sql` Gradle plugin automatically detects `lirp-sql` in your
+`implementation` or `api` dependencies and adds it to the `ksp` configuration. This enables the KSP
+processor to find `SqlTableDef` via the resolver and generate SQL-aware table definitions.
+
+### External Consumer Setup (Maven)
+
+Maven users must manually add `lirp-sql` to the KSP processor classpath so the resolver can
+find `SqlTableDef`. The Gradle plugin is not available for Maven — configure the KSP Maven
+plugin to include `lirp-sql` as a processor dependency:
+
+```xml
+<dependencies>
+    <dependency>
+        <groupId>net.transgressoft</groupId>
+        <artifactId>lirp-api</artifactId>
+        <version>X.Y.Z</version>
+    </dependency>
+    <dependency>
+        <groupId>net.transgressoft</groupId>
+        <artifactId>lirp-core</artifactId>
+        <version>X.Y.Z</version>
+    </dependency>
+    <dependency>
+        <groupId>net.transgressoft</groupId>
+        <artifactId>lirp-sql</artifactId>
+        <version>X.Y.Z</version>
+    </dependency>
+</dependencies>
+```
+
+In the KSP Maven plugin configuration, add `lirp-sql` alongside `lirp-ksp` as processor
+dependencies so the KSP resolver can discover `SqlTableDef` on its classpath:
+
+```xml
+<plugin>
+    <groupId>com.google.devtools.ksp</groupId>
+    <artifactId>symbol-processing-maven-plugin</artifactId>
+    <version>X.Y.Z</version>
+    <configuration>
+        <processorDependencies>
+            <dependency>
+                <groupId>net.transgressoft</groupId>
+                <artifactId>lirp-ksp</artifactId>
+                <version>X.Y.Z</version>
+            </dependency>
+            <dependency>
+                <groupId>net.transgressoft</groupId>
+                <artifactId>lirp-sql</artifactId>
+                <version>X.Y.Z</version>
+            </dependency>
+        </processorDependencies>
+    </configuration>
+</plugin>
+```
+
 ## Persistence Hierarchy
 
 lirp provides a layered persistence abstraction:

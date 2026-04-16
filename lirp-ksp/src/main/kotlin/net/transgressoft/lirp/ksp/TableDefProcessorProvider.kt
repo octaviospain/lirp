@@ -27,5 +27,5 @@ import com.google.devtools.ksp.processing.SymbolProcessorProvider
 class TableDefProcessorProvider : SymbolProcessorProvider {
 
     override fun create(environment: SymbolProcessorEnvironment): SymbolProcessor =
-        TableDefProcessor(environment.codeGenerator, environment.logger, environment.options)
+        TableDefProcessor(environment.codeGenerator, environment.logger)
 }
