@@ -60,6 +60,14 @@ object AudioItemSqlTableDef : SqlTableDef<AudioItem> {
             cols["album_name"]!! to entity.albumName
         )
     }
+
+    @Suppress("UNCHECKED_CAST")
+    override fun applyRow(entity: AudioItem, row: ResultRow, table: Table) {
+        val cols = table.columns.associateBy { it.name }
+        entity.title = row[cols["title"]!! as Column<String>]
+        entity.albumName = row[cols["album_name"]!! as Column<String>]
+        // id is PK — immutable on AudioItem
+    }
 }
 
 /**
@@ -102,6 +110,15 @@ object AudioPlaylistSqlTableDef : SqlTableDef<MutableAudioPlaylist> {
             cols["audio_item_ids"]!! to concrete.audioItems.referenceIds.joinToString(","),
             cols["playlist_ids"]!! to concrete.playlists.referenceIds.joinToString(",")
         )
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    override fun applyRow(entity: MutableAudioPlaylist, row: ResultRow, table: Table) {
+        val cols = table.columns.associateBy { it.name }
+        entity.name = row[cols["name"]!! as Column<String>]
+        // id is PK — immutable. audio_item_ids/playlist_ids are backed by aggregate delegates
+        // (val), so the collection state is managed via the aggregate delegate's mutation API —
+        // not applicable to applyRow (the delegate is constructed once at fromRow time).
     }
 }
 

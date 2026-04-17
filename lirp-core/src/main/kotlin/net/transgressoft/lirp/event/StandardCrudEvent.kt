@@ -74,4 +74,51 @@ sealed class StandardCrudEvent {
         override val oldEntities: Map<K, T> = emptyMap()
         override val type: CrudEvent.Type = CrudEvent.Type.DELETE
     }
+
+    /**
+     * Emitted when a `SqlRepository` detects an optimistic lock conflict during UPDATE or DELETE.
+     *
+     * The entity in [entities] (the `newEntity` argument) reflects the canonical state after
+     * auto-reload from the database; the entity in [oldEntities] (the `oldEntity` argument) is
+     * the local state attempted against SQL, post-collapse.
+     *
+     * Auto-reload applies the canonical state with entity mutation events disabled
+     * (via `withEventsDisabled`), so no corresponding [net.transgressoft.lirp.event.MutationEvent]
+     * fires during recovery. Repository subscribers should treat this `Conflict` event as the
+     * authoritative notification for the recovered state.
+     *
+     * @param expectedVersion version the local UPDATE or DELETE was based on
+     * @param actualVersion canonical version observed in the database at recovery time
+     */
+    data class Conflict<K, out T: IdentifiableEntity<K>>(
+        override val entities: Map<K, T>,
+        override val oldEntities: Map<K, T>,
+        val expectedVersion: Long,
+        val actualVersion: Long
+    ): CrudEvent<K, T> where K: Comparable<K> {
+
+        constructor(newEntity: T, oldEntity: T, expectedVersion: Long, actualVersion: Long): this(
+            mapOf(newEntity.id to newEntity),
+            mapOf(oldEntity.id to oldEntity),
+            expectedVersion,
+            actualVersion
+        )
+
+        init {
+            require(entities.size == 1 && oldEntities.size == 1 && entities.keys == oldEntities.keys) {
+                "Conflict event must carry exactly one entity (old + new) with matching id. " +
+                    "Got entities=${entities.keys}, oldEntities=${oldEntities.keys}."
+            }
+            // D-11: `actualVersion == -1L` is a sentinel meaning "the row was deleted by a third
+            // writer" — used by the SQL auto-reload path to report a third-party deletion as a
+            // Conflict. All other values must observe a newer DB version than the caller's view.
+            require(actualVersion == -1L || actualVersion > expectedVersion) {
+                "Conflict event requires actualVersion > expectedVersion " +
+                    "(or actualVersion == -1L for the row-deleted-by-third-writer sentinel): " +
+                    "expectedVersion=$expectedVersion, actualVersion=$actualVersion."
+            }
+        }
+
+        override val type: CrudEvent.Type = CrudEvent.Type.CONFLICT
+    }
 }

@@ -682,8 +682,9 @@ internal class TableDefProcessorTest : FunSpec({
         // Constructor args in declaration order: id first, tenantId second
         content shouldContain "val entity = MultiParamEntity("
         content shouldContain "entity.name ="
-        // tenantId should be in constructor, not a setter call
-        content shouldNotContain "entity.tenantId ="
+        // In fromRow, tenantId must be in the constructor call (not a setter) since it's a ctor param.
+        val fromRowBlock = content.substringAfter("override fun fromRow").substringBefore("override fun ")
+        fromRowBlock shouldNotContain "entity.tenantId ="
     }
 
     test("falls back to LirpTableDef when constructor param has no matching column") {
@@ -710,5 +711,245 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "LirpTableDef<UnmappedCtorEntity>"
         content shouldNotContain "SqlTableDef"
         content shouldNotContain "fromRow"
+    }
+
+    test("generates isVersion = true in ColumnDef for a valid @Version property") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "VersionedEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.Version
+
+                @PersistenceMapping
+                class VersionedEntity(override val id: Int) : ReactiveEntityBase<Int, VersionedEntity>() {
+                    @Version var version: Long by reactiveProperty(0L)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = VersionedEntity(id)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("VersionedEntity_LirpTableDef.kt")
+        content shouldContain "isVersion = true"
+        // The id column should still carry isVersion = false
+        val idColumnLine = content.lines().first { it.contains("name = \"id\"") }
+        idColumnLine shouldContain "isVersion = false"
+    }
+
+    test("generates symmetric applyRow function for entity with @Version") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "VersionedEntity2.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.Version
+
+                @PersistenceMapping
+                class VersionedEntity2(override val id: Int) : ReactiveEntityBase<Int, VersionedEntity2>() {
+                    var name: String by reactiveProperty("")
+                    @Version var version: Long by reactiveProperty(0L)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = VersionedEntity2(id)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("VersionedEntity2_LirpTableDef.kt")
+        content shouldContain "override fun applyRow(entity: VersionedEntity2, row: ResultRow, table: Table)"
+        content shouldContain "entity.name ="
+        content shouldContain "entity.version ="
+        // The id (PK) should NOT appear in applyRow assignments
+        val applyRowBlock = content.substringAfter("override fun applyRow").substringBefore("\n    }")
+        applyRowBlock shouldNotContain "entity.id ="
+    }
+
+    test("rejects @Version on a non-Long property") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "BadVersion1.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.Version
+
+                @PersistenceMapping
+                class BadVersion1(override val id: Int) : ReactiveEntityBase<Int, BadVersion1>() {
+                    @Version var version: Int by reactiveProperty(0)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = BadVersion1(id)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
+        result.messages shouldContain "must be of type 'Long'"
+    }
+
+    test("rejects @Version on a val property") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "BadVersion2.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.Version
+
+                @PersistenceMapping
+                class BadVersion2(override val id: Int) : ReactiveEntityBase<Int, BadVersion2>() {
+                    @Version val version: Long by reactiveProperty(0L)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = BadVersion2(id)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
+        result.messages shouldContain "must be declared with 'var'"
+    }
+
+    test("rejects multiple @Version properties on one class") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "BadVersion3.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.Version
+
+                @PersistenceMapping
+                class BadVersion3(override val id: Int) : ReactiveEntityBase<Int, BadVersion3>() {
+                    @Version var v1: Long by reactiveProperty(0L)
+                    @Version var v2: Long by reactiveProperty(0L)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = BadVersion3(id)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
+        result.messages shouldContain "multiple @Version properties"
+    }
+
+    test("rejects @Version on a non-delegated property") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "BadVersion4.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.Version
+
+                @PersistenceMapping
+                class BadVersion4(override val id: Int) : ReactiveEntityBase<Int, BadVersion4>() {
+                    @Version var version: Long = 0L
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = BadVersion4(id)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
+        result.messages shouldContain "must use the 'reactiveProperty' delegate"
+    }
+
+    test("entity without @Version has isVersion = false on all columns") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "Unversioned.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class Unversioned(override val id: Int) : ReactiveEntityBase<Int, Unversioned>() {
+                    var name: String by reactiveProperty("")
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Unversioned(id)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("Unversioned_LirpTableDef.kt")
+        content shouldNotContain "isVersion = true"
+        content shouldContain "isVersion = false"
+    }
+
+    test("generates bumpVersion override for entity with @Version") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "BumpCheck.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.Version
+
+                @PersistenceMapping
+                class BumpCheck(override val id: Int) : ReactiveEntityBase<Int, BumpCheck>() {
+                    @Version var version: Long by reactiveProperty(0L)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = BumpCheck(id)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("BumpCheck_LirpTableDef.kt")
+        content shouldContain "override fun bumpVersion(entity: BumpCheck, newVersion: Long)"
+        content shouldContain "entity.version = newVersion"
+    }
+
+    test("does NOT generate bumpVersion override for entity without @Version") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "NoBump.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class NoBump(override val id: Int) : ReactiveEntityBase<Int, NoBump>() {
+                    var name: String by reactiveProperty("")
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = NoBump(id)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("NoBump_LirpTableDef.kt")
+        content shouldNotContain "override fun bumpVersion"
     }
 })

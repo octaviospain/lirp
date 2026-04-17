@@ -37,6 +37,7 @@ dependencies {
     api libs.exposed.kotlin.datetime
     implementation libs.exposed.jdbc
     implementation libs.hikari
+    implementation libs.kotlin.logging
     runtimeOnly libs.postgresql
     runtimeOnly libs.mysql
     runtimeOnly libs.mariadb

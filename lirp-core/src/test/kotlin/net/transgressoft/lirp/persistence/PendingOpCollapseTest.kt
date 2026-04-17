@@ -191,7 +191,7 @@ internal class PendingOpCollapseTest : StringSpec({
     "PendingDelete followed by PendingUpdate on same entity preserves the delete" {
         val ops =
             listOf(
-                PendingDelete<Int, SimpleEntity>(1),
+                PendingDelete(1),
                 PendingUpdate(entityA1)
             )
         val result = collapse(ops)
@@ -235,12 +235,78 @@ internal class PendingOpCollapseTest : StringSpec({
     "PendingBatchDelete input IDs are expanded and re-collapsed as individual deletes" {
         val ops =
             listOf(
-                PendingBatchDelete<Int, SimpleEntity>(listOf(1, 2, 3))
+                PendingBatchDelete<Int, SimpleEntity>(listOf(1 to null, 2 to null, 3 to null))
             )
         val result = collapse(ops)
         result shouldHaveSize 1
         val batch = result.first()
         batch.shouldBeInstanceOf<PendingBatchDelete<Int, SimpleEntity>>()
         batch.ids shouldContainExactly listOf(1, 2, 3)
+    }
+
+    "two PendingUpdates on same entity preserve first-seen expectedVersion" {
+        val ops =
+            listOf<PendingOp<Int, SimpleEntity>>(
+                PendingUpdate(entityA1, expectedVersion = 3L),
+                PendingUpdate(entityA2, expectedVersion = 5L)
+            )
+        val result = collapse(ops)
+        result shouldContainExactly listOf(PendingUpdate(entityA2, expectedVersion = 3L))
+    }
+
+    "Insert followed by Update collapses to Insert and drops expectedVersion" {
+        val ops =
+            listOf<PendingOp<Int, SimpleEntity>>(
+                PendingInsert(entityA1),
+                PendingUpdate(entityA2, expectedVersion = 0L)
+            )
+        val result = collapse(ops)
+        result shouldContainExactly listOf(PendingInsert(entityA2))
+    }
+
+    "Update followed by Delete on same id collapses to Delete carrying the Delete's expectedVersion" {
+        val ops =
+            listOf<PendingOp<Int, SimpleEntity>>(
+                PendingUpdate(entityA1, expectedVersion = 3L),
+                PendingDelete<Int, SimpleEntity>(entityA1.id, expectedVersion = 3L)
+            )
+        val result = collapse(ops)
+        result shouldContainExactly listOf(PendingDelete<Int, SimpleEntity>(entityA1.id, expectedVersion = 3L))
+    }
+
+    "BatchDelete preserves per-id expectedVersion for mixed versioned and unversioned ids" {
+        val ops =
+            listOf<PendingOp<Int, SimpleEntity>>(
+                PendingDelete(1, expectedVersion = 3L),
+                PendingDelete(2, expectedVersion = null),
+                PendingDelete(3, expectedVersion = 5L)
+            )
+        val result = collapse(ops)
+        result shouldContainExactly
+            listOf(
+                PendingBatchDelete<Int, SimpleEntity>(listOf(1 to 3L, 2 to null, 3 to 5L))
+            )
+    }
+
+    "null expectedVersion behavior exactly matches pre-versioning semantics — regression guard" {
+        val ops =
+            listOf<PendingOp<Int, SimpleEntity>>(
+                PendingUpdate(entityA1),
+                PendingUpdate(entityA2)
+            )
+        val result = collapse(ops)
+        result shouldContainExactly listOf(PendingUpdate(entityA2, expectedVersion = null))
+    }
+
+    "three rapid Updates within debounce window preserve the first expectedVersion (D-08 debounce-window atomicity)" {
+        val entityA3 = SimpleEntity(1, "A-v3")
+        val ops =
+            listOf<PendingOp<Int, SimpleEntity>>(
+                PendingUpdate(entityA1, expectedVersion = 3L),
+                PendingUpdate(entityA2, expectedVersion = 3L),
+                PendingUpdate(entityA3, expectedVersion = 3L)
+            )
+        val result = collapse(ops)
+        result shouldContainExactly listOf(PendingUpdate(entityA3, expectedVersion = 3L))
     }
 })
