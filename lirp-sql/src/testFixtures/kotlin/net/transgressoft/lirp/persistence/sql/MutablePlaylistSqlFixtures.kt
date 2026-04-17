@@ -68,6 +68,13 @@ object SqlTestTrackTableDef : SqlTableDef<SqlTestTrack> {
             cols["title"]!! to entity.title
         )
     }
+
+    @Suppress("UNCHECKED_CAST")
+    override fun applyRow(entity: SqlTestTrack, row: ResultRow, table: Table) {
+        val cols = table.columns.associateBy { it.name }
+        entity.title = row[cols["title"]!! as Column<String>]
+        // id is PK — immutable on SqlTestTrack
+    }
 }
 
 /**
@@ -130,6 +137,22 @@ object MutablePlaylistSqlTableDef : SqlTableDef<MutablePlaylistSql> {
             cols["name"]!! to entity.name,
             cols["track_ids"]!! to entity.tracks.referenceIds.joinToString(",")
         )
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    override fun applyRow(entity: MutablePlaylistSql, row: ResultRow, table: Table) {
+        val cols = table.columns.associateBy { it.name }
+        entity.name = row[cols["name"]!! as Column<String>]
+        // id is PK — immutable. track_ids is backed by the `tracks` mutableAggregateList
+        // delegate (val), whose collection state is managed via the delegate's mutation API —
+        // not applicable to applyRow (the delegate is constructed once at fromRow time).
+        //
+        // Reload safety: [MutablePlaylistSql] has no `@Version` annotation and therefore never
+        // triggers the optimistic-lock reload path where this method is invoked. If a `@Version`
+        // is ever added to this entity (or if `applyRow` is invoked from a future "reload from
+        // DB" operation), the in-memory `tracks` collection would silently diverge from the DB
+        // row. In that case, reconcile the delegate's `referenceIds` here (clear + addAll inside
+        // `entity.withEventsDisabled { ... }`) before claiming `@Version` support on this entity.
     }
 }
 

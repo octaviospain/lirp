@@ -89,4 +89,21 @@ object AllTypesTableDef : SqlTableDef<AllTypesEntity> {
             cols["enum_val"]!! to entity.enumVal
         )
     }
+
+    @Suppress("UNCHECKED_CAST")
+    override fun applyRow(entity: AllTypesEntity, row: ResultRow, table: Table) {
+        val cols = table.columns.associateBy { it.name }
+        entity.longVal = row[cols["long_val"]!! as Column<Long>]
+        entity.textVal = row[cols["text_val"]!! as Column<String>]
+        entity.boolVal = row[cols["bool_val"]!! as Column<Boolean>]
+        entity.doubleVal = row[cols["double_val"]!! as Column<Double>]
+        entity.floatVal = row[cols["float_val"]!! as Column<Float>]
+        entity.uuidVal = row[cols["uuid_val"]!! as Column<Uuid>]
+        entity.dateVal = row[cols["date_val"]!! as Column<LocalDate>]
+        entity.dateTimeVal = row[cols["date_time_val"]!! as Column<LocalDateTime>]
+        entity.varcharVal = row[cols["varchar_val"]!! as Column<String>]
+        entity.decimalVal = row[cols["decimal_val"]!! as Column<BigDecimal>]
+        entity.enumVal = row[cols["enum_val"]!! as Column<String>]
+        // id is PK — immutable on AllTypesEntity
+    }
 }

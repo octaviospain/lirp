@@ -18,6 +18,7 @@
 package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.entity.ReactiveEntity
+import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.StandardCrudEvent
 import net.transgressoft.lirp.persistence.PendingBatchDelete
@@ -30,8 +31,11 @@ import net.transgressoft.lirp.persistence.PendingUpdate
 import net.transgressoft.lirp.persistence.PersistentRepositoryBase
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
+import io.github.oshai.kotlinlogging.KotlinLogging
 import org.jetbrains.exposed.v1.core.Column
+import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.Table
+import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
@@ -64,6 +68,32 @@ import kotlin.uuid.toKotlinUuid
  * - **User-provided [DataSource]:** The caller owns the connection pool; [close] does not close it.
  * - **JDBC URL constructor:** A [HikariDataSource] is created and owned by this repository;
  *   [close] shuts down the pool after the final flush.
+ *
+ * ## Transactional Model
+ *
+ * `SqlRepository` provides three guarantees and three intentional non-guarantees:
+ *
+ * **Guarantees:**
+ * - **Single-aggregate atomicity** — all collapsed pending ops for a single `flush()` cycle
+ *   execute in one Exposed `transaction(db) { ... }`. Either all operations commit, or the
+ *   transaction rolls back entirely (subject to dialect-specific partial-commit semantics on
+ *   failure — see the per-dialect integration tests for empirical behavior).
+ * - **Event-before-persistence** — in-memory [net.transgressoft.lirp.event.CrudEvent]s are emitted
+ *   at the call site (optimistic reads) not after SQL commit. Consumers see `Create`/`Update`/
+ *   `Delete` immediately; any subsequent [net.transgressoft.lirp.event.StandardCrudEvent.Conflict]
+ *   event explains if the persist ultimately failed due to an optimistic-lock conflict.
+ * - **Optimistic `@Version` reads** — when the tableDef exposes a `@Version`-flagged column,
+ *   UPDATE and DELETE augment their WHERE clause with `AND version = ?`. Zero-row-affected
+ *   triggers the auto-reload + `Conflict` recovery path. See
+ *   [net.transgressoft.lirp.persistence.Version] and
+ *   [net.transgressoft.lirp.event.StandardCrudEvent.Conflict].
+ *
+ * **Non-guarantees:**
+ * - No multi-aggregate transactions. Each `SqlRepository` transacts only over its own table.
+ * - No saga orchestration. Consumers compose cross-aggregate workflows via `CrudEvent` subscribers.
+ * - No outbox pattern. `CrudEvent`s go directly to subscribers; durable event logs are a consumer concern.
+ *
+ * See the wiki page "Transactional Boundaries" for prose and a saga/compensation example.
  *
  * @param K The type of entity identifier, must be [Comparable].
  * @param R The type of reactive entity stored in this repository.
@@ -117,7 +147,9 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     private val exposedTable: ExposedTable = ExposedTableInterpreter().interpret(tableDef)
     private val table: Table = exposedTable.table
     private val pkCol: Column<*> = exposedTable.columnsByName.getValue(tableDef.columns.first { it.primaryKey }.name)
+    private val versionCol: Column<Long>? = exposedTable.versionCol
     private val db: Database = Database.connect(dataSource)
+    private val log = KotlinLogging.logger(javaClass.name)
 
     init {
         try {
@@ -153,86 +185,281 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     }
 
     /**
+     * Reads the optimistic-lock version from [entity] via the table descriptor's `toParams`
+     * mapping. Returns `null` when the repository's `tableDef` has no `@Version` column.
+     *
+     * Rationale: LIRP has no runtime reflection API for typed property access. The existing
+     * `toParams(entity, table)` Map already exposes every persisted column value keyed by its
+     * [Column] reference, so a single map lookup on [versionCol] yields the value with zero
+     * reflection — the same zero-reflection invariant preserved by `fromRow`/`applyRow`. The
+     * O(columns) cost is acceptable for typical entity widths; if profiling shows the lookup
+     * dominates mutation hot paths, a KSP-generated VersionAccessor remains available as a
+     * future optimization.
+     */
+    override fun extractVersion(entity: R): Long? {
+        val vc = versionCol ?: return null
+        val params = tableDef.toParams(entity, table)
+        return params[vc] as? Long
+    }
+
+    /**
      * Executes all collapsed pending operations against the database in a single transaction.
      *
      * Insert operations use [batchInsert] for efficient bulk inserts. Delete operations use
-     * `deleteWhere { inList }` for batch deletes. Updates are applied individually per entity.
-     * A [PendingClear] deletes all rows from the table.
+     * `deleteWhere` (per-id within a batch) to stay dialect-portable. Updates are applied
+     * individually per entity. A [PendingClear] deletes all rows from the table.
      *
-     * Empty batch lists are guarded to avoid generating invalid SQL.
+     * For versioned tables (tableDef carries a `@Version` column), UPDATE and DELETE augment
+     * their WHERE clause with `AND version = ?`. A zero-row-affected result is treated as an
+     * optimistic-lock conflict and accumulated into a per-entity list; the accumulator does
+     * NOT throw inside the transaction, so any non-conflicting operations in the same flush
+     * still commit. After the transaction commits, every accumulated conflict is recovered
+     * (auto-reload + [StandardCrudEvent.Conflict] emission) in its own short-lived transaction.
+     *
+     * Rationale: wrapping the whole flush in one SQL transaction is required for D-01
+     * single-aggregate atomicity, but letting a single conflict throw mid-transaction would
+     * roll back every earlier insert/update/delete and the base class would drop the drained
+     * snapshot — silently losing work. Accumulating instead preserves non-conflicting writes.
      *
      * @param ops the minimal collapsed list of operations to execute.
      */
     override fun writePending(ops: List<PendingOp<K, R>>) {
+        val conflicts = mutableListOf<PendingConflict<K>>()
         transaction(db = db) {
             ops.forEach { op ->
                 when (op) {
-                    is PendingInsert ->
-                        table.insert { stmt ->
-                            tableDef.toParams(op.entity, table).forEach { (col, value) ->
-                                // Safe: col was registered by ExposedTableInterpreter from the declared LirpTableDef column type.
-                                // Exposed erases Column<T> to Column<*> at the statement-builder level; Column<Any?> is the canonical workaround.
-                                @Suppress("UNCHECKED_CAST")
-                                stmt[col as Column<Any?>] = value
-                            }
-                        }
-                    is PendingBatchInsert -> {
-                        if (op.entities.isNotEmpty()) {
-                            table.batchInsert(op.entities, shouldReturnGeneratedValues = false) { entity ->
-                                tableDef.toParams(entity, table).forEach { (col, value) ->
-                                    // Safe: col was registered by ExposedTableInterpreter from the declared LirpTableDef column type.
-                                    // Exposed erases Column<T> to Column<*> at the statement-builder level; Column<Any?> is the canonical workaround.
-                                    @Suppress("UNCHECKED_CAST")
-                                    this[col as Column<Any?>] = value
-                                }
-                            }
-                        }
-                    }
-                    is PendingUpdate ->
-                        table.update({
-                            // Safe: pkCol is the primary key column registered by ExposedTableInterpreter. Exposed's
-                            // eq() operator requires Column<Any?> due to statement-builder type erasure.
-                            @Suppress("UNCHECKED_CAST")
-                            (pkCol as Column<Any?>).eq(toExposedId(op.entity.id))
-                        }) { stmt ->
-                            tableDef.toParams(op.entity, table).forEach { (col, value) ->
-                                // Safe: col was registered by ExposedTableInterpreter from the declared LirpTableDef column type.
-                                // Exposed erases Column<T> to Column<*> at the statement-builder level; Column<Any?> is the canonical workaround.
-                                @Suppress("UNCHECKED_CAST")
-                                stmt[col as Column<Any?>] = value
-                            }
-                        }
-                    is PendingDelete ->
-                        table.deleteWhere {
-                            // Safe: pkCol is the primary key column registered by ExposedTableInterpreter. Exposed's
-                            // eq() operator requires Column<Any?> due to statement-builder type erasure.
-                            @Suppress("UNCHECKED_CAST")
-                            (pkCol as Column<Any?>).eq(toExposedId(op.id))
-                        }
-                    is PendingBatchDelete -> {
-                        // Use individual deleteWhere per ID within the same transaction to avoid
-                        // inList parameter expansion issues across different database dialects.
-                        // Acceptable for typical batch sizes (tens of IDs) produced by the collapse algorithm.
-                        op.ids.forEach { id ->
-                            table.deleteWhere {
-                                // Safe: pkCol is the primary key column registered by ExposedTableInterpreter. Exposed's
-                                // eq() operator requires Column<Any?> due to statement-builder type erasure.
-                                @Suppress("UNCHECKED_CAST")
-                                (pkCol as Column<Any?>).eq(toExposedId(id))
-                            }
-                        }
-                    }
+                    is PendingInsert -> executeInsert(op)
+                    is PendingBatchInsert -> executeBatchInsert(op)
+                    is PendingUpdate -> executeUpdate(op, conflicts)
+                    is PendingDelete -> executeDelete(op, conflicts)
+                    is PendingBatchDelete -> executeBatchDelete(op, conflicts)
                     is PendingClear -> table.deleteAll()
+                }
+            }
+        }
+        // The main transaction has committed. Recover every accumulated conflict — each path
+        // re-SELECTs the canonical row and emits a [StandardCrudEvent.Conflict]. A recovery
+        // failure must NOT escape to [writePending]: the base class would interpret it as a
+        // generic write failure and re-enqueue the whole drained snapshot, re-applying the
+        // non-conflicting ops that already succeeded. Log + continue per conflict.
+        conflicts.forEach { conflict ->
+            try {
+                recoverEntityFromConflict(conflict.id, conflict.expectedVersion)
+            } catch (e: Exception) {
+                log.error(e) {
+                    "recoverEntityFromConflict threw for id=${conflict.id} " +
+                        "(expectedVersion=${conflict.expectedVersion}); conflict may not have been fully recovered"
                 }
             }
         }
     }
 
+    private fun executeInsert(op: PendingInsert<K, R>) {
+        table.insert { stmt ->
+            tableDef.toParams(op.entity, table).forEach { (col, value) ->
+                // Safe: col was registered by ExposedTableInterpreter from the declared LirpTableDef column type.
+                // Exposed erases Column<T> to Column<*> at the statement-builder level; Column<Any?> is the canonical workaround.
+                @Suppress("UNCHECKED_CAST")
+                stmt[col as Column<Any?>] = value
+            }
+        }
+    }
+
+    private fun executeBatchInsert(op: PendingBatchInsert<K, R>) {
+        if (op.entities.isEmpty()) return
+        table.batchInsert(op.entities, shouldReturnGeneratedValues = false) { entity ->
+            tableDef.toParams(entity, table).forEach { (col, value) ->
+                // Safe: col was registered by ExposedTableInterpreter from the declared LirpTableDef column type.
+                @Suppress("UNCHECKED_CAST")
+                this[col as Column<Any?>] = value
+            }
+        }
+    }
+
+    private fun executeUpdate(op: PendingUpdate<K, R>, conflicts: MutableList<PendingConflict<K>>) {
+        val expected = op.expectedVersion
+        val vc = versionCol
+        val rowsAffected =
+            table.update({
+                // Safe: pkCol is the PK column registered by ExposedTableInterpreter. Exposed's
+                // eq() operator requires Column<Any?> due to statement-builder type erasure.
+                @Suppress("UNCHECKED_CAST")
+                val pkPred = (pkCol as Column<Any?>).eq(toExposedId(op.entity.id))
+                if (expected != null && vc != null) pkPred and (vc eq expected) else pkPred
+            }) { stmt ->
+                tableDef.toParams(op.entity, table).forEach { (col, value) ->
+                    // Safe: col was registered by ExposedTableInterpreter from the declared LirpTableDef column type.
+                    @Suppress("UNCHECKED_CAST")
+                    stmt[col as Column<Any?>] = value
+                }
+                // Advance the DB version to match the in-memory bump applied below. `toParams`
+                // emits the pre-bump `entity.version` (what the caller saw), so without this
+                // override the UPDATE would re-write the same version and leave the row at the
+                // expected value — the next mutation's `WHERE version = expected + 1` predicate
+                // would then miss and spuriously register an optimistic-lock conflict.
+                if (expected != null && vc != null) {
+                    @Suppress("UNCHECKED_CAST")
+                    stmt[vc as Column<Any?>] = expected + 1
+                }
+            }
+        if (expected != null && vc != null) {
+            if (rowsAffected == 0) {
+                // Accumulate instead of throwing: throwing here would abort the outer transaction
+                // and roll back every earlier non-conflicting op in the same flush cycle, which
+                // the base flush() path would then drop. Recovery runs post-commit.
+                conflicts.add(PendingConflict(op.entity.id, expected))
+                return
+            }
+            // auto-bump the in-memory version to expected + 1 with events disabled to avoid
+            // re-enqueueing another PendingUpdate through the mutation subscription. Matches the
+            // row state just written (the UPDATE payload above sets DB version = expected + 1,
+            // and this bump keeps in-memory in sync).
+            op.entity.withEventsDisabled {
+                tableDef.bumpVersion(op.entity, expected + 1)
+            }
+        }
+    }
+
+    private fun executeDelete(op: PendingDelete<K, R>, conflicts: MutableList<PendingConflict<K>>) {
+        val expected = op.expectedVersion
+        val vc = versionCol
+        val rowsAffected =
+            table.deleteWhere {
+                @Suppress("UNCHECKED_CAST")
+                val pkPred = (pkCol as Column<Any?>).eq(toExposedId(op.id))
+                if (expected != null && vc != null) pkPred and (vc eq expected) else pkPred
+            }
+        if (expected != null && vc != null && rowsAffected == 0) {
+            // Accumulate instead of throwing — see executeUpdate rationale.
+            conflicts.add(PendingConflict(op.id, expected))
+        }
+    }
+
+    private fun executeBatchDelete(op: PendingBatchDelete<K, R>, conflicts: MutableList<PendingConflict<K>>) {
+        // per-id independent DELETE loop. Accumulate conflicts rather than throwing so
+        // the other ids still commit in the same transaction.
+        val vc = versionCol
+        op.idsWithVersions.forEach { (id, expected) ->
+            val rowsAffected =
+                table.deleteWhere {
+                    @Suppress("UNCHECKED_CAST")
+                    val pkPred = (pkCol as Column<Any?>).eq(toExposedId(id))
+                    if (expected != null && vc != null) pkPred and (vc eq expected) else pkPred
+                }
+            if (expected != null && vc != null && rowsAffected == 0) {
+                conflicts.add(PendingConflict(id, expected))
+            }
+        }
+    }
+
+    /**
+     * Shared recovery path for conflicts accumulated during [writePending]. SELECTs the canonical
+     * row; if missing, emits a deletion-sentinel Conflict; otherwise swaps in-memory state (or
+     * reconstructs + re-inserts for defeated DELETE paths) and emits Conflict with the canonical
+     * version.
+     */
+    private fun recoverEntityFromConflict(id: K, expectedVersion: Long) {
+        // Defensive: unreachable under normal flow — conflict implies versioned repo.
+        val vc = versionCol ?: return
+
+        val canonicalRow: ResultRow? =
+            transaction(db = db) {
+                table.selectAll()
+                    .where {
+                        @Suppress("UNCHECKED_CAST")
+                        (pkCol as Column<Any?>).eq(toExposedId(id))
+                    }
+                    .singleOrNull()
+            }
+
+        // Case 1: row was deleted by a third writer — treat as Conflict with oldEntity == newEntity
+        // sentinel and actualVersion = -1L. The in-memory entity is dropped.
+        if (canonicalRow == null) {
+            // DELETE-DELETE race: if our failed op was itself a DELETE and the third writer also
+            // deleted, `findById` returns empty because the local state already reflects the
+            // intended removal. Both writers agreed — no subscriber-visible Conflict is emitted.
+            val inMemory = findById(id).orElse(null) ?: return
+            // Suppress the Delete event that would otherwise fire from removeFromMemoryOnly →
+            // VolatileRepository.remove. Recovery should look like a single Conflict to
+            // subscribers, not Delete + Conflict (which is indistinguishable from ordinary CRUD).
+            disableEvents(CrudEvent.Type.DELETE)
+            try {
+                removeFromMemoryOnly(inMemory)
+            } finally {
+                activateEvents(CrudEvent.Type.DELETE)
+            }
+            publisher.emitAsync(
+                StandardCrudEvent.Conflict(
+                    oldEntity = inMemory,
+                    newEntity = inMemory,
+                    expectedVersion = expectedVersion,
+                    actualVersion = -1L
+                )
+            )
+            return
+        }
+
+        val actualVersion = canonicalRow[vc]
+        val inMemoryOpt = findById(id)
+
+        if (inMemoryOpt.isPresent) {
+            // Case 2a: local entity still present — swap canonical state into it, emit Conflict
+            // with a clone of the pre-swap state as oldEntity for semantic clarity.
+            // clone() on ReactiveEntity<K, R> returns ReactiveEntity<K, R>, so cast to R — the
+            // implementation always returns its own type per ReactiveEntity.clone()'s contract.
+            val inMemory = inMemoryOpt.get()
+
+            @Suppress("UNCHECKED_CAST")
+            val oldSnapshot = inMemory.clone() as R
+            inMemory.withEventsDisabled {
+                tableDef.applyRow(inMemory, canonicalRow, table)
+            }
+            publisher.emitAsync(
+                StandardCrudEvent.Conflict<K, R>(
+                    oldEntity = oldSnapshot,
+                    newEntity = inMemory,
+                    expectedVersion = expectedVersion,
+                    actualVersion = actualVersion
+                )
+            )
+        } else {
+            // Case 2b: our DELETE was defeated (D-11). The entity is no longer in in-memory state
+            // but the canonical row exists — reconstruct and re-insert without enqueueing an
+            // insert PendingOp (the row is already persisted).
+            val reconstructed = tableDef.fromRow(canonicalRow, table)
+            // Suppress the Create event that would otherwise fire from addToMemoryOnly →
+            // VolatileRepository.add. Recovery should look like a single Conflict to
+            // subscribers, not Create + Conflict.
+            disableEvents(CrudEvent.Type.CREATE)
+            try {
+                addToMemoryOnly(reconstructed)
+            } finally {
+                activateEvents(CrudEvent.Type.CREATE)
+            }
+            publisher.emitAsync(
+                StandardCrudEvent.Conflict(
+                    oldEntity = reconstructed,
+                    newEntity = reconstructed,
+                    expectedVersion = expectedVersion,
+                    actualVersion = actualVersion
+                )
+            )
+        }
+    }
+
+    /**
+     * Per-entity optimistic-lock conflict accumulated during a flush. Conflicts from UPDATE,
+     * DELETE, and per-id batch-delete paths share this shape; all recovery happens post-commit.
+     */
+    private data class PendingConflict<K>(val id: K, val expectedVersion: Long)
+
     /**
      * Emits a [CrudEvent.Type.UPDATE] event to repository subscribers when an entity mutation is detected.
      *
      * The [MutationEvent] carries both the previous and current entity state, allowing subscribers
-     * to observe what changed.
+     * to observe what changed. The auto-reload path that reacts to optimistic-lock conflicts runs
+     * inside `withEventsDisabled`, so the entity's mutation subscription does not fire during the
+     * swap and `onEntityMutated` is not called for Conflict-induced state changes.
      */
     override fun onEntityMutated(event: MutationEvent<K, R>) {
         publisher.emitAsync(StandardCrudEvent.Update(event.newEntity, event.oldEntity))

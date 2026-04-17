@@ -36,6 +36,7 @@ private const val PERSISTENCE_MAPPING_FQN = "net.transgressoft.lirp.persistence.
 private const val PERSISTENCE_PROPERTY_FQN = "net.transgressoft.lirp.persistence.PersistenceProperty"
 private const val PERSISTENCE_IGNORE_FQN = "net.transgressoft.lirp.persistence.PersistenceIgnore"
 private const val AGGREGATE_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.Aggregate"
+private const val VERSION_FQN = "net.transgressoft.lirp.persistence.Version"
 private const val TRANSIENT_FQN = "kotlin.jvm.Transient"
 private const val SQL_TABLE_DEF_FQN = "net.transgressoft.lirp.persistence.sql.SqlTableDef"
 private const val UUID_FQN = "java.util.UUID"
@@ -75,7 +76,25 @@ class TableDefProcessor(
         val unableToProcess = mutableListOf<KSAnnotated>()
         val classes = mutableSetOf<KSClassDeclaration>()
 
-        // Dual-trigger: collect classes from @PersistenceMapping on class declarations
+        collectPersistenceMappingClasses(resolver, classes, unableToProcess)
+        collectPersistencePropertyClasses(resolver, classes, unableToProcess)
+        val versionedByClass = collectVersionedProperties(resolver, classes)
+
+        val sqlTableDefAvailable = detectSqlTableDefAvailability(resolver)
+
+        for (classDecl in classes) {
+            generateTableDef(classDecl, sqlTableDefAvailable, versionedByClass[classDecl])
+        }
+
+        return unableToProcess
+    }
+
+    // Dual-trigger: collect classes from @PersistenceMapping on class declarations.
+    private fun collectPersistenceMappingClasses(
+        resolver: Resolver,
+        classes: MutableSet<KSClassDeclaration>,
+        unableToProcess: MutableList<KSAnnotated>
+    ) {
         for (symbol in resolver.getSymbolsWithAnnotation(PERSISTENCE_MAPPING_FQN)) {
             if (symbol !is KSClassDeclaration) continue
             if (!symbol.validate()) {
@@ -84,8 +103,14 @@ class TableDefProcessor(
             }
             classes.add(symbol)
         }
+    }
 
-        // Dual-trigger: collect classes from @PersistenceProperty on property declarations
+    // Dual-trigger: collect classes from @PersistenceProperty on property declarations.
+    private fun collectPersistencePropertyClasses(
+        resolver: Resolver,
+        classes: MutableSet<KSClassDeclaration>,
+        unableToProcess: MutableList<KSAnnotated>
+    ) {
         for (symbol in resolver.getSymbolsWithAnnotation(PERSISTENCE_PROPERTY_FQN)) {
             if (symbol !is KSPropertyDeclaration) continue
             val parent = symbol.parentDeclaration as? KSClassDeclaration ?: continue
@@ -95,37 +120,114 @@ class TableDefProcessor(
             }
             classes.add(parent)
         }
+    }
 
-        // Detect SqlTableDef availability via resolver only. The resolver finds SqlTableDef when
-        // lirp-sql is a project dependency (monorepo) or when the net.transgressoft.lirp.sql
-        // Gradle plugin adds lirp-sql to the ksp configuration (external consumers).
-        // Maven users must add lirp-sql as a processor dependency in the KSP Maven plugin config.
-        val sqlTableDefAvailable =
+    // Scan for @Version-annotated properties and validate them per D-15. Invalid @Version
+    // declarations emit a KSP compile error and are not added to the returned map. Classes using
+    // only @Version (no @PersistenceMapping / @PersistenceProperty) are also added to [classes].
+    private fun collectVersionedProperties(
+        resolver: Resolver,
+        classes: MutableSet<KSClassDeclaration>
+    ): Map<KSClassDeclaration, KSPropertyDeclaration> {
+        val versionedByClass = mutableMapOf<KSClassDeclaration, KSPropertyDeclaration>()
+        for (symbol in resolver.getSymbolsWithAnnotation(VERSION_FQN)) {
+            if (symbol !is KSPropertyDeclaration) continue
+            val parent = symbol.parentDeclaration as? KSClassDeclaration ?: continue
+            if (!validateVersionProperty(symbol, parent, versionedByClass)) continue
+            versionedByClass[parent] = symbol
+            classes.add(parent)
+        }
+        return versionedByClass
+    }
+
+    // Detect SqlTableDef availability via resolver only. The resolver finds SqlTableDef when
+    // lirp-sql is a project dependency (monorepo) or when the net.transgressoft.lirp.sql
+    // Gradle plugin adds lirp-sql to the ksp configuration (external consumers). Maven users
+    // must add lirp-sql as a processor dependency in the KSP Maven plugin config.
+    private fun detectSqlTableDefAvailability(resolver: Resolver): Boolean {
+        val available =
             resolver.getClassDeclarationByName(
                 resolver.getKSNameFromString(SQL_TABLE_DEF_FQN)
             ) != null
-
-        if (!sqlTableDefAvailable) {
+        if (!available) {
             logger.info(
                 "lirp-sql not detected on classpath — generating LirpTableDef. " +
                     "Add lirp-sql dependency and apply the net.transgressoft.lirp.sql Gradle plugin for SqlTableDef generation."
             )
         }
-
-        for (classDecl in classes) {
-            generateTableDef(classDecl, sqlTableDefAvailable)
-        }
-
-        return unableToProcess
+        return available
     }
 
-    private fun generateTableDef(classDecl: KSClassDeclaration, sqlTableDefAvailable: Boolean) {
+    /**
+     * Validates a @Version property per D-15 — type must be non-nullable `kotlin.Long`, must be
+     * declared with `var`, must be delegated (reactiveProperty or equivalent), and at most one
+     * @Version per class. Emits [KSPLogger.error] on violation and returns `false`.
+     */
+    private fun validateVersionProperty(
+        prop: KSPropertyDeclaration,
+        parent: KSClassDeclaration,
+        alreadyFound: Map<KSClassDeclaration, KSPropertyDeclaration>
+    ): Boolean {
+        val className = parent.simpleName.asString()
+        val propName = prop.simpleName.asString()
+
+        // D-15: at most one @Version per class.
+        if (parent in alreadyFound) {
+            logger.error(
+                "Class '$className' has multiple @Version properties " +
+                    "('${alreadyFound.getValue(parent).simpleName.asString()}' and '$propName'); only one is allowed.",
+                prop
+            )
+            return false
+        }
+
+        // D-15: type must be exactly kotlin.Long (non-nullable).
+        val resolved = prop.type.resolve()
+        val typeFqn = resolved.makeNotNullable().declaration.qualifiedName?.asString()
+        if (typeFqn != "kotlin.Long" || resolved.isMarkedNullable) {
+            val found = typeFqn ?: "unresolved"
+            val suffix = if (resolved.isMarkedNullable) "?" else ""
+            logger.error(
+                "@Version property '$className.$propName' must be of type 'Long' (not nullable). Found: '$found$suffix'.",
+                prop
+            )
+            return false
+        }
+
+        // D-15: must be var.
+        if (!prop.isMutable) {
+            logger.error(
+                "@Version property '$className.$propName' must be declared with 'var' (not 'val').",
+                prop
+            )
+            return false
+        }
+
+        // D-15: must use the reactiveProperty delegate (enforcement via isDelegated as a
+        // necessary-but-not-sufficient check per RESEARCH.md Example 2).
+        if (!prop.isDelegated()) {
+            logger.error(
+                "@Version property '$className.$propName' must use the 'reactiveProperty' delegate " +
+                    "(e.g., 'var version: Long by reactiveProperty(0L)').",
+                prop
+            )
+            return false
+        }
+
+        return true
+    }
+
+    private fun generateTableDef(
+        classDecl: KSClassDeclaration,
+        sqlTableDefAvailable: Boolean,
+        versionedProperty: KSPropertyDeclaration?
+    ) {
         val packageName = classDecl.packageName.asString()
         val className = classDecl.simpleName.asString()
         val tableDefName = "${className}_LirpTableDef"
 
         val tableName = resolveTableName(classDecl, className)
-        val columns = collectColumns(classDecl)
+        val columns = collectColumns(classDecl, versionedProperty)
         // Ordered constructor parameter names — preserves declaration order for correct fromRow() generation.
         val constructorParamNames =
             classDecl.primaryConstructor?.parameters
@@ -226,7 +328,8 @@ class TableDefProcessor(
         if (columns.isNotEmpty()) {
             val columnsCode =
                 columns.joinToString(",\n        ") { col ->
-                    "ColumnDef(name = \"${col.name}\", type = ${col.typeExpression}, nullable = ${col.nullable}, primaryKey = ${col.isPrimaryKey})"
+                    "ColumnDef(name = \"${col.name}\", type = ${col.typeExpression}, " +
+                        "nullable = ${col.nullable}, primaryKey = ${col.isPrimaryKey}, isVersion = ${col.isVersion})"
                 }
             appendLine("        $columnsCode")
         }
@@ -236,6 +339,9 @@ class TableDefProcessor(
             appendFromRow(className, columns, constructorParamNames)
             appendLine()
             appendToParams(className, columns)
+            appendLine()
+            appendApplyRow(className, columns)
+            appendBumpVersion(className, columns)
         }
         appendLine("}")
     }
@@ -313,6 +419,34 @@ class TableDefProcessor(
         }
     }
 
+    private fun StringBuilder.appendApplyRow(className: String, columns: List<ColumnMeta>) {
+        // applyRow overwrites the state of an existing entity — skip primary-key columns
+        // (they are immutable post-construction) and any non-mutable property. Reuse the same
+        // `buildRowAccess` helper as fromRow so UUID/LocalDate/Enum conversions stay consistent.
+        val mutableNonPk = columns.filter { !it.isPrimaryKey && it.isMutable }
+        appendLine("    override fun applyRow(entity: $className, row: ResultRow, table: Table) {")
+        if (mutableNonPk.isEmpty()) {
+            appendLine("        // No mutable non-PK columns — applyRow is a no-op.")
+        } else {
+            for (col in mutableNonPk) {
+                val rowAccess = buildRowAccess(col)
+                appendLine("        entity.${col.propertyName} = $rowAccess")
+            }
+        }
+        appendLine("    }")
+    }
+
+    private fun StringBuilder.appendBumpVersion(className: String, columns: List<ColumnMeta>) {
+        // Emit a non-default bumpVersion override only when the entity declares a @Version
+        // column. Unversioned entities inherit the interface no-op default, so no emission keeps
+        // the generated file minimal.
+        val versionCol = columns.singleOrNull { it.isVersion } ?: return
+        appendLine()
+        appendLine("    override fun bumpVersion(entity: $className, newVersion: Long) {")
+        appendLine("        entity.${versionCol.propertyName} = newVersion")
+        appendLine("    }")
+    }
+
     private fun resolveTableName(classDecl: KSClassDeclaration, className: String): String {
         val mappingAnnotation =
             classDecl.annotations.firstOrNull {
@@ -322,13 +456,18 @@ class TableDefProcessor(
         return if (!customName.isNullOrEmpty()) customName else className.toSnakeCase()
     }
 
-    private fun collectColumns(classDecl: KSClassDeclaration): List<ColumnMeta> {
+    private fun collectColumns(
+        classDecl: KSClassDeclaration,
+        versionedProperty: KSPropertyDeclaration?
+    ): List<ColumnMeta> {
         val columns = mutableListOf<ColumnMeta>()
 
         // Detect PK: look for a concrete (non-abstract) 'id' property declared directly on the class.
         // Using getDeclaredProperties() avoids the hasBackingField pitfall on abstract interface properties
         // when the implementing class declares a concrete override.
         val hasDeclaredId = classDecl.getDeclaredProperties().any { it.simpleName.asString() == "id" && !it.isAbstract() }
+
+        val versionedName = versionedProperty?.simpleName?.asString()
 
         for (prop in classDecl.getAllProperties()) {
             if (prop.isExcluded()) continue
@@ -362,7 +501,9 @@ class TableDefProcessor(
             val isMutable = prop.isMutable && setterIsPublic
             val typeExpression = mapToColumnTypeExpression(prop, persistenceAnnotation) ?: continue
 
-            columns.add(ColumnMeta(columnName, propName, typeExpression, typeFqn, nullable, isPrimaryKey, isEnum, isMutable))
+            val isVersion = versionedName != null && propName == versionedName
+
+            columns.add(ColumnMeta(columnName, propName, typeExpression, typeFqn, nullable, isPrimaryKey, isEnum, isMutable, isVersion))
         }
 
         return columns
@@ -475,5 +616,6 @@ private data class ColumnMeta(
     val nullable: Boolean,
     val isPrimaryKey: Boolean,
     val isEnum: Boolean = false,
-    val isMutable: Boolean = false
+    val isMutable: Boolean = false,
+    val isVersion: Boolean = false
 )

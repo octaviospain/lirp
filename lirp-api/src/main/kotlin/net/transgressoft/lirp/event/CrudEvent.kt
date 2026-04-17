@@ -37,7 +37,14 @@ interface CrudEvent<K, out T: IdentifiableEntity<K>>: LirpEvent<CrudEvent.Type> 
         CREATE(100),
         READ(200),
         UPDATE(300),
-        DELETE(900);
+        DELETE(900),
+
+        /**
+         * Fired when an optimistic lock failure is detected during a persistent write.
+         * Carries both the attempted local state and the canonical state re-fetched from the store.
+         * See [net.transgressoft.lirp.event.StandardCrudEvent.Conflict].
+         */
+        CONFLICT(950);
 
         override fun toString() = "StandardDataEvent($name, $code)"
     }
@@ -62,4 +69,6 @@ interface CrudEvent<K, out T: IdentifiableEntity<K>>: LirpEvent<CrudEvent.Type> 
     fun isUpdate() = type == Type.UPDATE
 
     fun isDelete() = type == Type.DELETE
+
+    fun isConflict() = type == Type.CONFLICT
 }

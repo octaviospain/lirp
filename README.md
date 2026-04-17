@@ -127,6 +127,42 @@ val electronics: Set<Product> = repo.findByIndex("category", "electronics")
 val bySku: Optional<Product> = repo.findFirstByIndex("sku", "SKU-001")
 ```
 
+## Transactional Model
+
+LIRP is designed around **single-aggregate atomicity** with **optimistic concurrency control**. The transactional boundary for every SQL repository is one aggregate — all collapsed pending operations for a single debounce flush commit in a single JDBC transaction.
+
+### Guarantees
+
+- **Single-aggregate atomicity.** All collapsed ops for one flush cycle (inserts, updates, deletes, clear) commit in one `transaction(db) { ... }`. Either the whole cycle lands on disk, or the transaction rolls back.
+- **Event-before-persistence.** `CrudEvent`s fire at the consumer call site, not after SQL commit. Reactive UI bindings see state changes immediately (optimistic reads). If the persist fails later, a subsequent `StandardCrudEvent.Conflict` event explains the divergence and the in-memory state is reconciled with the database.
+- **Optimistic locking via `@Version`.** Annotating a `Long` reactive property with `@Version` turns every UPDATE and DELETE into a versioned statement: `... WHERE id = ? AND version = ?`. Zero-row-affected triggers an auto-reload from the database and emits a `Conflict` event alongside the recovered canonical state. No silent last-write-wins. Example:
+
+```kotlin
+class Order(override val id: Int) : ReactiveEntityBase<Int, Order>() {
+    var status: String by reactiveProperty("PENDING")
+    @Version var version: Long by reactiveProperty(0L)
+    override val uniqueId: String get() = "order-$id"
+    override fun clone() = Order(id).also { it.withEventsDisabled { it.status = status; it.version = version } }
+}
+
+repo.subscribe { event ->
+    if (event is StandardCrudEvent.Conflict<Int, Order>) {
+        // Conflict: canonical state is already swapped into the in-memory entity.
+        // event.entities.values.single() is the winning state; event.oldEntities is the local state we tried.
+    }
+}
+```
+
+### Non-Guarantees
+
+LIRP intentionally does not provide:
+
+- **Multi-aggregate transactions.** Each `SqlRepository` transacts over its own table. Coordinating writes across two or more aggregates is a consumer concern. The recommended pattern is a saga via `CrudEvent` subscribers with compensation — see [Transactional Boundaries](https://github.com/octaviospain/lirp/wiki/Transactional-Boundaries).
+- **Distributed saga orchestration.** No saga DSL, no event bus, no workflow engine. LIRP provides the primitives (`CrudEvent` stream on every repository, `Conflict` event as a compensation signal); consumers compose.
+- **Outbox pattern.** `CrudEvent`s go directly to subscribers. If you need a durable event log for downstream systems, subscribe and write to your own outbox — LIRP does not embed one.
+
+These boundaries are design decisions, not missing features. See the wiki page for context and the saga/compensation example.
+
 ## Aggregate References
 
 Model DDD aggregate root relationships with the `@Aggregate` annotation and the `aggregate()`, `aggregateList()`, or `aggregateSet()` property delegates. The `@Aggregate` annotation is **required** on every aggregate reference property — the KSP processor uses it to generate the `_LirpRefAccessor` that `RegistryBase` needs at runtime for reference binding and cascade resolution. Without it, `RegistryBase` throws `IllegalStateException` when the entity is added to a repository.

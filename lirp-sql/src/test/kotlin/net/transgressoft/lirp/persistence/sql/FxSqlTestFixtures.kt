@@ -78,6 +78,13 @@ object FxSqlTestItemTableDef : SqlTableDef<FxSqlTestItem> {
             cols["title"]!! to entity.title
         )
     }
+
+    @Suppress("UNCHECKED_CAST")
+    override fun applyRow(entity: FxSqlTestItem, row: ResultRow, table: Table) {
+        val cols = table.columns.associateBy { it.name }
+        entity.title = row[cols["title"]!! as Column<String>]
+        // id is PK — immutable on FxSqlTestItem
+    }
 }
 
 /**
@@ -189,6 +196,20 @@ object FxSqlTestEntityTableDef : SqlTableDef<FxSqlTestEntity> {
             cols["item_ids"]!! to entity.items.referenceIds.joinToString(","),
             cols["group_name"]!! to entity.groupProperty.get()
         )
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    override fun applyRow(entity: FxSqlTestEntity, row: ResultRow, table: Table) {
+        val cols = table.columns.associateBy { it.name }
+        entity.nameProperty.set(row[cols["name"]!! as Column<String>])
+        entity.yearProperty.set(row[cols["year"]!! as Column<Int>])
+        entity.activeProperty.set(row[cols["active"]!! as Column<Boolean>])
+        entity.ratingProperty.set(row[cols["rating"]!! as Column<Double>])
+        entity.tagProperty.set(row[cols["tag"]!! as Column<String?>])
+        entity.groupProperty.set(row[cols["group_name"]!! as Column<String>])
+        // id is PK — immutable. item_ids is backed by the `items` fxAggregateList delegate
+        // (val), whose collection state is managed via the delegate's mutation API —
+        // not applicable to applyRow (the delegate is constructed once at fromRow time).
     }
 }
 

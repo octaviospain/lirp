@@ -113,6 +113,14 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
 
         private val log = KotlinLogging.logger(javaClass.name)
 
+        init {
+            // Activate CONFLICT events for versioned subclasses. VolatileRepository activates
+            // CREATE/DELETE and RegistryBase activates UPDATE; CONFLICT is added here so the
+            // optimistic-locking recovery path (handleOptimisticLockConflict → emitAsync) reaches
+            // subscribers. Unversioned repositories never emit CONFLICT and are unaffected.
+            activateEvents(CrudEvent.Type.CONFLICT)
+        }
+
         @Volatile
         private var loaded: Boolean = false
 
@@ -225,32 +233,63 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
          */
         protected fun flush() {
             flushLock.withLock {
-                val snapshot = mutableListOf<PendingOp<K, R>>()
-                while (true) {
-                    snapshot.add(pendingOps.poll() ?: break)
-                }
-                if (snapshot.isEmpty())
-                    return
+                val snapshot = drainPendingOps()
+                if (snapshot.isEmpty()) return
                 val collapsed = collapse(snapshot)
-                if (collapsed.isEmpty())
-                    return
+                if (collapsed.isEmpty()) return
                 try {
                     writePending(collapsed)
+                } catch (e: OptimisticLockException) {
+                    routeOptimisticLockConflict(e)
                 } catch (e: Exception) {
-                    // Drain any ops that arrived during the failed write, then prepend the failed
-                    // snapshot to preserve chronological order for the retry
-                    val arrivedDuringWrite = mutableListOf<PendingOp<K, R>>()
-                    while (true) {
-                        arrivedDuringWrite.add(pendingOps.poll() ?: break)
-                    }
-                    snapshot.forEach { pendingOps.offer(it) }
-                    arrivedDuringWrite.forEach { pendingOps.offer(it) }
-                    if (!closed)
-                        scheduleFlush()
+                    reenqueueAfterFailure(snapshot)
                     throw e
                 }
             }
         }
+
+        private fun drainPendingOps(): List<PendingOp<K, R>> {
+            val snapshot = mutableListOf<PendingOp<K, R>>()
+            while (true) {
+                snapshot.add(pendingOps.poll() ?: break)
+            }
+            return snapshot.toList()
+        }
+
+        // D-04: optimistic-lock failures follow the Conflict + auto-reload path and DO NOT
+        // re-enqueue. The subclass recovery hook performs the auto-reload and emits the
+        // StandardCrudEvent.Conflict event. Ops that arrived during the failed write are kept
+        // in the queue (they were never drained here) so the next flush cycle handles them
+        // normally. Do NOT rethrow: the conflict is an internal signal, fully handled via the
+        // Conflict event.
+        private fun routeOptimisticLockConflict(e: OptimisticLockException) {
+            try {
+                handleOptimisticLockConflict(e)
+            } catch (hookFailure: Exception) {
+                log.error(hookFailure) { "handleOptimisticLockConflict threw; conflict may not have been fully recovered" }
+            }
+            if (!closed && pendingOps.isNotEmpty())
+                scheduleFlush()
+        }
+
+        // Drain any ops that arrived during the failed write, then prepend the failed snapshot
+        // to preserve chronological order for the retry.
+        private fun reenqueueAfterFailure(snapshot: List<PendingOp<K, R>>) {
+            val arrivedDuringWrite = drainPendingOps()
+            snapshot.forEach { pendingOps.offer(it) }
+            arrivedDuringWrite.forEach { pendingOps.offer(it) }
+            if (!closed)
+                scheduleFlush()
+        }
+
+        /**
+         * Test-only accessor returning the current size of the internal pending queue.
+         *
+         * Exposed as `internal` for the `lirp-core` test source set to verify flush routing
+         * invariants without reflection. Not part of the public API — callers outside tests
+         * should rely on [dirty] for coarse-grained write-pending signalling.
+         */
+        internal fun pendingOpsCount(): Int = pendingOps.size
 
         // All callers (add, remove, removeAll, clear) guard with checkNotClosed() before reaching
         // enqueue(). A narrow race exists where close() sets closed=true between checkNotClosed()
@@ -300,16 +339,80 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         }
 
         /**
+         * Removes [entity] from in-memory storage and cancels its mutation subscription without
+         * enqueuing any [PendingOp].
+         *
+         * Symmetric to [addToMemoryOnly]. Used by subclasses when the canonical backing-store
+         * state indicates the entity has already been removed by another writer (for example,
+         * during conflict recovery in `SqlRepository`). Avoids a spurious DELETE re-enqueue for
+         * a row that is already gone.
+         *
+         * @return `true` if the entity was present and removed, `false` otherwise.
+         */
+        protected fun removeFromMemoryOnly(entity: R): Boolean {
+            val removed = super.remove(entity)
+            if (removed) {
+                subscriptionsMap.remove(entity.id)?.cancel()
+            }
+            return removed
+        }
+
+        /**
+         * Extracts the optimistic-lock version from [entity] for use in `@Version`-aware [PendingOp]s.
+         *
+         * The default implementation returns `null`, which causes every enqueued [PendingUpdate] and
+         * [PendingDelete] to carry `expectedVersion = null` — the pre-versioning behavior
+         * (last-write-wins UPDATE/DELETE with no version check).
+         *
+         * Subclasses that support `@Version` (notably the SQL-backed repository) override this hook
+         * to read the entity's `@Version` property via a KSP-generated accessor. Returning a non-null
+         * value causes the corresponding SQL statement to include `AND version = ?` in its WHERE clause.
+         *
+         * @param entity The entity whose version is being captured.
+         * @return The current `@Version` value, or `null` when the entity type is unversioned.
+         */
+        protected open fun extractVersion(entity: R): Long? = null
+
+        /**
+         * Recovery hook invoked by [flush] when [writePending] throws an [OptimisticLockException].
+         *
+         * The default implementation is a no-op — a base [PersistentRepositoryBase] subclass that
+         * does not implement `@Version` semantics cannot receive this exception (see [extractVersion])
+         * and therefore does not need to recover. SQL-backed repositories override this to perform
+         * the auto-reload and emit the
+         * [net.transgressoft.lirp.event.StandardCrudEvent.Conflict] event.
+         *
+         * Implementations MUST be idempotent and MUST NOT throw. Rethrowing here would cause the
+         * original exception to escape `flush()` and reach the caller ([close] or the debounce
+         * scheduler), which is almost always undesirable.
+         *
+         * **Threading contract:** Invoked inside [flush] while holding [flushLock]. Implementations
+         * MUST NOT call [flush] recursively or otherwise acquire [flushLock] — doing so deadlocks.
+         * Implementations SHOULD emit user-facing events (e.g. [net.transgressoft.lirp.event.StandardCrudEvent.Conflict])
+         * asynchronously via the repository's publisher to avoid running user code on the flush thread.
+         *
+         * @param e The optimistic-lock failure carrying entity id, expected version, and actual version.
+         */
+        protected open fun handleOptimisticLockConflict(e: OptimisticLockException) {
+            // Default: no-op. Override in versioned subclasses.
+        }
+
+        /**
          * Subscribes to mutation events from [entity] and registers the subscription for lifecycle management.
          *
          * The subscription callback guards against post-close invocations to prevent dirty-marking
          * after the repository has been closed and subscriptions are being cancelled.
+         *
+         * For `@Version`-aware subclasses, the `expectedVersion` field of the enqueued [PendingUpdate]
+         * is captured from `mutationEvent.oldEntity` via [extractVersion], pinning the write against
+         * the state the caller observed before mutating. Capturing from `newEntity` would include the
+         * uncommitted bump (if any), which would never match the DB row.
          */
         protected fun subscribeEntity(entity: R) {
             val subscription =
                 entity.subscribe { mutationEvent ->
                     if (!closed) {
-                        enqueue(PendingUpdate(mutationEvent.newEntity))
+                        enqueue(PendingUpdate(mutationEvent.newEntity, extractVersion(mutationEvent.oldEntity)))
                         onEntityMutated(mutationEvent)
                     }
                 }
@@ -347,7 +450,9 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
             checkLoaded()
             return super.remove(entity).also { removed ->
                 if (removed) {
-                    enqueue(PendingDelete(entity.id))
+                    // For `@Version`-aware subclasses, [extractVersion] captures the row's version
+                    // at remove() time so the DELETE statement can check it in its WHERE clause.
+                    enqueue(PendingDelete(entity.id, extractVersion(entity)))
                     val subscription =
                         subscriptionsMap.remove(entity.id)
                             ?: error("Repository should contain a subscription for $entity")
@@ -362,7 +467,9 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
             val presentEntities = entities.filter { contains(it) }
             return super.removeAll(entities).also { removed ->
                 if (removed) {
-                    enqueue(PendingBatchDelete(presentEntities.map { it.id }))
+                    // Per-entity version capture: each id carries its own expectedVersion so that
+                    // a conflict on one id does not block deletions of the others.
+                    enqueue(PendingBatchDelete(presentEntities.map { it.id to extractVersion(it) }))
                     presentEntities.forEach {
                         subscriptionsMap.remove(it.id)?.cancel()
                     }
