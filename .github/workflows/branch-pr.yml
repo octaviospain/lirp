@@ -1,13 +1,24 @@
-name: non-master build
+name: branch / PR build
 
 on:
+    push:
+        branches-ignore:
+            - master
+        paths-ignore:
+            - "**.md"
+            - '.gitignore'
+            - 'docs/**'
     pull_request:
+        types: [opened, synchronize, reopened]
         branches:
             - master
         paths-ignore:
             - "**.md"
             - '.gitignore'
             - 'docs/**'
+concurrency:
+    group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+    cancel-in-progress: true
 
 jobs:
     build-and-test:
@@ -24,13 +35,6 @@ jobs:
                     java-version: 21
                     distribution: 'zulu'
                     java-package: 'jdk+fx'
-
-            -   name: Cache SonarQube packages
-                uses: actions/cache@v4
-                with:
-                    path: ~/.sonar/cache
-                    key: ${{ runner.os }}-sonar
-                    restore-keys: ${{ runner.os }}-sonar
 
             -   name: Cache Gradle packages
                 uses: actions/cache@v4
