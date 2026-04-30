@@ -223,6 +223,11 @@ class FxAggregateSet<K : Comparable<K>, E : IdentifiableEntity<K>>(
     }
 
     private fun fireAdded(element: E) {
+        // Returns null (not throws) from getElementRemoved on a pure addition. JavaFX's
+        // SetExpressionHelper$SimpleChange copy constructor unconditionally reads both
+        // sides when forwarding a change to listeners attached to a SimpleSetProperty
+        // wrapping this set; throwing here crashed the FX thread with
+        // `UnsupportedOperationException: No element removed`.
         val change =
             object : SetChangeListener.Change<E>(this) {
                 override fun wasAdded() = true
@@ -231,19 +236,21 @@ class FxAggregateSet<K : Comparable<K>, E : IdentifiableEntity<K>>(
 
                 override fun getElementAdded() = element
 
-                override fun getElementRemoved(): E = throw UnsupportedOperationException("No element removed")
+                override fun getElementRemoved(): E? = null
             }
         fireChange(change)
     }
 
     private fun fireRemoved(element: E) {
+        // Mirror of fireAdded — returns null from getElementAdded on a pure removal so
+        // SetExpressionHelper$SimpleChange can copy the change without throwing.
         val change =
             object : SetChangeListener.Change<E>(this) {
                 override fun wasAdded() = false
 
                 override fun wasRemoved() = true
 
-                override fun getElementAdded(): E = throw UnsupportedOperationException("No element added")
+                override fun getElementAdded(): E? = null
 
                 override fun getElementRemoved() = element
             }
