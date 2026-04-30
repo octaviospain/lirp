@@ -22,9 +22,11 @@ import net.transgressoft.lirp.persistence.AggregateCollectionRef
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import io.kotest.core.spec.style.StringSpec
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import javafx.application.Platform
+import javafx.beans.property.SimpleSetProperty
 import javafx.collections.ObservableSet
 import javafx.collections.SetChangeListener
 import java.util.concurrent.CountDownLatch
@@ -284,5 +286,84 @@ class FxAggregateSetTest : StringSpec({
         proxy.clear()
 
         changes.size shouldBe 0
+    }
+
+    /*
+     * The four tests below pin the [SetChangeListener.Change] semantics that JavaFX standard
+     * containers — most notably the [SimpleSetProperty] used to expose observable aggregates —
+     * rely on when they copy an incoming change via `SetExpressionHelper$SimpleChange`.
+     * That copy unconditionally calls both [SetChangeListener.Change.getElementAdded] and
+     * [SetChangeListener.Change.getElementRemoved], so if either side throws
+     * [UnsupportedOperationException], any downstream listener attached to the property
+     * crashes the FX thread instead of receiving the change.
+     */
+
+    "FxAggregateSet fireAdded change returns null from getElementRemoved" {
+        val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
+        val captured = mutableListOf<SetChangeListener.Change<out AudioItem>>()
+        proxy.addListener(SetChangeListener(captured::add))
+
+        val item = MutableAudioItem(1, "A")
+        proxy.add(item)
+
+        captured.size shouldBe 1
+        captured[0].wasAdded() shouldBe true
+        captured[0].elementAdded shouldBe item
+        // contract: getElementRemoved returns null on a pure addition (matches JavaFX defaults
+        // and lets SetExpressionHelper$SimpleChange copy the change without throwing)
+        captured[0].elementRemoved.shouldBeNull()
+    }
+
+    "FxAggregateSet fireRemoved change returns null from getElementAdded" {
+        val item = MutableAudioItem(1, "A")
+        val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
+        proxy.add(item)
+        val captured = mutableListOf<SetChangeListener.Change<out AudioItem>>()
+        proxy.addListener(SetChangeListener(captured::add))
+
+        proxy.remove(item)
+
+        captured.size shouldBe 1
+        captured[0].wasRemoved() shouldBe true
+        captured[0].elementRemoved shouldBe item
+        // contract: getElementAdded returns null on a pure removal (matches JavaFX defaults
+        // and lets SetExpressionHelper$SimpleChange copy the change without throwing)
+        captured[0].elementAdded.shouldBeNull()
+    }
+
+    "SimpleSetProperty wrapping FxAggregateSet propagates add changes to its listeners" {
+        val backing = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
+        val property = SimpleSetProperty<AudioItem>(backing)
+
+        val captured = mutableListOf<SetChangeListener.Change<out AudioItem>>()
+        property.addListener(SetChangeListener<AudioItem> { captured.add(it) })
+
+        val item = MutableAudioItem(1, "A")
+        // SetExpressionHelper$SimpleChange copies the change for the property listener — this
+        // call previously crashed with `UnsupportedOperationException: No element removed`
+        // because the lirp-side change object threw on getElementRemoved.
+        backing.add(item)
+
+        captured.size shouldBe 1
+        captured[0].wasAdded() shouldBe true
+        captured[0].elementAdded shouldBe item
+        captured[0].elementRemoved.shouldBeNull()
+    }
+
+    "SimpleSetProperty wrapping FxAggregateSet propagates remove changes to its listeners" {
+        val backing = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
+        val item = MutableAudioItem(1, "A")
+        backing.add(item)
+        val property = SimpleSetProperty<AudioItem>(backing)
+
+        val captured = mutableListOf<SetChangeListener.Change<out AudioItem>>()
+        property.addListener(SetChangeListener<AudioItem> { captured.add(it) })
+
+        backing.remove(item)
+
+        captured.size shouldBe 1
+        captured[0].wasRemoved() shouldBe true
+        captured[0].elementRemoved shouldBe item
+        captured[0].elementAdded.shouldBeNull()
     }
 })
