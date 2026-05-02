@@ -497,6 +497,50 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
             check(registered || context.registryFor(entityClass) === registry) {
                 "A repository for ${entityClass.simpleName} is already registered. Only one @LirpRepository per entity type is allowed."
             }
+            if (registered) {
+                rebindReferencesTo(entityClass, context)
+            }
+        }
+
+        /**
+         * Rebinds aggregate-ref delegates that target [referencedClass] for every entity already
+         * present in any registry of [context]. Called from [registerRepository] right after a new
+         * registry is registered, so that entities whose [bindEntityRefs] ran before this point
+         * (when the [referencedClass] registry was still unregistered) get their previously-skipped
+         * delegates wired up against the freshly-registered registry.
+         *
+         * Without this pass, delegates that observed a missing registry at load time remain
+         * unbound forever and `resolveAll()` returns an empty set even after registration.
+         *
+         * For each rebound entity, [wireRefBubbleUp] is also re-run so that scalar refs declared
+         * with `bubbleUp = true` get their parent->child subscription created against the freshly
+         * resolvable referenced entity. Without this second pass, mutations on the newly registered
+         * children would never propagate to parent subscribers until a `resolve()` call lazily
+         * triggered the rewire.
+         *
+         * Only registries whose entity type declares a ref (scalar or collection) to
+         * [referencedClass] are visited; everything else is skipped via the cached
+         * [LirpRefAccessor]. Both [bindEntityRefs] and [wireRefBubbleUp] are idempotent —
+         * already-bound delegates simply have their registry/subscription reference re-set.
+         */
+        private fun rebindReferencesTo(referencedClass: Class<*>, context: LirpContext) {
+            for ((_, otherRegistry) in context.registriesSnapshot()) {
+                if (otherRegistry !is RegistryBase<*, *>) continue
+                @Suppress("UNCHECKED_CAST")
+                val typed = otherRegistry as RegistryBase<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>
+                for (entity in typed) {
+                    // Look up the accessor by the entity's concrete runtime class — refAccessorFor
+                    // resolves "${concreteClass.name}_LirpRefAccessor", and that class is generated
+                    // per concrete @Aggregate-annotated entity, not per registered interface.
+                    val accessor = refAccessorFor(entity.javaClass) ?: continue
+                    val refsThisClass =
+                        accessor.entries.any { it.referencedClass == referencedClass } ||
+                            accessor.collectionEntries.any { it.referencedClass == referencedClass }
+                    if (!refsThisClass) continue
+                    typed.bindEntityRefs(entity)
+                    typed.wireRefBubbleUp(entity)
+                }
+            }
         }
 
         /**
