@@ -135,13 +135,13 @@ class ProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEnti
     }
 
     private fun removeFromAnyBucket(element: E): Boolean {
-        val iterator = backingMap.entries.iterator()
-        while (iterator.hasNext()) {
-            val entry = iterator.next()
+        for (entry in backingMap.entries) {
             if (element in entry.value) {
                 val filtered = entry.value.filter { it != element }
-                if (filtered.isEmpty()) iterator.remove()
-                else entry.setValue(freezeBucket(filtered))
+                // ConcurrentSkipListMap entry iterators return SimpleImmutableEntry instances whose setValue throws
+                // UnsupportedOperationException — go through the map directly instead.
+                if (filtered.isEmpty()) backingMap.remove(entry.key)
+                else backingMap[entry.key] = freezeBucket(filtered)
                 return true
             }
         }

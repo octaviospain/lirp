@@ -142,6 +142,28 @@ internal class ProjectionMapTest : StringSpec({
         projection.containsKey("Rock") shouldBe true
     }
 
+    "ProjectionMap keeps remaining bucket members when fallback removal leaves the bucket non-empty" {
+        val t1 = trackRepo.create(1, "Jazz")
+        val t2 = trackRepo.create(2, "Jazz")
+        val t3 = trackRepo.create(3, "Rock")
+        val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id, t3.id)).also(playlistRepo::add)
+
+        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        projection["Jazz"]!!.size shouldBe 2
+
+        // Mutate t1's grouping key, then remove from source. handleRemoved looks under "Classical",
+        // misses, and falls back to removeFromAnyBucket which finds t1 under "Jazz" and rewrites the bucket
+        // to [t2] — exercises the filtered.isNotEmpty() branch (would throw with CSLM if entry.setValue
+        // were still in use, since the iterator entries are SimpleImmutableEntry).
+        (t1 as MutableAudioItem).title = "Classical"
+        playlist.audioItems.remove(t1)
+
+        projection.containsKey("Classical") shouldBe false
+        projection["Jazz"]!! shouldContainExactly listOf(t2)
+        projection["Rock"]!! shouldContainExactly listOf(t3)
+        projection.size shouldBe 2
+    }
+
     "ProjectionMap keys are in natural sorted order" {
         val t1 = trackRepo.create(1, "Rock")
         val t2 = trackRepo.create(2, "Classical")
@@ -306,6 +328,15 @@ internal class ProjectionMapTest : StringSpec({
         val executor = Executors.newSingleThreadExecutor()
         val latch = CountDownLatch(totalItems)
 
+        // Reader runs as a coroutine so a writer failure trips latch.await(10s) instead of looping forever.
+        val readerJob =
+            launch(Dispatchers.Default) {
+                while (latch.count > 0L) {
+                    projection.keys.toList()
+                    projection.entries.forEach { it.value.size }
+                }
+            }
+
         try {
             for (track in seedTracks) {
                 executor.submit {
@@ -314,22 +345,18 @@ internal class ProjectionMapTest : StringSpec({
                 }
             }
 
-            // Reader iterates concurrently; assertions run after the writer completes.
-            while (latch.count > 0L) {
-                projection.keys.toList()
-                projection.entries.forEach { it.value.size }
-            }
-
             latch.await(10, TimeUnit.SECONDS) shouldBe true
             projection.size shouldBe titles.size
             projection.values.sumOf { it.size } shouldBe totalItems
             projection.keys.toList() shouldContainExactly titles.sorted()
         } finally {
+            readerJob.cancel()
+            readerJob.join()
             executor.shutdownNow()
         }
     }
 
-    "ProjectionMap iterates without ConcurrentModificationException under multi-writer stress"
+    "ProjectionMap iterates without ConcurrentModificationException under concurrent reader and writer stress"
         .config(tags = setOf(Stress)) {
             val totalMutations = 5000
             val readerIterations = 1000

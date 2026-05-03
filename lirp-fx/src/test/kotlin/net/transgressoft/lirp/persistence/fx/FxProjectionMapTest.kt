@@ -386,6 +386,15 @@ class FxProjectionMapTest : StringSpec({
         val executor = Executors.newSingleThreadExecutor()
         val latch = CountDownLatch(totalItems)
 
+        // Reader runs as a coroutine so a writer failure trips latch.await(10s) instead of looping forever.
+        val readerJob =
+            launch(Dispatchers.Default) {
+                while (latch.count > 0L) {
+                    projection.keys.toList()
+                    projection.entries.forEach { it.value.size }
+                }
+            }
+
         try {
             for (i in 1..totalItems) {
                 val item = FxAudioItem(i, "Track-$i", albums[i % albums.size])
@@ -395,22 +404,18 @@ class FxProjectionMapTest : StringSpec({
                 }
             }
 
-            // Reader iterates concurrently; assertions run after the writer completes.
-            while (latch.count > 0L) {
-                projection.keys.toList()
-                projection.entries.forEach { it.value.size }
-            }
-
             latch.await(10, TimeUnit.SECONDS) shouldBe true
             projection.size shouldBe albums.size
             projection.values.sumOf { it.size } shouldBe totalItems
             projection.keys.toList() shouldContainExactly albums.sorted()
         } finally {
+            readerJob.cancel()
+            readerJob.join()
             executor.shutdownNow()
         }
     }
 
-    "FxProjectionMap iterates without ConcurrentModificationException under multi-writer stress"
+    "FxProjectionMap iterates without ConcurrentModificationException under concurrent reader and writer stress"
         .config(tags = setOf(Stress)) {
             val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
             val projection = FxProjectionMap({ source }, { it.albumName }, false)
