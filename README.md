@@ -12,13 +12,25 @@
 
 # LIRP - Lightweight Reactive Persistence
 
-A Kotlin/Java library where domain entities own their reactivity — property changes automatically notify subscribers, repositories persist transparently.
+A Kotlin/Java library where domain entities own their reactivity — property changes automatically notify subscribers, and repositories persist transparently.
 
-## Overview
+## What is LIRP?
 
-LIRP is built around a single idea: **domain entities should not be passive data containers**. Inspired by Domain-Driven Design, entities in LIRP carry identity and behavior, and they publish their own state changes without external wiring.
+LIRP solves a specific problem: **most reactive libraries make you wire streams manually, and most persistence libraries treat entities as passive data**. LIRP does both — your entities are reactive objects that automatically notify subscribers on property changes, and repositories keep your data in sync with a database or file.
 
-Unlike general-purpose reactive toolkits (Kotlin Flow, RxJava, EventBus) where you wire streams yourself, LIRP operates at the domain level — **your domain objects _are_ the reactive infrastructure**. A property declared with `reactiveProperty()` automatically notifies every subscriber on assignment, with zero overhead for unobserved entities thanks to lazy publisher initialization. Repositories are event publishers too: they emit `CrudEvent`s on add/remove and serve as entity factories through typed `create()` methods.
+**The core idea:** domain entities should carry both behavior and reactivity. When you declare `var price by reactiveProperty(initial)`, the property becomes observable. When you add an entity to a repository, persistence happens automatically.
+
+## Why LIRP?
+
+| Approach | Entities are reactive? | Auto-persist changes? | Wiring needed? |
+|---|---|---|---|
+| **LIRP** | ✅ Built-in via `reactiveProperty()` | ✅ Transparent (SQL/JSON) | None |
+| RxJava / Kotlin Flow | ❌ You wire streams yourself | ❌ Not a concern | Extensive |
+| Event Sourcing (fmodel, occurrent) | ❌ Events stored & replayed | ✅ But event-focused | Moderate |
+| Hibernate Reactive | ❌ ORM-managed | ✅ But requires sessions | Moderate |
+| Event Bus (Guava, Event-Library) | ❌ Separate infrastructure | ❌ Not a concern | Manual |
+
+LIRP's sweet spot: **small-to-medium datasets where entities need both reactivity and persistence with zero boilerplate** — configuration stores, user preferences, catalog management, any bounded context where the working set fits in memory.
 
 Built on Kotlin Coroutines and Kotlin Serialization. Targets **JVM 17+, Kotlin 2.3.10**.
 
@@ -45,9 +57,21 @@ val repo = ProductRepository()
 val widget = repo.create(1, "Widget", 29.99)
 
 widget.subscribe { event ->
-    println("${event.oldEntity.price} -> ${event.newEntity.price}")
+    println("Price changed: ${event.oldEntity.price} -> ${event.newEntity.price}")
 }
-widget.price = 39.99  // prints: 29.99 -> 39.99
+widget.price = 39.99  // prints: Price changed: 29.99 -> 39.99
+```
+
+Subscribe to repository-level events to track creation, updates, and deletions:
+
+```kotlin
+repo.subscribe { event ->
+    when (event) {
+        is StandardCrudEvent.Create -> println("Added: ${event.entity.name}")
+        is StandardCrudEvent.Update -> println("Updated product ${event.entityId}")
+        is StandardCrudEvent.Delete -> println("Removed product ${event.entityId}")
+    }
+}
 ```
 
 See [Core Concepts](https://github.com/octaviospain/lirp/wiki/Core-Concepts) for the reactive-property model, subscription patterns, and entity lifecycle.
