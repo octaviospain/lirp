@@ -17,6 +17,8 @@
 
 package net.transgressoft.lirp.persistence
 
+import net.transgressoft.lirp.testing.Stress
+import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldContainExactly
@@ -24,6 +26,11 @@ import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.maps.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * Tests for [ProjectionMap], verifying grouping behavior, incremental auto-updates from
@@ -285,4 +292,81 @@ internal class ProjectionMapTest : StringSpec({
         lastSnapshot shouldNotBe null
         lastSnapshot!!.containsKey("Rock Playlist") shouldBe true
     }
+
+    "ProjectionMap reflects writer state in reader iteration after writer completes" {
+        val titles = listOf("Alpha", "Bravo", "Charlie", "Delta")
+        val totalItems = 200
+        val seedTracks = (1..totalItems).map { i -> trackRepo.create(i, titles[i % titles.size]) }
+        val playlist = DefaultAudioPlaylist(1, "Test", emptyList()).also(playlistRepo::add)
+
+        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        // Trigger init before writer starts so the source-callback subscription is live.
+        projection.size shouldBe 0
+
+        val executor = Executors.newSingleThreadExecutor()
+        val latch = CountDownLatch(totalItems)
+
+        try {
+            for (track in seedTracks) {
+                executor.submit {
+                    playlist.audioItems.add(track)
+                    latch.countDown()
+                }
+            }
+
+            // Reader iterates concurrently; assertions run after the writer completes.
+            while (latch.count > 0L) {
+                projection.keys.toList()
+                projection.entries.forEach { it.value.size }
+            }
+
+            latch.await(10, TimeUnit.SECONDS) shouldBe true
+            projection.size shouldBe titles.size
+            projection.values.sumOf { it.size } shouldBe totalItems
+            projection.keys.toList() shouldContainExactly titles.sorted()
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    "ProjectionMap iterates without ConcurrentModificationException under multi-writer stress"
+        .config(tags = setOf(Stress)) {
+            val totalMutations = 5000
+            val readerIterations = 1000
+            val seedSize = 100
+
+            val seedTracks = (1..seedSize).map { i -> trackRepo.create(i, "Title-${i % 8}") }
+            val playlist = DefaultAudioPlaylist(1, "Stress", seedTracks.map { it.id }).also(playlistRepo::add)
+
+            val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+            // Trigger init so the source-callback subscription is live before writers start.
+            projection.size shouldBe 8
+
+            shouldNotThrowAny {
+                // Single writer coroutine: MutableAggregateList serializes mutations internally
+                // via a ReentrantLock; concurrent writes from multiple threads are not supported.
+                // The CME regression tripwire is on the reader side — a TreeMap revert causes
+                // ConcurrentModificationException when the backing map is mutated by the writer
+                // while the reader coroutine iterates projection.keys / projection.entries.
+                val writerJob =
+                    launch(Dispatchers.Default) {
+                        repeat(totalMutations) { i ->
+                            val extra = trackRepo.create(seedSize + i + 1, "Title-${i % 8}")
+                            playlist.audioItems.add(extra)
+                            playlist.audioItems.remove(extra)
+                        }
+                    }
+
+                val readerJob =
+                    launch(Dispatchers.Default) {
+                        repeat(readerIterations) {
+                            projection.keys.toList()
+                            projection.entries.forEach { it.value.size }
+                        }
+                    }
+
+                writerJob.join()
+                readerJob.join()
+            }
+        }
 })

@@ -19,6 +19,8 @@ package net.transgressoft.lirp.persistence.fx
 
 import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.AudioItem
+import net.transgressoft.lirp.testing.Stress
+import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldContainExactly
@@ -26,9 +28,12 @@ import io.kotest.matchers.shouldBe
 import javafx.beans.InvalidationListener
 import javafx.collections.MapChangeListener
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
@@ -369,4 +374,82 @@ class FxProjectionMapTest : StringSpec({
         projection["Blues"]!!.size shouldBe 5
         projection["Pop"]!!.size shouldBe 5
     }
+
+    "FxProjectionMap reflects writer state in reader iteration after writer completes" {
+        val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
+        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        // Trigger init before writer starts so the source-listener subscription is live.
+        projection.size shouldBe 0
+
+        val albums = listOf("Alpha", "Bravo", "Charlie", "Delta")
+        val totalItems = 200
+        val executor = Executors.newSingleThreadExecutor()
+        val latch = CountDownLatch(totalItems)
+
+        try {
+            for (i in 1..totalItems) {
+                val item = FxAudioItem(i, "Track-$i", albums[i % albums.size])
+                executor.submit {
+                    source.add(source.size, item)
+                    latch.countDown()
+                }
+            }
+
+            // Reader iterates concurrently; assertions run after the writer completes.
+            while (latch.count > 0L) {
+                projection.keys.toList()
+                projection.entries.forEach { it.value.size }
+            }
+
+            latch.await(10, TimeUnit.SECONDS) shouldBe true
+            projection.size shouldBe albums.size
+            projection.values.sumOf { it.size } shouldBe totalItems
+            projection.keys.toList() shouldContainExactly albums.sorted()
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    "FxProjectionMap iterates without ConcurrentModificationException under multi-writer stress"
+        .config(tags = setOf(Stress)) {
+            val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
+            val projection = FxProjectionMap({ source }, { it.albumName }, false)
+
+            val seedSize = 100
+            val mutationCount = 5000
+            val readerIterations = 1000
+
+            val seedItems = (1..seedSize).map { FxAudioItem(it, "Seed-$it", "Album-${it % 8}") }
+            seedItems.forEach { source.add(source.size, it) }
+            projection.size shouldBe 8
+
+            val executor = Executors.newSingleThreadExecutor()
+            val latch = CountDownLatch(mutationCount)
+
+            try {
+                shouldNotThrowAny {
+                    for (i in 1..mutationCount) {
+                        val item = FxAudioItem(seedSize + i, "Stress-$i", "Album-${i % 8}")
+                        executor.submit {
+                            source.add(source.size, item)
+                            source.remove(item)
+                            latch.countDown()
+                        }
+                    }
+
+                    val readerJob =
+                        launch(Dispatchers.Default) {
+                            repeat(readerIterations) {
+                                projection.keys.toList()
+                                projection.entries.forEach { it.value.size }
+                            }
+                        }
+
+                    latch.await(30, TimeUnit.SECONDS) shouldBe true
+                    readerJob.join()
+                }
+            } finally {
+                executor.shutdownNow()
+            }
+        }
 })
