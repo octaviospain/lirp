@@ -9,6 +9,7 @@ Thank you for your interest in contributing to lirp! This document provides guid
 - [Reporting Bugs](#reporting-bugs)
 - [Suggesting Enhancements](#suggesting-enhancements)
 - [Pull Requests](#pull-requests)
+- [Running Tests](#running-tests)
 - [Style Guidelines](#style-guidelines)
 
 ## Code of Conduct
@@ -64,6 +65,45 @@ All pull requests should:
 - **Be focused on a single objective** (don't mix unrelated changes)
 
 ## Development Guidelines
+
+### Running Tests
+
+The default test run executes the full deterministic suite:
+
+```bash
+./gradlew test                    # full project
+./gradlew :lirp-core:test         # single module
+```
+
+#### Opt-in stress tests (`Stress` tag)
+
+Some concurrency regression tests are tagged with `Stress` and **excluded by default**.
+They are aggressive multi-iteration tripwires that protect invariants like CME-free
+iteration of `ProjectionMap` / `FxProjectionMap`; they are too slow and noisy for the
+default loop but valuable when modifying the affected code.
+
+Include them with the `kotest.tags.include` Gradle property:
+
+```bash
+./gradlew test -Pkotest.tags.include=Stress
+./gradlew :lirp-core:test -Pkotest.tags.include=Stress
+./gradlew :lirp-fx:test -Pkotest.tags.include=Stress
+```
+
+Add a new stress-tagged test by attaching the shared tag at the test definition:
+
+```kotlin
+import net.transgressoft.lirp.testing.Stress
+
+"MyComponent stays consistent under concurrent readers and a writer"
+    .config(tags = setOf(Stress)) {
+        // ...
+    }
+```
+
+The `Stress` tag is defined once in `lirp-core/src/test/kotlin/net/transgressoft/lirp/testing/Stress.kt`
+and is visible to `lirp-fx` tests via the existing `testImplementation files(...)` wiring,
+so no per-module duplication is needed.
 
 ### Problem Statement Requirement
 

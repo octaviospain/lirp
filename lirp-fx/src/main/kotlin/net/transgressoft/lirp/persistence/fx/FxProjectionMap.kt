@@ -28,7 +28,7 @@ import javafx.collections.MapChangeListener
 import javafx.collections.ObservableMap
 import javafx.collections.SetChangeListener
 import java.util.Collections
-import java.util.TreeMap
+import java.util.concurrent.ConcurrentSkipListMap
 import kotlin.reflect.KProperty
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
@@ -43,7 +43,8 @@ import kotlinx.coroutines.launch
  *
  * Entities from the source collection are grouped by a [keyExtractor] function into
  * buckets of type `List<E>`, keyed by projection key type `PK`. The backing map is a
- * [TreeMap], so keys are always iterated in natural sorted order.
+ * [ConcurrentSkipListMap] (wrapped by [FXCollections.observableMap]), so keys are always
+ * iterated in natural sorted order with CME-free iteration under concurrent reads.
  *
  * The projection initializes lazily: the source subscription and initial state build happen
  * on the first [getValue] call (Kotlin `by` delegation) or on the first [addListener] call,
@@ -66,8 +67,17 @@ import kotlinx.coroutines.launch
  * When `false`, notifications and mutations are serialized through a Channel-based sequential
  * processor on [ReactiveScope.flowScope], ensuring no concurrent map access.
  *
+ * **Thread safety:** Iteration of [keys], [values], [entries], plus [size], [containsKey],
+ * and [get] never throws [ConcurrentModificationException], because the underlying
+ * [ConcurrentSkipListMap] iterators are weakly-consistent — readers observe a snapshot of
+ * map state at the point of access, and entries added concurrently may or may not be visible
+ * mid-iteration. The CSLM swap is orthogonal to the dispatch model: both the [Platform.runLater]
+ * path and the [ReactiveScope.flowScope] [Channel] path continue to serialize [ListChangeListener]
+ * and [SetChangeListener] notifications exactly as documented above; the choice of backing map
+ * does not change either dispatch contract.
+ *
  * @param K the entity ID type, must be [Comparable]
- * @param PK the projection key type, must be [Comparable] (used as [TreeMap] key)
+ * @param PK the projection key type, must be [Comparable] (used as the backing [ConcurrentSkipListMap] key)
  * @param E the entity type
  * @param sourceRef deferred reference to the source [FxObservableCollection] (resolved on first [getValue] or [addListener])
  * @param keyExtractor grouping function that extracts the projection key from an entity
@@ -78,7 +88,7 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
     private val keyExtractor: (E) -> PK,
     val dispatchToFxThread: Boolean = true
 ) : ObservableMap<PK, List<E>> {
-    private val innerObservableMap: ObservableMap<PK, List<E>> = FXCollections.observableMap(TreeMap<PK, List<E>>())
+    private val innerObservableMap: ObservableMap<PK, List<E>> = FXCollections.observableMap(ConcurrentSkipListMap<PK, List<E>>())
 
     @Volatile
     private var initialized = false
@@ -190,13 +200,12 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
     }
 
     private fun removeFromAnyBucket(element: E) {
-        val iterator = innerObservableMap.entries.iterator()
-        while (iterator.hasNext()) {
-            val entry = iterator.next()
+        for (entry in innerObservableMap.entries) {
             if (element in entry.value) {
                 val filtered = entry.value.filter { it != element }
-                if (filtered.isEmpty()) iterator.remove()
-                else entry.setValue(freezeBucket(filtered))
+                // Use map put/remove rather than entry.setValue so the ObservableMap wrapper fires change listeners.
+                if (filtered.isEmpty()) innerObservableMap.remove(entry.key)
+                else innerObservableMap[entry.key] = freezeBucket(filtered)
                 return
             }
         }

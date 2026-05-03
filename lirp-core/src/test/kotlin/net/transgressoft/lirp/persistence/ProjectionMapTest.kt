@@ -17,6 +17,8 @@
 
 package net.transgressoft.lirp.persistence
 
+import net.transgressoft.lirp.testing.Stress
+import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldContainExactly
@@ -24,6 +26,11 @@ import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.maps.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * Tests for [ProjectionMap], verifying grouping behavior, incremental auto-updates from
@@ -133,6 +140,28 @@ internal class ProjectionMapTest : StringSpec({
         projection.containsKey("Classical") shouldBe false
         projection.size shouldBe 1
         projection.containsKey("Rock") shouldBe true
+    }
+
+    "ProjectionMap keeps remaining bucket members when fallback removal leaves the bucket non-empty" {
+        val t1 = trackRepo.create(1, "Jazz")
+        val t2 = trackRepo.create(2, "Jazz")
+        val t3 = trackRepo.create(3, "Rock")
+        val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id, t3.id)).also(playlistRepo::add)
+
+        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        projection["Jazz"]!!.size shouldBe 2
+
+        // Mutate t1's grouping key, then remove from source. handleRemoved looks under "Classical",
+        // misses, and falls back to removeFromAnyBucket which finds t1 under "Jazz" and rewrites the bucket
+        // to [t2] — exercises the filtered.isNotEmpty() branch (would throw with CSLM if entry.setValue
+        // were still in use, since the iterator entries are SimpleImmutableEntry).
+        (t1 as MutableAudioItem).title = "Classical"
+        playlist.audioItems.remove(t1)
+
+        projection.containsKey("Classical") shouldBe false
+        projection["Jazz"]!! shouldContainExactly listOf(t2)
+        projection["Rock"]!! shouldContainExactly listOf(t3)
+        projection.size shouldBe 2
     }
 
     "ProjectionMap keys are in natural sorted order" {
@@ -285,4 +314,86 @@ internal class ProjectionMapTest : StringSpec({
         lastSnapshot shouldNotBe null
         lastSnapshot!!.containsKey("Rock Playlist") shouldBe true
     }
+
+    "ProjectionMap reflects writer state in reader iteration after writer completes" {
+        val titles = listOf("Alpha", "Bravo", "Charlie", "Delta")
+        val totalItems = 200
+        val seedTracks = (1..totalItems).map { i -> trackRepo.create(i, titles[i % titles.size]) }
+        val playlist = DefaultAudioPlaylist(1, "Test", emptyList()).also(playlistRepo::add)
+
+        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        // Trigger init before writer starts so the source-callback subscription is live.
+        projection.size shouldBe 0
+
+        val executor = Executors.newSingleThreadExecutor()
+        val latch = CountDownLatch(totalItems)
+
+        // Reader runs as a coroutine so a writer failure trips latch.await(10s) instead of looping forever.
+        val readerJob =
+            launch(Dispatchers.Default) {
+                while (latch.count > 0L) {
+                    projection.keys.toList()
+                    projection.entries.forEach { it.value.size }
+                }
+            }
+
+        try {
+            for (track in seedTracks) {
+                executor.submit {
+                    playlist.audioItems.add(track)
+                    latch.countDown()
+                }
+            }
+
+            latch.await(10, TimeUnit.SECONDS) shouldBe true
+            projection.size shouldBe titles.size
+            projection.values.sumOf { it.size } shouldBe totalItems
+            projection.keys.toList() shouldContainExactly titles.sorted()
+        } finally {
+            readerJob.cancel()
+            readerJob.join()
+            executor.shutdownNow()
+        }
+    }
+
+    "ProjectionMap iterates without ConcurrentModificationException under concurrent reader and writer stress"
+        .config(tags = setOf(Stress)) {
+            val totalMutations = 5000
+            val readerIterations = 1000
+            val seedSize = 100
+
+            val seedTracks = (1..seedSize).map { i -> trackRepo.create(i, "Title-${i % 8}") }
+            val playlist = DefaultAudioPlaylist(1, "Stress", seedTracks.map { it.id }).also(playlistRepo::add)
+
+            val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+            // Trigger init so the source-callback subscription is live before writers start.
+            projection.size shouldBe 8
+
+            shouldNotThrowAny {
+                // Single writer coroutine: MutableAggregateList serializes mutations internally
+                // via a ReentrantLock; concurrent writes from multiple threads are not supported.
+                // The CME regression tripwire is on the reader side — a TreeMap revert causes
+                // ConcurrentModificationException when the backing map is mutated by the writer
+                // while the reader coroutine iterates projection.keys / projection.entries.
+                val writerJob =
+                    launch(Dispatchers.Default) {
+                        repeat(totalMutations) { i ->
+                            val extra = trackRepo.create(seedSize + i + 1, "Title-${i % 8}")
+                            playlist.audioItems.add(extra)
+                            playlist.audioItems.remove(extra)
+                        }
+                    }
+
+                val readerJob =
+                    launch(Dispatchers.Default) {
+                        repeat(readerIterations) {
+                            projection.keys.toList()
+                            projection.entries.forEach { it.value.size }
+                        }
+                    }
+
+                writerJob.join()
+                readerJob.join()
+            }
+        }
 })

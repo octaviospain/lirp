@@ -28,7 +28,7 @@ import net.transgressoft.lirp.entity.IdentifiableEntity
  * automatically without any manual notification. For other [AggregateCollectionRef] implementations,
  * only the initial snapshot is captured.
  *
- * Keys are maintained in natural sorted order via a [java.util.TreeMap] backing. The projected
+ * Keys are maintained in natural sorted order via a [java.util.concurrent.ConcurrentSkipListMap] backing. The projected
  * map is read-only; mutations must flow through the source collection.
  *
  * Usage:

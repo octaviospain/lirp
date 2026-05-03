@@ -57,4 +57,11 @@ tasks.withType(Test).configureEach {
             '--add-exports=javafx.graphics/com.sun.javafx.util=ALL-UNNAMED',
             '--add-exports=javafx.graphics/com.sun.glass.ui=ALL-UNNAMED',
             '--add-exports=javafx.graphics/com.sun.glass.ui.monocle=ALL-UNNAMED'
+
+    def includeTags = project.findProperty('kotest.tags.include') as String
+    if (includeTags) {
+        systemProperty 'kotest.tags.include', includeTags
+    } else {
+        systemProperty 'kotest.tags.exclude', 'Stress'
+    }
 }

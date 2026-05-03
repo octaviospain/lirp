@@ -20,14 +20,15 @@ package net.transgressoft.lirp.persistence
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.CollectionChangeEvent
 import java.util.Collections
-import java.util.TreeMap
+import java.util.concurrent.ConcurrentSkipListMap
 import kotlin.reflect.KProperty
 
 /**
  * A read-only grouped view that derives a `Map<PK, List<E>>` from a source collection,
  * grouping entities by a secondary key via [keyExtractor].
  *
- * The projection uses a [TreeMap] for natural key ordering and fires an optional [onChange]
+ * The projection uses a [ConcurrentSkipListMap] for natural key ordering with CME-free iteration,
+ * and fires an optional [onChange]
  * callback when the projection state changes. It has no JavaFX dependency and works with
  * any JVM target including Android and server-side applications.
  *
@@ -39,14 +40,16 @@ import kotlin.reflect.KProperty
  *
  * The map is read-only. All mutations flow through the source collection.
  *
- * **Thread safety:** This class is not thread-safe. All mutations — whether through
- * direct source collection operations or the [onChange] callback — must be invoked
- * from a single thread or externally synchronized. The dominant use case (lirp-core
- * [MutableAggregateList]/[MutableAggregateSet] projection callbacks) satisfies this
- * contract naturally, as collection mutations are serialized by the caller.
+ * **Thread safety:** Iterating [keys], [values], [entries], or calling [size], [containsKey],
+ * and [get] is CME-free under concurrent mutation because the backing map is [ConcurrentSkipListMap].
+ * Reads are weakly-consistent: entries added concurrently may or may not be visible mid-iteration,
+ * but iteration always completes without error. Mutations via [onChange], [MutableAggregateList],
+ * or [MutableAggregateSet] still flow through a single source-collection mutation thread;
+ * the class does not provide cross-thread atomicity for compound read-modify-write of an
+ * individual bucket — that contract is unchanged.
  *
  * @param K the entity ID type, must be [Comparable]
- * @param PK the projection key type, must be [Comparable] (used as [TreeMap] key)
+ * @param PK the projection key type, must be [Comparable] (used as the backing [ConcurrentSkipListMap] key)
  * @param E the entity type
  * @param sourceRef deferred reference to the source collection (resolved on first access)
  * @param keyExtractor grouping function that extracts the projection key from an entity
@@ -55,7 +58,7 @@ class ProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEnti
     private val sourceRef: () -> AggregateCollectionRef<K, E>,
     private val keyExtractor: (E) -> PK
 ) : AbstractMap<PK, List<E>>() {
-    private val backingMap = TreeMap<PK, List<E>>()
+    private val backingMap = ConcurrentSkipListMap<PK, List<E>>()
     private val readOnlyView: Map<PK, List<E>> = Collections.unmodifiableMap(backingMap)
 
     @Volatile
@@ -64,6 +67,9 @@ class ProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEnti
     /**
      * Optional callback invoked after each projection change with the current map state.
      * Fires after every incremental update that results in at least one addition or removal.
+     *
+     * The callback fires on the same thread that performed the source mutation; subscribers
+     * requiring a specific thread must marshal themselves. No cross-thread atomicity is provided.
      */
     internal var onChange: ((Map<PK, List<E>>) -> Unit)? = null
 
@@ -129,13 +135,13 @@ class ProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEnti
     }
 
     private fun removeFromAnyBucket(element: E): Boolean {
-        val iterator = backingMap.entries.iterator()
-        while (iterator.hasNext()) {
-            val entry = iterator.next()
+        for (entry in backingMap.entries) {
             if (element in entry.value) {
                 val filtered = entry.value.filter { it != element }
-                if (filtered.isEmpty()) iterator.remove()
-                else entry.setValue(freezeBucket(filtered))
+                // ConcurrentSkipListMap entry iterators return SimpleImmutableEntry instances whose setValue throws
+                // UnsupportedOperationException — go through the map directly instead.
+                if (filtered.isEmpty()) backingMap.remove(entry.key)
+                else backingMap[entry.key] = freezeBucket(filtered)
                 return true
             }
         }

@@ -151,7 +151,7 @@ fun <T> fxObject(initialValue: T? = null, dispatchToFxThread: Boolean = true): L
  * from the source's current contents. Subsequent adds and removes fire incremental
  * [javafx.collections.MapChangeListener.Change] notifications per affected bucket key.
  *
- * Keys are maintained in natural sorted order via a [java.util.TreeMap] backing.
+ * Keys are maintained in natural sorted order via a [java.util.concurrent.ConcurrentSkipListMap] backing.
  * The projected map is read-only; calling `put` or `remove` on it throws [UnsupportedOperationException].
  *
  * Usage:
