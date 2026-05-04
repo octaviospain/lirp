@@ -41,6 +41,7 @@ dependencies {
     runtimeOnly libs.postgresql
     runtimeOnly libs.mysql
     runtimeOnly libs.mariadb
+    runtimeOnly libs.sqlite
 
     testImplementation platform(libs.junit.bom)
     testImplementation libs.bundles.kotest
@@ -54,6 +55,7 @@ dependencies {
     integrationTestImplementation libs.testcontainers.postgresql
     integrationTestImplementation libs.testcontainers.mysql
     integrationTestImplementation libs.testcontainers.mariadb
+    integrationTestImplementation libs.sqlite
     integrationTestImplementation libs.coroutines.test
     integrationTestImplementation libs.junit.jupiter
     integrationTestRuntimeOnly libs.junit.platform.launcher
@@ -79,6 +81,7 @@ dependencies {
     testFixturesImplementation libs.testcontainers.postgresql
     testFixturesImplementation libs.testcontainers.mysql
     testFixturesImplementation libs.testcontainers.mariadb
+    testFixturesImplementation libs.sqlite
     testFixturesImplementation libs.kotest.runner.junit6
 
     // Consume testFixtures from both test and integrationTest

@@ -47,7 +47,8 @@ object DatabaseTestSupport {
         listOf(
             DbConfig("PostgreSQL") { PostgresContainerSupport.buildDataSource() },
             DbConfig("MySQL") { MysqlContainerSupport.buildDataSource() },
-            DbConfig("MariaDB") { MariaDbContainerSupport.buildDataSource() }
+            DbConfig("MariaDB") { MariaDbContainerSupport.buildDataSource() },
+            DbConfig("SQLite") { SqliteFileSupport.buildDataSource() }
         )
 
     fun dropTable(dataSource: HikariDataSource, tableDef: SqlTableDef<*>) {
@@ -59,7 +60,8 @@ object DatabaseTestSupport {
             val tableNotFound =
                 e.sqlState in listOf("42S02", "42P01") ||
                     e.message?.contains("does not exist", ignoreCase = true) == true ||
-                    e.message?.contains("Unknown table", ignoreCase = true) == true
+                    e.message?.contains("Unknown table", ignoreCase = true) == true ||
+                    e.message?.contains("no such table", ignoreCase = true) == true
             if (!tableNotFound) throw e
         }
     }

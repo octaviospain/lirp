@@ -33,7 +33,8 @@ import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 
 /**
- * Integration tests for [SqlRepository] DDL behaviour against PostgreSQL, MySQL 8.0, and MariaDB 11.
+ * Integration tests for [SqlRepository] DDL behaviour against PostgreSQL, MySQL 8.0, MariaDB 11,
+ * and SQLite.
  *
  * Verifies that tables are auto-created and all 12 [net.transgressoft.lirp.persistence.ColumnType]
  * variants round-trip correctly via CRUD operations, that re-initialization is idempotent, and that
@@ -108,7 +109,13 @@ internal class SqlRepositoryDdlIntegrationTest : FunSpec({
                 val exposedDb = Database.connect(dataSource)
                 val dialectName = transaction(exposedDb) { exposedDb.dialect.name }
 
-                val expectedDialects = mapOf("PostgreSQL" to "PostgreSQL", "MySQL" to "MySQL", "MariaDB" to "MariaDB")
+                val expectedDialects =
+                    mapOf(
+                        "PostgreSQL" to "PostgreSQL",
+                        "MySQL" to "MySQL",
+                        "MariaDB" to "MariaDB",
+                        "SQLite" to "SQLite"
+                    )
                 dialectName shouldBe expectedDialects[db.name]
             } finally {
                 dataSource.close()
