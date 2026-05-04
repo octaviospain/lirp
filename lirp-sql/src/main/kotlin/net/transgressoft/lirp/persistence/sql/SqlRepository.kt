@@ -128,6 +128,13 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      * The created [HikariDataSource] is owned by this repository and will be closed when [close]
      * is called.
      *
+     * For `jdbc:sqlite:` URLs, prefer [SqliteRepository.fileBacked] or
+     * [SqliteRepository.inMemory], which apply the SQLite PRAGMA bundle
+     * (`foreign_keys = ON`, `journal_mode = WAL`, `busy_timeout`,
+     * `synchronous = NORMAL`) on every pooled connection. This constructor
+     * leaves SQLite without those PRAGMAs unless the caller layers them in
+     * via a pre-built [DataSource].
+     *
      * @param jdbcUrl The JDBC connection URL (e.g. `jdbc:postgresql://host/db`).
      * @param tableDef The SQL table definition describing the entity's column mapping.
      * @param poolSize Maximum number of connections in the HikariCP pool. Defaults to 10.
@@ -486,7 +493,16 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     }
 
     companion object {
+        private val log = KotlinLogging.logger(SqlRepository::class.java.name)
+
         private fun buildDataSource(jdbcUrl: String, poolSize: Int, schema: String?): HikariDataSource {
+            if (jdbcUrl.startsWith("jdbc:sqlite:")) {
+                log.warn {
+                    "SQLite JDBC URL '$jdbcUrl' passed to SqlRepository(jdbcUrl, ...) without connectionInitSql; " +
+                        "FK enforcement and WAL mode are not configured. Prefer SqliteRepository.fileBacked(...) " +
+                        "or SqliteRepository.inMemory(...) for the curated PRAGMA bundle."
+                }
+            }
             val config =
                 HikariConfig().apply {
                     this.jdbcUrl = jdbcUrl
