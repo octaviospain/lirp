@@ -71,23 +71,26 @@ All pull requests should:
 The default test run executes the full deterministic suite:
 
 ```bash
-./gradlew test                    # full project
-./gradlew :lirp-core:test         # single module
+gradle test
+gradle :lirp-core:test
+gradle :lirp-fx:test
+gradle :lirp-sql:test
 ```
 
-#### Opt-in stress tests (`Stress` tag)
+#### Stress-tagged tests (`Stress` tag)
 
-Some concurrency regression tests are tagged with `Stress` and **excluded by default**.
+Some concurrency regression tests are tagged with `Stress` and run by default with the
+rest of the suite.
 They are aggressive multi-iteration tripwires that protect invariants like CME-free
 iteration of `ProjectionMap` / `FxProjectionMap`; they are too slow and noisy for the
-default loop but valuable when modifying the affected code.
+short feedback loop, but valuable when modifying the affected code.
 
-Include them with the `kotest.tags.include` Gradle property:
+Skip them with the `kotest.tags.exclude` Gradle property:
 
 ```bash
-./gradlew test -Pkotest.tags.include=Stress
-./gradlew :lirp-core:test -Pkotest.tags.include=Stress
-./gradlew :lirp-fx:test -Pkotest.tags.include=Stress
+gradle test -Pkotest.tags.exclude=Stress
+gradle :lirp-core:test -Pkotest.tags.exclude=Stress
+gradle :lirp-fx:test -Pkotest.tags.exclude=Stress
 ```
 
 Add a new stress-tagged test by attaching the shared tag at the test definition:
@@ -104,6 +107,13 @@ import net.transgressoft.lirp.testing.Stress
 The `Stress` tag is defined once in `lirp-core/src/test/kotlin/net/transgressoft/lirp/testing/Stress.kt`
 and is visible to `lirp-fx` tests via the existing `testImplementation files(...)` wiring,
 so no per-module duplication is needed.
+
+#### Kotest parallelism
+
+`lirp-core` enables Kotest spec-level parallelism while keeping test execution inside each
+spec sequential. This reduces default wall-clock time without changing spec-local fixture
+ordering. JavaFX specs remain serialized because `FxToolkitInit` and JavaFX toolkit state
+are process-wide. Scheduled Stress CI is not part of this setup.
 
 ### Problem Statement Requirement
 

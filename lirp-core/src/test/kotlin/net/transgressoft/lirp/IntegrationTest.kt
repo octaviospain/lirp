@@ -30,6 +30,8 @@ import net.transgressoft.lirp.persistence.CustomerVolatileRepo
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.json.PolymorphicCustomer
 import net.transgressoft.lirp.persistence.json.StandardCustomerJsonFileRepository
+import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.Stress
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.core.spec.style.DescribeSpec
 import io.kotest.engine.spec.tempfile
@@ -48,6 +50,7 @@ import kotlinx.coroutines.withTimeout
 
 /** Integration tests for concurrent access, failure recovery, and resource lifecycle scenarios. */
 @ExperimentalCoroutinesApi
+@SerializeWithReactiveScope
 class IntegrationTest : DescribeSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()
@@ -64,7 +67,7 @@ class IntegrationTest : DescribeSpec({
     }
 
     describe("Concurrent subscriptions") {
-        it("handles 200 subscribers with 2000 events without deadlocking") {
+        it("handles 200 subscribers with 2000 events without deadlocking").config(tags = setOf(Stress)) {
             val subscriberCount = 200
             val eventCount = 2000
 
@@ -108,7 +111,7 @@ class IntegrationTest : DescribeSpec({
     }
 
     describe("Repository state consistency") {
-        it("maintains consistency under 50 coroutines performing 1000 mixed operations each") {
+        it("maintains consistency under 50 coroutines performing 1000 mixed operations each").config(tags = setOf(Stress)) {
             val coroutineCount = 50
             val opsPerCoroutine = 1000
             val entityPoolSize = 100
@@ -262,7 +265,7 @@ class IntegrationTest : DescribeSpec({
     }
 
     describe("Concurrent entity mutations") {
-        it("500 concurrent mutations on same entity do not corrupt state") {
+        it("500 concurrent mutations on same entity do not corrupt state").config(tags = setOf(Stress)) {
             val mutationCount = 500
 
             val entity = LazyTestEntity("concurrent-test")
@@ -297,7 +300,7 @@ class IntegrationTest : DescribeSpec({
     }
 
     describe("Publisher closure and reactivation under load") {
-        it("30 dormant-to-active cycles with 50 mutations each do not silently drop events") {
+        it("30 dormant-to-active cycles with 50 mutations each do not silently drop events").config(tags = setOf(Stress)) {
             val cycleCount = 30
             val mutationsPerCycle = 50
 

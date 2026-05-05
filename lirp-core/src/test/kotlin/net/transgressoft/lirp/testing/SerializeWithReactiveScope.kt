@@ -17,11 +17,10 @@
 
 package net.transgressoft.lirp.testing
 
-import io.kotest.core.Tag
-
 /**
- * Marker tag for heavyweight stress regression tests. By default these tests run with the
- * rest of the suite; pass `-Pkotest.tags.exclude=Stress` to skip them for a faster loop.
- * See module `build.gradle` Kotest tag wiring.
+ * Marks a spec that mutates the process-wide `ReactiveScope` and must therefore be serialized
+ * against other specs with the same annotation when core spec-level parallelism is enabled.
  */
-object Stress : Tag()
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class SerializeWithReactiveScope

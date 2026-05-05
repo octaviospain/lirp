@@ -10,6 +10,7 @@ import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.LirpEventSubscriberBase
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.ReactiveScope
+import net.transgressoft.lirp.testing.SerializeWithReactiveScope
 import io.kotest.assertions.assertSoftly
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainExactly
@@ -42,6 +43,7 @@ private fun arbitraryCustomer(id: Int = -1) =
     }
 
 @ExperimentalCoroutinesApi
+@SerializeWithReactiveScope
 internal class VolatileRepositoryTest : FunSpec({
 
     class SomeClassSubscribedToEvents() : LirpEventSubscriberBase<Customer, CrudEvent.Type, CrudEvent<Int, Customer>>("Some Name") {

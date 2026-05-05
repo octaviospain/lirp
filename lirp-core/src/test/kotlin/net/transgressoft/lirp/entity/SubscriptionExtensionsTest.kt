@@ -26,6 +26,7 @@ import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
 import net.transgressoft.lirp.persistence.AudioPlaylistVolatileRepository
 import net.transgressoft.lirp.persistence.DefaultAudioPlaylist
 import net.transgressoft.lirp.persistence.LirpContext
+import net.transgressoft.lirp.testing.SerializeWithReactiveScope
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
@@ -43,6 +44,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  */
 @DisplayName("Subscription extension functions")
 @OptIn(ExperimentalCoroutinesApi::class)
+@SerializeWithReactiveScope
 class SubscriptionExtensionsTest : StringSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()

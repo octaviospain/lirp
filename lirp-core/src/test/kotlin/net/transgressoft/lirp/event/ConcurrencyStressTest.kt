@@ -19,6 +19,8 @@ package net.transgressoft.lirp.event
 
 import net.transgressoft.lirp.persistence.Customer
 import net.transgressoft.lirp.persistence.CustomerVolatileRepo
+import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.Stress
 import io.kotest.core.spec.style.DescribeSpec
 import io.kotest.matchers.shouldBe
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -47,7 +49,9 @@ private const val TOTAL_EVENTS = WRITER_COUNT * EVENTS_PER_WRITER
  * - Interleaved CRUD and mutation operations from truly concurrent coroutines
  * - Repository state consistency (correct size, no duplicate IDs) after concurrent stress
  */
+@SerializeWithReactiveScope
 class ConcurrencyStressTest : DescribeSpec({
+    tags(Stress)
 
     afterSpec {
         ReactiveScope.resetDefaultIoScope()

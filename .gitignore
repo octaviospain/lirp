@@ -2,6 +2,7 @@
 **/build/
 !**/src/**/build/
 *.log
+.env
 
 # Ignore Gradle GUI config
 gradle-app.setting
@@ -36,8 +37,12 @@ replay_pid*
 # Agentic coding tools
 .serena
 .claude
+.codexignore
+.codex
+tasks
 .planning
 CLAUDE.md
+AGENTS.md
 .mcp.json
 .graphifyignore
 **/graphify-out/**

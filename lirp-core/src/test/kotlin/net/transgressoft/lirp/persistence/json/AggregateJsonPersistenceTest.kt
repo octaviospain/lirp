@@ -27,6 +27,7 @@ import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpRepository
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.MutableAudioPlaylist
+import net.transgressoft.lirp.testing.SerializeWithReactiveScope
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempfile
 import io.kotest.matchers.collections.shouldContainExactly
@@ -57,6 +58,7 @@ import kotlinx.serialization.builtins.serializer
  * - Re-wiring of bubble-up subscriptions after reload
  */
 @ExperimentalCoroutinesApi
+@SerializeWithReactiveScope
 class AggregateJsonPersistenceTest : FunSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()

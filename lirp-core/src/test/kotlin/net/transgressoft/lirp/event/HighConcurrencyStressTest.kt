@@ -18,6 +18,8 @@
 package net.transgressoft.lirp.event
 
 import net.transgressoft.lirp.persistence.CustomerVolatileRepo
+import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.Stress
 import io.kotest.core.spec.style.DescribeSpec
 import io.kotest.matchers.shouldBe
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -41,7 +43,9 @@ private const val TOTAL_EVENTS = WRITER_COUNT * EVENTS_PER_WRITER
  * (never test dispatchers) and [CountDownLatch] for bounded waits. No [Thread.sleep] or fixed
  * delays are used. Subscribers are always registered before writers start.
  */
+@SerializeWithReactiveScope
 class HighConcurrencyStressTest : DescribeSpec({
+    tags(Stress)
 
     afterSpec {
         ReactiveScope.resetDefaultIoScope()

@@ -18,6 +18,7 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.event.ReactiveScope
+import net.transgressoft.lirp.testing.SerializeWithReactiveScope
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -38,6 +39,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  */
 @DisplayName("AggregateCollectionRefDelegate")
 @OptIn(ExperimentalCoroutinesApi::class)
+@SerializeWithReactiveScope
 internal class AggregateCollectionRefResolutionTest : StringSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()

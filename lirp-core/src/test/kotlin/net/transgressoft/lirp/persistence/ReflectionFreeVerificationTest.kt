@@ -19,6 +19,7 @@ package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.event.ReactiveScope
+import net.transgressoft.lirp.testing.SerializeWithReactiveScope
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.booleans.shouldBeFalse
@@ -42,6 +43,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  */
 @DisplayName("RegistryBase")
 @OptIn(ExperimentalCoroutinesApi::class)
+@SerializeWithReactiveScope
 internal class ReflectionFreeVerificationTest : FunSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()

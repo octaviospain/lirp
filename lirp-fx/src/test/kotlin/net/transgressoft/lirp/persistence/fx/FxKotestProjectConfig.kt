@@ -15,13 +15,19 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>. *
  ******************************************************************************/
 
-package net.transgressoft.lirp.testing
+package net.transgressoft.lirp.persistence.fx
 
-import io.kotest.core.Tag
+import io.kotest.core.config.AbstractProjectConfig
+import io.kotest.engine.concurrency.SpecExecutionMode
+import io.kotest.engine.concurrency.TestExecutionMode
 
 /**
- * Marker tag for heavyweight stress regression tests. By default these tests run with the
- * rest of the suite; pass `-Pkotest.tags.exclude=Stress` to skip them for a faster loop.
- * See module `build.gradle` Kotest tag wiring.
+ * Kotest project configuration for JavaFX tests.
+ *
+ * JavaFX toolkit state is process-wide, so FX specs and tests remain serialized even when
+ * other modules opt into spec-level parallelism.
  */
-object Stress : Tag()
+class FxKotestProjectConfig : AbstractProjectConfig() {
+    override val specExecutionMode = SpecExecutionMode.Sequential
+    override val testExecutionMode = TestExecutionMode.Sequential
+}

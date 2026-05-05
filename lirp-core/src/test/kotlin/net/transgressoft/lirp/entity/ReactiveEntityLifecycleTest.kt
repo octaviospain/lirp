@@ -22,6 +22,7 @@ import net.transgressoft.lirp.event.MutationEvent.Type.MUTATE
 import net.transgressoft.lirp.event.ReactiveMutationEvent
 import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.Customer
+import net.transgressoft.lirp.testing.SerializeWithReactiveScope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
@@ -37,6 +38,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * Tests for [ReactiveEntityBase] lifecycle states: Created, Active, Dormant, and Closed.
  */
 @ExperimentalCoroutinesApi
+@SerializeWithReactiveScope
 class ReactiveEntityLifecycleTest : StringSpec({
     val testDispatcher = UnconfinedTestDispatcher()
     val testScope = CoroutineScope(testDispatcher)

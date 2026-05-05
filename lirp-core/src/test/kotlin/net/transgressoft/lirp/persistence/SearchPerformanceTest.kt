@@ -3,6 +3,7 @@ package net.transgressoft.lirp.persistence
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.CrudEvent.Type.READ
 import net.transgressoft.lirp.event.ReactiveScope
+import net.transgressoft.lirp.testing.SerializeWithReactiveScope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
@@ -78,6 +79,7 @@ class IndexedProductVolatileRepo : VolatileRepository<Int, IndexedProduct>("Inde
  */
 @ExperimentalCoroutinesApi
 @DisplayName("VolatileRepository search performance")
+@SerializeWithReactiveScope
 internal class SearchPerformanceTest : StringSpec({
 
     lateinit var ctx: LirpContext

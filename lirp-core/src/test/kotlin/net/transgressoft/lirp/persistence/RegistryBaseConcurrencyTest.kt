@@ -18,6 +18,8 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.event.ReactiveScope
+import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.Stress
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.property.Arb
@@ -48,7 +50,9 @@ private fun arbitraryCustomer(id: Int = -1) =
  * concurrently via another coroutine.
  */
 @ExperimentalCoroutinesApi
+@SerializeWithReactiveScope
 internal class RegistryBaseConcurrencyTest : StringSpec({
+    tags(Stress)
 
     val testDispatcher = UnconfinedTestDispatcher()
     val testScope = CoroutineScope(testDispatcher)
