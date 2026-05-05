@@ -106,6 +106,37 @@ class AlbumRepository(context: LirpContext) :
 
 Reads are served from the in-memory `ConcurrentHashMap`, so `findById` avoids SQL round-trips. Write behavior differs by operation type; refer to the SQL Persistence wiki for current flush/transaction details.
 
+## Query DSL
+
+LIRP provides a type-safe, Kotlin-native query DSL for filtering, ordering, and paginating entities directly from any `Repository`. Predicates compose with infix operators; the planner automatically routes indexed equality checks through secondary indexes and falls back to in-memory scans for range and composite predicates.
+
+```kotlin
+// Equality filter — auto-routes through @Indexed if available
+val books = repo.query { where { Product::category eq "books" } }.toList()
+
+// Range filter
+val premium = repo.query { where { Product::price gte 50.0 } }.toList()
+
+// Composite predicates with AND, OR, NOT
+val featured = repo.query {
+    where {
+        (Product::category eq "electronics") and (Product::price gt 100.0)
+    }
+}.toList()
+
+// Ordering and pagination
+val page = repo.query {
+    where { Product::stock gt 0 }
+    orderBy(Product::price, Direction.ASC)
+    offset(20)
+    limit(10)
+}.toList()
+```
+
+The returned `Sequence<T>` is lazy — no evaluation occurs until a terminal operation (`toList`, `firstOrNull`, `count`, etc.). When `activateEvents(READ)` is enabled, a `StandardCrudEvent.Read` fires on every terminal operation.
+
+See the wiki page [Query DSL](https://github.com/octaviospain/lirp/wiki/Query-DSL) for the full operator reference, planner strategies, and Java interop notes.
+
 | Persistence target | Module | Status |
 |---|---|---|
 | PostgreSQL, MySQL, MariaDB | `lirp-sql` | Supported |
@@ -144,6 +175,7 @@ For Gradle without the LIRP plugin (manual KSP configuration), **Maven consumers
 - **Two subscription levels** — repository-level `CrudEvent`s and entity-level `MutationEvent`s
 - **DDD aggregate references** — `@Aggregate` with single-entity (`aggregate`, `optionalAggregate`) and collection (`aggregateList`, `aggregateSet`, `mutableAggregateList`, `mutableAggregateSet`) delegates, configurable cascade (DETACH / CASCADE / RESTRICT / NONE)
 - **Secondary indexes** — `@Indexed` for O(1) equality lookups
+- **Type-safe Query DSL** — Kotlin-native filtering, ordering, and pagination with automatic index routing
 - **Optimistic locking** — `@Version` triggers versioned UPDATE/DELETE; conflicts surface as `StandardCrudEvent.Conflict` with canonical state
 - **Convention-over-configuration KSP codegen** — `@PersistenceMapping` generates table definitions; annotations only when you need to customize
 - **JSON persistence** — debounced file writes via `JsonFileRepository`, zero-reflection `LirpEntitySerializer`
@@ -159,7 +191,7 @@ LIRP's in-memory-first architecture has trade-offs that influence where it fits 
 - **Full dataset loaded into memory** — `SqlRepository` and `JsonFileRepository` load every row into a `ConcurrentHashMap` on initialization. This enables instant reads and O(1) indexed lookups but caps practical dataset size at what the JVM heap can hold (comfortable up to low thousands of entities; tens of thousands need heap tuning; hundreds of thousands are impractical).
 - **Optimistic writes, eventual persistence** — in-memory state is always authoritative; a crash between enqueue and flush loses uncommitted mutations. The debounce window (default 100 ms, max 1 s) defines the data-loss window.
 - **Single-node only** — no cross-process replication or distributed cache invalidation. LIRP is not a substitute for a shared database layer in a multi-instance deployment.
-- **No query language** — reads are key lookups, index lookups, or full-scan predicates. Complex joins, aggregations, or range queries should be handled at the SQL level outside LIRP.
+- **No joins or SQL aggregations** — the Query DSL operates on a single repository at a time. Cross-repository joins, GROUP BY, or window functions should be handled at the SQL level outside LIRP.
 
 **Best suited for:** microservices or bounded contexts with small-to-medium datasets where domain reactivity and transparent persistence matter more than raw query power — configuration stores, user preference services, catalog management, any context where the working set fits comfortably in memory.
 

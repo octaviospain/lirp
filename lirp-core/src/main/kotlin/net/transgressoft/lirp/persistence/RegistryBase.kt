@@ -32,6 +32,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.function.Predicate
 import java.util.stream.Stream
 import java.util.stream.StreamSupport
+import kotlin.reflect.KProperty1
 
 /**
  * Base class for read-only entity registries with reactive query capabilities.
@@ -159,9 +160,9 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
      */
     protected fun indexEntity(entity: T) {
         val entries = indexEntries ?: return
-        for ((indexName, getter) in entries) {
-            val value = getter(entity) ?: continue
-            secondaryIndexes[indexName]
+        for (entry in entries) {
+            val value = entry.getter(entity) ?: continue
+            secondaryIndexes[entry.indexName]
                 ?.computeIfAbsent(value) { ConcurrentHashMap.newKeySet() }
                 ?.add(entity)
         }
@@ -172,9 +173,9 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
      */
     protected fun deindexEntity(entity: T) {
         val entries = indexEntries ?: return
-        for ((indexName, getter) in entries) {
-            val value = getter(entity) ?: continue
-            secondaryIndexes[indexName]
+        for (entry in entries) {
+            val value = entry.getter(entity) ?: continue
+            secondaryIndexes[entry.indexName]
                 ?.get(value)
                 ?.remove(entity)
         }
@@ -187,6 +188,25 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
     protected fun clearSecondaryIndexes() {
         secondaryIndexes.values.forEach { it.clear() }
     }
+
+    /**
+     * Returns `true` if the given property corresponds to a declared `@Indexed` property
+     * on this registry's entity type.
+     *
+     * Matches by [IndexEntry.propertyName] so that properties with a custom
+     * `@Indexed(name = "...")` are correctly identified.
+     */
+    internal fun isPropertyIndexed(prop: KProperty1<T, *>): Boolean =
+        indexEntries?.any { it.propertyName == prop.name } == true
+
+    /**
+     * Returns the index name for a property, or `null` if the property is not indexed.
+     *
+     * The returned name is the resolved index name (from [Indexed.name] or the property name),
+     * suitable for passing to [findByIndex].
+     */
+    internal fun indexNameFor(prop: KProperty1<T, *>): String? =
+        indexEntries?.find { it.propertyName == prop.name }?.indexName
 
     /**
      * Loads the KSP-generated [LirpRefAccessor] for the entity's class via a convention-based
