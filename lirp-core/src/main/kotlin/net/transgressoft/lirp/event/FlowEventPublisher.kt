@@ -369,6 +369,8 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
             log.trace { "Enabled event types from $id: $activatedEventTypes" }
         }
 
+        override fun isEventActive(type: ET): Boolean = type in activatedEventTypes
+
         override fun toString() = "FlowEventPublisher(id=$id, activatedEventTypes=$activatedEventTypes)"
 
         private fun cancelledSubscription(): LirpEventSubscription<in LirpEntity, ET, E> =

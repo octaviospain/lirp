@@ -98,6 +98,13 @@ interface LirpEventPublisher<ET : EventType, out E : LirpEvent<ET>> : Flow.Publi
     fun disableEvents(vararg types: @UnsafeVariance ET)
 
     /**
+     * Returns `true` if the given event type is currently activated for emission.
+     *
+     * @param type the event type to check
+     */
+    fun isEventActive(type: @UnsafeVariance ET): Boolean
+
+    /**
      * Permanently closes this publisher.
      *
      * After closing, [emitAsync] and all [subscribe] overloads throw [IllegalStateException].

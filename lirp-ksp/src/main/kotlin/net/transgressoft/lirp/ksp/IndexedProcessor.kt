@@ -88,9 +88,19 @@ class IndexedProcessor(
                 fileName = accessorName
             )
 
+        fun String.escapeForKotlinStringLiteral(): String =
+            replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\\$")
+                .replace("\n", "\\n").replace("\r", "\\r")
+
         val entriesCode =
             entries.joinToString(",\n        ") { meta ->
-                "IndexEntry(\"${meta.indexName}\") { it.${meta.propertyName} }"
+                val idx = meta.indexName.escapeForKotlinStringLiteral()
+                val prop = meta.propertyName // identifier, not a string literal
+                if (meta.indexName == meta.propertyName) {
+                    "IndexEntry(\"$idx\") { it.$prop }"
+                } else {
+                    "IndexEntry(\"$idx\", \"$prop\") { it.$prop }"
+                }
             }
 
         file.write(
