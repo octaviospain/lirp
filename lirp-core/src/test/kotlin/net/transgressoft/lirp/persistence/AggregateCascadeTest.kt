@@ -20,6 +20,7 @@ package net.transgressoft.lirp.persistence
 import net.transgressoft.lirp.event.AggregateMutationEvent
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.ReactiveScope
+import net.transgressoft.lirp.testing.SerializeWithReactiveScope
 import io.kotest.assertions.nondeterministic.continually
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
@@ -47,6 +48,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  */
 @DisplayName("AggregateCascadeTest")
 @OptIn(ExperimentalCoroutinesApi::class)
+@SerializeWithReactiveScope
 internal class AggregateCascadeTest : FunSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()

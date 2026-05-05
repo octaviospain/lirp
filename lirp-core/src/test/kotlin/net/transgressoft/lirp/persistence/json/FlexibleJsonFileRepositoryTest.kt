@@ -1,6 +1,7 @@
 package net.transgressoft.lirp.persistence.json
 
 import net.transgressoft.lirp.event.ReactiveScope
+import net.transgressoft.lirp.testing.SerializeWithReactiveScope
 import io.kotest.assertions.json.shouldEqualJson
 import io.kotest.assertions.throwables.shouldThrowExactly
 import io.kotest.core.spec.style.StringSpec
@@ -14,6 +15,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 @ExperimentalCoroutinesApi
+@SerializeWithReactiveScope
 class FlexibleJsonFileRepositoryTest : StringSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()

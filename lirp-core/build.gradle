@@ -33,10 +33,9 @@ dependencies {
 }
 
 tasks.withType(Test).configureEach {
-    def includeTags = project.findProperty('kotest.tags.include') as String
-    if (includeTags) {
-        systemProperty 'kotest.tags.include', includeTags
-    } else {
-        systemProperty 'kotest.tags.exclude', 'Stress'
+    systemProperty 'kotest.framework.config.fqn', 'net.transgressoft.lirp.testing.CoreKotestProjectConfig'
+    def excludeTags = project.findProperty('kotest.tags.exclude') as String
+    if (excludeTags) {
+        systemProperty 'kotest.tags.exclude', excludeTags
     }
 }

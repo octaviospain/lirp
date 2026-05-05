@@ -113,7 +113,7 @@ subprojects {
         properties {
             property 'sonar.moduleKey', "${project.name}"
             property 'sonar.sources', 'src/main'
-            property 'sonar.exclusions', 'src/test/**,src/integrationTest/**'
+            property 'sonar.test.exclusions', 'src/test/**,src/integrationTest/**, src/testFixtures/**'
         }
     }
 

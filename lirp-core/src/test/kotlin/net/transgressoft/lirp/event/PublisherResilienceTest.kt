@@ -19,6 +19,7 @@ package net.transgressoft.lirp.event
 
 import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
 import net.transgressoft.lirp.event.StandardCrudEvent.Create
+import net.transgressoft.lirp.testing.SerializeWithReactiveScope
 import io.kotest.core.spec.style.DescribeSpec
 import io.kotest.matchers.shouldBe
 import java.util.concurrent.atomic.AtomicInteger
@@ -38,6 +39,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * [ReactiveScope] behaviour so that child coroutine failures do not cancel the parent.
  */
 @ExperimentalCoroutinesApi
+@SerializeWithReactiveScope
 class PublisherResilienceTest : DescribeSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()

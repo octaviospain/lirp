@@ -28,6 +28,7 @@ import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.MutableAudioPlaylist
 import net.transgressoft.lirp.persistence.PlaylistHierarchyJsonFileRepository
 import net.transgressoft.lirp.persistence.Repository
+import net.transgressoft.lirp.testing.SerializeWithReactiveScope
 import io.kotest.core.annotation.DisplayName
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
@@ -52,6 +53,7 @@ import kotlinx.serialization.builtins.serializer
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @DisplayName("Music-commons integration (JSON)")
+@SerializeWithReactiveScope
 class MusicCommonsJsonIntegrationTest : MusicCommonsIntegrationTestBase() {
 
     val testDispatcher = UnconfinedTestDispatcher()

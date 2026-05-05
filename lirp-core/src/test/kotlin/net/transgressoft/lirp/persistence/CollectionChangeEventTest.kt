@@ -21,6 +21,7 @@ import net.transgressoft.lirp.event.AggregateMutationEvent
 import net.transgressoft.lirp.event.CollectionChangeEvent
 import net.transgressoft.lirp.event.ReactiveMutationEvent
 import net.transgressoft.lirp.event.ReactiveScope
+import net.transgressoft.lirp.testing.SerializeWithReactiveScope
 import io.kotest.assertions.nondeterministic.continually
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
@@ -41,6 +42,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  */
 @DisplayName("CollectionChangeEvent emission")
 @OptIn(ExperimentalCoroutinesApi::class)
+@SerializeWithReactiveScope
 internal class CollectionChangeEventTest : StringSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()

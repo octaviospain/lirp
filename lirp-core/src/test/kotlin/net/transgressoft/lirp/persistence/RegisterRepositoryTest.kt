@@ -23,6 +23,7 @@ import net.transgressoft.lirp.persistence.json.BubbleUpOrderJsonFileRepository
 import net.transgressoft.lirp.persistence.json.JsonFileRepository
 import net.transgressoft.lirp.persistence.json.MutableAudioPlaylistJsonFileRepository
 import net.transgressoft.lirp.persistence.json.lirpSerializer
+import net.transgressoft.lirp.testing.SerializeWithReactiveScope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
@@ -48,6 +49,7 @@ import kotlinx.serialization.builtins.serializer
  */
 @ExperimentalCoroutinesApi
 @DisplayName("RegistryBase.registerRepository()")
+@SerializeWithReactiveScope
 internal class RegisterRepositoryTest : StringSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()

@@ -10,6 +10,8 @@ import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpDeserializationException
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.PersistentRepositoryBase
+import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.Stress
 import io.kotest.assertions.json.shouldEqualJson
 import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.assertions.throwables.shouldNotThrowAny
@@ -40,6 +42,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 @ExperimentalCoroutinesApi
+@SerializeWithReactiveScope
 class JsonFileRepositoryTest : DescribeSpec({
     val testDispatcher = UnconfinedTestDispatcher()
     val testScope = CoroutineScope(testDispatcher)
@@ -261,7 +264,7 @@ class JsonFileRepositoryTest : DescribeSpec({
     }
 
     describe("Concurrency") {
-        it("maintains state under concurrent additions") {
+        it("maintains state under concurrent additions").config(tags = setOf(Stress)) {
             val testCustomers = (1..100).map { arbitraryStandardCustomer(it).next() }
             testScope.launch {
                 testCustomers.chunked(10).forEach { chunk ->
@@ -276,7 +279,7 @@ class JsonFileRepositoryTest : DescribeSpec({
             reloadedRepo.close()
         }
 
-        it("publishes create events under concurrency") {
+        it("publishes create events under concurrency").config(tags = setOf(Stress)) {
             val events = Collections.synchronizedList(mutableListOf<CrudEvent<Int, PolymorphicCustomer>>())
             val subscription: LirpEventSubscription<in PolymorphicCustomer, CrudEvent.Type, CrudEvent<Int, PolymorphicCustomer>> =
                 repository.subscribe(CREATE) { events.add(it) }
@@ -293,7 +296,7 @@ class JsonFileRepositoryTest : DescribeSpec({
             StandardCustomerJsonFileRepository(jsonFile).also { it.size() shouldBe reloadSize }.close()
         }
 
-        it("remains consistent under concurrent mutations") {
+        it("remains consistent under concurrent mutations").config(tags = setOf(Stress)) {
             (1..20).forEach { id -> repository.create(id, "Customer-$id", "c$id@example.com") }
             testDispatcher.scheduler.advanceUntilIdle()
             (1..5).map { _ ->

@@ -26,6 +26,7 @@ import net.transgressoft.lirp.persistence.EntityCVolatileRepo
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.MutableRefOrderVolatileRepo
 import net.transgressoft.lirp.persistence.OrderVolatileRepo
+import net.transgressoft.lirp.testing.SerializeWithReactiveScope
 import io.kotest.assertions.nondeterministic.continually
 import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.core.annotation.DisplayName
@@ -50,6 +51,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 @DisplayName("AggregateBubbleUpTest")
 @OptIn(ExperimentalCoroutinesApi::class)
 @Suppress("UNCHECKED_CAST")
+@SerializeWithReactiveScope
 internal class AggregateBubbleUpTest : FunSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()

@@ -18,6 +18,7 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.event.ReactiveScope
+import net.transgressoft.lirp.testing.SerializeWithReactiveScope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
@@ -40,6 +41,7 @@ import kotlinx.coroutines.test.TestCoroutineScheduler
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @DisplayName("PersistentRepositoryBase debounce queue")
+@SerializeWithReactiveScope
 internal class PersistentRepositoryDebounceTest : StringSpec({
 
     val testScheduler = TestCoroutineScheduler()
