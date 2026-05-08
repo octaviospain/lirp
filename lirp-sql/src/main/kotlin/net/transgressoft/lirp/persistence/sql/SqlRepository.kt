@@ -33,11 +33,16 @@ import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.jetbrains.exposed.v1.core.Column
+import org.jetbrains.exposed.v1.core.ForeignKeyConstraint
+import org.jetbrains.exposed.v1.core.ReferenceOption
 import org.jetbrains.exposed.v1.core.ResultRow
+import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.exceptions.ExposedSQLException
 import org.jetbrains.exposed.v1.jdbc.Database
+import org.jetbrains.exposed.v1.jdbc.JdbcTransaction
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.batchInsert
 import org.jetbrains.exposed.v1.jdbc.deleteAll
@@ -49,6 +54,8 @@ import org.jetbrains.exposed.v1.jdbc.update
 import java.util.UUID
 import javax.sql.DataSource
 import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
+import kotlin.uuid.toJavaUuid
 import kotlin.uuid.toKotlinUuid
 
 /**
@@ -151,18 +158,50 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         loadOnInit: Boolean = true
     ) : this(buildDataSource(jdbcUrl, poolSize, schema), tableDef, true, loadOnInit)
 
-    private val exposedTable: ExposedTable = ExposedTableInterpreter().interpret(tableDef)
+    private val interpreter = ExposedTableInterpreter()
+    private val exposedTable: ExposedTable = interpreter.interpret(tableDef)
     private val table: Table = exposedTable.table
     private val pkCol: Column<*> = exposedTable.columnsByName.getValue(tableDef.columns.first { it.primaryKey }.name)
     private val versionCol: Column<Long>? = exposedTable.versionCol
     private val db: Database = Database.connect(dataSource)
     private val log = KotlinLogging.logger(javaClass.name)
 
+    /**
+     * Cached interpretations of this entity's junction descriptors, keyed by descriptor reference.
+     * Reused across `loadFromStore` (and, in subsequent commits, `writePending` and
+     * `installJunctionForeignKeys`) so we don't re-allocate Exposed [Table] objects on every call.
+     */
+    private val junctionTables: Map<JunctionTableDef, ExposedJunctionTable> =
+        tableDef.junctionTableDefs.associateWith { interpreter.interpretJunction(it) }
+
     init {
+        // Fail-loud: a SqlTableDef that declares junction descriptors but supplies no matching
+        // accessors would silently skip every junction-row write at flush time, producing schema
+        // rows that never reflect the in-memory collection state. Hand-written SqlTableDefs MUST
+        // either supply matching junctionAccessors or use the @PersistenceMapping KSP processor.
+        val descriptorSet = tableDef.junctionTableDefs.toSet()
+        val accessorDescriptorSet = tableDef.junctionAccessors.map { it.descriptor }.toSet()
+        check(
+            tableDef.junctionTableDefs.size == tableDef.junctionAccessors.size &&
+                descriptorSet == accessorDescriptorSet
+        ) {
+            "SqlTableDef '${tableDef::class.qualifiedName}' declares ${tableDef.junctionTableDefs.size} " +
+                "junction descriptor(s) but ${tableDef.junctionAccessors.size} junction accessor(s). " +
+                "Hand-written SqlTableDefs must implement junctionAccessors when junctionTableDefs is non-empty. " +
+                "Use the @PersistenceMapping KSP processor to generate both."
+        }
+
         try {
-            // Auto-create the table if it does not yet exist (always, even when loadOnInit=false)
+            // Auto-create the entity table and every junction table that backs an aggregate
+            // collection. Junction tables are created WITHOUT FK constraints — the referenced
+            // entity table may belong to a not-yet-constructed SqlRepository, and adding the FK
+            // up-front would fail with "referenced table does not exist". FKs install via
+            // installJunctionForeignKeys() once every repository has materialised its entity table.
             transaction(db = db) {
                 SchemaUtils.create(table)
+                for (junction in junctionTables.values) {
+                    SchemaUtils.create(junction.table)
+                }
             }
             if (loadOnInit) load()
         } catch (e: Exception) {
@@ -174,6 +213,102 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     }
 
     /**
+     * Installs the junction-table foreign-key constraints for this repository.
+     *
+     * Junction tables are created without FK constraints during [init] because the referenced
+     * item table may belong to a different [SqlRepository] that has not yet been constructed.
+     * Once every repository in the application has initialised, call this method on each
+     * repository (or once via the application bootstrapper) to install the constraints. The
+     * parent-side FK is always emitted with `ON DELETE CASCADE` so deleting a parent row reaps
+     * the orphaned junction rows; the item-side FK uses
+     * `descriptor.itemFkOnDelete` (or is skipped entirely when the action is `NONE`).
+     *
+     * Safe to call multiple times — duplicate-constraint errors raised by the database are
+     * swallowed so the operation is effectively idempotent.
+     */
+    fun installJunctionForeignKeys() {
+        if (junctionTables.isEmpty()) return
+
+        // Each FK is installed in its own transaction. Postgres (and some other dialects) abort the
+        // entire transaction on a DDL error — even a swallowed duplicate-constraint error poisons the
+        // connection for subsequent statements in the same transaction. Independent transactions keep
+        // each idempotent install isolated so a duplicate on the parent-side FK does not prevent the
+        // item-side FK from being installed on the first call.
+        for (junction in junctionTables.values) {
+            val descriptor = junction.descriptor
+
+            transaction(db = db) {
+                installFk(
+                    fromCol = junction.parentIdCol,
+                    targetTableName = descriptor.parentTableName,
+                    targetColType = parentIdJunctionType(descriptor),
+                    onDelete = ReferenceOption.CASCADE
+                )
+            }
+
+            val itemRefOption = cascadeToReferenceOption(descriptor.itemFkOnDelete)
+            if (itemRefOption != null) {
+                transaction(db = db) {
+                    installFk(
+                        fromCol = junction.itemIdCol,
+                        targetTableName = descriptor.itemTableName,
+                        targetColType = itemIdJunctionType(descriptor),
+                        onDelete = itemRefOption
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Builds an Exposed [ForeignKeyConstraint] anchored at a shadow target table whose only
+     * column is `id` with the descriptor-declared type, and executes the resulting DDL inside the
+     * current transaction. Duplicate-constraint failures are caught and logged at DEBUG so
+     * repeated calls are no-ops.
+     */
+    private fun JdbcTransaction.installFk(
+        fromCol: Column<Any>,
+        targetTableName: String,
+        targetColType: net.transgressoft.lirp.persistence.ColumnType,
+        onDelete: ReferenceOption
+    ) {
+        val shadowTarget = ShadowEntityIdTable(targetTableName, targetColType)
+
+        @Suppress("UNCHECKED_CAST")
+        val targetCol = shadowTarget.idColumn as Column<Any>
+
+        val fk =
+            ForeignKeyConstraint(
+                target = targetCol,
+                from = fromCol,
+                onUpdate = null,
+                onDelete = onDelete,
+                name = null
+            )
+        for (sql in SchemaUtils.createFKey(fk)) {
+            try {
+                exec(sql)
+            } catch (e: ExposedSQLException) {
+                // Duplicate FK constraint is idempotent — already installed by a prior call.
+                // Only swallow errors that indicate the constraint already exists; rethrow everything
+                // else (missing referenced table, type mismatch, permissions, etc.) so callers are
+                // not silently left without the FK constraint.
+                if (isDuplicateConstraintException(e)) {
+                    log.debug(e) { "installJunctionForeignKeys: skipping '$sql' — duplicate constraint (SQLState=${e.sqlState})" }
+                } else {
+                    throw e
+                }
+            }
+        }
+    }
+
+    private fun parentIdJunctionType(descriptor: JunctionTableDef): net.transgressoft.lirp.persistence.ColumnType =
+        descriptor.columns.first { it.name == "parent_id" }.type
+
+    private fun itemIdJunctionType(descriptor: JunctionTableDef): net.transgressoft.lirp.persistence.ColumnType =
+        descriptor.columns.first { it.name == "item_id" }.type
+
+    /**
      * Loads all existing rows from the database into memory.
      *
      * Called by [load] as part of the template method. Reads the full table contents via a
@@ -183,12 +318,94 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      * @return a map of entity ID to entity from the database, or an empty map if the table is empty.
      */
     override fun loadFromStore(): Map<K, R> {
-        val entities =
+        val byId =
             transaction(db = db) {
-                table.selectAll().map { row -> tableDef.fromRow(row, table) }
+                val entities = table.selectAll().map { row -> tableDef.fromRow(row, table) }
+                val byId = entities.associateBy { it.id }
+
+                if (junctionTables.isEmpty()) return@transaction byId
+
+                // Issue one ordered SELECT per junction descriptor and group the rows in process by
+                // parent_id. For ordered descriptors, sort the per-parent ID list by the position
+                // column before handing it off to applyJunctionRows. Junction rows referencing
+                // parent IDs that are not present in this entity result set (orphans) are dropped
+                // silently — the FK ON DELETE CASCADE installed later by
+                // installJunctionForeignKeys() handles SQL-side cleanup.
+                for (junction in junctionTables.values) {
+                    val descriptor = junction.descriptor
+                    val grouped = LinkedHashMap<Any, MutableList<Pair<Any, Int?>>>()
+
+                    val rowsQuery = junction.table.selectAll()
+                    val orderedQuery =
+                        junction.positionCol?.let { posCol ->
+                            rowsQuery.orderBy(junction.parentIdCol, SortOrder.ASC).orderBy(posCol, SortOrder.ASC)
+                        } ?: rowsQuery.orderBy(junction.parentIdCol, SortOrder.ASC)
+
+                    for (row in orderedQuery) {
+                        val parentId = toDomainId(row[junction.parentIdCol])
+                        val itemId = toDomainId(row[junction.itemIdCol])
+                        val position = junction.positionCol?.let { row[it] }
+                        grouped.getOrPut(parentId) { mutableListOf() }.add(itemId to position)
+                    }
+
+                    for ((parentId, pairs) in grouped) {
+                        @Suppress("UNCHECKED_CAST")
+                        val entity = byId[parentId as K] ?: continue
+                        val orderedIds: List<Any> =
+                            if (descriptor.isOrdered) {
+                                pairs.sortedBy { it.second ?: 0 }.map { it.first }
+                            } else {
+                                pairs.map { it.first }
+                            }
+                        tableDef.applyJunctionRows(entity, descriptor, orderedIds)
+                    }
+                }
+                byId
             }
         dirty.set(false)
-        return entities.associateBy { it.id }
+        return byId
+    }
+
+    /**
+     * Fetches junction rows for [entity] from the database and applies them via
+     * [SqlTableDef.applyJunctionRows]. Issues one SELECT per junction table, filtered to the
+     * entity's primary key, so the query set is proportional to the number of collection fields
+     * rather than the total entity count. No-op when [junctionTables] is empty.
+     *
+     * Must be called from code that is either within an active Exposed transaction or can start a
+     * new one; opens its own [transaction] block when junction tables are present.
+     */
+    private fun hydrateJunctionsForEntity(entity: R) {
+        if (junctionTables.isEmpty()) return
+        val exposedId = toExposedId(entity.id)
+        transaction(db = db) {
+            for (junction in junctionTables.values) {
+                val descriptor = junction.descriptor
+                val rows =
+                    junction.table.selectAll()
+                        .where {
+                            @Suppress("UNCHECKED_CAST")
+                            (junction.parentIdCol as Column<Any?>).eq(exposedId)
+                        }
+                val orderedRows =
+                    junction.positionCol?.let { posCol ->
+                        rows.orderBy(posCol, SortOrder.ASC)
+                    } ?: rows
+                val pairs =
+                    orderedRows.map { row ->
+                        val itemId = toDomainId(row[junction.itemIdCol])
+                        val position = junction.positionCol?.let { row[it] }
+                        itemId to position
+                    }
+                val orderedIds: List<Any> =
+                    if (descriptor.isOrdered) {
+                        pairs.sortedBy { it.second ?: 0 }.map { it.first }
+                    } else {
+                        pairs.map { it.first }
+                    }
+                tableDef.applyJunctionRows(entity, descriptor, orderedIds)
+            }
+        }
     }
 
     /**
@@ -270,6 +487,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                 stmt[col as Column<Any?>] = value
             }
         }
+        syncJunctionRows(op.entity)
     }
 
     private fun executeBatchInsert(op: PendingBatchInsert<K, R>) {
@@ -279,6 +497,44 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                 // Safe: col was registered by ExposedTableInterpreter from the declared LirpTableDef column type.
                 @Suppress("UNCHECKED_CAST")
                 this[col as Column<Any?>] = value
+            }
+        }
+        // Sync junction rows after the batch insert. A future optimisation could batch-insert every
+        // junction row in a single statement; per-entity is correct and acceptable for typical
+        // batch sizes (Spike 008).
+        op.entities.forEach { syncJunctionRows(it) }
+    }
+
+    /**
+     * Synchronises the junction rows for [entity] using a delete-then-insert strategy. The
+     * descriptor-driven `idsOf` accessor provides the current collection-ID state; previous junction
+     * rows for this parent are deleted in bulk and re-inserted at positions `0..ids.size - 1` (for
+     * ordered descriptors) or without position (for unordered). On insert the entity has no prior
+     * junction rows, so the delete is a cheap no-op; on update the wholesale replacement keeps SQL
+     * state consistent with the in-memory collection without diff-and-patch complexity (Spike 008
+     * measured the trade-off as acceptable for typical aggregate sizes).
+     *
+     * `executeDelete` does NOT call this method — the parent-side FK's `ON DELETE CASCADE`
+     * (installed by [installJunctionForeignKeys]) reaps the junction rows automatically.
+     */
+    private fun syncJunctionRows(entity: R) {
+        if (junctionTables.isEmpty()) return
+        val accessors = tableDef.junctionAccessors
+
+        for (accessor in accessors) {
+            val descriptor = accessor.descriptor
+            val junction = junctionTables[descriptor] ?: continue
+            val ids = accessor.idsOf(entity).toList()
+            val parentId: Any = toExposedId(entity.id as Any)
+
+            junction.table.deleteWhere { junction.parentIdCol eq parentId }
+
+            ids.forEachIndexed { index, itemId ->
+                junction.table.insert { stmt ->
+                    stmt[junction.parentIdCol] = parentId
+                    stmt[junction.itemIdCol] = toExposedId(itemId)
+                    junction.positionCol?.let { posCol -> stmt[posCol] = index }
+                }
             }
         }
     }
@@ -325,6 +581,10 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                 tableDef.bumpVersion(op.entity, expected + 1)
             }
         }
+        // Wholesale-replace junction rows after the parent UPDATE succeeds. Skipped on optimistic
+        // lock conflict (early return above) — the conflicting state will be reconciled via
+        // recoverEntityFromConflict + the next user-driven UPDATE.
+        syncJunctionRows(op.entity)
     }
 
     private fun executeDelete(op: PendingDelete<K, R>, conflicts: MutableList<PendingConflict<K>>) {
@@ -410,8 +670,8 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         val inMemoryOpt = findById(id)
 
         if (inMemoryOpt.isPresent) {
-            // Case 2a: local entity still present — swap canonical state into it, emit Conflict
-            // with a clone of the pre-swap state as oldEntity for semantic clarity.
+            // Case 2a: local entity still present — swap canonical state (scalars + junctions) into
+            // it, emit Conflict with a clone of the pre-swap state as oldEntity for semantic clarity.
             // clone() on ReactiveEntity<K, R> returns ReactiveEntity<K, R>, so cast to R — the
             // implementation always returns its own type per ReactiveEntity.clone()'s contract.
             val inMemory = inMemoryOpt.get()
@@ -421,6 +681,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
             inMemory.withEventsDisabled {
                 tableDef.applyRow(inMemory, canonicalRow, table)
             }
+            hydrateJunctionsForEntity(inMemory)
             publisher.emitAsync(
                 StandardCrudEvent.Conflict<K, R>(
                     oldEntity = oldSnapshot,
@@ -434,6 +695,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
             // but the canonical row exists — reconstruct and re-insert without enqueueing an
             // insert PendingOp (the row is already persisted).
             val reconstructed = tableDef.fromRow(canonicalRow, table)
+            hydrateJunctionsForEntity(reconstructed)
             // Suppress the Create event that would otherwise fire from addToMemoryOnly →
             // VolatileRepository.add. Recovery should look like a single Conflict to
             // subscribers, not Create + Conflict.
@@ -495,6 +757,38 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     companion object {
         private val log = KotlinLogging.logger(SqlRepository::class.java.name)
 
+        // SQLState codes that indicate a duplicate/already-existing constraint, which is the expected
+        // idempotency condition for installFk(). All other SQLStates are genuine errors and re-thrown.
+        // 42P07: PostgreSQL "relation/object already exists"
+        // 42710: ISO SQL / IBM DB2 "duplicate object"
+        // 42S01: MySQL / MariaDB "table/object already exists"
+        // 90045: H2 CONSTRAINT_ALREADY_EXISTS_1 (H2 returns the numeric error code as SQLState for
+        //        non-standard codes, i.e. Integer.toString(90045))
+        private val DUPLICATE_CONSTRAINT_SQL_STATES = setOf("42P07", "42710", "42S01", "90045")
+
+        // MySQL and MariaDB both use the generic SQLState HY000 for duplicate FK constraint name
+        // errors (MySQL error 1826, MariaDB errno 121). As a fallback for HY000, check the error
+        // message for dialect-specific duplicate-constraint keywords so we don't silently swallow
+        // unrelated HY000 errors.
+        private val DUPLICATE_CONSTRAINT_MESSAGE_PATTERNS =
+            listOf(
+                "duplicate foreign key constraint",
+                "duplicate key on write or update",
+                "already exists"
+            )
+
+        private fun isDuplicateConstraintException(e: ExposedSQLException): Boolean {
+            val state = e.sqlState.orEmpty()
+            if (state in DUPLICATE_CONSTRAINT_SQL_STATES) return true
+            // HY000 is a catch-all for many MySQL/MariaDB errors; only treat it as a duplicate
+            // if the message matches a known duplicate-constraint pattern.
+            if (state == "HY000") {
+                val msg = e.message.orEmpty().lowercase()
+                return DUPLICATE_CONSTRAINT_MESSAGE_PATTERNS.any { it in msg }
+            }
+            return false
+        }
+
         private fun buildDataSource(jdbcUrl: String, poolSize: Int, schema: String?): HikariDataSource {
             if (jdbcUrl.startsWith("jdbc:sqlite:")) {
                 log.warn {
@@ -519,5 +813,38 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         @OptIn(ExperimentalUuidApi::class)
         private fun toExposedId(id: Any): Any =
             if (id is UUID) id.toKotlinUuid() else id
+
+        /**
+         * Converts a `kotlin.uuid.Uuid` read from Exposed column back to `java.util.UUID` for
+         * domain-model comparison. Junction `parent_id` / `item_id` columns return `kotlin.uuid.Uuid`;
+         * entity IDs stored as `java.util.UUID` must be normalized to the same type for map lookups
+         * and collection matching to succeed.
+         */
+        @OptIn(ExperimentalUuidApi::class)
+        private fun toDomainId(id: Any): Any =
+            if (id is Uuid) id.toJavaUuid() else id
     }
+}
+
+/**
+ * Shadow Exposed [Table] used solely as a target for [ForeignKeyConstraint] DDL emission during
+ * deferred junction-FK installation. The shadow table has a single `id` column whose type matches
+ * the descriptor's `parent_id` / `item_id` declaration; Exposed reads only the table name and
+ * column name when rendering the `REFERENCES <tbl>(<col>)` clause, so the shadow table never needs
+ * to be created in the database.
+ */
+@OptIn(ExperimentalUuidApi::class)
+private class ShadowEntityIdTable(
+    tableName: String,
+    idType: net.transgressoft.lirp.persistence.ColumnType
+) : Table(tableName) {
+    val idColumn: Column<*> =
+        when (idType) {
+            is net.transgressoft.lirp.persistence.ColumnType.IntType -> integer("id")
+            is net.transgressoft.lirp.persistence.ColumnType.LongType -> long("id")
+            is net.transgressoft.lirp.persistence.ColumnType.UuidType -> uuid("id")
+            is net.transgressoft.lirp.persistence.ColumnType.VarcharType -> varchar("id", idType.length)
+            is net.transgressoft.lirp.persistence.ColumnType.TextType -> text("id")
+            else -> error("Unsupported junction id type for shadow target table: $idType")
+        }
 }

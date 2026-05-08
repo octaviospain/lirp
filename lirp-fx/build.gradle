@@ -2,6 +2,12 @@ apply plugin: 'com.google.devtools.ksp'
 
 description = 'LIRP FX - JavaFX Observable Collection Bridges'
 
+// Gradle 9 changed `project(':x')` inside `dependencies { ... }` to return a Dependency, not a
+// Project, so accessing `.sourceSets` from there raises "unknown property" under 9.5. Use
+// `rootProject.project(':lirp-core')` (a real Project lookup) and force evaluation order so
+// the source set output is available when this script reads it (#144).
+evaluationDependsOn(':lirp-core')
+
 ktlint {
     filter {
         exclude { it.file.path.contains("/generated/") }
@@ -28,7 +34,7 @@ dependencies {
     testImplementation "org.openjfx:javafx-graphics:21:${fxPlatform}"
     testImplementation 'org.testfx:openjfx-monocle:21.0.2'
 
-    testImplementation files(project(':lirp-core').sourceSets.test.output)
+    testImplementation files(rootProject.project(':lirp-core').sourceSets.test.output)
     testImplementation libs.coroutines.test
     testImplementation libs.serialization.json
 

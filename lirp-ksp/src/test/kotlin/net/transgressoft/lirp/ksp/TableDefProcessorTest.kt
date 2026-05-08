@@ -952,4 +952,474 @@ internal class TableDefProcessorTest : FunSpec({
         val content = result.generatedFileContent("NoBump_LirpTableDef.kt")
         content shouldNotContain "override fun bumpVersion"
     }
+
+    // ---- Junction tables and FK constraints (#144) ----
+
+    test("emits Playlist_Items_LirpJunctionTableDef for aggregateList collection ref") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "Playlist.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.IdentifiableEntity
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.Aggregate
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.aggregateList
+
+                @PersistenceMapping
+                data class Track(override val id: Int, val title: String) : ReactiveEntityBase<Int, Track>() {
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Track(id, title)
+                }
+
+                @PersistenceMapping
+                class Playlist(override val id: Int) : ReactiveEntityBase<Int, Playlist>() {
+                    var trackIds: List<Int> = emptyList()
+                    @Aggregate
+                    val tracks by aggregateList<Int, Track>(trackIds)
+
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Playlist(id).also { it.trackIds = trackIds.toList() }
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val junction = result.generatedFileContent("Playlist_Tracks_LirpJunctionTableDef.kt")
+        junction shouldContain "object Playlist_Tracks_LirpJunctionTableDef : JunctionTableDef"
+        junction shouldContain "tableName: String = \"playlist_tracks\""
+        junction shouldContain "parentTableName: String = \"playlist\""
+        junction shouldContain "itemTableName: String = \"track\""
+        junction shouldContain "isOrdered: Boolean = true"
+        junction shouldContain "JunctionColumnDef(name = \"parent_id\""
+        junction shouldContain "JunctionColumnDef(name = \"item_id\""
+        junction shouldContain "JunctionColumnDef(name = \"position\""
+        junction shouldContain "parentFkOnDelete: CascadeAction = CascadeAction.CASCADE"
+        junction shouldContain "itemFkOnDelete: CascadeAction = CascadeAction.DETACH"
+    }
+
+    test("emits unordered junction descriptor without position column for aggregateSet") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "Album.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.Aggregate
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.aggregateSet
+
+                @PersistenceMapping
+                data class Tag(override val id: Int, val label: String) : ReactiveEntityBase<Int, Tag>() {
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Tag(id, label)
+                }
+
+                @PersistenceMapping
+                class Album(override val id: Int) : ReactiveEntityBase<Int, Album>() {
+                    var tagIds: Set<Int> = emptySet()
+                    @Aggregate
+                    val tags by aggregateSet<Int, Tag>(tagIds)
+
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Album(id).also { it.tagIds = tagIds.toSet() }
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val junction = result.generatedFileContent("Album_Tags_LirpJunctionTableDef.kt")
+        junction shouldContain "isOrdered: Boolean = false"
+        junction shouldNotContain "position"
+    }
+
+    test("attaches RESTRICT foreign key to scalar backing single-entity aggregate") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "Order.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.CascadeAction
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.Aggregate
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.aggregate
+
+                @PersistenceMapping
+                class Customer(override val id: Int) : ReactiveEntityBase<Int, Customer>() {
+                    var name: String by reactiveProperty("")
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Customer(id)
+                }
+
+                @PersistenceMapping
+                class Order(override val id: Long, customerId: Int) : ReactiveEntityBase<Long, Order>() {
+                    var customerId: Int by reactiveProperty(customerId)
+                    @Aggregate(onDelete = CascadeAction.RESTRICT)
+                    val customer by aggregate<Int, Customer> { customerId }
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Order(id, customerId)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("Order_LirpTableDef.kt")
+        content shouldContain "override fun foreignKeys(): List<ForeignKeyDef>"
+        content shouldContain "ForeignKeyDef(columnName = \"customer_id\""
+        content shouldContain "referencedTable = \"customer\""
+        content shouldContain "referencedColumn = \"id\""
+        content shouldContain "onDelete = CascadeAction.RESTRICT"
+    }
+
+    test("rejects DETACH on non-nullable backing scalar at compile time") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "BadDetach.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.CascadeAction
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.Aggregate
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.aggregate
+
+                @PersistenceMapping
+                class Country(override val id: Long) : ReactiveEntityBase<Long, Country>() {
+                    var code: String by reactiveProperty("")
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Country(id)
+                }
+
+                @PersistenceMapping
+                class Address(override val id: Long, countryId: Long) : ReactiveEntityBase<Long, Address>() {
+                    var countryId: Long by reactiveProperty(countryId)
+                    @Aggregate(onDelete = CascadeAction.DETACH)
+                    val country by aggregate<Long, Country> { countryId }
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Address(id, countryId)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
+        result.messages shouldContain "requires a nullable backing scalar"
+    }
+
+    test("allows DETACH on nullable backing scalar and emits SET_NULL semantics") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "GoodDetach.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.CascadeAction
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.Aggregate
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.aggregate
+
+                @PersistenceMapping
+                class Region(override val id: Long) : ReactiveEntityBase<Long, Region>() {
+                    var name: String by reactiveProperty("")
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Region(id)
+                }
+
+                @PersistenceMapping
+                class Site(override val id: Long, regionId: Long?) : ReactiveEntityBase<Long, Site>() {
+                    var regionId: Long? by reactiveProperty(regionId)
+                    @Aggregate(onDelete = CascadeAction.DETACH)
+                    val region by aggregate<Long, Region> { regionId!! }
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Site(id, regionId)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("Site_LirpTableDef.kt")
+        content shouldContain "ForeignKeyDef(columnName = \"region_id\""
+        content shouldContain "onDelete = CascadeAction.DETACH"
+    }
+
+    // ---- Junction accessor wiring on _LirpTableDef (#144 / FK-04, plan 53-03a) ----
+
+    test("_LirpTableDef overrides junctionTableDefs for entity with aggregateList collection ref") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "PlaylistJunctionWiring.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.Aggregate
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.aggregateList
+
+                @PersistenceMapping
+                data class Track(override val id: Int, val title: String) : ReactiveEntityBase<Int, Track>() {
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Track(id, title)
+                }
+
+                @PersistenceMapping
+                class Playlist(override val id: Int) : ReactiveEntityBase<Int, Playlist>() {
+                    var trackIds: List<Int> = emptyList()
+                    @Aggregate
+                    val tracks by aggregateList<Int, Track>(trackIds)
+
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Playlist(id).also { it.trackIds = trackIds.toList() }
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("Playlist_LirpTableDef.kt")
+        content shouldContain "import net.transgressoft.lirp.persistence.sql.JunctionAccessor"
+        content shouldContain "import net.transgressoft.lirp.persistence.sql.JunctionTableDef"
+        content shouldContain "override val junctionTableDefs: List<JunctionTableDef>"
+        content shouldContain "Playlist_Tracks_LirpJunctionTableDef"
+    }
+
+    test("_LirpTableDef overrides junctionAccessors with idsOf returning the backing field") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "PlaylistAccessorWiring.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.Aggregate
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.aggregateList
+
+                @PersistenceMapping
+                data class Track(override val id: Int, val title: String) : ReactiveEntityBase<Int, Track>() {
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Track(id, title)
+                }
+
+                @PersistenceMapping
+                class Playlist(override val id: Int) : ReactiveEntityBase<Int, Playlist>() {
+                    var trackIds: List<Int> = emptyList()
+                    @Aggregate
+                    val tracks by aggregateList<Int, Track>(trackIds)
+
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Playlist(id).also { it.trackIds = trackIds.toList() }
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("Playlist_LirpTableDef.kt")
+        content shouldContain "override val junctionAccessors: List<JunctionAccessor<Playlist>>"
+        content shouldContain "object : JunctionAccessor<Playlist>"
+        content shouldContain "override val descriptor: JunctionTableDef = Playlist_Tracks_LirpJunctionTableDef"
+        content shouldContain "override fun idsOf(entity: Playlist): Collection<Any> = entity.trackIds"
+    }
+
+    test("_LirpTableDef overrides applyJunctionRows wrapping mutation in withEventsDisabled") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "PlaylistApplyJunction.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.Aggregate
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.aggregateList
+
+                @PersistenceMapping
+                data class Track(override val id: Int, val title: String) : ReactiveEntityBase<Int, Track>() {
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Track(id, title)
+                }
+
+                @PersistenceMapping
+                class Playlist(override val id: Int) : ReactiveEntityBase<Int, Playlist>() {
+                    var trackIds: List<Int> = emptyList()
+                    @Aggregate
+                    val tracks by aggregateList<Int, Track>(trackIds)
+
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Playlist(id).also { it.trackIds = trackIds.toList() }
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("Playlist_LirpTableDef.kt")
+        content shouldContain "override fun applyJunctionRows("
+        content shouldContain "entity.withEventsDisabled"
+        content shouldContain "Playlist_Tracks_LirpJunctionTableDef ->"
+        content shouldContain "entity.trackIds = ids.filterIsInstance<Int>()"
+    }
+
+    test("_LirpTableDef does NOT override junction members when entity has no collection aggregates") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "Plain.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                data class Plain(override val id: Int, val label: String) : ReactiveEntityBase<Int, Plain>() {
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Plain(id, label)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("Plain_LirpTableDef.kt")
+        content shouldNotContain "junctionTableDefs"
+        content shouldNotContain "junctionAccessors"
+        content shouldNotContain "applyJunctionRows"
+    }
+
+    test("KSP-emitted _LirpTableDef applies junction rows at runtime without firing MutationEvents") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "RuntimePlaylist.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.Aggregate
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.aggregateList
+
+                @PersistenceMapping
+                data class Track(override val id: Int, val title: String) : ReactiveEntityBase<Int, Track>() {
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Track(id, title)
+                }
+
+                @PersistenceMapping
+                class RuntimePlaylist(override val id: Int) : ReactiveEntityBase<Int, RuntimePlaylist>() {
+                    var trackIds: List<Int> = emptyList()
+                    @Aggregate
+                    val tracks by aggregateList<Int, Track>(trackIds)
+
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = RuntimePlaylist(id).also { it.trackIds = trackIds.toList() }
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+
+        val cl = result.classLoader
+        val playlistClass = cl.loadClass("test.RuntimePlaylist")
+        val tableDefClass = cl.loadClass("test.RuntimePlaylist_LirpTableDef")
+        val junctionClass = cl.loadClass("test.RuntimePlaylist_Tracks_LirpJunctionTableDef")
+
+        val tableDef = tableDefClass.getField("INSTANCE").get(null)
+        val junctionDescriptor = junctionClass.getField("INSTANCE").get(null)
+
+        // junctionTableDefs.size == 1 and contains the expected descriptor instance
+        val descriptors = tableDefClass.getMethod("getJunctionTableDefs").invoke(tableDef) as List<*>
+        descriptors.size shouldBe 1
+        (descriptors.first() === junctionDescriptor) shouldBe true
+
+        // junctionAccessors.size == 1, descriptor matches, idsOf returns trackIds contents
+        val accessors = tableDefClass.getMethod("getJunctionAccessors").invoke(tableDef) as List<*>
+        accessors.size shouldBe 1
+        val accessor = accessors.first()!!
+        val accessorDescriptor =
+            accessor.javaClass.getMethod("getDescriptor").invoke(accessor)
+        (accessorDescriptor === junctionDescriptor) shouldBe true
+
+        // Construct an entity, subscribe to MutationEvents via a counter, then call applyJunctionRows.
+        val entity = playlistClass.getConstructor(Int::class.java).newInstance(7)
+        val mutationCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val subscribeMethod =
+            playlistClass.methods.first {
+                it.name == "subscribe" &&
+                    it.parameterCount == 1 &&
+                    it.parameterTypes[0] == kotlin.jvm.functions.Function2::class.java
+            }
+        val action: suspend (Any?) -> Unit = { _ ->
+            mutationCount.incrementAndGet()
+            Unit
+        }
+        @Suppress("UNCHECKED_CAST")
+        subscribeMethod.invoke(entity, action as kotlin.jvm.functions.Function2<Any?, kotlin.coroutines.Continuation<in Unit>, Any?>)
+
+        // applyJunctionRows(entity, descriptor, ids)
+        val applyMethod =
+            tableDefClass.methods.first { it.name == "applyJunctionRows" && it.parameterCount == 3 }
+        applyMethod.invoke(tableDef, entity, junctionDescriptor, listOf(1, 2, 3))
+
+        // Field is a plain `var` — direct read of the backing trackIds reflects the assignment
+        val trackIdsField = playlistClass.getMethod("getTrackIds").invoke(entity) as List<*>
+        trackIdsField shouldBe listOf(1, 2, 3)
+
+        // idsOf returns the same content (and same reference, since the trackIds field is a plain var)
+        val idsOfMethod = accessor.javaClass.getMethod("idsOf", Any::class.java)
+        val idsResult = idsOfMethod.invoke(accessor, entity) as Collection<*>
+        idsResult.toList() shouldBe listOf(1, 2, 3)
+
+        // Brief wait so any erroneous async event delivery would have happened.
+        Thread.sleep(100)
+        mutationCount.get() shouldBe 0
+    }
+
+    test("KSP emits a clear error when aggregateList backing field is not a writable List<K>") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "BadBacking.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.Aggregate
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.aggregateList
+
+                @PersistenceMapping
+                data class Track(override val id: Int, val title: String) : ReactiveEntityBase<Int, Track>() {
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Track(id, title)
+                }
+
+                @PersistenceMapping
+                class BadPlaylist(override val id: Int) : ReactiveEntityBase<Int, BadPlaylist>() {
+                    // No `var trackIds: List<Int>` backing field — KSP must surface this.
+                    @Aggregate
+                    val tracks by aggregateList<Int, Track>(emptyList())
+
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = BadPlaylist(id)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
+        result.messages shouldContain "KSP[FK-04]"
+        result.messages shouldContain "must be a 'var List<K>'"
+    }
 })

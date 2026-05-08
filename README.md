@@ -173,7 +173,8 @@ For Gradle without the LIRP plugin (manual KSP configuration), **Maven consumers
 - **Transparent SQL persistence** — add an entity, change a property, the database stays in sync automatically
 - **Entity-first reactivity** — `var x by reactiveProperty(init)` notifies subscribers on assignment, zero overhead when unobserved
 - **Two subscription levels** — repository-level `CrudEvent`s and entity-level `MutationEvent`s
-- **DDD aggregate references** — `@Aggregate` with single-entity (`aggregate`, `optionalAggregate`) and collection (`aggregateList`, `aggregateSet`, `mutableAggregateList`, `mutableAggregateSet`) delegates, configurable cascade (DETACH / CASCADE / RESTRICT / NONE)
+- **DDD aggregate references** — `@Aggregate` with single-entity (`aggregate`, `optionalAggregate`) and collection (`aggregateList`, `aggregateSet`, `mutableAggregateList`, `mutableAggregateSet`) delegates, configurable cascade (DETACH / CASCADE / RESTRICT / NONE) enforced both app-side and at the database layer (FK constraints on scalar refs, junction tables for collection refs)
+- **JSON FK reconciliation** — `JsonFkPolicy.LOG_AND_RECONCILE` (default) silently repairs dangling refs at load; `JsonFkPolicy.STRICT` fails loudly — symmetric to SQL `ON DELETE RESTRICT`
 - **Secondary indexes** — `@Indexed` for O(1) equality lookups
 - **Type-safe Query DSL** — Kotlin-native filtering, ordering, and pagination with automatic index routing
 - **Optimistic locking** — `@Version` triggers versioned UPDATE/DELETE; conflicts surface as `StandardCrudEvent.Conflict` with canonical state
@@ -213,20 +214,21 @@ Benchmarks run with JMH 1.37 on OpenJDK 21.0.10, 13th Gen Intel Core i7-13700, 6
 
 The **[LIRP Wiki](https://github.com/octaviospain/lirp/wiki)** is the canonical reference. Start with the page that matches your question:
 
-| Page | What's there |
-|---|---|
-| [Home](https://github.com/octaviospain/lirp/wiki) | Guided tour, entry points by use case |
-| [Consuming LIRP](https://github.com/octaviospain/lirp/wiki/Consuming-LIRP) | External-consumer setup: Gradle plugin, Gradle manual, Maven, compatibility matrix, KSP troubleshooting |
-| [Core Concepts](https://github.com/octaviospain/lirp/wiki/Core-Concepts) | Reactive entities, `reactiveProperty()`, lazy publishers, events, subscription patterns, `withEventsDisabled` |
-| [DDD & Aggregates](https://github.com/octaviospain/lirp/wiki/DDD-and-Aggregates) | `@Aggregate`, `aggregate`, `optionalAggregate`, collection delegates, cascade, bubble-up, `CollectionChangeEvent` |
-| [Persistence](https://github.com/octaviospain/lirp/wiki/Persistence) | Repository hierarchy, `PersistentRepositoryBase`, debounced write pipeline, deferred loading |
-| [SQL Persistence](https://github.com/octaviospain/lirp/wiki/SQL-Persistence) | `SqlRepository`, entity annotations, type mapping, dialect support, batch SQL |
-| [Transactional Boundaries](https://github.com/octaviospain/lirp/wiki/Transactional-Boundaries) | Single-aggregate atomicity, `@Version` optimistic locking, `Conflict` event, saga/compensation pattern |
-| [JSON Persistence](https://github.com/octaviospain/lirp/wiki/JSON-Persistence) | `JsonFileRepository`, `LirpEntitySerializer`, polymorphic serializers, deferred loading |
-| [JavaFX Integration](https://github.com/octaviospain/lirp/wiki/JavaFX-Integration) | `lirp-fx`, `fxAggregateList`/`fxAggregateSet`, scalar delegates, dual notification, FX thread dispatch |
-| [Projection Maps](https://github.com/octaviospain/lirp/wiki/Projection-Maps) | `projectionMap` and `fxProjectionMap` — read-only grouped views |
-| [Java Interop](https://github.com/octaviospain/lirp/wiki/Java-Interop) | Full Java examples for entities, repositories, subscriptions, collection events |
-| [Architecture Overview](https://github.com/octaviospain/lirp/wiki/Architecture-Overview) | Entity hierarchy, event flow, module dependency, repository lifecycle diagrams |
+| Page | What's there                                                                                                                                 |
+|---|----------------------------------------------------------------------------------------------------------------------------------------------|
+| [Home](https://github.com/octaviospain/lirp/wiki) | Guided tour, entry points by use case                                                                                                        |
+| [Consuming LIRP](https://github.com/octaviospain/lirp/wiki/Consuming-LIRP) | External-consumer setup: Gradle plugin, Gradle manual, Maven, compatibility matrix, KSP troubleshooting                                      |
+| [Core Concepts](https://github.com/octaviospain/lirp/wiki/Core-Concepts) | Reactive entities, `reactiveProperty()`, lazy publishers, events, subscription patterns, `withEventsDisabled`                                |
+| [Query DSL](https://github.com/octaviospain/lirp/wiki/Query-DSL) | type-safe, Kotlin-native query DSL for filtering, ordering, and paginating entities                                                          |
+| [DDD & Aggregates](https://github.com/octaviospain/lirp/wiki/DDD-and-Aggregates) | `@Aggregate`, `aggregate`, `optionalAggregate`, collection delegates, cascade, bubble-up, `CollectionChangeEvent`, app-side ↔ SQL FK mapping |
+| [Persistence](https://github.com/octaviospain/lirp/wiki/Persistence) | Repository hierarchy, `PersistentRepositoryBase`, debounced write pipeline, deferred loading                                                 |
+| [SQL Persistence](https://github.com/octaviospain/lirp/wiki/SQL-Persistence) | `SqlRepository`, entity annotations, type mapping, dialect support, batch SQL, foreign keys & junction tables, deferred FK installation      |
+| [Transactional Boundaries](https://github.com/octaviospain/lirp/wiki/Transactional-Boundaries) | Single-aggregate atomicity, `@Version` optimistic locking, `Conflict` event, saga/compensation pattern                                       |
+| [JSON Persistence](https://github.com/octaviospain/lirp/wiki/JSON-Persistence) | `JsonFileRepository`, `LirpEntitySerializer`, polymorphic serializers, deferred loading, `JsonFkPolicy` reconciliation                       |
+| [JavaFX Integration](https://github.com/octaviospain/lirp/wiki/JavaFX-Integration) | `lirp-fx`, `fxAggregateList`/`fxAggregateSet`, scalar delegates, dual notification, FX thread dispatch                                       |
+| [Projection Maps](https://github.com/octaviospain/lirp/wiki/Projection-Maps) | `projectionMap` and `fxProjectionMap` — read-only grouped views                                                                              |
+| [Java Interop](https://github.com/octaviospain/lirp/wiki/Java-Interop) | Full Java examples for entities, repositories, subscriptions, collection events                                                              |
+| [Architecture Overview](https://github.com/octaviospain/lirp/wiki/Architecture-Overview) | Entity hierarchy, event flow, module dependency, repository lifecycle diagrams                                                               |
 
 ## Contributing
 

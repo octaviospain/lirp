@@ -17,10 +17,12 @@
 
 package net.transgressoft.lirp.persistence.sql
 
+import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.persistence.ColumnDef
 import net.transgressoft.lirp.persistence.ColumnType
 import net.transgressoft.lirp.persistence.LirpTableDef
 import org.jetbrains.exposed.v1.core.Column
+import org.jetbrains.exposed.v1.core.ReferenceOption
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.datetime.date
 import org.jetbrains.exposed.v1.datetime.datetime
@@ -41,6 +43,61 @@ import kotlin.uuid.ExperimentalUuidApi
  * typed `Column<Long>` for use by [SqlRepository] when composing versioned UPDATE/DELETE predicates.
  */
 class ExposedTableInterpreter {
+
+    /**
+     * Interprets the given [JunctionTableDef] descriptor into a live Exposed [ExposedJunctionTable].
+     *
+     * The returned [Table] has a composite primary key over `(parent_id, item_id)` and an optional
+     * `position` column when `descriptor.isOrdered` is `true`. The columns are plain (typed) columns,
+     * not Exposed `reference()` columns — foreign-key constraints are installed later via
+     * `SqlRepository.installJunctionForeignKeys()` once every parent / item entity table has
+     * materialised. This allows junction tables to be created during repository init even when the
+     * referenced entity table belongs to a not-yet-constructed [SqlRepository].
+     *
+     * @param descriptor The junction descriptor to interpret.
+     * @return An [ExposedJunctionTable] exposing the [Table] handle plus typed `parent_id`,
+     *   `item_id`, and (for ordered descriptors) `position` column references.
+     */
+    internal fun interpretJunction(descriptor: JunctionTableDef): ExposedJunctionTable {
+        val parentColDef =
+            descriptor.columns.firstOrNull { it.name == "parent_id" }
+                ?: error("JunctionTableDef '${descriptor.tableName}' is missing a 'parent_id' column")
+        val itemColDef =
+            descriptor.columns.firstOrNull { it.name == "item_id" }
+                ?: error("JunctionTableDef '${descriptor.tableName}' is missing an 'item_id' column")
+        val positionColDef = descriptor.columns.firstOrNull { it.name == "position" }
+        require(!descriptor.isOrdered || positionColDef != null) {
+            "JunctionTableDef '${descriptor.tableName}' is ordered but does not declare a 'position' column"
+        }
+
+        val columnsByName = mutableMapOf<String, Column<*>>()
+        val table =
+            LirpDynamicJunctionTable(
+                tableName = descriptor.tableName,
+                parentColDef = parentColDef,
+                itemColDef = itemColDef,
+                positionColDef = if (descriptor.isOrdered) positionColDef else null,
+                columnsByName = columnsByName
+            )
+
+        @Suppress("UNCHECKED_CAST")
+        val parentIdCol = columnsByName.getValue("parent_id") as Column<Any>
+
+        @Suppress("UNCHECKED_CAST")
+        val itemIdCol = columnsByName.getValue("item_id") as Column<Any>
+
+        @Suppress("UNCHECKED_CAST")
+        val positionCol: Column<Int>? =
+            if (descriptor.isOrdered) columnsByName["position"] as? Column<Int> else null
+
+        return ExposedJunctionTable(
+            descriptor = descriptor,
+            table = table,
+            parentIdCol = parentIdCol,
+            itemIdCol = itemIdCol,
+            positionCol = positionCol
+        )
+    }
 
     /**
      * Interprets the given [LirpTableDef] descriptor into a live Exposed [ExposedTable].
@@ -127,6 +184,75 @@ private class LirpDynamicTable(
 }
 
 /**
+ * Internal Exposed [Table] subclass for junction tables. Registers a `parent_id` column, an
+ * `item_id` column, and an optional `position` column. The primary key is composite over
+ * `(parent_id, item_id)`. Junction columns are plain (typed) columns — foreign-key constraints
+ * are installed later by [SqlRepository.installJunctionForeignKeys].
+ */
+private class LirpDynamicJunctionTable(
+    tableName: String,
+    parentColDef: JunctionColumnDef,
+    itemColDef: JunctionColumnDef,
+    positionColDef: JunctionColumnDef?,
+    columnsByName: MutableMap<String, Column<*>>
+) : Table(tableName) {
+
+    override val primaryKey: PrimaryKey
+
+    init {
+        val parentCol = buildJunctionColumn(parentColDef)
+        val itemCol = buildJunctionColumn(itemColDef)
+        columnsByName[parentColDef.name] = parentCol
+        columnsByName[itemColDef.name] = itemCol
+        if (positionColDef != null) {
+            val positionCol = buildJunctionColumn(positionColDef)
+            columnsByName[positionColDef.name] = positionCol
+        }
+        primaryKey = PrimaryKey(parentCol, itemCol)
+    }
+
+    @OptIn(ExperimentalUuidApi::class)
+    private fun buildJunctionColumn(col: JunctionColumnDef): Column<*> {
+        val raw: Column<*> =
+            when (val type = col.type) {
+                is ColumnType.IntType -> integer(col.name)
+                is ColumnType.LongType -> long(col.name)
+                is ColumnType.TextType -> text(col.name)
+                is ColumnType.BooleanType -> bool(col.name)
+                is ColumnType.DoubleType -> double(col.name)
+                is ColumnType.FloatType -> float(col.name)
+                is ColumnType.UuidType -> uuid(col.name)
+                is ColumnType.DateType -> date(col.name)
+                is ColumnType.DateTimeType -> datetime(col.name)
+                is ColumnType.VarcharType -> varchar(col.name, type.length)
+                is ColumnType.DecimalType -> decimal(col.name, type.precision, type.scale)
+                is ColumnType.EnumType -> varchar(col.name, 255)
+            }
+        @Suppress("UNCHECKED_CAST")
+        return if (col.nullable) (raw as Column<Any>).nullable() else raw
+    }
+}
+
+/**
+ * Wraps the Exposed [Table] produced by [ExposedTableInterpreter.interpretJunction] together with
+ * typed handles to the junction columns.
+ *
+ * @property descriptor The junction descriptor this table was built from.
+ * @property table The Exposed [Table] with composite PK over `(parent_id, item_id)`.
+ * @property parentIdCol The `parent_id` column, typed as `Column<Any>` to support the full range of
+ *   key types (Int, Long, UUID, …) without compile-time specialization.
+ * @property itemIdCol The `item_id` column, typed as `Column<Any>`.
+ * @property positionCol The `position` column, present only when `descriptor.isOrdered` is `true`.
+ */
+internal data class ExposedJunctionTable(
+    val descriptor: JunctionTableDef,
+    val table: Table,
+    val parentIdCol: Column<Any>,
+    val itemIdCol: Column<Any>,
+    val positionCol: Column<Int>?
+)
+
+/**
  * Wraps a live Exposed [Table] together with a column-by-name index produced by [ExposedTableInterpreter].
  *
  * @property table The Exposed [Table] with all columns and primary key configured.
@@ -141,3 +267,26 @@ data class ExposedTable(
     val columnsByName: Map<String, Column<*>>,
     val versionCol: Column<Long>? = null
 )
+
+/**
+ * Maps a LIRP [CascadeAction] to the corresponding Exposed [ReferenceOption] used on
+ * `REFERENCES … ON DELETE …` foreign-key constraints (Spike 006).
+ *
+ * Returns `null` for [CascadeAction.NONE] — the convention is that NONE means "no FK clause at
+ * all", which preserves backwards compatibility with consumer schemas whose existing tables lack
+ * the constraint. Callers translate `null` into "skip the `reference()` call entirely".
+ *
+ * | LIRP `CascadeAction` | Exposed `ReferenceOption` |
+ * |----------------------|---------------------------|
+ * | `RESTRICT`           | `RESTRICT`                |
+ * | `CASCADE`            | `CASCADE`                 |
+ * | `DETACH`             | `SET_NULL`                |
+ * | `NONE`               | `null` (no FK clause)     |
+ */
+internal fun cascadeToReferenceOption(action: CascadeAction): ReferenceOption? =
+    when (action) {
+        CascadeAction.RESTRICT -> ReferenceOption.RESTRICT
+        CascadeAction.CASCADE -> ReferenceOption.CASCADE
+        CascadeAction.DETACH -> ReferenceOption.SET_NULL
+        CascadeAction.NONE -> null
+    }

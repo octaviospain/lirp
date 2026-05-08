@@ -828,7 +828,11 @@ class JsonFileRepositoryTest : DescribeSpec({
             ctx.close()
 
             val ctx2 = LirpContext()
-            AudioItemVolatileRepository(ctx2)
+            AudioItemVolatileRepository(ctx2).apply {
+                add(MutableAudioItem(10, "Track 10"))
+                add(MutableAudioItem(20, "Track 20"))
+                add(MutableAudioItem(30, "Track 30"))
+            }
             val playlistRepo2 = MutableAudioPlaylistJsonFileRepository(ctx2, file, 10L)
 
             playlistRepo2.findById(1).shouldBePresent {
