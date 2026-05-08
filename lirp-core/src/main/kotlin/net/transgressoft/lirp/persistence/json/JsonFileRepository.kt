@@ -18,15 +18,24 @@
 package net.transgressoft.lirp.persistence.json
 
 import net.transgressoft.lirp.entity.ReactiveEntity
+import net.transgressoft.lirp.entity.ReactiveEntityBase
+import net.transgressoft.lirp.persistence.AbstractMutableAggregateCollectionRefDelegate
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpDeserializationException
+import net.transgressoft.lirp.persistence.MutableAggregateList
+import net.transgressoft.lirp.persistence.MutableAggregateSet
 import net.transgressoft.lirp.persistence.PendingOp
 import net.transgressoft.lirp.persistence.PersistentRepositoryBase
+import net.transgressoft.lirp.persistence.Registry
+import net.transgressoft.lirp.persistence.RegistryBase
 import io.github.oshai.kotlinlogging.KotlinLogging
 import java.io.File
 import java.util.Objects
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.withLock
+import kotlin.reflect.KMutableProperty1
+import kotlin.reflect.full.memberProperties
+import kotlin.reflect.jvm.isAccessible
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.serialization.KSerializer
@@ -77,7 +86,8 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
         private val mapSerializer: KSerializer<Map<K, R>>,
         private val repositorySerializersModule: SerializersModule = SerializersModule {},
         private val serializationDelay: Duration = 300.milliseconds,
-        loadOnInit: Boolean = true
+        loadOnInit: Boolean = true,
+        private val fkPolicy: JsonFkPolicy = JsonFkPolicy.LOG_AND_RECONCILE
     ) : PersistentRepositoryBase<K, R>(
             context,
             "JsonFileRepository-${file.name}",
@@ -94,8 +104,9 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
             mapSerializer: KSerializer<Map<K, R>>,
             repositorySerializersModule: SerializersModule = SerializersModule {},
             serializationDelay: Duration = 300.milliseconds,
-            loadOnInit: Boolean = true
-        ) : this(LirpContext.default, file, mapSerializer, repositorySerializersModule, serializationDelay, loadOnInit)
+            loadOnInit: Boolean = true,
+            fkPolicy: JsonFkPolicy = JsonFkPolicy.LOG_AND_RECONCILE
+        ) : this(LirpContext.default, file, mapSerializer, repositorySerializersModule, serializationDelay, loadOnInit, fkPolicy)
 
         private val log = KotlinLogging.logger(javaClass.name)
 
@@ -155,8 +166,190 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
             }
             val entities = decodeFromJson() ?: emptyMap()
             log.info { "${entities.size} objects deserialized from file $jsonFile" }
+            reconcileDanglingRefs(entities)
             dirty.set(false)
             return entities
+        }
+
+        /**
+         * Walks every deserialized entity, inspects its `@Aggregate` references against the live
+         * registries on the owning [LirpContext], and applies the configured [JsonFkPolicy].
+         *
+         * `LOG_AND_RECONCILE` (default) drops dangling collection IDs and nulls dangling nullable
+         * scalar refs, emitting one warning per affected entity. All mutations run inside
+         * [ReactiveEntityBase.withEventsDisabled] so neither [net.transgressoft.lirp.event.MutationEvent]
+         * nor [net.transgressoft.lirp.event.CrudEvent] fire, and `@Version` fields stay untouched —
+         * reconciliation is cleanup, not a domain mutation.
+         *
+         * `STRICT` throws [LirpDeserializationException] on the first dangling reference encountered,
+         * mirroring SQL `ON DELETE RESTRICT` semantics.
+         *
+         * Reconciliation only applies to mutable aggregate-collection delegates
+         * ([MutableAggregateList] / [MutableAggregateSet]) and to mutable scalar `@Aggregate`
+         * properties whose name follows the `${refName}Id` convention. Immutable collection refs
+         * (whose IDs are captured at construction time and have no setter) cannot be reconciled in
+         * place; for those a warning is logged and the dangling IDs remain.
+         */
+        private fun reconcileDanglingRefs(entities: Map<K, R>) {
+            // Self-reference fallback: when an entity's @Aggregate target is the same entity type
+            // being loaded, the registry hasn't seen these entities yet (loadFromStore runs before
+            // addToMemoryOnly). Treat the in-progress map as resolvable so self-referencing
+            // hierarchies survive a round-trip without being clobbered.
+            val selfEntityClasses: Map<Any, Class<*>> =
+                entities.entries.associate { (id, entity) -> id as Any to entity.javaClass }
+
+            for (entity in entities.values) {
+                val accessor = RegistryBase.refAccessorFor(entity.javaClass) ?: continue
+                if (accessor.entries.isEmpty() && accessor.collectionEntries.isEmpty()) continue
+
+                val danglingForEntity = mutableMapOf<String, List<Any>>()
+
+                reconcileCollectionRefs(entity, accessor, danglingForEntity, selfEntityClasses)
+                reconcileScalarRefs(entity, accessor, danglingForEntity, selfEntityClasses)
+
+                if (danglingForEntity.isNotEmpty() && fkPolicy == JsonFkPolicy.LOG_AND_RECONCILE) {
+                    log.warn {
+                        "Reconciled dangling refs for ${entity.javaClass.simpleName}(id=${entity.id}): $danglingForEntity"
+                    }
+                }
+            }
+        }
+
+        private fun isResolvable(
+            id: Any,
+            referencedClass: Class<*>,
+            selfEntityClasses: Map<Any, Class<*>>
+        ): Boolean {
+            // Check the in-progress entity map first for self-referencing aggregates. Use the
+            // concrete class of the referenced ID's entity rather than the first entity's class,
+            // so mixed-type repos correctly identify whether the referenced ID belongs to an entity
+            // assignable to the declared reference type.
+            val selfClass = selfEntityClasses[id]
+            if (selfClass != null && referencedClass.isAssignableFrom(selfClass)) return true
+
+            val registry = context.registryFor(referencedClass) ?: return true
+
+            // Permissive: when the referenced repo is not registered in this context we cannot
+            // confirm the reference is dangling, so leave it untouched (preserves pre-existing
+            // permissive behavior for partially-wired contexts).
+            @Suppress("UNCHECKED_CAST")
+            val typedRegistry = registry as Registry<Comparable<Any>, *>
+            return typedRegistry.findById(id as Comparable<Any>).isPresent
+        }
+
+        @Suppress("UNCHECKED_CAST")
+        private fun reconcileCollectionRefs(
+            entity: R,
+            accessor: net.transgressoft.lirp.persistence.LirpRefAccessor<Any>,
+            danglingForEntity: MutableMap<String, List<Any>>,
+            selfEntityClasses: Map<Any, Class<*>>
+        ) {
+            for (collEntry in accessor.collectionEntries) {
+                val ids =
+                    (collEntry as net.transgressoft.lirp.persistence.CollectionRefEntry<Comparable<Any>, Any>)
+                        .idsGetter(entity as Any)
+                if (ids.isEmpty()) continue
+
+                val dangling = ids.filter { !isResolvable(it as Any, collEntry.referencedClass, selfEntityClasses) }
+                if (dangling.isEmpty()) continue
+
+                if (fkPolicy == JsonFkPolicy.STRICT) {
+                    throw LirpDeserializationException(
+                        "Dangling @Aggregate reference(s) found in ${entity.javaClass.simpleName}(id=${entity.id})." +
+                            " Reference '${collEntry.refName}' points to missing ${collEntry.referencedClass.simpleName}" +
+                            "(ids=$dangling)"
+                    )
+                }
+
+                val delegate = collEntry.delegateGetter(entity)
+                val mutableBacking =
+                    when (delegate) {
+                        is MutableAggregateList<*, *> -> delegate.innerDelegate
+                        is MutableAggregateSet<*, *> -> delegate.innerDelegate
+                        is AbstractMutableAggregateCollectionRefDelegate<*, *> -> delegate
+                        else -> {
+                            log.warn {
+                                "Cannot reconcile dangling IDs $dangling for immutable collection " +
+                                    "ref '${collEntry.refName}' on ${entity.javaClass.simpleName}(id=${entity.id})"
+                            }
+                            null
+                        }
+                    }
+
+                if (mutableBacking != null) {
+                    val keep = ids.filter { isResolvable(it as Any, collEntry.referencedClass, selfEntityClasses) }
+                    val rebase = mutableBacking as AbstractMutableAggregateCollectionRefDelegate<Comparable<Any>, *>
+                    if (entity is ReactiveEntityBase<*, *>) {
+                        entity.withEventsDisabled { rebase.setBackingIds(keep) }
+                    } else {
+                        rebase.setBackingIds(keep)
+                    }
+                    danglingForEntity[collEntry.refName] = dangling.toList()
+                }
+            }
+        }
+
+        @Suppress("UNCHECKED_CAST")
+        private fun reconcileScalarRefs(
+            entity: R,
+            accessor: net.transgressoft.lirp.persistence.LirpRefAccessor<Any>,
+            danglingForEntity: MutableMap<String, List<Any>>,
+            selfEntityClasses: Map<Any, Class<*>>
+        ) {
+            for (entry in accessor.entries) {
+                val typedEntry = entry as net.transgressoft.lirp.persistence.RefEntry<Comparable<Any>, Any>
+                val refId =
+                    runCatching { typedEntry.idGetter(entity as Any) }
+                        .getOrNull() ?: continue
+                if (isResolvable(refId as Any, entry.referencedClass, selfEntityClasses)) continue
+
+                if (fkPolicy == JsonFkPolicy.STRICT) {
+                    throw LirpDeserializationException(
+                        "Dangling @Aggregate reference found in ${entity.javaClass.simpleName}(id=${entity.id})." +
+                            " Reference '${entry.refName}' points to missing ${entry.referencedClass.simpleName}(id=$refId)"
+                    )
+                }
+
+                val nulled = nullScalarIfMutable(entity, entry.refName)
+                if (nulled) {
+                    danglingForEntity[entry.refName] = listOf(refId)
+                } else {
+                    log.warn {
+                        "Cannot reconcile dangling scalar ref '${entry.refName}' (id=$refId) on " +
+                            "${entity.javaClass.simpleName}(id=${entity.id}): no nullable mutable property '${entry.refName}Id' found"
+                    }
+                }
+            }
+        }
+
+        /**
+         * Locates a mutable Kotlin property named `${refName}Id` on [entity] and writes `null` to
+         * it under [ReactiveEntityBase.withEventsDisabled], so neither reactive property nor CRUD
+         * events fire and `@Version` is not bumped. Returns `true` when a writable nullable property
+         * was found and successfully nulled. The plan's scalar reconciliation is intentionally
+         * convention-driven (`refName + "Id"`) — non-nullable scalar refs cannot be safely defaulted
+         * without losing data, so they are left untouched and reported via the caller.
+         */
+        @Suppress("UNCHECKED_CAST")
+        private fun nullScalarIfMutable(entity: R, refName: String): Boolean {
+            val expected = "${refName}Id"
+            val property =
+                entity::class
+                    .memberProperties
+                    .firstOrNull { it.name == expected } as? KMutableProperty1<Any, Any?> ?: return false
+            if (!property.returnType.isMarkedNullable) return false
+            property.isAccessible = true
+            return try {
+                if (entity is ReactiveEntityBase<*, *>) {
+                    entity.withEventsDisabled { property.set(entity, null) }
+                } else {
+                    property.set(entity as Any, null)
+                }
+                true
+            } catch (exception: Exception) {
+                log.warn(exception) { "Failed to null scalar ref '$refName' on ${entity.javaClass.simpleName}" }
+                false
+            }
         }
 
         /**

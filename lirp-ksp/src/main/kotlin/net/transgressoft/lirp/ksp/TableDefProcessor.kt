@@ -25,12 +25,15 @@ import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.processing.Resolver
 import com.google.devtools.ksp.processing.SymbolProcessor
 import com.google.devtools.ksp.symbol.ClassKind
+import com.google.devtools.ksp.symbol.FileLocation
 import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSAnnotation
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
+import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.symbol.Modifier
 import com.google.devtools.ksp.validate
+import java.io.File
 
 private const val PERSISTENCE_MAPPING_FQN = "net.transgressoft.lirp.persistence.PersistenceMapping"
 private const val PERSISTENCE_PROPERTY_FQN = "net.transgressoft.lirp.persistence.PersistenceProperty"
@@ -82,11 +85,181 @@ class TableDefProcessor(
 
         val sqlTableDefAvailable = detectSqlTableDefAvailability(resolver)
 
+        // Collect @Aggregate properties per class, classifying each as collection (junction
+        // descriptor target) or single (FK constraint target). Performed once per round so the
+        // per-entity codegen below has everything it needs without re-scanning.
+        val aggregatesByClass = collectAggregateProperties(resolver, classes)
+
         for (classDecl in classes) {
-            generateTableDef(classDecl, sqlTableDefAvailable, versionedByClass[classDecl])
+            val aggregates = aggregatesByClass[classDecl].orEmpty()
+            val foreignKeys = sqlTableDefAvailable.let { collectForeignKeys(classDecl, aggregates) }
+            val junctionRefs =
+                if (sqlTableDefAvailable) collectJunctionRefs(classDecl, aggregates) else emptyList()
+            // Backing collection fields for @Aggregate collection refs are never SQL columns —
+            // they are the in-memory mirror of junction-table rows. Exclude them from column
+            // collection so the column-type mapper doesn't emit "Unsupported column type
+            // 'kotlin.collections.List'" errors.
+            val excludedBackingFields =
+                aggregates.mapNotNullTo(mutableSetOf()) { if (it.isCollection) it.backingCollectionName else null }
+            generateTableDef(
+                classDecl,
+                sqlTableDefAvailable,
+                versionedByClass[classDecl],
+                foreignKeys,
+                junctionRefs,
+                excludedBackingFields
+            )
+
+            if (sqlTableDefAvailable) {
+                for (collectionAgg in aggregates.filter { it.isCollection }) {
+                    generateJunctionTableDef(classDecl, collectionAgg)
+                }
+            }
         }
 
         return unableToProcess
+    }
+
+    /**
+     * Scans every entity class for `@Aggregate` properties, classifies each as collection-typed or
+     * single-entity, and records the metadata needed to emit junction tables (collection refs) and
+     * foreign-key constraints (single refs).
+     *
+     * Detection mirrors [ReactiveEntityRefProcessor]: source-text scanning of factory call names
+     * (`aggregateList`, `aggregateSet` and their mutable variants) is the primary mechanism because
+     * the delegate factories return stdlib `List<E>` / `Set<E>`, which do not expose the
+     * `AggregateCollectionRef` supertype to KSP's type-resolution. The lambda body of single-entity
+     * `aggregate { … }` is also extracted from the same source-text view and used to identify the
+     * scalar property that backs the foreign key.
+     */
+    private fun collectAggregateProperties(
+        resolver: Resolver,
+        classes: Set<KSClassDeclaration>
+    ): Map<KSClassDeclaration, List<AggregatePropertyMeta>> {
+        val byClass = mutableMapOf<KSClassDeclaration, MutableList<AggregatePropertyMeta>>()
+        for (symbol in resolver.getSymbolsWithAnnotation(AGGREGATE_ANNOTATION_FQN)) {
+            if (symbol !is KSPropertyDeclaration) continue
+            val parent = symbol.parentDeclaration as? KSClassDeclaration ?: continue
+            if (parent !in classes) continue
+            val meta = analyzeAggregateProperty(symbol) ?: continue
+            byClass.getOrPut(parent) { mutableListOf() }.add(meta)
+        }
+        return byClass
+    }
+
+    private fun analyzeAggregateProperty(prop: KSPropertyDeclaration): AggregatePropertyMeta? {
+        val annotation =
+            prop.annotations.firstOrNull {
+                it.annotationType.resolve().declaration.qualifiedName?.asString() == AGGREGATE_ANNOTATION_FQN
+            } ?: return null
+        val onDeleteName = extractCascadeActionName(annotation.arguments.firstOrNull { it.name?.asString() == "onDelete" }?.value)
+
+        val sourceText = readSourceLines(prop, linesAfter = 2) ?: ""
+        val isCollection = containsAggregateFactoryCall(sourceText)
+        val isOrdered =
+            when {
+                sourceText.contains("mutableAggregateList") -> true
+                sourceText.contains("mutableAggregateSet") -> false
+                sourceText.contains("aggregateList") -> true
+                sourceText.contains("aggregateSet") -> false
+                else -> false
+            }
+
+        val resolvedType = prop.type.resolve()
+        val referencedClass = findReferencedClassDeclaration(resolvedType, isCollection) ?: return null
+
+        val backingScalarName = if (!isCollection) extractAggregateLambdaIdentifier(sourceText) else null
+        val backingCollectionName = if (isCollection) extractAggregateCollectionArgument(sourceText) else null
+
+        return AggregatePropertyMeta(
+            property = prop,
+            propertyName = prop.simpleName.asString(),
+            isCollection = isCollection,
+            isOrdered = isOrdered,
+            onDeleteName = onDeleteName,
+            referencedClass = referencedClass,
+            backingScalarName = backingScalarName,
+            backingCollectionName = backingCollectionName
+        )
+    }
+
+    /**
+     * Extracts the backing-collection identifier passed as the first positional argument to
+     * `aggregateList(initialTrackIds)` / `aggregateSet(initialTagIds)` (and their `mutable*`
+     * variants). Returns `null` when the argument is not a bare identifier (e.g. `emptyList()`,
+     * `setOf(1, 2)`), which signals that the entity has no writable backing field for the
+     * collection — the validation in [collectJunctionRefs] surfaces a clear error in that case.
+     */
+    private fun extractAggregateCollectionArgument(text: String): String? {
+        // Match `aggregateList<...>(IDENT)` / `aggregateSet<...>(IDENT)` and their mutable
+        // variants, where IDENT is a bare identifier (no parentheses or dots). The regex tolerates
+        // leading whitespace inside the parentheses but stops at the first non-identifier token.
+        val regex =
+            Regex(
+                """\b(?:mutable)?[Aa]ggregate(?:List|Set)\b[^(]*\(\s*([A-Za-z_][A-Za-z_0-9]*)\s*\)"""
+            )
+        return regex.find(text)?.groupValues?.getOrNull(1)
+    }
+
+    private fun containsAggregateFactoryCall(text: String): Boolean =
+        text.contains("mutableAggregateList") ||
+            text.contains("mutableAggregateSet") ||
+            text.contains("aggregateList") ||
+            text.contains("aggregateSet")
+
+    /**
+     * Extracts the backing scalar identifier referenced by the lambda passed to
+     * `aggregate { … }` (e.g. `customerId` from `aggregate<Int, Customer> { customerId }`).
+     *
+     * Single-entity aggregate factories take an `idProvider: () -> K` lambda whose body is
+     * conventionally a property reference, optionally with non-null assertion (`!!`) or an
+     * elvis fallback. KSP's resolved type model does not expose lambda bodies, so source-text
+     * scanning is the only avenue. The first identifier inside the lambda braces names the
+     * backing scalar.
+     */
+    private fun extractAggregateLambdaIdentifier(text: String): String? {
+        // Match `aggregate<...> { ... }` and capture the first identifier inside the braces.
+        // The first identifier is the backing scalar in conventional usage:
+        //   aggregate { customerId }      → customerId
+        //   aggregate { customerId!! }    → customerId
+        //   aggregate { customerId ?: 0 } → customerId
+        val regex = Regex("""\baggregate\b[^{]*\{\s*([A-Za-z_][A-Za-z_0-9]*)\b""")
+        return regex.find(text)?.groupValues?.getOrNull(1)
+    }
+
+    /**
+     * Reads source lines around a [KSPropertyDeclaration] from its originating file. Returns
+     * `null` when the source is unavailable. Mirrors the helper used by [ReactiveEntityRefProcessor].
+     */
+    private fun readSourceLines(prop: KSPropertyDeclaration, linesBefore: Int = 0, linesAfter: Int = 5): String? {
+        val location = prop.location as? FileLocation ?: return null
+        val file = File(location.filePath)
+        if (!file.exists()) return null
+        val lines = file.readLines()
+        val propLine = (location.lineNumber - 1).coerceAtLeast(0)
+        val startLine = (propLine - linesBefore).coerceAtLeast(0)
+        val endLine = (propLine + linesAfter + 1).coerceAtMost(lines.size)
+        return lines.subList(startLine, endLine).joinToString("\n")
+    }
+
+    /**
+     * Resolves the referenced entity class from the property's declared type.
+     *
+     * Single-entity refs declare `aggregate<K, E>` so the second type parameter holds the entity.
+     * Collection refs declare `aggregateList<K, E>` / `aggregateSet<K, E>` whose return type is a
+     * stdlib `List<E>` / `Set<E>` — in that case the single type argument is the entity.
+     */
+    private fun findReferencedClassDeclaration(type: KSType, isCollection: Boolean): KSClassDeclaration? {
+        val args = type.arguments
+        // Stdlib List<E> / Set<E> returned by aggregateList/aggregateSet
+        if (isCollection && args.size == 1) {
+            return args[0].type?.resolve()?.declaration as? KSClassDeclaration
+        }
+        // ReactiveEntityReference<K, E> / AggregateRefDelegate<K, E>
+        if (args.size >= 2) {
+            return args[1].type?.resolve()?.declaration as? KSClassDeclaration
+        }
+        return null
     }
 
     // Dual-trigger: collect classes from @PersistenceMapping on class declarations.
@@ -220,14 +393,17 @@ class TableDefProcessor(
     private fun generateTableDef(
         classDecl: KSClassDeclaration,
         sqlTableDefAvailable: Boolean,
-        versionedProperty: KSPropertyDeclaration?
+        versionedProperty: KSPropertyDeclaration?,
+        foreignKeys: List<ForeignKeyMeta> = emptyList(),
+        junctionRefs: List<JunctionRefInfo> = emptyList(),
+        excludedBackingFields: Set<String> = emptySet()
     ) {
         val packageName = classDecl.packageName.asString()
         val className = classDecl.simpleName.asString()
         val tableDefName = "${className}_LirpTableDef"
 
         val tableName = resolveTableName(classDecl, className)
-        val columns = collectColumns(classDecl, versionedProperty)
+        val columns = collectColumns(classDecl, versionedProperty, excludedBackingFields)
         // Ordered constructor parameter names — preserves declaration order for correct fromRow() generation.
         val constructorParamNames =
             classDecl.primaryConstructor?.parameters
@@ -252,10 +428,20 @@ class TableDefProcessor(
                 fileName = tableDefName
             )
 
+        val emitJunctions = canGenerateSqlMapping && junctionRefs.isNotEmpty()
         file.write(
             buildString {
-                appendPackageAndImports(packageName, canGenerateSqlMapping, columns)
-                appendObjectBody(tableDefName, className, tableName, canGenerateSqlMapping, columns, constructorParamNames)
+                appendPackageAndImports(packageName, canGenerateSqlMapping, columns, foreignKeys.isNotEmpty(), emitJunctions)
+                appendObjectBody(
+                    tableDefName,
+                    className,
+                    tableName,
+                    canGenerateSqlMapping,
+                    columns,
+                    constructorParamNames,
+                    foreignKeys,
+                    if (emitJunctions) junctionRefs else emptyList()
+                )
             }.toByteArray()
         )
         file.close()
@@ -266,7 +452,9 @@ class TableDefProcessor(
     private fun StringBuilder.appendPackageAndImports(
         packageName: String,
         canGenerateSqlMapping: Boolean,
-        columns: List<ColumnMeta>
+        columns: List<ColumnMeta>,
+        emitsForeignKeys: Boolean = false,
+        emitsJunctions: Boolean = false
     ) {
         if (packageName.isNotEmpty()) {
             appendLine("package $packageName")
@@ -280,6 +468,14 @@ class TableDefProcessor(
             appendLine("import org.jetbrains.exposed.v1.core.Column")
             appendLine("import org.jetbrains.exposed.v1.core.ResultRow")
             appendLine("import org.jetbrains.exposed.v1.core.Table")
+            if (emitsForeignKeys) {
+                appendLine("import net.transgressoft.lirp.entity.CascadeAction")
+                appendLine("import net.transgressoft.lirp.persistence.sql.ForeignKeyDef")
+            }
+            if (emitsJunctions) {
+                appendLine("import net.transgressoft.lirp.persistence.sql.JunctionAccessor")
+                appendLine("import net.transgressoft.lirp.persistence.sql.JunctionTableDef")
+            }
             appendConditionalTypeImports(columns)
         } else {
             appendLine("import net.transgressoft.lirp.persistence.LirpTableDef")
@@ -315,7 +511,9 @@ class TableDefProcessor(
         tableName: String,
         canGenerateSqlMapping: Boolean,
         columns: List<ColumnMeta>,
-        constructorParamNames: List<String> = emptyList()
+        constructorParamNames: List<String> = emptyList(),
+        foreignKeys: List<ForeignKeyMeta> = emptyList(),
+        junctionRefs: List<JunctionRefInfo> = emptyList()
     ) {
         appendLine("/** KSP-generated table descriptor for [$className]. */")
         if (canGenerateSqlMapping && columns.any { it.typeFqn == UUID_FQN }) {
@@ -342,8 +540,67 @@ class TableDefProcessor(
             appendLine()
             appendApplyRow(className, columns)
             appendBumpVersion(className, columns)
+            appendForeignKeys(foreignKeys)
+            appendJunctionOverrides(className, junctionRefs)
         }
         appendLine("}")
+    }
+
+    private fun StringBuilder.appendJunctionOverrides(
+        className: String,
+        junctionRefs: List<JunctionRefInfo>
+    ) {
+        if (junctionRefs.isEmpty()) return
+        appendLine()
+        appendLine("    override val junctionTableDefs: List<JunctionTableDef> = listOf(")
+        appendLine("        ${junctionRefs.joinToString(",\n        ") { it.junctionObjectName }}")
+        appendLine("    )")
+        appendLine()
+        appendLine("    override val junctionAccessors: List<JunctionAccessor<$className>> = listOf(")
+        junctionRefs.forEachIndexed { idx, ref ->
+            val trailingComma = if (idx == junctionRefs.lastIndex) "" else ","
+            appendLine("        object : JunctionAccessor<$className> {")
+            appendLine("            override val descriptor: JunctionTableDef = ${ref.junctionObjectName}")
+            appendLine("            override fun idsOf(entity: $className): Collection<Any> = entity.${ref.backingFieldName}")
+            appendLine("        }$trailingComma")
+        }
+        appendLine("    )")
+        appendLine()
+        appendLine("    override fun applyJunctionRows(")
+        appendLine("        entity: $className,")
+        appendLine("        descriptor: JunctionTableDef,")
+        appendLine("        ids: List<Any>,")
+        appendLine("    ) {")
+        appendLine("        entity.withEventsDisabled {")
+        appendLine("            when (descriptor) {")
+        for (ref in junctionRefs) {
+            val rhs =
+                if (ref.isOrdered) {
+                    "ids.filterIsInstance<${ref.itemKeyTypeSimpleName}>()"
+                } else {
+                    "ids.filterIsInstance<${ref.itemKeyTypeSimpleName}>().toSet()"
+                }
+            appendLine("                ${ref.junctionObjectName} ->")
+            appendLine("                    entity.${ref.backingFieldName} = $rhs")
+        }
+        appendLine("            }")
+        appendLine("        }")
+        appendLine("    }")
+    }
+
+    private fun StringBuilder.appendForeignKeys(foreignKeys: List<ForeignKeyMeta>) {
+        if (foreignKeys.isEmpty()) return
+        appendLine()
+        appendLine("    override fun foreignKeys(): List<ForeignKeyDef> = listOf(")
+        val entries =
+            foreignKeys.joinToString(",\n        ") { fk ->
+                "ForeignKeyDef(columnName = \"${fk.columnName}\", " +
+                    "referencedTable = \"${fk.referencedTable}\", " +
+                    "referencedColumn = \"${fk.referencedColumn}\", " +
+                    "onDelete = CascadeAction.${fk.onDelete})"
+            }
+        appendLine("        $entries")
+        appendLine("    )")
     }
 
     private fun StringBuilder.appendFromRow(
@@ -458,7 +715,8 @@ class TableDefProcessor(
 
     private fun collectColumns(
         classDecl: KSClassDeclaration,
-        versionedProperty: KSPropertyDeclaration?
+        versionedProperty: KSPropertyDeclaration?,
+        excludedBackingFields: Set<String> = emptySet()
     ): List<ColumnMeta> {
         val columns = mutableListOf<ColumnMeta>()
 
@@ -473,6 +731,7 @@ class TableDefProcessor(
             if (prop.isExcluded()) continue
 
             val propName = prop.simpleName.asString()
+            if (propName in excludedBackingFields) continue
             val isPrimaryKey = propName == "id" && hasDeclaredId && !prop.isAbstract()
 
             val persistenceAnnotation =
@@ -601,6 +860,342 @@ class TableDefProcessor(
                 null
             }
         }
+
+    /**
+     * Builds the [ForeignKeyMeta] list for an entity by walking its single-entity `@Aggregate`
+     * properties. Collection refs are skipped — they are handled by junction-table descriptors.
+     *
+     * Validates each single-entity ref:
+     *  - The lambda body of `aggregate { … }` must be a bare identifier naming the backing scalar.
+     *  - The backing scalar property must exist on the same class.
+     *  - `@Aggregate(onDelete = DETACH)` requires the backing scalar to be nullable (Spike 006).
+     *
+     * Drops entries with `onDelete = NONE` — by convention, NONE means "no FK clause at all".
+     */
+    private fun collectForeignKeys(
+        classDecl: KSClassDeclaration,
+        aggregates: List<AggregatePropertyMeta>
+    ): List<ForeignKeyMeta> {
+        if (aggregates.isEmpty()) return emptyList()
+
+        val foreignKeys = mutableListOf<ForeignKeyMeta>()
+        val propertiesByName = classDecl.getAllProperties().associateBy { it.simpleName.asString() }
+
+        for (agg in aggregates.filter { !it.isCollection }) {
+            val propName = agg.propertyName
+            val scalarName =
+                agg.backingScalarName
+                    ?: run {
+                        logger.error(
+                            "Cannot determine backing scalar for @Aggregate property '$propName'. " +
+                                "The aggregate { … } lambda must reference exactly one scalar property.",
+                            agg.property
+                        )
+                        continue
+                    }
+
+            val scalarProp = propertiesByName[scalarName]
+            if (scalarProp == null) {
+                logger.error(
+                    "@Aggregate property '$propName' references unknown scalar '$scalarName'.",
+                    agg.property
+                )
+                continue
+            }
+
+            val onDelete = agg.onDeleteName
+            if (onDelete == "DETACH" && !scalarProp.type.resolve().isMarkedNullable) {
+                logger.error(
+                    "@Aggregate(onDelete = DETACH) on property '$propName' requires a nullable backing scalar. " +
+                        "Make '$scalarName' nullable (e.g., 'Long?') or choose a different CascadeAction " +
+                        "(RESTRICT, CASCADE, NONE).",
+                    agg.property
+                )
+                continue
+            }
+
+            // NONE => emit no FK clause at all (preserves backwards compatibility per Spike 006).
+            if (onDelete == "NONE") continue
+
+            val referencedTableName = resolveTableName(agg.referencedClass, agg.referencedClass.simpleName.asString())
+
+            // Resolve the local FK column name using @PersistenceProperty(name=...) on the backing
+            // scalar, mirroring the column-name resolution logic in collectColumns().
+            val scalarPersistenceAnnotation =
+                scalarProp.annotations.firstOrNull {
+                    it.annotationType.resolve().declaration.qualifiedName?.asString() == PERSISTENCE_PROPERTY_FQN
+                }
+            val localColumnName =
+                (
+                    scalarPersistenceAnnotation
+                        ?.arguments
+                        ?.firstOrNull { it.name?.asString() == "name" }
+                        ?.value as? String
+                )
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: scalarName.toSnakeCase()
+
+            // Resolve the referenced entity's PK column name using @PersistenceProperty(name=...)
+            // on the 'id' property of the referenced entity class.
+            val referencedIdPropForFk =
+                agg.referencedClass.getAllProperties()
+                    .firstOrNull { it.simpleName.asString() == "id" }
+            val referencedPkAnnotation =
+                referencedIdPropForFk?.annotations?.firstOrNull {
+                    it.annotationType.resolve().declaration.qualifiedName?.asString() == PERSISTENCE_PROPERTY_FQN
+                }
+            val referencedColumnName =
+                (
+                    referencedPkAnnotation
+                        ?.arguments
+                        ?.firstOrNull { it.name?.asString() == "name" }
+                        ?.value as? String
+                )
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: "id"
+
+            foreignKeys.add(
+                ForeignKeyMeta(
+                    columnName = localColumnName,
+                    referencedTable = referencedTableName,
+                    referencedColumn = referencedColumnName,
+                    onDelete = onDelete
+                )
+            )
+        }
+        return foreignKeys
+    }
+
+    /**
+     * Builds the [JunctionRefInfo] list for one entity by walking its collection-typed `@Aggregate`
+     * properties.
+     *
+     * Validates each collection ref:
+     *  - The first positional argument of `aggregateList(…)` / `aggregateSet(…)` must be a bare
+     *    identifier naming a property on the same class.
+     *  - That property must be `var`, with a stdlib `kotlin.collections.List`,
+     *    `kotlin.collections.MutableList`, `kotlin.collections.Set`, or
+     *    `kotlin.collections.MutableSet` type whose element type matches the item entity's `id`
+     *    type.
+     *  - For `aggregateList`, the property must be a `List` / `MutableList`. For `aggregateSet`,
+     *    it must be a `Set` / `MutableSet`.
+     *
+     * Failures emit `KSP[FK-04]` errors and skip emission for the affected entity. The successful
+     * entries drive the `junctionTableDefs` / `junctionAccessors` / `applyJunctionRows` overrides
+     * on the parent's `_LirpTableDef`.
+     */
+    private fun collectJunctionRefs(
+        classDecl: KSClassDeclaration,
+        aggregates: List<AggregatePropertyMeta>
+    ): List<JunctionRefInfo> {
+        val collectionAggs = aggregates.filter { it.isCollection }
+        if (collectionAggs.isEmpty()) return emptyList()
+
+        val propertiesByName = classDecl.getAllProperties().associateBy { it.simpleName.asString() }
+        val parentSimpleName = classDecl.simpleName.asString()
+        val results = mutableListOf<JunctionRefInfo>()
+
+        for (agg in collectionAggs) {
+            val backingName = agg.backingCollectionName
+            if (backingName == null) {
+                logger.error(
+                    "KSP[FK-04]: @Aggregate collection property '${agg.propertyName}' on " +
+                        "'$parentSimpleName' must be a 'var List<K>'/'var Set<K>' bound to a writable " +
+                        "backing field passed as the first positional argument to " +
+                        "${if (agg.isOrdered) "aggregateList" else "aggregateSet"}(<field>). " +
+                        "Anonymous initialisers like 'emptyList()' or 'setOf(...)' are not supported.",
+                    agg.property
+                )
+                continue
+            }
+            val backingProp = propertiesByName[backingName]
+            if (backingProp == null) {
+                logger.error(
+                    "KSP[FK-04]: backing field '$backingName' for @Aggregate property " +
+                        "'${agg.propertyName}' on '$parentSimpleName' must be a 'var List<K>'/" +
+                        "'var Set<K>' declared on the same class.",
+                    agg.property
+                )
+                continue
+            }
+            if (!backingProp.isMutable) {
+                logger.error(
+                    "KSP[FK-04]: backing field '$backingName' for @Aggregate property " +
+                        "'${agg.propertyName}' on '$parentSimpleName' must be a 'var List<K>'/" +
+                        "'var Set<K>' (declared 'val').",
+                    agg.property
+                )
+                continue
+            }
+            val resolvedType = backingProp.type.resolve()
+            val typeFqn = resolvedType.makeNotNullable().declaration.qualifiedName?.asString()
+            val isList = typeFqn == "kotlin.collections.List" || typeFqn == "kotlin.collections.MutableList"
+            val isSet = typeFqn == "kotlin.collections.Set" || typeFqn == "kotlin.collections.MutableSet"
+            val expectsList = agg.isOrdered
+            if (expectsList && !isList) {
+                logger.error(
+                    "KSP[FK-04]: backing field '$backingName' for @Aggregate property " +
+                        "'${agg.propertyName}' on '$parentSimpleName' must be a 'var List<K>' for " +
+                        "aggregateList; found '$typeFqn'.",
+                    agg.property
+                )
+                continue
+            }
+            if (!expectsList && !isSet) {
+                logger.error(
+                    "KSP[FK-04]: backing field '$backingName' for @Aggregate property " +
+                        "'${agg.propertyName}' on '$parentSimpleName' must be a 'var Set<K>' for " +
+                        "aggregateSet; found '$typeFqn'.",
+                    agg.property
+                )
+                continue
+            }
+            val elementType = resolvedType.arguments.firstOrNull()?.type?.resolve()
+            val elementFqn = elementType?.makeNotNullable()?.declaration?.qualifiedName?.asString()
+
+            // KSP[FK-05]: verify the backing collection's element type matches the referenced entity's ID type.
+            // A mismatch (e.g. List<Int> backing an aggregate whose target uses Long ids) is silently
+            // accepted by the compiler but causes filterIsInstance to drop all loaded IDs at runtime.
+            val referencedIdProp =
+                agg.referencedClass.getAllProperties()
+                    .firstOrNull { it.simpleName.asString() == "id" }
+            val referencedIdFqn =
+                referencedIdProp?.type?.resolve()?.makeNotNullable()
+                    ?.declaration?.qualifiedName?.asString()
+            if (elementFqn != null && referencedIdFqn != null && elementFqn != referencedIdFqn) {
+                // Normalize kotlin.UUID alias to java.util.UUID for comparison
+                val normalizedElement = if (elementFqn == "kotlin.UUID") UUID_FQN else elementFqn
+                val normalizedRefId = if (referencedIdFqn == "kotlin.UUID") UUID_FQN else referencedIdFqn
+                if (normalizedElement != normalizedRefId) {
+                    logger.error(
+                        "KSP[FK-05]: backing field '$backingName' element type '$elementFqn' does not match " +
+                            "the referenced entity '${agg.referencedClass.simpleName.asString()}' ID type " +
+                            "'$referencedIdFqn'. Fix the backing collection's type parameter to match.",
+                        agg.property
+                    )
+                    continue
+                }
+            }
+
+            val itemSimpleName =
+                when (elementFqn) {
+                    "kotlin.Int" -> "Int"
+                    "kotlin.Long" -> "Long"
+                    "kotlin.String" -> "String"
+                    "kotlin.UUID", UUID_FQN -> "java.util.UUID"
+                    null -> "Any"
+                    else -> elementFqn.substringAfterLast(".")
+                }
+            val propertyCapitalized = agg.propertyName.replaceFirstChar { it.uppercase() }
+            val descriptorName = "${parentSimpleName}_${propertyCapitalized}_LirpJunctionTableDef"
+            val isMutableList = typeFqn == "kotlin.collections.MutableList" || typeFqn == "kotlin.collections.MutableSet"
+
+            results.add(
+                JunctionRefInfo(
+                    propertyName = agg.propertyName,
+                    backingFieldName = backingName,
+                    junctionObjectName = descriptorName,
+                    isOrdered = agg.isOrdered,
+                    itemKeyTypeSimpleName = itemSimpleName,
+                    isMutableList = isMutableList
+                )
+            )
+        }
+        return results
+    }
+
+    private fun extractCascadeActionName(value: Any?): String =
+        when {
+            value is KSType -> value.declaration.simpleName.asString()
+            value != null -> {
+                val str = value.toString()
+                when {
+                    str.endsWith("CASCADE") -> "CASCADE"
+                    str.endsWith("NONE") -> "NONE"
+                    str.endsWith("RESTRICT") -> "RESTRICT"
+                    else -> "DETACH"
+                }
+            }
+            else -> "DETACH"
+        }
+
+    /**
+     * Emits a `{Parent}_{Property}_LirpJunctionTableDef` object that implements [JunctionTableDef]
+     * for one collection-typed `@Aggregate` property.
+     *
+     * The descriptor is the SQL-side companion of the parent's `_LirpTableDef` and lives in the
+     * same package. Its column shape is fixed: `(parent_id, item_id)` always form the composite
+     * primary key; `position` is appended for `aggregateList` and omitted for `aggregateSet`.
+     */
+    private fun generateJunctionTableDef(
+        parentClass: KSClassDeclaration,
+        agg: AggregatePropertyMeta
+    ) {
+        val packageName = parentClass.packageName.asString()
+        val parentSimpleName = parentClass.simpleName.asString()
+        val itemSimpleName = agg.referencedClass.simpleName.asString()
+        val propertyCapitalized = agg.propertyName.replaceFirstChar { it.uppercase() }
+        val descriptorName = "${parentSimpleName}_${propertyCapitalized}_LirpJunctionTableDef"
+
+        val parentTableName = resolveTableName(parentClass, parentSimpleName)
+        val itemTableName = resolveTableName(agg.referencedClass, itemSimpleName)
+        val junctionTableName = "${parentTableName}_${agg.propertyName.toSnakeCase()}"
+
+        val parentPkType = pkColumnTypeExpression(parentClass) ?: "ColumnType.IntType"
+        val itemPkType = pkColumnTypeExpression(agg.referencedClass) ?: "ColumnType.IntType"
+
+        val file =
+            codeGenerator.createNewFile(
+                dependencies = Dependencies(false, parentClass.containingFile!!),
+                packageName = packageName,
+                fileName = descriptorName
+            )
+
+        // Item-side cascade action defaults to DETACH per @Aggregate's annotation default; that
+        // mirrors the existing in-memory behaviour for collection refs and is what consumers see
+        // when they add @Aggregate without arguments.
+        val itemOnDelete = agg.onDeleteName
+
+        file.write(
+            buildString {
+                if (packageName.isNotEmpty()) {
+                    appendLine("package $packageName")
+                    appendLine()
+                }
+                appendLine("import net.transgressoft.lirp.entity.CascadeAction")
+                appendLine("import net.transgressoft.lirp.persistence.ColumnType")
+                appendLine("import net.transgressoft.lirp.persistence.sql.JunctionColumnDef")
+                appendLine("import net.transgressoft.lirp.persistence.sql.JunctionTableDef")
+                appendLine()
+                appendLine("/** KSP-generated junction table descriptor for $parentSimpleName.${agg.propertyName} → $itemSimpleName. */")
+                appendLine("public object $descriptorName : JunctionTableDef {")
+                appendLine("    override val tableName: String = \"$junctionTableName\"")
+                appendLine("    override val parentTableName: String = \"$parentTableName\"")
+                appendLine("    override val itemTableName: String = \"$itemTableName\"")
+                appendLine("    override val isOrdered: Boolean = ${agg.isOrdered}")
+                appendLine("    override val parentFkOnDelete: CascadeAction = CascadeAction.CASCADE")
+                appendLine("    override val itemFkOnDelete: CascadeAction = CascadeAction.$itemOnDelete")
+                appendLine("    override val columns: List<JunctionColumnDef> = listOf(")
+                appendLine("        JunctionColumnDef(name = \"parent_id\", type = $parentPkType, primaryKey = true),")
+                if (agg.isOrdered) {
+                    appendLine("        JunctionColumnDef(name = \"item_id\", type = $itemPkType, primaryKey = true),")
+                    appendLine("        JunctionColumnDef(name = \"position\", type = ColumnType.IntType)")
+                } else {
+                    appendLine("        JunctionColumnDef(name = \"item_id\", type = $itemPkType, primaryKey = true)")
+                }
+                appendLine("    )")
+                appendLine("}")
+            }.toByteArray()
+        )
+        file.close()
+
+        logger.info("Generated $packageName.$descriptorName for $parentSimpleName.${agg.propertyName}")
+    }
+
+    private fun pkColumnTypeExpression(classDecl: KSClassDeclaration): String? {
+        val idProp = classDecl.getAllProperties().firstOrNull { it.simpleName.asString() == "id" } ?: return null
+        return mapToColumnTypeExpression(idProp, persistenceAnnotation = null)
+    }
 }
 
 private fun String.toSnakeCase(): String =
@@ -618,4 +1213,31 @@ private data class ColumnMeta(
     val isEnum: Boolean = false,
     val isMutable: Boolean = false,
     val isVersion: Boolean = false
+)
+
+private data class AggregatePropertyMeta(
+    val property: KSPropertyDeclaration,
+    val propertyName: String,
+    val isCollection: Boolean,
+    val isOrdered: Boolean,
+    val onDeleteName: String,
+    val referencedClass: KSClassDeclaration,
+    val backingScalarName: String?,
+    val backingCollectionName: String? = null
+)
+
+private data class JunctionRefInfo(
+    val propertyName: String,
+    val backingFieldName: String,
+    val junctionObjectName: String,
+    val isOrdered: Boolean,
+    val itemKeyTypeSimpleName: String,
+    val isMutableList: Boolean
+)
+
+private data class ForeignKeyMeta(
+    val columnName: String,
+    val referencedTable: String,
+    val referencedColumn: String,
+    val onDelete: String
 )

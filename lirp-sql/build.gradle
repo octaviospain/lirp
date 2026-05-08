@@ -2,6 +2,12 @@ description = 'LIRP SQL - SQL Persistence via JetBrains Exposed'
 
 apply plugin: 'java-test-fixtures'
 
+// Gradle 9 changed `project(':x')` inside `dependencies { ... }` to return a Dependency, not a
+// Project, so accessing `.sourceSets` from there raises "unknown property" under 9.5. Use
+// `rootProject.project(':lirp-core')` (a real Project lookup) and force evaluation order so
+// the source set output is available when this script reads it.
+evaluationDependsOn(':lirp-core')
+
 ktlint {
     filter {
         exclude { it.file.path.contains("/generated/") }
@@ -73,8 +79,8 @@ dependencies {
     // testFixtures infrastructure — shared entities, table defs, container support
     testFixturesImplementation project(path: ':lirp-api')
     testFixturesImplementation project(path: ':lirp-core')
-    testFixturesImplementation files(project(':lirp-core').sourceSets.test.output)
-    integrationTestImplementation files(project(':lirp-core').sourceSets.test.output)
+    testFixturesImplementation files(rootProject.project(':lirp-core').sourceSets.test.output)
+    integrationTestImplementation files(rootProject.project(':lirp-core').sourceSets.test.output)
     testFixturesImplementation platform(libs.exposed.bom)
     testFixturesImplementation libs.bundles.exposed
     testFixturesImplementation libs.hikari
@@ -141,6 +147,6 @@ check.dependsOn integrationTest
 jacocoTestReport {
     dependsOn test, integrationTest
     // Use fileTree so missing JaCoCo .exec files are skipped gracefully.
-    // Note: `jacocoTestReport` still depends on both `test` and `integrationTest` (line 136).
-    executionData fileTree(buildDir).include('jacoco/*.exec')
+    // Note: `jacocoTestReport` still depends on both `test` and `integrationTest` (line 148).
+    executionData fileTree(layout.buildDirectory.get().asFile).include('jacoco/*.exec')
 }

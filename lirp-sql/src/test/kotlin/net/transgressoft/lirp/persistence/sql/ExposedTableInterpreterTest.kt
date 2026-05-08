@@ -17,11 +17,14 @@
 
 package net.transgressoft.lirp.persistence.sql
 
+import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.persistence.ColumnDef
 import net.transgressoft.lirp.persistence.ColumnType
 import net.transgressoft.lirp.persistence.LirpTableDef
 import io.kotest.core.spec.style.StringSpec
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.maps.shouldContainKey
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
@@ -170,6 +173,88 @@ internal class ExposedTableInterpreterTest : StringSpec({
         val pk = result.table.primaryKey
         pk.shouldNotBeNull()
         pk.columns.map { it.name } shouldBe listOf("id")
+    }
+
+    "interpretJunction returns table with composite PK over parent_id and item_id and a position column for ordered descriptors" {
+        val descriptor =
+            object : JunctionTableDef {
+                override val tableName: String = "playlist_tracks"
+                override val parentTableName: String = "playlist"
+                override val itemTableName: String = "track"
+                override val columns: List<JunctionColumnDef> =
+                    listOf(
+                        JunctionColumnDef("parent_id", ColumnType.IntType, primaryKey = true),
+                        JunctionColumnDef("item_id", ColumnType.IntType, primaryKey = true),
+                        JunctionColumnDef("position", ColumnType.IntType)
+                    )
+                override val isOrdered: Boolean = true
+                override val parentFkOnDelete: CascadeAction = CascadeAction.CASCADE
+                override val itemFkOnDelete: CascadeAction = CascadeAction.RESTRICT
+            }
+
+        val result = interpreter.interpretJunction(descriptor)
+
+        result.descriptor shouldBe descriptor
+        result.table.tableName shouldBe "playlist_tracks"
+        val pk = result.table.primaryKey
+        pk.shouldNotBeNull()
+        pk.columns.map { it.name } shouldContainExactly listOf("parent_id", "item_id")
+        result.parentIdCol.name shouldBe "parent_id"
+        result.itemIdCol.name shouldBe "item_id"
+        result.positionCol.shouldNotBeNull()
+        result.positionCol!!.name shouldBe "position"
+        result.positionCol!!.columnType.nullable shouldBe false
+    }
+
+    "interpretJunction returns table without position column for unordered descriptors" {
+        val descriptor =
+            object : JunctionTableDef {
+                override val tableName: String = "album_genres"
+                override val parentTableName: String = "album"
+                override val itemTableName: String = "genre"
+                override val columns: List<JunctionColumnDef> =
+                    listOf(
+                        JunctionColumnDef("parent_id", ColumnType.IntType, primaryKey = true),
+                        JunctionColumnDef("item_id", ColumnType.IntType, primaryKey = true)
+                    )
+                override val isOrdered: Boolean = false
+                override val parentFkOnDelete: CascadeAction = CascadeAction.CASCADE
+                override val itemFkOnDelete: CascadeAction = CascadeAction.CASCADE
+            }
+
+        val result = interpreter.interpretJunction(descriptor)
+
+        result.table.tableName shouldBe "album_genres"
+        val pk = result.table.primaryKey
+        pk.shouldNotBeNull()
+        pk.columns.map { it.name } shouldContainExactly listOf("parent_id", "item_id")
+        result.positionCol.shouldBeNull()
+        result.table.columns.map { it.name }.toSet() shouldBe setOf("parent_id", "item_id")
+    }
+
+    "interpretJunction exposes typed handles for parent_id, item_id, and position columns" {
+        val descriptor =
+            object : JunctionTableDef {
+                override val tableName: String = "playlist_tracks"
+                override val parentTableName: String = "playlist"
+                override val itemTableName: String = "track"
+                override val columns: List<JunctionColumnDef> =
+                    listOf(
+                        JunctionColumnDef("parent_id", ColumnType.LongType, primaryKey = true),
+                        JunctionColumnDef("item_id", ColumnType.LongType, primaryKey = true),
+                        JunctionColumnDef("position", ColumnType.IntType)
+                    )
+                override val isOrdered: Boolean = true
+                override val parentFkOnDelete: CascadeAction = CascadeAction.CASCADE
+                override val itemFkOnDelete: CascadeAction = CascadeAction.CASCADE
+            }
+
+        val result = interpreter.interpretJunction(descriptor)
+
+        result.parentIdCol.columnType.shouldBeInstanceOf<LongColumnType>()
+        result.itemIdCol.columnType.shouldBeInstanceOf<LongColumnType>()
+        result.positionCol.shouldNotBeNull()
+        result.positionCol!!.columnType.shouldBeInstanceOf<IntegerColumnType>()
     }
 
     "provides column lookup by name" {
