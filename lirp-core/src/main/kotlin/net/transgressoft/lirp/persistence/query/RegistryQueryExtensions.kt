@@ -47,6 +47,13 @@ import net.transgressoft.lirp.persistence.RegistryBase
  * events after calling [query] but before consuming the sequence does not
  * change the behaviour of the returned sequence.
  *
+ * **Cross-aggregate queries:** when the predicate contains a `via … anyMatch /
+ * allMatch / noneMatch / where` chain, the planner reads `parentProp` and
+ * `childRegistry` directly from the captured Via* AST nodes. No `LirpViaAccessor`
+ * callback is required for the in-memory path; the accessor contract emitted by
+ * Plan 02's `LirpViaAccessorProcessor` is reserved for the future SQL pushdown
+ * path and for `RegistryBase.viaAccessorFor` (Plan 04).
+ *
  * @param block DSL builder block defining the query predicate, ordering, and pagination
  * @return A lazy [Sequence] of matching entities
  */
@@ -83,22 +90,12 @@ fun <K, T> Registry<K, T>.query(block: QueryBuilder<T>.() -> Unit): Sequence<T>
  */
 private fun <K, T> Sequence<T>.withReadEvents(registry: Registry<K, T>): Sequence<T>
     where K : Comparable<K>, T : IdentifiableEntity<K> {
-    val lock = Any()
-    var cached: List<T>? = null
-    var emitted = false
-
-    return object : Sequence<T> {
-        override fun iterator(): Iterator<T> {
-            val list =
-                synchronized(lock) {
-                    val snapshot = cached ?: this@withReadEvents.toList().also { cached = it }
-                    if (!emitted) {
-                        registry.emitAsync(Read(snapshot))
-                        emitted = true
-                    }
-                    snapshot
-                }
-            return list.iterator()
+    // Lazy materialises the source sequence exactly once on first iterator() call (thread-safe
+    // by default — SYNCHRONIZED) and emits the Read event as part of that initialisation.
+    // Subsequent iterator() calls reuse the same list without re-firing the event.
+    val materialized =
+        lazy {
+            this@withReadEvents.toList().also { registry.emitAsync(Read(it)) }
         }
-    }
+    return Sequence { materialized.value.iterator() }
 }
