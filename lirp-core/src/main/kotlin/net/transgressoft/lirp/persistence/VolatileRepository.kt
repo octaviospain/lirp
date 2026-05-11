@@ -79,6 +79,7 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
                 discoverIndexes(entity)
                 indexEntity(entity)
                 discoverRefs(entity)
+                discoverViaAccessors(entity)
                 bindEntityRefs(entity)
                 wireRefBubbleUp(entity)
                 publisher.emitAsync(Create(entity))

@@ -135,7 +135,21 @@ val page = repo.query {
 
 The returned `Sequence<T>` is lazy — no evaluation occurs until a terminal operation (`toList`, `firstOrNull`, `count`, etc.). When `activateEvents(READ)` is enabled, a `StandardCrudEvent.Read` fires on every terminal operation.
 
-See the wiki page [Query DSL](https://github.com/octaviospain/lirp/wiki/Query-DSL) for the full operator reference, planner strategies, and Java interop notes.
+Cross-aggregate predicates pivot a foreign-key property into a related repository with `via`, and compose with the usual `and` / `or` / `not`:
+
+```kotlin
+// Single-entity reference: orders whose customer lives in Berlin
+val berlinOrders = orders.query {
+    where { Order::customerId via customers where { Customer::city eq "Berlin" } }
+}.toList()
+
+// Collection reference: playlists with at least one track over $100
+val premiumPlaylists = playlists.query {
+    where { Playlist::trackIds via tracks anyMatch { Track::price gt 100.0 } }
+}.toList()
+```
+
+The planner picks per-parent loop or child-set hash-join per query from a live cardinality estimate, reads the parent's foreign keys on every match (so `@Aggregate(onDelete = DETACH)` is immediately visible to subsequent queries), and rejects chains deeper than 3 levels at construction time. See the wiki page [Query DSL](https://github.com/octaviospain/lirp/wiki/Query-DSL) for the full operator reference, planner strategies, and Java interop notes.
 
 | Persistence target | Module | Status |
 |---|---|---|

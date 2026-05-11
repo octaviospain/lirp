@@ -45,6 +45,10 @@ private const val SQL_TABLE_DEF_FQN = "net.transgressoft.lirp.persistence.sql.Sq
 private const val UUID_FQN = "java.util.UUID"
 private const val LOCAL_DATE_FQN = "java.time.LocalDate"
 private const val LOCAL_DATE_TIME_FQN = "java.time.LocalDateTime"
+private const val KOTLIN_LONG_FQN = "kotlin.Long"
+private const val KOTLIN_UUID_FQN = "kotlin.UUID"
+private const val COLUMN_TYPE_INT_EXPR = "ColumnType.IntType"
+private const val LIST_ITEM_SEPARATOR = ",\n        "
 
 /**
  * KSP processor that generates `_LirpTableDef` descriptor objects for entity classes annotated with
@@ -357,7 +361,7 @@ class TableDefProcessor(
         // D-15: type must be exactly kotlin.Long (non-nullable).
         val resolved = prop.type.resolve()
         val typeFqn = resolved.makeNotNullable().declaration.qualifiedName?.asString()
-        if (typeFqn != "kotlin.Long" || resolved.isMarkedNullable) {
+        if (typeFqn != KOTLIN_LONG_FQN || resolved.isMarkedNullable) {
             val found = typeFqn ?: "unresolved"
             val suffix = if (resolved.isMarkedNullable) "?" else ""
             logger.error(
@@ -435,12 +439,14 @@ class TableDefProcessor(
                 appendObjectBody(
                     tableDefName,
                     className,
-                    tableName,
-                    canGenerateSqlMapping,
-                    columns,
-                    constructorParamNames,
-                    foreignKeys,
-                    if (emitJunctions) junctionRefs else emptyList()
+                    ObjectBodyParams(
+                        tableName = tableName,
+                        canGenerateSqlMapping = canGenerateSqlMapping,
+                        columns = columns,
+                        constructorParamNames = constructorParamNames,
+                        foreignKeys = foreignKeys,
+                        junctionRefs = if (emitJunctions) junctionRefs else emptyList()
+                    )
                 )
             }.toByteArray()
         )
@@ -505,16 +511,29 @@ class TableDefProcessor(
         }
     }
 
+    /** Aggregates the descriptor-shape inputs the table-def emitter consumes, keeping the
+     *  emitter API below Sonar's 7-parameter ceiling without inlining the structure at every
+     *  call site. */
+    private data class ObjectBodyParams(
+        val tableName: String,
+        val canGenerateSqlMapping: Boolean,
+        val columns: List<ColumnMeta>,
+        val constructorParamNames: List<String> = emptyList(),
+        val foreignKeys: List<ForeignKeyMeta> = emptyList(),
+        val junctionRefs: List<JunctionRefInfo> = emptyList()
+    )
+
     private fun StringBuilder.appendObjectBody(
         tableDefName: String,
         className: String,
-        tableName: String,
-        canGenerateSqlMapping: Boolean,
-        columns: List<ColumnMeta>,
-        constructorParamNames: List<String> = emptyList(),
-        foreignKeys: List<ForeignKeyMeta> = emptyList(),
-        junctionRefs: List<JunctionRefInfo> = emptyList()
+        params: ObjectBodyParams
     ) {
+        val tableName = params.tableName
+        val canGenerateSqlMapping = params.canGenerateSqlMapping
+        val columns = params.columns
+        val constructorParamNames = params.constructorParamNames
+        val foreignKeys = params.foreignKeys
+        val junctionRefs = params.junctionRefs
         appendLine("/** KSP-generated table descriptor for [$className]. */")
         if (canGenerateSqlMapping && columns.any { it.typeFqn == UUID_FQN }) {
             appendLine("@OptIn(ExperimentalUuidApi::class)")
@@ -525,7 +544,7 @@ class TableDefProcessor(
         appendLine("    override val columns: List<ColumnDef> = listOf(")
         if (columns.isNotEmpty()) {
             val columnsCode =
-                columns.joinToString(",\n        ") { col ->
+                columns.joinToString(LIST_ITEM_SEPARATOR) { col ->
                     "ColumnDef(name = \"${col.name}\", type = ${col.typeExpression}, " +
                         "nullable = ${col.nullable}, primaryKey = ${col.isPrimaryKey}, isVersion = ${col.isVersion})"
                 }
@@ -553,7 +572,7 @@ class TableDefProcessor(
         if (junctionRefs.isEmpty()) return
         appendLine()
         appendLine("    override val junctionTableDefs: List<JunctionTableDef> = listOf(")
-        appendLine("        ${junctionRefs.joinToString(",\n        ") { it.junctionObjectName }}")
+        appendLine("        ${junctionRefs.joinToString(LIST_ITEM_SEPARATOR) { it.junctionObjectName }}")
         appendLine("    )")
         appendLine()
         appendLine("    override val junctionAccessors: List<JunctionAccessor<$className>> = listOf(")
@@ -593,7 +612,7 @@ class TableDefProcessor(
         appendLine()
         appendLine("    override fun foreignKeys(): List<ForeignKeyDef> = listOf(")
         val entries =
-            foreignKeys.joinToString(",\n        ") { fk ->
+            foreignKeys.joinToString(LIST_ITEM_SEPARATOR) { fk ->
                 "ForeignKeyDef(columnName = \"${fk.columnName}\", " +
                     "referencedTable = \"${fk.referencedTable}\", " +
                     "referencedColumn = \"${fk.referencedColumn}\", " +
@@ -718,55 +737,58 @@ class TableDefProcessor(
         versionedProperty: KSPropertyDeclaration?,
         excludedBackingFields: Set<String> = emptySet()
     ): List<ColumnMeta> {
-        val columns = mutableListOf<ColumnMeta>()
-
         // Detect PK: look for a concrete (non-abstract) 'id' property declared directly on the class.
         // Using getDeclaredProperties() avoids the hasBackingField pitfall on abstract interface properties
         // when the implementing class declares a concrete override.
         val hasDeclaredId = classDecl.getDeclaredProperties().any { it.simpleName.asString() == "id" && !it.isAbstract() }
-
         val versionedName = versionedProperty?.simpleName?.asString()
-
-        for (prop in classDecl.getAllProperties()) {
-            if (prop.isExcluded()) continue
-
-            val propName = prop.simpleName.asString()
-            if (propName in excludedBackingFields) continue
-            val isPrimaryKey = propName == "id" && hasDeclaredId && !prop.isAbstract()
-
-            val persistenceAnnotation =
-                prop.annotations.firstOrNull {
-                    it.annotationType.resolve().declaration.qualifiedName?.asString() == PERSISTENCE_PROPERTY_FQN
-                }
-
-            val columnName =
-                if (persistenceAnnotation != null) {
-                    val customName = persistenceAnnotation.arguments.firstOrNull { it.name?.asString() == "name" }?.value as? String
-                    if (!customName.isNullOrEmpty()) customName else propName.toSnakeCase()
-                } else {
-                    propName.toSnakeCase()
-                }
-
-            val resolvedType = prop.type.resolve()
-            val nullable = resolvedType.isMarkedNullable
-            val notNullableType = resolvedType.makeNotNullable()
-            val typeFqn = notNullableType.declaration.qualifiedName?.asString() ?: "kotlin.Any"
-            val isEnum = (notNullableType.declaration as? KSClassDeclaration)?.classKind == ClassKind.ENUM_CLASS
-            // Mutable for SqlTableDef fromRow purposes means: var property with a public setter
-            val setterIsPublic =
-                prop.setter?.modifiers?.none {
-                    it == Modifier.PROTECTED || it == Modifier.PRIVATE || it == Modifier.INTERNAL
-                } ?: true
-            val isMutable = prop.isMutable && setterIsPublic
-            val typeExpression = mapToColumnTypeExpression(prop, persistenceAnnotation) ?: continue
-
-            val isVersion = versionedName != null && propName == versionedName
-
-            columns.add(ColumnMeta(columnName, propName, typeExpression, typeFqn, nullable, isPrimaryKey, isEnum, isMutable, isVersion))
-        }
-
-        return columns
+        return classDecl.getAllProperties()
+            .filterNot { it.isExcluded() || it.simpleName.asString() in excludedBackingFields }
+            .mapNotNull { buildColumnMeta(it, hasDeclaredId, versionedName) }
+            .toList()
     }
+
+    private fun buildColumnMeta(
+        prop: KSPropertyDeclaration,
+        hasDeclaredId: Boolean,
+        versionedName: String?
+    ): ColumnMeta? {
+        val propName = prop.simpleName.asString()
+        val persistenceAnnotation =
+            prop.annotations.firstOrNull {
+                it.annotationType.resolve().declaration.qualifiedName?.asString() == PERSISTENCE_PROPERTY_FQN
+            }
+        val typeExpression = mapToColumnTypeExpression(prop, persistenceAnnotation) ?: return null
+
+        val resolvedType = prop.type.resolve()
+        val notNullableType = resolvedType.makeNotNullable()
+        val typeFqn = notNullableType.declaration.qualifiedName?.asString() ?: "kotlin.Any"
+        val isEnum = (notNullableType.declaration as? KSClassDeclaration)?.classKind == ClassKind.ENUM_CLASS
+
+        return ColumnMeta(
+            name = columnNameFor(persistenceAnnotation, propName),
+            propertyName = propName,
+            typeExpression = typeExpression,
+            typeFqn = typeFqn,
+            nullable = resolvedType.isMarkedNullable,
+            isPrimaryKey = propName == "id" && hasDeclaredId && !prop.isAbstract(),
+            isEnum = isEnum,
+            isMutable = prop.isMutable && hasPublicSetter(prop),
+            isVersion = versionedName != null && propName == versionedName
+        )
+    }
+
+    private fun columnNameFor(persistenceAnnotation: KSAnnotation?, propName: String): String {
+        if (persistenceAnnotation == null) return propName.toSnakeCase()
+        val customName = persistenceAnnotation.arguments.firstOrNull { it.name?.asString() == "name" }?.value as? String
+        return if (!customName.isNullOrEmpty()) customName else propName.toSnakeCase()
+    }
+
+    // Mutable for SqlTableDef fromRow purposes means: var property with a public setter.
+    private fun hasPublicSetter(prop: KSPropertyDeclaration): Boolean =
+        prop.setter?.modifiers?.none {
+            it == Modifier.PROTECTED || it == Modifier.PRIVATE || it == Modifier.INTERNAL
+        } ?: true
 
     private fun KSPropertyDeclaration.isExcluded(): Boolean {
         val annotationFqns =
@@ -800,8 +822,8 @@ class TableDefProcessor(
         }
 
         return when (fqn) {
-            "kotlin.Int" -> "ColumnType.IntType"
-            "kotlin.Long" -> "ColumnType.LongType"
+            "kotlin.Int" -> COLUMN_TYPE_INT_EXPR
+            KOTLIN_LONG_FQN -> "ColumnType.LongType"
             "kotlin.String" -> if (length > 0) "ColumnType.VarcharType($length)" else "ColumnType.TextType"
             "kotlin.Boolean" -> "ColumnType.BooleanType"
             "kotlin.Double" -> "ColumnType.DoubleType"
@@ -842,7 +864,7 @@ class TableDefProcessor(
                 }
                 "ColumnType.VarcharType($length)"
             }
-            "INT" -> "ColumnType.IntType"
+            "INT" -> COLUMN_TYPE_INT_EXPR
             "BIGINT" -> "ColumnType.LongType"
             "BOOLEAN" -> "ColumnType.BooleanType"
             "DOUBLE" -> "ColumnType.DoubleType"
@@ -993,116 +1015,144 @@ class TableDefProcessor(
 
         val propertiesByName = classDecl.getAllProperties().associateBy { it.simpleName.asString() }
         val parentSimpleName = classDecl.simpleName.asString()
-        val results = mutableListOf<JunctionRefInfo>()
-
-        for (agg in collectionAggs) {
-            val backingName = agg.backingCollectionName
-            if (backingName == null) {
-                logger.error(
-                    "KSP[FK-04]: @Aggregate collection property '${agg.propertyName}' on " +
-                        "'$parentSimpleName' must be a 'var List<K>'/'var Set<K>' bound to a writable " +
-                        "backing field passed as the first positional argument to " +
-                        "${if (agg.isOrdered) "aggregateList" else "aggregateSet"}(<field>). " +
-                        "Anonymous initialisers like 'emptyList()' or 'setOf(...)' are not supported.",
-                    agg.property
-                )
-                continue
-            }
-            val backingProp = propertiesByName[backingName]
-            if (backingProp == null) {
-                logger.error(
-                    "KSP[FK-04]: backing field '$backingName' for @Aggregate property " +
-                        "'${agg.propertyName}' on '$parentSimpleName' must be a 'var List<K>'/" +
-                        "'var Set<K>' declared on the same class.",
-                    agg.property
-                )
-                continue
-            }
-            if (!backingProp.isMutable) {
-                logger.error(
-                    "KSP[FK-04]: backing field '$backingName' for @Aggregate property " +
-                        "'${agg.propertyName}' on '$parentSimpleName' must be a 'var List<K>'/" +
-                        "'var Set<K>' (declared 'val').",
-                    agg.property
-                )
-                continue
-            }
-            val resolvedType = backingProp.type.resolve()
-            val typeFqn = resolvedType.makeNotNullable().declaration.qualifiedName?.asString()
-            val isList = typeFqn == "kotlin.collections.List" || typeFqn == "kotlin.collections.MutableList"
-            val isSet = typeFqn == "kotlin.collections.Set" || typeFqn == "kotlin.collections.MutableSet"
-            val expectsList = agg.isOrdered
-            if (expectsList && !isList) {
-                logger.error(
-                    "KSP[FK-04]: backing field '$backingName' for @Aggregate property " +
-                        "'${agg.propertyName}' on '$parentSimpleName' must be a 'var List<K>' for " +
-                        "aggregateList; found '$typeFqn'.",
-                    agg.property
-                )
-                continue
-            }
-            if (!expectsList && !isSet) {
-                logger.error(
-                    "KSP[FK-04]: backing field '$backingName' for @Aggregate property " +
-                        "'${agg.propertyName}' on '$parentSimpleName' must be a 'var Set<K>' for " +
-                        "aggregateSet; found '$typeFqn'.",
-                    agg.property
-                )
-                continue
-            }
-            val elementType = resolvedType.arguments.firstOrNull()?.type?.resolve()
-            val elementFqn = elementType?.makeNotNullable()?.declaration?.qualifiedName?.asString()
-
-            // KSP[FK-05]: verify the backing collection's element type matches the referenced entity's ID type.
-            // A mismatch (e.g. List<Int> backing an aggregate whose target uses Long ids) is silently
-            // accepted by the compiler but causes filterIsInstance to drop all loaded IDs at runtime.
-            val referencedIdProp =
-                agg.referencedClass.getAllProperties()
-                    .firstOrNull { it.simpleName.asString() == "id" }
-            val referencedIdFqn =
-                referencedIdProp?.type?.resolve()?.makeNotNullable()
-                    ?.declaration?.qualifiedName?.asString()
-            if (elementFqn != null && referencedIdFqn != null && elementFqn != referencedIdFqn) {
-                // Normalize kotlin.UUID alias to java.util.UUID for comparison
-                val normalizedElement = if (elementFqn == "kotlin.UUID") UUID_FQN else elementFqn
-                val normalizedRefId = if (referencedIdFqn == "kotlin.UUID") UUID_FQN else referencedIdFqn
-                if (normalizedElement != normalizedRefId) {
-                    logger.error(
-                        "KSP[FK-05]: backing field '$backingName' element type '$elementFqn' does not match " +
-                            "the referenced entity '${agg.referencedClass.simpleName.asString()}' ID type " +
-                            "'$referencedIdFqn'. Fix the backing collection's type parameter to match.",
-                        agg.property
-                    )
-                    continue
-                }
-            }
-
-            val itemSimpleName =
-                when (elementFqn) {
-                    "kotlin.Int" -> "Int"
-                    "kotlin.Long" -> "Long"
-                    "kotlin.String" -> "String"
-                    "kotlin.UUID", UUID_FQN -> "java.util.UUID"
-                    null -> "Any"
-                    else -> elementFqn.substringAfterLast(".")
-                }
-            val propertyCapitalized = agg.propertyName.replaceFirstChar { it.uppercase() }
-            val descriptorName = "${parentSimpleName}_${propertyCapitalized}_LirpJunctionTableDef"
-            val isMutableList = typeFqn == "kotlin.collections.MutableList" || typeFqn == "kotlin.collections.MutableSet"
-
-            results.add(
-                JunctionRefInfo(
-                    propertyName = agg.propertyName,
-                    backingFieldName = backingName,
-                    junctionObjectName = descriptorName,
-                    isOrdered = agg.isOrdered,
-                    itemKeyTypeSimpleName = itemSimpleName,
-                    isMutableList = isMutableList
-                )
-            )
-        }
-        return results
+        return collectionAggs.mapNotNull { buildJunctionRefInfo(it, parentSimpleName, propertiesByName) }
     }
+
+    private fun buildJunctionRefInfo(
+        agg: AggregatePropertyMeta,
+        parentSimpleName: String,
+        propertiesByName: Map<String, KSPropertyDeclaration>
+    ): JunctionRefInfo? {
+        val backingName =
+            agg.backingCollectionName
+                ?: return logFk04MissingBacking(agg, parentSimpleName).let { null }
+        val backingProp =
+            propertiesByName[backingName]
+                ?: return logFk04MissingBackingProp(agg, parentSimpleName, backingName).let { null }
+        if (!backingProp.isMutable) return logFk04ImmutableBacking(agg, parentSimpleName, backingName).let { null }
+
+        val resolvedType = backingProp.type.resolve()
+        val typeFqn = resolvedType.makeNotNullable().declaration.qualifiedName?.asString()
+        if (!validateBackingShape(agg, parentSimpleName, backingName, typeFqn)) return null
+
+        val elementFqn =
+            resolvedType.arguments.firstOrNull()?.type?.resolve()
+                ?.makeNotNullable()?.declaration?.qualifiedName?.asString()
+        if (!validateElementMatchesReferencedId(agg, backingName, elementFqn)) return null
+
+        val itemSimpleName = elementFqnToSimpleName(elementFqn)
+        val propertyCapitalized = agg.propertyName.replaceFirstChar { it.uppercase() }
+        val descriptorName = "${parentSimpleName}_${propertyCapitalized}_LirpJunctionTableDef"
+        val isMutableList = typeFqn == "kotlin.collections.MutableList" || typeFqn == "kotlin.collections.MutableSet"
+
+        return JunctionRefInfo(
+            propertyName = agg.propertyName,
+            backingFieldName = backingName,
+            junctionObjectName = descriptorName,
+            isOrdered = agg.isOrdered,
+            itemKeyTypeSimpleName = itemSimpleName,
+            isMutableList = isMutableList
+        )
+    }
+
+    private fun logFk04MissingBacking(agg: AggregatePropertyMeta, parentSimpleName: String) {
+        logger.error(
+            "KSP[FK-04]: @Aggregate collection property '${agg.propertyName}' on " +
+                "'$parentSimpleName' must be a 'var List<K>'/'var Set<K>' bound to a writable " +
+                "backing field passed as the first positional argument to " +
+                "${if (agg.isOrdered) "aggregateList" else "aggregateSet"}(<field>). " +
+                "Anonymous initialisers like 'emptyList()' or 'setOf(...)' are not supported.",
+            agg.property
+        )
+    }
+
+    private fun logFk04MissingBackingProp(agg: AggregatePropertyMeta, parentSimpleName: String, backingName: String) {
+        logger.error(
+            "KSP[FK-04]: backing field '$backingName' for @Aggregate property " +
+                "'${agg.propertyName}' on '$parentSimpleName' must be a 'var List<K>'/" +
+                "'var Set<K>' declared on the same class.",
+            agg.property
+        )
+    }
+
+    private fun logFk04ImmutableBacking(agg: AggregatePropertyMeta, parentSimpleName: String, backingName: String) {
+        logger.error(
+            "KSP[FK-04]: backing field '$backingName' for @Aggregate property " +
+                "'${agg.propertyName}' on '$parentSimpleName' must be a 'var List<K>'/" +
+                "'var Set<K>' (declared 'val').",
+            agg.property
+        )
+    }
+
+    private fun validateBackingShape(
+        agg: AggregatePropertyMeta,
+        parentSimpleName: String,
+        backingName: String,
+        typeFqn: String?
+    ): Boolean {
+        val isList = typeFqn == "kotlin.collections.List" || typeFqn == "kotlin.collections.MutableList"
+        val isSet = typeFqn == "kotlin.collections.Set" || typeFqn == "kotlin.collections.MutableSet"
+        if (agg.isOrdered && !isList) {
+            logger.error(
+                "KSP[FK-04]: backing field '$backingName' for @Aggregate property " +
+                    "'${agg.propertyName}' on '$parentSimpleName' must be a 'var List<K>' for " +
+                    "aggregateList; found '$typeFqn'.",
+                agg.property
+            )
+            return false
+        }
+        if (!agg.isOrdered && !isSet) {
+            logger.error(
+                "KSP[FK-04]: backing field '$backingName' for @Aggregate property " +
+                    "'${agg.propertyName}' on '$parentSimpleName' must be a 'var Set<K>' for " +
+                    "aggregateSet; found '$typeFqn'.",
+                agg.property
+            )
+            return false
+        }
+        return true
+    }
+
+    private fun validateElementMatchesReferencedId(
+        agg: AggregatePropertyMeta,
+        backingName: String,
+        elementFqn: String?
+    ): Boolean {
+        // KSP[FK-05]: verify the backing collection's element type matches the referenced
+        // entity's ID type. A mismatch (e.g. List<Int> backing an aggregate whose target uses
+        // Long ids) is silently accepted by the compiler but causes filterIsInstance to drop
+        // all loaded IDs at runtime.
+        val referencedIdProp =
+            agg.referencedClass.getAllProperties()
+                .firstOrNull { it.simpleName.asString() == "id" } ?: return true
+        val referencedIdFqn =
+            referencedIdProp.type.resolve().makeNotNullable()
+                .declaration.qualifiedName?.asString() ?: return true
+        if (elementFqn == null || elementFqn == referencedIdFqn) return true
+
+        // Normalize kotlin.UUID alias to java.util.UUID for comparison.
+        val normalizedElement = if (elementFqn == KOTLIN_UUID_FQN) UUID_FQN else elementFqn
+        val normalizedRefId = if (referencedIdFqn == KOTLIN_UUID_FQN) UUID_FQN else referencedIdFqn
+        if (normalizedElement == normalizedRefId) return true
+
+        logger.error(
+            "KSP[FK-05]: backing field '$backingName' element type '$elementFqn' does not match " +
+                "the referenced entity '${agg.referencedClass.simpleName.asString()}' ID type " +
+                "'$referencedIdFqn'. Fix the backing collection's type parameter to match.",
+            agg.property
+        )
+        return false
+    }
+
+    private fun elementFqnToSimpleName(elementFqn: String?): String =
+        when (elementFqn) {
+            "kotlin.Int" -> "Int"
+            KOTLIN_LONG_FQN -> "Long"
+            "kotlin.String" -> "String"
+            KOTLIN_UUID_FQN, UUID_FQN -> "java.util.UUID"
+            null -> "Any"
+            else -> elementFqn.substringAfterLast(".")
+        }
 
     private fun extractCascadeActionName(value: Any?): String =
         when {
@@ -1141,8 +1191,8 @@ class TableDefProcessor(
         val itemTableName = resolveTableName(agg.referencedClass, itemSimpleName)
         val junctionTableName = "${parentTableName}_${agg.propertyName.toSnakeCase()}"
 
-        val parentPkType = pkColumnTypeExpression(parentClass) ?: "ColumnType.IntType"
-        val itemPkType = pkColumnTypeExpression(agg.referencedClass) ?: "ColumnType.IntType"
+        val parentPkType = pkColumnTypeExpression(parentClass) ?: COLUMN_TYPE_INT_EXPR
+        val itemPkType = pkColumnTypeExpression(agg.referencedClass) ?: COLUMN_TYPE_INT_EXPR
 
         val file =
             codeGenerator.createNewFile(

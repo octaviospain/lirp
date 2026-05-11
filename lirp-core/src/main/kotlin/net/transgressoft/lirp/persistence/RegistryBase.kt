@@ -94,6 +94,25 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
     @Volatile
     private var collectionRefEntries: List<CollectionRefEntry<*, T>>? = null
 
+    /**
+     * Cached [LirpViaAccessor] loaded from the KSP-generated `{EntityName}_LirpViaAccessor` for this entity type.
+     * Holds the typed [KProperty1] descriptors consumed by the cross-aggregate Query DSL planner.
+     * Null until discovery runs; remains null when no generated accessor exists (entity has no `@Aggregate` properties).
+     *
+     * Discovery occurs lazily on first entity registration via [discoverViaAccessors].
+     */
+    @Volatile
+    internal var viaAccessor: LirpViaAccessor<T>? = null
+        private set
+
+    /**
+     * Marks whether [discoverViaAccessors] has already executed for this registry. Distinguishes
+     * "no accessor exists" (null + flag=true) from "discovery has not yet run" (null + flag=false),
+     * mirroring the indexEntries/refEntries discovery-state contract.
+     */
+    @Volatile
+    private var viaAccessorDiscovered: Boolean = false
+
     init {
         // A registry can't create or delete entities,
         // so the CREATE and DELETE events are disabled by default.
@@ -248,6 +267,49 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
             }
         }
     }
+
+    /**
+     * Loads the KSP-generated [LirpViaAccessor] for the entity's class via a convention-based
+     * [Class.forName] lookup (`{EntityClassName}_LirpViaAccessor`). Uses double-checked locking
+     * to ensure loading runs exactly once and the result is visible to all threads — mirrors
+     * [discoverIndexes] exactly.
+     *
+     * The generated accessor provides typed [KProperty1] descriptors used by the cross-aggregate
+     * Query DSL planner to resolve `via(prop)` references at query time, completely avoiding
+     * `kotlin-reflect`. If no generated accessor is found (entity has no `@Aggregate` properties
+     * or KSP not applied), the cached accessor remains `null`.
+     *
+     * Anonymous and local class entities are skipped early — they can never have KSP-generated
+     * accessors because they lack stable binary names.
+     */
+    @Suppress("UNCHECKED_CAST")
+    protected fun discoverViaAccessors(entity: T) {
+        if (viaAccessorDiscovered) return
+        synchronized(this) {
+            if (viaAccessorDiscovered) return
+            if (entity.javaClass.isAnonymousClass || entity.javaClass.isLocalClass) {
+                viaAccessor = null
+                viaAccessorDiscovered = true
+                return
+            }
+            viaAccessor =
+                try {
+                    val accessorClass = Class.forName("${entity.javaClass.name}_LirpViaAccessor")
+                    accessorClass.getDeclaredConstructor().newInstance() as LirpViaAccessor<T>
+                } catch (_: ClassNotFoundException) {
+                    null
+                }
+            viaAccessorDiscovered = true
+        }
+    }
+
+    /**
+     * Returns the cached [LirpViaAccessor] for this registry's entity type, or `null` when no
+     * generated accessor exists. Intended as a test-state inspection seam — production callers
+     * should rely on the per-instance discovery wired into entity registration paths and the
+     * companion [viaAccessorFor] cross-class cache for planner lookups.
+     */
+    internal fun viaAccessorOrNull(): LirpViaAccessor<T>? = viaAccessor
 
     /**
      * Checks whether [entityClass] has any `${'$'}delegate` backing fields whose type is assignable
@@ -492,6 +554,15 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
         private val refAccessorCache: ConcurrentHashMap<Class<*>, Optional<LirpRefAccessor<Any>>> = ConcurrentHashMap()
 
         /**
+         * Cross-class cache for [LirpViaAccessor] instances, mirroring [refAccessorCache]. The Query
+         * DSL planner consults this cache when resolving `via(KProperty1)` references across registries,
+         * so the lookup must be O(1) after the first hit. Uses [Optional] as the map value to cache both
+         * "found" and "not found" states — [ConcurrentHashMap] does not accept null values directly.
+         */
+        @JvmStatic
+        private val viaAccessorCache: ConcurrentHashMap<Class<*>, Optional<LirpViaAccessor<Any>>> = ConcurrentHashMap()
+
+        /**
          * Registers a [RegistryBase] instance for the given entity class in the default [LirpContext].
          *
          * Intended for delegation-based repositories that do not extend [RegistryBase] directly
@@ -602,6 +673,30 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
                 try {
                     val accessorClass = Class.forName("${entityClass.name}_LirpRefAccessor")
                     Optional.of(accessorClass.getDeclaredConstructor().newInstance() as LirpRefAccessor<Any>)
+                } catch (_: ClassNotFoundException) {
+                    Optional.empty()
+                }
+            }.orElse(null)
+        }
+
+        /**
+         * Returns the [LirpViaAccessor] for [entityClass], loading it via a convention-based
+         * [Class.forName] lookup on first call and caching the result. Returns `null` if no
+         * KSP-generated accessor exists for the class (entity has no `@Aggregate` properties)
+         * or when [entityClass] is anonymous / local (no stable binary name).
+         *
+         * Consumed by the cross-aggregate Query DSL planner to resolve `via(prop)` references to
+         * the descriptor that names the child entity class.
+         */
+        @JvmStatic
+        @Suppress("UNCHECKED_CAST")
+        internal fun viaAccessorFor(entityClass: Class<*>): LirpViaAccessor<Any>? {
+            if (entityClass.isAnonymousClass || entityClass.isLocalClass)
+                return null
+            return viaAccessorCache.computeIfAbsent(entityClass) {
+                try {
+                    val accessorClass = Class.forName("${entityClass.name}_LirpViaAccessor")
+                    Optional.of(accessorClass.getDeclaredConstructor().newInstance() as LirpViaAccessor<Any>)
                 } catch (_: ClassNotFoundException) {
                     Optional.empty()
                 }

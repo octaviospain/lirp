@@ -231,10 +231,14 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
 
             // Permissive: when the referenced repo is not registered in this context we cannot
             // confirm the reference is dangling, so leave it untouched (preserves pre-existing
-            // permissive behavior for partially-wired contexts).
+            // permissive behavior for partially-wired contexts). The single suppress covers both
+            // erased casts — `registry`'s K projection and `id`'s `Comparable<*>` boundary.
             @Suppress("UNCHECKED_CAST")
             val typedRegistry = registry as Registry<Comparable<Any>, *>
-            return typedRegistry.findById(id as Comparable<Any>).isPresent
+
+            @Suppress("UNCHECKED_CAST")
+            val typedId = id as Comparable<Any>
+            return typedRegistry.findById(typedId).isPresent
         }
 
         @Suppress("UNCHECKED_CAST")
