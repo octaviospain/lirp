@@ -32,37 +32,46 @@ infix fun <T : IdentifiableEntity<*>, V> KProperty1<T, V>.eq(value: V): Predicat
 /**
  * Creates a greater-than predicate: `property > value`.
  *
- * @param value the value to compare against
+ * Accepts nullable property types — rows whose property value is `null` never match the
+ * predicate (SQL three-valued-logic style: `NULL > x` is unknown, treated as false).
+ *
+ * @param value the value to compare against (non-null)
  * @return a [Predicate.Gt] leaf node
  */
-infix fun <T : IdentifiableEntity<*>, V : Comparable<V>> KProperty1<T, V>.gt(value: V): Predicate<T> =
+infix fun <T : IdentifiableEntity<*>, V : Comparable<V>> KProperty1<T, V?>.gt(value: V): Predicate<T> =
     Predicate.Gt(this, value)
 
 /**
  * Creates a greater-than-or-equal predicate: `property >= value`.
  *
- * @param value the value to compare against
+ * Accepts nullable property types — rows whose property value is `null` never match.
+ *
+ * @param value the value to compare against (non-null)
  * @return a [Predicate.Gte] leaf node
  */
-infix fun <T : IdentifiableEntity<*>, V : Comparable<V>> KProperty1<T, V>.gte(value: V): Predicate<T> =
+infix fun <T : IdentifiableEntity<*>, V : Comparable<V>> KProperty1<T, V?>.gte(value: V): Predicate<T> =
     Predicate.Gte(this, value)
 
 /**
  * Creates a less-than predicate: `property < value`.
  *
- * @param value the value to compare against
+ * Accepts nullable property types — rows whose property value is `null` never match.
+ *
+ * @param value the value to compare against (non-null)
  * @return a [Predicate.Lt] leaf node
  */
-infix fun <T : IdentifiableEntity<*>, V : Comparable<V>> KProperty1<T, V>.lt(value: V): Predicate<T> =
+infix fun <T : IdentifiableEntity<*>, V : Comparable<V>> KProperty1<T, V?>.lt(value: V): Predicate<T> =
     Predicate.Lt(this, value)
 
 /**
  * Creates a less-than-or-equal predicate: `property <= value`.
  *
- * @param value the value to compare against
+ * Accepts nullable property types — rows whose property value is `null` never match.
+ *
+ * @param value the value to compare against (non-null)
  * @return a [Predicate.Lte] leaf node
  */
-infix fun <T : IdentifiableEntity<*>, V : Comparable<V>> KProperty1<T, V>.lte(value: V): Predicate<T> =
+infix fun <T : IdentifiableEntity<*>, V : Comparable<V>> KProperty1<T, V?>.lte(value: V): Predicate<T> =
     Predicate.Lte(this, value)
 
 /**
