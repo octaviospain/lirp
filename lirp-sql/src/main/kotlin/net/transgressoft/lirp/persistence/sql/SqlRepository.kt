@@ -241,6 +241,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                 installFk(
                     fromCol = junction.parentIdCol,
                     targetTableName = descriptor.parentTableName,
+                    targetColumnName = "id",
                     targetColType = parentIdJunctionType(descriptor),
                     onDelete = ReferenceOption.CASCADE
                 )
@@ -252,6 +253,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                     installFk(
                         fromCol = junction.itemIdCol,
                         targetTableName = descriptor.itemTableName,
+                        targetColumnName = "id",
                         targetColType = itemIdJunctionType(descriptor),
                         onDelete = itemRefOption
                     )
@@ -319,6 +321,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                 installFk(
                     fromCol = fromCol,
                     targetTableName = fk.referencedTable,
+                    targetColumnName = fk.referencedColumn,
                     targetColType = columnType,
                     onDelete = refOption
                 )
@@ -338,17 +341,18 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
 
     /**
      * Builds an Exposed [ForeignKeyConstraint] anchored at a shadow target table whose only
-     * column is `id` with the descriptor-declared type, and executes the resulting DDL inside the
-     * current transaction. Duplicate-constraint failures are caught and logged at DEBUG so
-     * repeated calls are no-ops.
+     * column is [targetColumnName] with the descriptor-declared type, and executes the resulting
+     * DDL inside the current transaction. Duplicate-constraint failures are caught and logged
+     * at DEBUG so repeated calls are no-ops.
      */
     private fun JdbcTransaction.installFk(
         fromCol: Column<Any>,
         targetTableName: String,
+        targetColumnName: String,
         targetColType: net.transgressoft.lirp.persistence.ColumnType,
         onDelete: ReferenceOption
     ) {
-        val shadowTarget = ShadowEntityIdTable(targetTableName, targetColType)
+        val shadowTarget = ShadowEntityIdTable(targetTableName, targetColumnName, targetColType)
 
         @Suppress("UNCHECKED_CAST")
         val targetCol = shadowTarget.idColumn as Column<Any>
@@ -904,23 +908,24 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
 
 /**
  * Shadow Exposed [Table] used solely as a target for [ForeignKeyConstraint] DDL emission during
- * deferred junction-FK installation. The shadow table has a single `id` column whose type matches
- * the descriptor's `parent_id` / `item_id` declaration; Exposed reads only the table name and
- * column name when rendering the `REFERENCES <tbl>(<col>)` clause, so the shadow table never needs
- * to be created in the database.
+ * deferred FK installation. The shadow table has a single column named [columnName] whose type
+ * matches the descriptor's declaration; Exposed reads only the table name and column name when
+ * rendering the `REFERENCES <tbl>(<col>)` clause, so the shadow table never needs to be created
+ * in the database.
  */
 @OptIn(ExperimentalUuidApi::class)
 private class ShadowEntityIdTable(
     tableName: String,
+    columnName: String,
     idType: net.transgressoft.lirp.persistence.ColumnType
 ) : Table(tableName) {
     val idColumn: Column<*> =
         when (idType) {
-            is net.transgressoft.lirp.persistence.ColumnType.IntType -> integer("id")
-            is net.transgressoft.lirp.persistence.ColumnType.LongType -> long("id")
-            is net.transgressoft.lirp.persistence.ColumnType.UuidType -> uuid("id")
-            is net.transgressoft.lirp.persistence.ColumnType.VarcharType -> varchar("id", idType.length)
-            is net.transgressoft.lirp.persistence.ColumnType.TextType -> text("id")
-            else -> error("Unsupported junction id type for shadow target table: $idType")
+            is net.transgressoft.lirp.persistence.ColumnType.IntType -> integer(columnName)
+            is net.transgressoft.lirp.persistence.ColumnType.LongType -> long(columnName)
+            is net.transgressoft.lirp.persistence.ColumnType.UuidType -> uuid(columnName)
+            is net.transgressoft.lirp.persistence.ColumnType.VarcharType -> varchar(columnName, idType.length)
+            is net.transgressoft.lirp.persistence.ColumnType.TextType -> text(columnName)
+            else -> error("Unsupported id type for shadow target table: $idType")
         }
 }
