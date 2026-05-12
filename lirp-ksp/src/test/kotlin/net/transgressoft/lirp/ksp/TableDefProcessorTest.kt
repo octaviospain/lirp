@@ -1153,6 +1153,40 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "onDelete = CascadeAction.DETACH"
     }
 
+    test("resolves backing scalar from optionalAggregate lambda and emits SET_NULL FK") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "OptionalAggregateRef.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.CascadeAction
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.Aggregate
+                import net.transgressoft.lirp.persistence.PersistenceIgnore
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.optionalAggregate
+                import java.util.UUID
+
+                @PersistenceMapping
+                class Tenant(override val id: UUID, parentTenantId: UUID? = null) : ReactiveEntityBase<UUID, Tenant>() {
+                    var parentTenantId: UUID? by reactiveProperty(parentTenantId)
+                    @Aggregate(onDelete = CascadeAction.DETACH)
+                    @PersistenceIgnore
+                    val parentTenant by optionalAggregate<UUID, Tenant> { parentTenantId }
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Tenant(id, parentTenantId)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("Tenant_LirpTableDef.kt")
+        content shouldContain "ForeignKeyDef(columnName = \"parent_tenant_id\""
+        content shouldContain "onDelete = CascadeAction.DETACH"
+    }
+
     // ---- Junction accessor wiring on _LirpTableDef (#144 / FK-04, plan 53-03a) ----
 
     test("_LirpTableDef overrides junctionTableDefs for entity with aggregateList collection ref") {

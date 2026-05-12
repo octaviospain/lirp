@@ -212,8 +212,9 @@ class TableDefProcessor(
             text.contains("aggregateSet")
 
     /**
-     * Extracts the backing scalar identifier referenced by the lambda passed to
-     * `aggregate { … }` (e.g. `customerId` from `aggregate<Int, Customer> { customerId }`).
+     * Extracts the backing scalar identifier referenced by the lambda passed to a
+     * single-entity aggregate factory (`aggregate { … }`, `optionalAggregate { … }`,
+     * or any future `mutableAggregate { … }` variant).
      *
      * Single-entity aggregate factories take an `idProvider: () -> K` lambda whose body is
      * conventionally a property reference, optionally with non-null assertion (`!!`) or an
@@ -222,12 +223,13 @@ class TableDefProcessor(
      * backing scalar.
      */
     private fun extractAggregateLambdaIdentifier(text: String): String? {
-        // Match `aggregate<...> { ... }` and capture the first identifier inside the braces.
-        // The first identifier is the backing scalar in conventional usage:
-        //   aggregate { customerId }      → customerId
-        //   aggregate { customerId!! }    → customerId
-        //   aggregate { customerId ?: 0 } → customerId
-        val regex = Regex("""\baggregate\b[^{]*\{\s*([A-Za-z_][A-Za-z_0-9]*)\b""")
+        // Capture the first identifier inside the lambda braces for the single-entity
+        // factory family. The first identifier is the backing scalar in conventional usage:
+        //   aggregate         { customerId }       → customerId
+        //   aggregate         { customerId!! }     → customerId
+        //   aggregate         { customerId ?: 0 }  → customerId
+        //   optionalAggregate { parentTenantId }   → parentTenantId
+        val regex = Regex("""\b(?:optional|mutable)?[Aa]ggregate\b[^{]*\{\s*([A-Za-z_][A-Za-z_0-9]*)\b""")
         return regex.find(text)?.groupValues?.getOrNull(1)
     }
 
