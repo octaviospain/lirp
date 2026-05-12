@@ -40,6 +40,20 @@ sealed class ColumnType {
 
     data object FloatType : ColumnType()
 
+    /**
+     * UUID column whose physical storage is selected by the SQL dialect adapter in `lirp-sql`.
+     *
+     * | Dialect | Storage | JDBC bind/read |
+     * |---------|---------|----------------|
+     * | H2 / PostgreSQL | native `UUID` | `setObject(i, uuid)` / `getObject(c, UUID::class.java)` |
+     * | MySQL / MariaDB | `BINARY(16)` | `setBytes(i, bigEndianBytes)` / `getBytes(c)` |
+     * | SQLite | `BLOB(16)` | `setBytes(i, bigEndianBytes)` / `getBytes(c)` |
+     *
+     * Out-of-band JDBC consumers should use `bindUuid` / `readUuid` in
+     * `net.transgressoft.lirp.persistence.sql` rather than binding canonical hex
+     * strings, which do not match the byte-backed storage used by MySQL, MariaDB,
+     * and SQLite.
+     */
     data object UuidType : ColumnType()
 
     data object DateType : ColumnType()

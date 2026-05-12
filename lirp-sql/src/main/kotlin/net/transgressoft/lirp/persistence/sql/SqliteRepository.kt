@@ -31,6 +31,13 @@ import java.nio.file.Path
  * so foreign-key enforcement and WAL concurrent reads apply to every
  * pooled connection. The returned repository owns the pool and closes
  * it on [SqlRepository.close].
+ *
+ * SQLite has no native UUID type, so [net.transgressoft.lirp.persistence.ColumnType.UuidType]
+ * columns materialize as 16-byte BLOB values. Raw-JDBC `setString(i, uuid.toString())`
+ * binds TEXT, and `WHERE id = ?` comparisons against those BLOB columns can return
+ * `executeUpdate() == 0` with no [java.sql.SQLException]. Out-of-band JDBC consumers
+ * should use `bindUuid` / `readUuid` in this package so the same binary representation
+ * is used for writes and reads.
  */
 object SqliteRepository {
 
