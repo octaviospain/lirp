@@ -261,6 +261,82 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     }
 
     /**
+     * Installs the single-entity foreign-key constraints declared on this entity's scalar
+     * `@Aggregate` references.
+     *
+     * The entity table is created without these constraints during [init] for the same reason
+     * junction tables are: the referenced target table may belong to a different [SqlRepository]
+     * that has not yet been constructed. Once every repository in the application has
+     * materialised, call this method on each repository (or once via the application bootstrapper)
+     * to install the constraints declared in [SqlTableDef.foreignKeys].
+     *
+     * The `ON DELETE` clause is taken from each [ForeignKeyDef.onDelete] descriptor and translated
+     * via [cascadeToReferenceOption]; entries whose action is [CascadeAction.NONE] are skipped
+     * upstream by the KSP processor and never appear in `tableDef.foreignKeys()`.
+     *
+     * **SQLite caveat:** SQLite does not support `ALTER TABLE ADD CONSTRAINT`, so this method
+     * logs a warning and returns without installing any constraints. Consumers needing FK
+     * enforcement on SQLite must declare the constraints inline at `CREATE TABLE` time (a future
+     * follow-up may emit them through the table builder for the SQLite dialect).
+     *
+     * Safe to call multiple times — duplicate-constraint errors raised by the database are
+     * swallowed so the operation is effectively idempotent.
+     */
+    fun installEntityForeignKeys() {
+        val foreignKeys = tableDef.foreignKeys()
+        if (foreignKeys.isEmpty()) return
+
+        if (isSqliteDialect()) {
+            log.warn {
+                "installEntityForeignKeys: skipping ${foreignKeys.size} single-entity FK(s) on table " +
+                    "'${tableDef.tableName}' — SQLite does not support ALTER TABLE ADD CONSTRAINT. " +
+                    "FK constraints must be declared inline at CREATE TABLE time on this dialect."
+            }
+            return
+        }
+
+        val columnTypesByName = tableDef.columns.associate { it.name to it.type }
+
+        // Each FK is installed in its own transaction. Postgres (and some other dialects) abort the
+        // entire transaction on a DDL error — even a swallowed duplicate-constraint error poisons the
+        // connection for subsequent statements. Independent transactions keep each idempotent install
+        // isolated.
+        for (fk in foreignKeys) {
+            val refOption = cascadeToReferenceOption(fk.onDelete) ?: continue
+
+            val columnType =
+                columnTypesByName[fk.columnName]
+                    ?: error(
+                        "SqlTableDef '${tableDef::class.qualifiedName}' declares ForeignKeyDef on column " +
+                            "'${fk.columnName}' but no such column exists in tableDef.columns. This is a KSP " +
+                            "or hand-written SqlTableDef contract violation."
+                    )
+
+            @Suppress("UNCHECKED_CAST")
+            val fromCol = exposedTable.columnsByName.getValue(fk.columnName) as Column<Any>
+
+            transaction(db = db) {
+                installFk(
+                    fromCol = fromCol,
+                    targetTableName = fk.referencedTable,
+                    targetColType = columnType,
+                    onDelete = refOption
+                )
+            }
+        }
+    }
+
+    /**
+     * Detects SQLite by inspecting the underlying JDBC connection's `DatabaseMetaData`.
+     * Used by [installEntityForeignKeys] to short-circuit before attempting an unsupported
+     * `ALTER TABLE ADD CONSTRAINT` DDL statement.
+     */
+    private fun isSqliteDialect(): Boolean =
+        dataSource.connection.use { conn ->
+            conn.metaData.databaseProductName.orEmpty().lowercase().contains("sqlite")
+        }
+
+    /**
      * Builds an Exposed [ForeignKeyConstraint] anchored at a shadow target table whose only
      * column is `id` with the descriptor-declared type, and executes the resulting DDL inside the
      * current transaction. Duplicate-constraint failures are caught and logged at DEBUG so
