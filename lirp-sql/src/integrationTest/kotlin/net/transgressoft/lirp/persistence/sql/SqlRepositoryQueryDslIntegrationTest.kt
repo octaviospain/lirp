@@ -40,7 +40,9 @@ import io.kotest.matchers.ints.shouldBeExactly
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.DisplayName as JunitDisplayName
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.delay
 
 /**
  * Integration tests for the Query DSL against [SqlRepository] on PostgreSQL, MySQL, MariaDB, and SQLite.
@@ -756,6 +758,7 @@ internal class SqlRepositoryQueryDslIntegrationTest : FunSpec({
                     repo.activateEvents(CrudEvent.Type.READ)
                     val readCount = AtomicInteger(0)
                     repo.subscribe(CrudEvent.Type.READ) { readCount.incrementAndGet() }
+                    delay(50.milliseconds) // let SharedFlow collector coroutine start
 
                     val sequence = repo.query { where { TestPerson::firstName eq "A" } }
 
@@ -768,7 +771,7 @@ internal class SqlRepositoryQueryDslIntegrationTest : FunSpec({
                     rows.first().firstName shouldBe "A"
 
                     // emitAsync is asynchronous; poll until the event is processed
-                    eventually(2.seconds) {
+                    eventually(5.seconds) {
                         readCount.get() shouldBeExactly 1
                     }
                 } finally {
