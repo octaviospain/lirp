@@ -54,47 +54,63 @@ sealed class Predicate<T : IdentifiableEntity<*>> {
     }
 
     /**
-     * Greater-than comparison between a comparable property and a value.
+     * Greater-than comparison between a comparable property and a value. The property type
+     * may be nullable; rows whose property value is `null` never match (SQL three-valued-logic).
      *
-     * @param prop the property reference
-     * @param value the value to compare against
+     * @param prop the property reference (may yield null)
+     * @param value the value to compare against (non-null)
      */
-    class Gt<T : IdentifiableEntity<*>, V : Comparable<V>>(val prop: KProperty1<T, V>, val value: V) : Predicate<T>() {
-        /** Returns `true` if [prop] of [t] is strictly greater than [value]. */
-        override fun matches(t: T): Boolean = prop.get(t) > value
+    class Gt<T : IdentifiableEntity<*>, V : Comparable<V>>(val prop: KProperty1<T, V?>, val value: V) : Predicate<T>() {
+        /** Returns `true` if [prop] of [t] is non-null and strictly greater than [value]. */
+        override fun matches(t: T): Boolean {
+            val v = prop.get(t) ?: return false
+            return v > value
+        }
     }
 
     /**
-     * Greater-than-or-equal comparison between a comparable property and a value.
+     * Greater-than-or-equal comparison between a comparable property and a value. The property
+     * type may be nullable; rows whose property value is `null` never match.
      *
-     * @param prop the property reference
-     * @param value the value to compare against
+     * @param prop the property reference (may yield null)
+     * @param value the value to compare against (non-null)
      */
-    class Gte<T : IdentifiableEntity<*>, V : Comparable<V>>(val prop: KProperty1<T, V>, val value: V) : Predicate<T>() {
-        /** Returns `true` if [prop] of [t] is greater than or equal to [value]. */
-        override fun matches(t: T): Boolean = prop.get(t) >= value
+    class Gte<T : IdentifiableEntity<*>, V : Comparable<V>>(val prop: KProperty1<T, V?>, val value: V) : Predicate<T>() {
+        /** Returns `true` if [prop] of [t] is non-null and greater than or equal to [value]. */
+        override fun matches(t: T): Boolean {
+            val v = prop.get(t) ?: return false
+            return v >= value
+        }
     }
 
     /**
-     * Less-than comparison between a comparable property and a value.
+     * Less-than comparison between a comparable property and a value. The property type may be
+     * nullable; rows whose property value is `null` never match.
      *
-     * @param prop the property reference
-     * @param value the value to compare against
+     * @param prop the property reference (may yield null)
+     * @param value the value to compare against (non-null)
      */
-    class Lt<T : IdentifiableEntity<*>, V : Comparable<V>>(val prop: KProperty1<T, V>, val value: V) : Predicate<T>() {
-        /** Returns `true` if [prop] of [t] is strictly less than [value]. */
-        override fun matches(t: T): Boolean = prop.get(t) < value
+    class Lt<T : IdentifiableEntity<*>, V : Comparable<V>>(val prop: KProperty1<T, V?>, val value: V) : Predicate<T>() {
+        /** Returns `true` if [prop] of [t] is non-null and strictly less than [value]. */
+        override fun matches(t: T): Boolean {
+            val v = prop.get(t) ?: return false
+            return v < value
+        }
     }
 
     /**
-     * Less-than-or-equal comparison between a comparable property and a value.
+     * Less-than-or-equal comparison between a comparable property and a value. The property type
+     * may be nullable; rows whose property value is `null` never match.
      *
-     * @param prop the property reference
-     * @param value the value to compare against
+     * @param prop the property reference (may yield null)
+     * @param value the value to compare against (non-null)
      */
-    class Lte<T : IdentifiableEntity<*>, V : Comparable<V>>(val prop: KProperty1<T, V>, val value: V) : Predicate<T>() {
-        /** Returns `true` if [prop] of [t] is less than or equal to [value]. */
-        override fun matches(t: T): Boolean = prop.get(t) <= value
+    class Lte<T : IdentifiableEntity<*>, V : Comparable<V>>(val prop: KProperty1<T, V?>, val value: V) : Predicate<T>() {
+        /** Returns `true` if [prop] of [t] is non-null and less than or equal to [value]. */
+        override fun matches(t: T): Boolean {
+            val v = prop.get(t) ?: return false
+            return v <= value
+        }
     }
 
     /**
