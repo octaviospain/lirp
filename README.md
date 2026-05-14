@@ -106,6 +106,42 @@ class AlbumRepository(context: LirpContext) :
 
 Reads are served from the in-memory `ConcurrentHashMap`, so `findById` avoids SQL round-trips. Write behavior differs by operation type; refer to the SQL Persistence wiki for current flush/transaction details.
 
+### Credential handling
+
+JDBC URLs frequently embed secrets. Treat them like passwords, not like configuration.
+
+**Inject credentials via environment variables** rather than embedding them in the URL or committing them to source control. Use the three-argument constructor overload so the password never appears inside the URL string:
+
+```kotlin
+@LirpRepository
+class AlbumRepository(context: LirpContext) :
+    SqlRepository<Int, Album>(
+        context,
+        Album_LirpTableDef,
+        url = System.getenv("JDBC_URL") ?: error("JDBC_URL not set"),
+        username = System.getenv("DB_USER"),
+        password = System.getenv("DB_PASSWORD"),
+    )
+```
+
+**Never log a raw JDBC URL in production.** Passwords commonly appear in the userinfo segment (`user:pwd@host`), in query parameters (`?password=...`), or as H2 semicolon properties (`;PASSWORD=...`). Connection-pool metrics, HikariCP DEBUG logs, and error stack traces all routinely capture the URL.
+
+When you must include a URL in diagnostic output, route it through `ConnectionUrlSanitizer`:
+
+```kotlin
+import net.transgressoft.lirp.persistence.sql.ConnectionUrlSanitizer
+
+// masks the password with **** in userinfo, query-string, and H2 semicolon surfaces
+logger.debug { "Connecting to: ${ConnectionUrlSanitizer.sanitize(jdbcUrl)}" }
+
+// jdbc:postgresql://user:secret@host:5432/db  →  jdbc:postgresql://user:****@host:5432/db
+// jdbc:h2:mem:test;USER=sa;PASSWORD=secret    →  jdbc:h2:mem:test;USER=sa;PASSWORD=****
+```
+
+`sanitize` handles all five supported dialects (PostgreSQL, MySQL, MariaDB, SQLite, H2), is case-insensitive on the `password` key, and returns malformed input verbatim — it never throws. It is defence-in-depth for logging, not a substitute for env-var injection.
+
+See the [SQL Persistence wiki page](https://github.com/octaviospain/lirp/wiki/SQL-Persistence#credential-handling) for the long-form guidance.
+
 ## Query DSL
 
 LIRP provides a type-safe, Kotlin-native query DSL for filtering, ordering, and paginating entities directly from any `Repository`. Predicates compose with infix operators; the planner automatically routes indexed equality checks through secondary indexes and falls back to in-memory scans for range and composite predicates.

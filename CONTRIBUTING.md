@@ -115,6 +115,49 @@ spec sequential. This reduces default wall-clock time without changing spec-loca
 ordering. JavaFX specs remain serialized because `FxToolkitInit` and JavaFX toolkit state
 are process-wide. Scheduled Stress CI is not part of this setup.
 
+#### Event-asserting integration tests: SharedFlow collector warmup
+
+Tests that subscribe to a repository's `SharedFlow` event stream and then immediately fire a
+mutation are inherently racy: the collector coroutine launched by `subscribe { ... }` is not
+necessarily fully scheduled before the test's next line runs. Without a small warmup delay
+between subscribing and emitting, the very first event can be dropped and the test fails
+non-deterministically. This was the root cause of the v2.5.0 SQL event-flow flake (fixed in
+commit `ba7f2f2`).
+
+**Convention:** every integration test that subscribes to a `SharedFlow` before asserting on
+collected events MUST include a 50 ms warmup `delay` between the subscription and the first
+mutation under test.
+
+Required import:
+
+```kotlin
+import kotlin.time.Duration.Companion.milliseconds
+```
+
+Canonical snippet:
+
+```kotlin
+val received = AtomicReference<CrudEvent.Type?>()
+repo.subscribe { event -> received.set(event.type) }
+delay(50.milliseconds) // let SharedFlow collector coroutine start
+
+repo.add(TestPerson(1).apply { firstName = "Alice" })
+
+eventually(5.seconds) {
+    received.get() shouldBe CrudEvent.Type.CREATE
+}
+```
+
+Canonical call sites to mirror:
+
+- `lirp-sql/src/integrationTest/kotlin/net/transgressoft/lirp/persistence/sql/SqlRepositoryEventIntegrationTest.kt`
+  — lines 53, 73, 95, 118, 143.
+- `lirp-sql/src/integrationTest/kotlin/net/transgressoft/lirp/persistence/sql/SqlRepositoryQueryDslIntegrationTest.kt`
+  — line 761.
+
+Any new integration test that asserts on `SharedFlow`-delivered events without this warmup is
+considered incomplete and will be flagged in review.
+
 ### Problem Statement Requirement
 
 When submitting a PR, always include a clear problem statement that answers:

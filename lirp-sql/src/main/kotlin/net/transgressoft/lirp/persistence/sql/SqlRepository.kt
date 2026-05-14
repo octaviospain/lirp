@@ -872,7 +872,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         private fun buildDataSource(jdbcUrl: String, poolSize: Int, schema: String?): HikariDataSource {
             if (jdbcUrl.startsWith("jdbc:sqlite:")) {
                 log.warn {
-                    "SQLite JDBC URL '$jdbcUrl' passed to SqlRepository(jdbcUrl, ...) without connectionInitSql; " +
+                    "SQLite JDBC URL '${ConnectionUrlSanitizer.sanitize(jdbcUrl)}' passed to SqlRepository(jdbcUrl, ...) without connectionInitSql; " +
                         "FK enforcement and WAL mode are not configured. Prefer SqliteRepository.fileBacked(...) " +
                         "or SqliteRepository.inMemory(...) for the curated PRAGMA bundle."
                 }
