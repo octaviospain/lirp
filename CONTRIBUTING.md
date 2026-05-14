@@ -205,6 +205,94 @@ To automatically fix formatting issues:
 ./gradlew ktlintFormat
 ```
 
+## Supply Chain Security
+
+### Dependency verification metadata
+
+`gradle/verification-metadata.xml` pins SHA-256 checksums for every resolved artifact (direct and transitive, including Gradle plugins). Gradle reads this file automatically on every invocation; a checksum mismatch fails the build with `Dependency verification failed`.
+
+**When to regenerate** — any change that alters the resolved dependency graph:
+
+- bumping a version in `gradle/libs.versions.toml`
+- adding or removing a dependency
+- changing a plugin version in `build.gradle`
+- upgrading the Kotlin or JVM toolchain
+
+**How to regenerate:**
+
+```bash
+./gradlew --write-verification-metadata sha256 build cyclonedxBom --no-parallel --refresh-dependencies
+```
+
+Commit the resulting diff alongside the dependency change. Review it — only the expected artifacts should appear.
+
+Why this exact command:
+
+- **No `-x test`.** Excluding the `test` task skips configuring its lazily-resolved classpath, which silently drops JUnit-platform deps (`junit-bom.module`, `opentest4j.module`, etc.) from the regenerated metadata. The next CI run fails verification on those missing entries.
+- **`build` covers `:lirp-sql:integrationTest`** because integration tests are wired into `check`, which `build` triggers. A separate `:lirp-sql:integrationTest` invocation is redundant.
+- **`cyclonedxBom`** ensures the CycloneDX plugin's transitives are also recorded — otherwise the SBOM step on release would fail.
+- **`--refresh-dependencies`** forces a fresh fetch from declared repositories rather than reusing the local cache. Without it, anything already in `~/.gradle/caches` (or in `~/.m2/` via the global init script's `mavenLocal()`) is reused, which can mask `.module` files that exist on Maven Central but aren't in the local cache.
+- **`--no-parallel`** avoids `Resolution of the configuration was attempted without an exclusive lock` errors when multiple modules resolve concurrently.
+
+**Current trust model:** `verify-metadata="true"`, `verify-signatures="false"`. PGP signature verification is deferred — it requires curating a `<trusted-keys>` block per signing identity. Checksum verification alone still defeats artifact tampering at the registry or proxy layer.
+
+`net.transgressoft` `*-SNAPSHOT` artifacts are listed under `<trusted-artifacts>` and bypass checksum verification. SNAPSHOTs are mutable by design, so pinning their checksums is impossible — trusting the group/version pattern lets cross-project snapshot testing (via `gradle publishToMavenLocal`) keep working.
+
+**Troubleshooting:**
+
+| Symptom | Action |
+|---|---|
+| `Checksum missing` on a new dep | Rerun the regeneration commands above |
+| `Wrong checksum` without an intentional bump | Investigate — could be cache corruption or a compromised proxy. Do not blindly regenerate |
+| Plugin resolution failure in CI | Ensure plugin's metadata covers the `pluginManagement` configurations — running `cyclonedxBom` regeneration usually picks them up |
+
+### CycloneDX SBOM
+
+`./gradlew cyclonedxBom --no-parallel` produces `build/reports/bom.json` (CycloneDX 1.5). The release workflow uploads it as a GitHub Release artifact for downstream consumers and security tools (Trivy, Grype, etc).
+
+### Cross-checking metadata against Maven Central
+
+PR builds run a "verification metadata cross-check" step after the main build. It re-resolves every dependency with `--refresh-dependencies` (bypassing the Gradle cache) and writes a fresh metadata report to `verification-metadata.dryrun.xml`. The committed file is then diffed against the freshly-generated one — any divergence fails the build.
+
+This catches the failure mode that pure local regeneration can't catch: if your local Gradle cache or proxy was tampered with at metadata-generation time, the committed SHA-256 values would not match what Central actually serves. The CI cross-check has no local cache and pulls directly from Central, so a mismatch is loud and immediate.
+
+Master builds skip this step — every metadata change has already been cross-checked at PR time, and the ~2-minute cost outweighs the marginal benefit of catching direct-push edge cases.
+
+### Vulnerability scanning
+
+- **PR builds** run `actions/dependency-review-action` and fail on HIGH+ severity CVEs in the PR diff.
+- **Weekly schedule** runs `osv-scanner` against the full dependency graph and uploads SARIF to the GitHub Security tab.
+
+### Renovate
+
+`renovate.json` configures the [Renovate](https://docs.renovatebot.com) GitHub App to keep dependencies, GitHub Actions, and the Gradle wrapper up to date.
+
+- **Schedule:** Mondays before 06:00 Europe/Madrid. CVE-flagged updates ignore the schedule.
+- **Grouping:** Kotlin, Kotest, Testcontainers, Exposed, Kotlinx, GitHub Actions, and the Gradle wrapper are each batched into a single PR.
+- **GitHub Actions** are kept SHA-pinned via `pinDigests: true` — Renovate updates both the SHA and the trailing version comment.
+- **Dependency Dashboard:** Renovate maintains a persistent GitHub issue listing pending updates with checkboxes. Tick a box → it opens that PR.
+
+**Verification metadata on Renovate PRs:** Renovate does **not** automatically update `gradle/verification-metadata.xml`. Every Renovate PR that bumps a dependency will fail CI on the dependency-verification step. The workflow to merge a Renovate PR is:
+
+1. Check out the PR branch locally.
+2. Run the regeneration commands above.
+3. Amend the commit and force-push to the PR branch.
+4. CI re-runs and passes.
+
+This friction is the price of strict verification. If it becomes painful, a follow-up is to add a `postUpgradeTasks` block to `renovate.json` invoking the regeneration command — but `postUpgradeTasks` requires a self-hosted Renovate instance (not the Mend cloud app), so it's a non-trivial migration.
+
+### Pinned GitHub Actions
+
+All `uses:` references in `.github/workflows/` are pinned to commit SHAs (with the version tag preserved in a trailing comment for human readability). Tag references like `@v4` are mutable — pinning to a SHA prevents a compromised tag from silently injecting code into CI runs.
+
+When updating an action, look up the SHA for the target tag and update both the SHA and the comment:
+
+```bash
+gh api repos/<owner>/<repo>/git/refs/tags/<tag> --jq '.object.sha'
+```
+
+If the returned object has `type: tag` (annotated tag), dereference it: `gh api repos/<owner>/<repo>/git/tags/<sha> --jq '.object.sha'`.
+
 ## Questions?
 
 If you have any questions or need help with the contribution process, please don't hesitate to open an issue asking for guidance.

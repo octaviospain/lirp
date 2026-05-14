@@ -1,21 +1,23 @@
 [versions]
-kotlin = "2.3.10"
-ksp = "2.3.6"
-coroutines = "1.10.2"
+kotlin = "2.3.21"
+ksp = "2.3.8"
+coroutines = "1.11.0"
+serialization = "1.11.0"
 kotest = "6.1.11"
-exposed = "1.2.0"
+exposed = "1.3.0"
 hikari = "7.0.2"
-testcontainers = "2.0.4"
+testcontainers = "2.0.5"
 kctfork = "0.12.1"
-postgresql = "42.7.10"
-mysql = "9.6.0"
+postgresql = "42.7.11"
+mysql = "9.7.0"
 mariadb = "3.5.8"
-sqlite = "3.53.0.0"
+sqlite = "3.53.1.0"
 jmh = "1.37"
 jol = "0.17"
-springDataJpa = "3.4.7"
-hibernate = "6.6.17.Final"
+springDataJpa = "4.0.5"
+hibernate = "7.3.4.Final"
 jakartaPersistence = "3.2.0"
+ch-qos-logback = "1.5.32"
 
 [libraries]
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
@@ -28,7 +30,7 @@ coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test" }
 
 ksp-api = { module = "com.google.devtools.ksp:symbol-processing-api", version.ref = "ksp" }
 
-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version = "1.11.0" }
+serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 
 kotest-runner-junit6 = { module = "io.kotest:kotest-runner-junit6", version.ref = "kotest" }
 kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
@@ -49,18 +51,18 @@ testcontainers-mariadb = { module = "org.testcontainers:testcontainers-mariadb",
 
 kctfork-ksp = { module = "dev.zacsweers.kctfork:ksp", version.ref = "kctfork" }
 
-h2 = { module = "com.h2database:h2", version = "2.4.240" }
+h2 = "com.h2database:h2:2.4.240"
 postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
 mysql = { module = "com.mysql:mysql-connector-j", version.ref = "mysql" }
 mariadb = { module = "org.mariadb.jdbc:mariadb-java-client", version.ref = "mariadb" }
 sqlite = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite" }
-mockk = { module = "io.mockk:mockk", version = "1.14.9" }
-logback-core = { module = "ch.qos.logback:logback-core", version = "1.5.32" }
-logback-classic = { module = "ch.qos.logback:logback-classic", version = "1.5.32" }
-jsr305 = { module = "com.google.code.findbugs:jsr305", version = "3.0.2" }
-kotlin-logging = { module = "io.github.oshai:kotlin-logging-jvm", version = "7.0.14" }
+mockk = "io.mockk:mockk:1.14.9"
+logback-core = { module = "ch.qos.logback:logback-core", version.ref = "ch-qos-logback" }
+logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "ch-qos-logback" }
+jsr305 = "com.google.code.findbugs:jsr305:3.0.2"
+kotlin-logging = "io.github.oshai:kotlin-logging-jvm:8.0.02"
 
-junit-bom = { module = "org.junit:junit-bom", version = "6.0.3" }
+junit-bom = "org.junit:junit-bom:6.0.3"
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 
@@ -72,9 +74,21 @@ hibernate-core = { module = "org.hibernate.orm:hibernate-core", version.ref = "h
 jakarta-persistence-api = { module = "jakarta.persistence:jakarta.persistence-api", version.ref = "jakartaPersistence" }
 
 [bundles]
-kotest = ["kotest-runner-junit6", "kotest-assertions-core", "kotest-assertions-json", "kotest-property"]
-exposed = ["exposed-core", "exposed-jdbc", "exposed-kotlin-datetime"]
-logback = ["logback-core", "logback-classic"]
+kotest = [
+    "kotest-assertions-core",
+    "kotest-assertions-json",
+    "kotest-property",
+    "kotest-runner-junit6",
+]
+exposed = [
+    "exposed-core",
+    "exposed-jdbc",
+    "exposed-kotlin-datetime",
+]
+logback = [
+    "logback-classic",
+    "logback-core",
+]
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

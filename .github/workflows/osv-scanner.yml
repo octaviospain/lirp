@@ -1,0 +1,22 @@
+name: OSV-Scanner
+
+on:
+    schedule:
+        # Mondays 06:00 UTC — runs against the full dependency graph, complements
+        # the per-PR dependency-review-action which only inspects the diff.
+        -   cron: '0 6 * * 1'
+    workflow_dispatch:
+
+permissions:
+    contents: read
+    security-events: write
+    actions: read
+
+jobs:
+    scan:
+        uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@764c91816374ff2d8fc2095dab36eecd42d61638 # v1.9.2
+        with:
+            scan-args: |-
+                --recursive
+                ./
+            upload-sarif: true
