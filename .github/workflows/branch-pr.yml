@@ -25,19 +25,26 @@ jobs:
         runs-on: ubuntu-latest
 
         steps:
-            -   uses: actions/checkout@v4
+            -   uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
                 with:
                     fetch-depth: 0
 
+            -   name: Dependency Review
+                if: github.event_name == 'pull_request'
+                uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+                with:
+                    fail-on-severity: high
+                    comment-summary-in-pr: on-failure
+
             -   name: Set up JDK 21
-                uses: actions/setup-java@v4
+                uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
                 with:
                     java-version: 21
                     distribution: 'zulu'
                     java-package: 'jdk+fx'
 
             -   name: Cache Gradle packages
-                uses: actions/cache@v4
+                uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
                 with:
                     path: |
                         ~/.gradle/caches
@@ -48,6 +55,26 @@ jobs:
 
             -   name: Build with Gradle
                 run: ./gradlew build
+
+            -   name: Cross-check verification metadata against Maven Central
+                # Re-resolves every dependency with --refresh-dependencies (bypasses the
+                # cache restored above) and writes a fresh dependency-verification report
+                # to verification-metadata.dryrun.xml. Two outcomes:
+                #   1. Gradle's own dependency-verification rejects a freshly-downloaded
+                #      artifact whose SHA does not match the committed metadata — fails here.
+                #   2. The dry-run output diverges from the committed file (new components,
+                #      reordering, missing entries) — flagged by the diff below.
+                # Together these prove the committed metadata matches what Maven Central
+                # currently serves, defeating a poisoned-local-cache attack at regen time.
+                run: |
+                    ./gradlew --write-verification-metadata sha256 build cyclonedxBom \
+                        --dry-run --no-parallel --refresh-dependencies
+                    if ! diff -q gradle/verification-metadata.xml gradle/verification-metadata.dryrun.xml > /dev/null; then
+                        echo "::error::verification-metadata.xml diverges from Maven Central. Regenerate locally and recommit."
+                        diff gradle/verification-metadata.xml gradle/verification-metadata.dryrun.xml || true
+                        exit 1
+                    fi
+                    rm gradle/verification-metadata.dryrun.xml
 
             -   name: Upload coverage to Codecov
                 uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5

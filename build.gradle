@@ -8,6 +8,7 @@ plugins {
     id 'jacoco-report-aggregation'
     id 'org.jetbrains.dokka' version '2.2.0'
     id 'org.jetbrains.kotlin.jvm' version '2.3.10'
+    id 'org.cyclonedx.bom' version '2.3.1'
     id 'org.jetbrains.kotlin.plugin.serialization' version '2.3.10'
     id 'org.jlleitschuh.gradle.ktlint' version '14.2.0'
     id 'org.sonarqube' version '7.2.3.7755'
@@ -47,6 +48,7 @@ tasks.withType(PublishToMavenLocal).configureEach {
     onlyIf { project != rootProject }
 }
 
+group = 'net.transgressoft'
 version = scmVersion.version
 description = 'LIRP - Lightweight Reactive Persistence. An asynchronous, non-blocking, reactive persistence library for Java and Kotlin.'
 
@@ -65,6 +67,18 @@ sonar {
 
 tasks.named('check') {
     dependsOn tasks.named('testCodeCoverageReport')
+}
+
+cyclonedxBom {
+    includeConfigs = ['runtimeClasspath']
+    skipConfigs = ['compileClasspath', 'testCompileClasspath', 'testRuntimeClasspath']
+    projectType = 'library'
+    schemaVersion = '1.5'
+    destination = file("${layout.buildDirectory.get().asFile}/reports")
+    outputName = 'bom'
+    outputFormat = 'json'
+    includeBomSerialNumber = true
+    includeLicenseText = false
 }
 
 subprojects {
