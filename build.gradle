@@ -3,7 +3,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 import org.jlleitschuh.gradle.ktlint.reporter.ReporterType
 
 plugins {
-    id 'com.google.devtools.ksp' version '2.3.6' apply false
+    id 'com.google.devtools.ksp' version '2.3.8' apply false
     id 'com.vanniktech.maven.publish' version '0.36.0'
     id 'jacoco-report-aggregation'
     id 'org.jetbrains.dokka' version '2.2.0'
