@@ -272,7 +272,12 @@ Master builds skip this step — every metadata change has already been cross-ch
 `renovate.json` configures the [Renovate](https://docs.renovatebot.com) GitHub App to keep dependencies, GitHub Actions, and the Gradle wrapper up to date.
 
 - **Schedule:** Mondays before 06:00 Europe/Madrid. CVE-flagged updates ignore the schedule.
-- **Grouping:** Kotlin, Kotest, Testcontainers, Exposed, Kotlinx, GitHub Actions, and the Gradle wrapper are each batched into a single PR.
+- **Grouping:**
+    - All non-plugin library bumps (entries in `libs.versions.toml` and `dependencies` blocks) are batched into a single `gradle-libraries` PR.
+    - Kotlin language artifacts (plugin + stdlib/reflect/etc.) and KSP are bundled into a `kotlin` PR — they share an ABI and must move in lockstep.
+    - GitHub Actions are batched into one PR (digests kept pinned via the `helpers:pinGitHubActionDigests` preset).
+    - The Gradle wrapper is its own PR.
+    - Every other Gradle plugin gets its own PR — plugins (e.g. cyclonedx, sonarqube) tend to ship breaking changes that need individual review.
 - **GitHub Actions** are kept SHA-pinned via `pinDigests: true` — Renovate updates both the SHA and the trailing version comment.
 - **Dependency Dashboard:** Renovate maintains a persistent GitHub issue listing pending updates with checkboxes. Tick a box → it opens that PR.
 
