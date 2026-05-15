@@ -236,7 +236,9 @@ Why this exact command:
 
 **Current trust model:** `verify-metadata="true"`, `verify-signatures="false"`. PGP signature verification is deferred — it requires curating a `<trusted-keys>` block per signing identity. Checksum verification alone still defeats artifact tampering at the registry or proxy layer.
 
-`net.transgressoft` `*-SNAPSHOT` artifacts are listed under `<trusted-artifacts>` and bypass checksum verification. SNAPSHOTs are mutable by design, so pinning their checksums is impossible — trusting the group/version pattern lets cross-project snapshot testing (via `gradle publishToMavenLocal`) keep working.
+`net.transgressoft` `*-SNAPSHOT` artifacts are listed under `<trusted-artifacts>` and bypass checksum verification. SNAPSHOTs are mutable by design, so pinning their checksums is impossible — trusting the group/version pattern lets cross-project snapshot testing (via `./gradlew publishToMavenLocal`) keep working.
+
+`*-sources.jar` and `*-javadoc.jar` are also trusted blanket-wide. IDEs (IntelliJ, Eclipse) auto-download these for code navigation via their own resolver, not through the build's task graph — so they are never seen by `--write-verification-metadata`. They are inert documentation; a compromised sources jar cannot execute code in your build. Runtime checksum pinning still applies to every executable artifact.
 
 **Troubleshooting:**
 
