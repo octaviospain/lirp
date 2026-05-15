@@ -13,29 +13,18 @@
     "ignoreUnstable": true,
     "packageRules": [
         {
-            "description": "Group all Kotlin language/plugin updates together",
-            "matchPackagePatterns": ["^org\\.jetbrains\\.kotlin"],
+            "description": "Bundle every non-plugin library bump (libs.versions.toml + dependencies blocks) into a single PR. Plugins are excluded because matchDepTypes restricts to 'dependencies' (Renovate uses 'plugin' for build.gradle plugins {} entries).",
+            "groupName": "gradle-libraries",
+            "matchDepTypes": ["dependencies"],
+            "matchManagers": ["gradle"]
+        },
+        {
+            "description": "Override: Kotlin plugin + Kotlin stdlib/reflect + KSP must move in lockstep (compiler ABI). Runs after gradle-libraries so org.jetbrains.kotlin libraries get pulled out of the libraries bundle back into this group, paired with the plugin and KSP.",
+            "matchPackageNames": [
+                "/^org\\.jetbrains\\.kotlin/",
+                "/^com\\.google\\.devtools\\.ksp/"
+            ],
             "groupName": "kotlin"
-        },
-        {
-            "description": "Group Kotest core + extensions",
-            "matchPackagePatterns": ["^io\\.kotest"],
-            "groupName": "kotest"
-        },
-        {
-            "description": "Group all Testcontainers modules",
-            "matchPackagePatterns": ["^org\\.testcontainers"],
-            "groupName": "testcontainers"
-        },
-        {
-            "description": "Group all Exposed (JetBrains ORM) modules",
-            "matchPackagePatterns": ["^org\\.jetbrains\\.exposed"],
-            "groupName": "exposed"
-        },
-        {
-            "description": "Group Kotlinx coroutines/serialization together",
-            "matchPackagePatterns": ["^org\\.jetbrains\\.kotlinx"],
-            "groupName": "kotlinx"
         },
         {
             "description": "Group all GitHub Action updates (digest pinning handled by helpers:pinGitHubActionDigests preset above)",
