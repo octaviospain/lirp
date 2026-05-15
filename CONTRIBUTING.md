@@ -240,6 +240,8 @@ Why this exact command:
 
 `*-sources.jar` and `*-javadoc.jar` are also trusted blanket-wide. IDEs (IntelliJ, Eclipse) auto-download these for code navigation via their own resolver, not through the build's task graph — so they are never seen by `--write-verification-metadata`. They are inert documentation; a compromised sources jar cannot execute code in your build. Runtime checksum pinning still applies to every executable artifact.
 
+`org.apache.groovy` is trusted unconditionally for the same reason: IntelliJ's Gradle integration resolves Apache Groovy from Gradle's internal "Gradle Libs" repository to parse `build.gradle` DSL syntax, outside any task graph. Apache Groovy is published and signed by the ASF and is part of Gradle's own runtime — trusting the group avoids whack-a-mole when new IDE versions resolve different point versions.
+
 **Troubleshooting:**
 
 | Symptom | Action |
