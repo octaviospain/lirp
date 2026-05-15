@@ -252,7 +252,7 @@ Why this exact command:
 
 ### CycloneDX SBOM
 
-`./gradlew cyclonedxBom --no-parallel` produces `build/reports/bom.json` (CycloneDX 1.5). The release workflow uploads it as a GitHub Release artifact for downstream consumers and security tools (Trivy, Grype, etc).
+`./gradlew cyclonedxBom --no-parallel` produces an aggregated `build/reports/cyclonedx/bom.json` (CycloneDX 1.5) that combines per-subproject BOMs at `<subproject>/build/reports/cyclonedx-direct/bom.json`. The release workflow uploads the aggregated file as a GitHub Release artifact for downstream consumers and security tools (Trivy, Grype, etc).
 
 ### Cross-checking metadata against Maven Central
 
