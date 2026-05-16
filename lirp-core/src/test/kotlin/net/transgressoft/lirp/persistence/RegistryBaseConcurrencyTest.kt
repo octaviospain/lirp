@@ -18,24 +18,14 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.testing.Stress
+import net.transgressoft.lirp.testing.arbitraryCustomer
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.core.spec.style.StringSpec
-import io.kotest.property.Arb
 import io.kotest.property.arbitrary.next
-import io.kotest.property.arbitrary.positiveInt
-import io.kotest.property.arbitrary.stringPattern
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
-
-private fun arbitraryCustomer(id: Int = -1) =
-    io.kotest.property.arbitrary.arbitrary {
-        Customer(
-            id = if (id == -1) Arb.positiveInt(500_000).bind() else id,
-            initialName = Arb.stringPattern("[a-z]{5} [a-z]{5}").bind()
-        )
-    }
 
 /**
  * Concurrency tests verifying that [RegistryBase] iteration and search operations are safe

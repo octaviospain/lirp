@@ -9,6 +9,7 @@ import net.transgressoft.lirp.event.EventType
 import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.LirpEventSubscriberBase
 import net.transgressoft.lirp.event.MutationEvent
+import net.transgressoft.lirp.testing.arbitraryCustomer
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.assertSoftly
 import io.kotest.core.spec.style.FunSpec
@@ -21,22 +22,12 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.property.Arb
 import io.kotest.property.arbitrary.next
-import io.kotest.property.arbitrary.positiveInt
 import io.kotest.property.arbitrary.set
-import io.kotest.property.arbitrary.stringPattern
 import io.kotest.property.checkAll
 import java.util.Collections
 import java.util.Optional
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
-
-private fun arbitraryCustomer(id: Int = -1) =
-    io.kotest.property.arbitrary.arbitrary {
-        Customer(
-            id = if (id == -1) Arb.positiveInt(500_000).bind() else id,
-            initialName = Arb.stringPattern("[a-z]{5} [a-z]{5}").bind()
-        )
-    }
 
 internal class VolatileRepositoryTest : FunSpec({
 

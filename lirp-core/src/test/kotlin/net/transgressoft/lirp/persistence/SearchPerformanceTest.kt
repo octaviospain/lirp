@@ -2,6 +2,7 @@ package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.CrudEvent.Type.READ
+import net.transgressoft.lirp.testing.arbitraryCustomer
 import net.transgressoft.lirp.testing.reactiveScope
 import net.transgressoft.lirp.testing.record
 import io.kotest.assertions.throwables.shouldThrow
@@ -17,20 +18,10 @@ import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 import io.kotest.property.Arb
 import io.kotest.property.arbitrary.next
-import io.kotest.property.arbitrary.positiveInt
 import io.kotest.property.arbitrary.set
-import io.kotest.property.arbitrary.stringPattern
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.stream.Collectors
-
-private fun arbitraryCustomer(id: Int = -1) =
-    io.kotest.property.arbitrary.arbitrary {
-        Customer(
-            id = if (id == -1) Arb.positiveInt(500_000).bind() else id,
-            initialName = Arb.stringPattern("[a-z]{5} [a-z]{5}").bind()
-        )
-    }
 
 /**
  * A minimal entity with `@Indexed` properties for secondary-index tests.
