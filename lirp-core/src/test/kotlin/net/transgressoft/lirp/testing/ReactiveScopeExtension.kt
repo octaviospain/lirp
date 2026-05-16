@@ -25,6 +25,7 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.TestDispatcher
@@ -102,6 +103,9 @@ class ReactiveScopeExtension(
             } finally {
                 ReactiveScope.resetDefaultFlowScope()
                 ReactiveScope.resetDefaultIoScope()
+                // Cancel the per-spec SupervisorJob so any in-flight or leaked coroutines
+                // terminate before the mutex is released and the next spec acquires it.
+                scope.cancel()
             }
             if (failOnUncaughtExceptions) failOnUncaughtExceptions(spec, uncaught)
         }
