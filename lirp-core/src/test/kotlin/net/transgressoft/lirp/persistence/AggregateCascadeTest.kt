@@ -19,8 +19,7 @@ package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.event.AggregateMutationEvent
 import net.transgressoft.lirp.event.MutationEvent
-import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.nondeterministic.continually
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
@@ -32,13 +31,10 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.milliseconds
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Tests for DDD-04: cascade behavior when the referencing entity is removed from its repository.
@@ -47,17 +43,9 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * only cancels subscription, and [NoneOrder] (NONE) does nothing on delete.
  */
 @DisplayName("AggregateCascadeTest")
-@OptIn(ExperimentalCoroutinesApi::class)
-@SerializeWithReactiveScope
 internal class AggregateCascadeTest : FunSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
+    val reactive = reactiveScope()
 
     lateinit var ctx: LirpContext
 
@@ -295,14 +283,14 @@ internal class AggregateCascadeTest : FunSpec({
         order.subscribe { received.add(it) }
 
         customer.updateName("Bob")
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         received.size shouldBe 1
 
         detachOrderRepo.remove(order)
 
         customer.updateName("Charlie")
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         received.size shouldBe 1
     }

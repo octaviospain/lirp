@@ -22,7 +22,6 @@ import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.PublisherConfig
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.event.StandardCrudEvent.Create
 import net.transgressoft.lirp.event.TestEntity
 import net.transgressoft.lirp.persistence.Customer
@@ -30,8 +29,8 @@ import net.transgressoft.lirp.persistence.CustomerVolatileRepo
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.json.PolymorphicCustomer
 import net.transgressoft.lirp.persistence.json.StandardCustomerJsonFileRepository
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
 import net.transgressoft.lirp.testing.Stress
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.core.spec.style.DescribeSpec
 import io.kotest.engine.spec.tempfile
@@ -40,31 +39,16 @@ import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicInteger
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.withTimeout
 
 /** Integration tests for concurrent access, failure recovery, and resource lifecycle scenarios. */
-@ExperimentalCoroutinesApi
-@SerializeWithReactiveScope
 class IntegrationTest : DescribeSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
-    }
+    val reactive = reactiveScope()
 
     describe("Concurrent subscriptions") {
         it("handles 200 subscribers with 2000 events without deadlocking").config(tags = setOf(Stress)) {
@@ -77,13 +61,13 @@ class IntegrationTest : DescribeSpec({
                 }
             val collectedCounts = Collections.synchronizedList(mutableListOf<Int>())
 
-            withTimeout(10_000) {
+            withTimeout(10.seconds) {
                 val subscriberJobs =
                     (1..subscriberCount).map {
-                        testScope.launch {
+                        reactive.scope.launch {
                             val events = Collections.synchronizedList(mutableListOf<CrudEvent<String, TestEntity>>())
                             val subscription = publisher.subscribe { event -> events.add(event) }
-                            testDispatcher.scheduler.advanceUntilIdle()
+                            reactive.advance()
                             collectedCounts.add(events.size)
                             subscription.cancel()
                         }
@@ -91,7 +75,7 @@ class IntegrationTest : DescribeSpec({
 
                 val producerJobs =
                     (1..4).map { producerId ->
-                        testScope.launch {
+                        reactive.scope.launch {
                             val batchSize = eventCount / 4
                             repeat(batchSize) { i ->
                                 val idx = (producerId - 1) * batchSize + i
@@ -100,7 +84,7 @@ class IntegrationTest : DescribeSpec({
                         }
                     }
 
-                testDispatcher.scheduler.advanceUntilIdle()
+                reactive.advance()
                 subscriberJobs.joinAll()
                 producerJobs.joinAll()
             }
@@ -122,7 +106,7 @@ class IntegrationTest : DescribeSpec({
 
             val jobs =
                 (1..coroutineCount).map { seed ->
-                    testScope.launch {
+                    reactive.scope.launch {
                         val random = kotlin.random.Random(seed)
                         repeat(opsPerCoroutine) {
                             val customer = customerPool[random.nextInt(customerPool.size)]
@@ -144,7 +128,7 @@ class IntegrationTest : DescribeSpec({
                     }
                 }
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             jobs.joinAll()
 
             val reportedSize = repository.size()
@@ -161,7 +145,7 @@ class IntegrationTest : DescribeSpec({
             val repository = StandardCustomerJsonFileRepository(ctx, jsonFile)
 
             (1..20).forEach { id -> repository.create(id, "Customer-$id", null) }
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             repository.size() shouldBe 20
 
             jsonFile.delete()
@@ -169,7 +153,7 @@ class IntegrationTest : DescribeSpec({
             shouldNotThrowAny {
                 (21..40).forEach { id -> repository.create(id, "Customer-$id", null) }
             }
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             repository.size() shouldBe 40
 
             // Write corrupted content to simulate a partial write
@@ -178,7 +162,7 @@ class IntegrationTest : DescribeSpec({
             shouldNotThrowAny {
                 (41..50).forEach { id -> repository.create(id, "Customer-$id", null) }
             }
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             repository.size() shouldBe 50
 
             shouldNotThrowAny { ctx.close() }
@@ -213,7 +197,7 @@ class IntegrationTest : DescribeSpec({
             repeat(eventCount) { i ->
                 publisher.emitAsync(Create(TestEntity("entity-$i")))
             }
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             subscriptions.forEach { (_, events) ->
                 subscriberResults.add(events.toList())
@@ -248,13 +232,13 @@ class IntegrationTest : DescribeSpec({
                         customer.subscribe { }
                     }
                 }
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             entitySubscriptions.size shouldBe entityCount * subscribersPerEntity
             jsonFile.readText().isNotEmpty() shouldBe true
 
             repository.close()
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             jsonFile.readText().isNotEmpty() shouldBe true
             repoEvents.size shouldBeGreaterThan 0
@@ -274,12 +258,12 @@ class IntegrationTest : DescribeSpec({
 
             val jobs =
                 (1..mutationCount).map { coroutineId ->
-                    testScope.launch {
+                    reactive.scope.launch {
                         entity.value = "value-$coroutineId"
                     }
                 }
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             jobs.joinAll()
 
             val finalValue = entity.value
@@ -292,7 +276,7 @@ class IntegrationTest : DescribeSpec({
 
             // Verify entity still functions after the storm
             entity.value = "post-storm"
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             entity.value shouldBe "post-storm"
 
             subscription.cancel()
@@ -318,13 +302,13 @@ class IntegrationTest : DescribeSpec({
                 repeat(mutationsPerCycle) { i ->
                     entity.value = "cycle-$cycle-mutation-$i"
                 }
-                testDispatcher.scheduler.advanceUntilIdle()
+                reactive.advance()
 
                 cycleEvents.size shouldBeGreaterThan 0
                 cycleEvents.last().newEntity.value shouldBe "cycle-$cycle-mutation-${mutationsPerCycle - 1}"
 
                 subscriptions.forEach { it.cancel() }
-                testDispatcher.scheduler.advanceUntilIdle()
+                reactive.advance()
             }
 
             creationCounter.get() shouldBeGreaterThanOrEqual cycleCount
@@ -332,7 +316,7 @@ class IntegrationTest : DescribeSpec({
             val finalEvents = Collections.synchronizedList(mutableListOf<MutationEvent<String, LazyTestEntity>>())
             val finalSubscription = entity.subscribe { event -> finalEvents.add(event) }
             entity.value = "final-check"
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             finalEvents.size shouldBe 1
             finalEvents[0].newEntity.value shouldBe "final-check"

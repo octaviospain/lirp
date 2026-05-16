@@ -17,15 +17,12 @@
 
 package net.transgressoft.lirp.persistence.fx
 
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.LirpContext
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Integration tests verifying that [fxProjectionMap] correctly groups and updates entities
@@ -34,21 +31,12 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * Covers initial grouping, add propagation, and remove propagation.
  */
 @DisplayName("FxProjectionMapIntegrationTest")
-@OptIn(ExperimentalCoroutinesApi::class)
 class FxProjectionMapIntegrationTest : StringSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
+    reactiveScope()
 
     beforeSpec {
         FxToolkitInit.ensureInitialized()
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultFlowScope()
-        ReactiveScope.resetDefaultIoScope()
     }
 
     afterEach {

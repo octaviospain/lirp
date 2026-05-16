@@ -19,10 +19,10 @@ package net.transgressoft.lirp.persistence.fx
 
 import net.transgressoft.lirp.entity.subscribeToCollectionChanges
 import net.transgressoft.lirp.event.CollectionChangeEvent
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
 import net.transgressoft.lirp.persistence.LirpContext
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldContainExactly
@@ -32,9 +32,6 @@ import javafx.collections.SetChangeListener
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Integration tests verifying that RegistryBase correctly unwraps fx proxies via
@@ -43,21 +40,12 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * fire for the same mutation.
  */
 @DisplayName("FxRegistryIntegrationTest")
-@OptIn(ExperimentalCoroutinesApi::class)
 class FxRegistryIntegrationTest : StringSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
+    reactiveScope()
 
     beforeSpec {
         FxToolkitInit.ensureInitialized()
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultFlowScope()
-        ReactiveScope.resetDefaultIoScope()
     }
 
     lateinit var trackRepo: AudioItemVolatileRepository

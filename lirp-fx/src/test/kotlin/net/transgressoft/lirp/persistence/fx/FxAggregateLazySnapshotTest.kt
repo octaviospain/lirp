@@ -20,20 +20,17 @@ package net.transgressoft.lirp.persistence.fx
 import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.entity.ReactiveEntityBase
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.Aggregate
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.FxObservableCollection
 import net.transgressoft.lirp.persistence.LirpRepository
 import net.transgressoft.lirp.persistence.VolatileRepository
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import javafx.collections.ListChangeListener
 import javafx.collections.SetChangeListener
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Test entity that uses lazy-snapshot FxAggregateList and FxAggregateSet delegates.
@@ -84,10 +81,9 @@ class LazyFxPlaylistRepo : VolatileRepository<Int, LazyFxPlaylistEntity>("LazyFx
  * Change listener notifications are verified for each operation. Repositories are shared
  * across tests and cleared between each test to avoid duplicate-registration errors.
  */
-@OptIn(ExperimentalCoroutinesApi::class)
 class FxAggregateLazySnapshotTest : StringSpec({
 
-    val testScope = CoroutineScope(UnconfinedTestDispatcher())
+    reactiveScope()
 
     // Repositories registered once for the entire spec; cleared between tests
     val audioItemRepo = FxAudioItemVolatileRepository()
@@ -95,11 +91,9 @@ class FxAggregateLazySnapshotTest : StringSpec({
 
     beforeSpec {
         FxToolkitInit.ensureInitialized()
-        ReactiveScope.flowScope = testScope
     }
 
     afterSpec {
-        ReactiveScope.resetDefaultFlowScope()
         audioItemRepo.close()
         playlistRepo.close()
     }

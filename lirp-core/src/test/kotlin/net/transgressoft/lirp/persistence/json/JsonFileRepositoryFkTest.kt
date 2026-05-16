@@ -21,7 +21,6 @@ import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.event.CrudEvent
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.Aggregate
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpDeserializationException
@@ -29,7 +28,7 @@ import net.transgressoft.lirp.persistence.LirpRepository
 import net.transgressoft.lirp.persistence.VolatileRepository
 import net.transgressoft.lirp.persistence.mutableAggregateSet
 import net.transgressoft.lirp.persistence.optionalAggregate
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.engine.spec.tempfile
@@ -38,9 +37,6 @@ import io.kotest.matchers.string.shouldContain
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.milliseconds
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 
@@ -54,22 +50,9 @@ import kotlinx.serialization.builtins.serializer
  * `@Version`. [JsonFkPolicy.STRICT] surfaces the same condition as a
  * [LirpDeserializationException].
  */
-@OptIn(ExperimentalCoroutinesApi::class)
-@SerializeWithReactiveScope
 internal class JsonFileRepositoryFkTest : StringSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
-    }
+    val reactive = reactiveScope()
 
     "JsonFileRepository drops dangling collection IDs on load" {
         val ctx1 = LirpContext()
@@ -82,7 +65,7 @@ internal class JsonFileRepositoryFkTest : StringSpec({
         FkItemJsonRepo(ctx1, itemFile, 50L).apply {
             add(FkItem(1, setOf(10, 99)))
         }
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         ctx1.close()
 
         // Reload with only tag 10 present (tag 11 still in file but tag 99 was never added).
@@ -98,7 +81,7 @@ internal class JsonFileRepositoryFkTest : StringSpec({
             }
         itemRepo2.load()
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         val item = itemRepo2.findById(1).get()
         item.tags.referenceIds shouldBe setOf(10)
         updateEvents.get() shouldBe 0
@@ -112,7 +95,7 @@ internal class JsonFileRepositoryFkTest : StringSpec({
         val parentFile = tempfile("fk-parent-repo", ".json").also { it.deleteOnExit() }
         FkChildJsonRepo(ctx1, childFile, 50L).apply { add(FkChild(5)) }
         FkParentJsonRepo(ctx1, parentFile, 50L).apply { add(FkParent(100, 5)) }
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         ctx1.close()
 
         // Reload, but remove child 5 so the parent has a dangling reference
@@ -127,7 +110,7 @@ internal class JsonFileRepositoryFkTest : StringSpec({
             }
         parentRepo2.load()
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         val parent = parentRepo2.findById(100).get()
         parent.childId shouldBe null
         updateEvents.get() shouldBe 0
@@ -141,7 +124,7 @@ internal class JsonFileRepositoryFkTest : StringSpec({
         val parentFile = tempfile("fk-version-parent", ".json").also { it.deleteOnExit() }
         FkChildJsonRepo(ctx1, childFile, 50L).apply { add(FkChild(7)) }
         FkParentJsonRepo(ctx1, parentFile, 50L).apply { add(FkParent(200, 7)) }
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         ctx1.close()
 
         val ctx2 = LirpContext()
@@ -149,7 +132,7 @@ internal class JsonFileRepositoryFkTest : StringSpec({
         childRepo2.findById(7).ifPresent { childRepo2.remove(it) }
         val parentRepo2 = FkParentJsonRepo(ctx2, parentFile, 50L)
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         val parent = parentRepo2.findById(200).get()
         parent.childId shouldBe null
         parent.version shouldBe 0L
@@ -166,7 +149,7 @@ internal class JsonFileRepositoryFkTest : StringSpec({
             add(FkTag(11))
         }
         FkItemJsonRepo(ctx1, itemFile, 50L).apply { add(FkItem(2, setOf(10, 99))) }
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         ctx1.close()
 
         val ctx2 = LirpContext()
@@ -186,7 +169,7 @@ internal class JsonFileRepositoryFkTest : StringSpec({
         val parentFile = tempfile("fk-strict-parent", ".json").also { it.deleteOnExit() }
         FkChildJsonRepo(ctx1, childFile, 50L).apply { add(FkChild(5)) }
         FkParentJsonRepo(ctx1, parentFile, 50L).apply { add(FkParent(300, 5)) }
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         ctx1.close()
 
         val ctx2 = LirpContext()

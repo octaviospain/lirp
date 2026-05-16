@@ -17,7 +17,6 @@
 
 package net.transgressoft.lirp.persistence.json
 
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.AudioItemJsonFileRepository
 import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
@@ -28,7 +27,7 @@ import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.MutableAudioPlaylist
 import net.transgressoft.lirp.persistence.PlaylistHierarchyJsonFileRepository
 import net.transgressoft.lirp.persistence.Repository
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.annotation.DisplayName
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
@@ -36,9 +35,6 @@ import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import java.io.File
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
@@ -51,28 +47,13 @@ import kotlinx.serialization.builtins.serializer
  * The [ReactiveScope] dispatchers are overridden with a test dispatcher to make coroutine-driven
  * persistence synchronous in tests.
  */
-@OptIn(ExperimentalCoroutinesApi::class)
 @DisplayName("Music-commons integration (JSON)")
-@SerializeWithReactiveScope
 class MusicCommonsJsonIntegrationTest : MusicCommonsIntegrationTestBase() {
-
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
 
     lateinit var audioItemFile: File
     lateinit var playlistFile: File
 
-    init {
-        beforeSpec {
-            ReactiveScope.flowScope = testScope
-            ReactiveScope.ioScope = testScope
-        }
-
-        afterSpec {
-            ReactiveScope.resetDefaultIoScope()
-            ReactiveScope.resetDefaultFlowScope()
-        }
-    }
+    private val reactive = reactiveScope()
 
     @Suppress("UNCHECKED_CAST")
     override fun createAudioItemRepo(ctx: LirpContext): Repository<Int, AudioItem> {
@@ -89,7 +70,7 @@ class MusicCommonsJsonIntegrationTest : MusicCommonsIntegrationTestBase() {
     }
 
     override fun flushPendingWrites() {
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
     }
 
     init {

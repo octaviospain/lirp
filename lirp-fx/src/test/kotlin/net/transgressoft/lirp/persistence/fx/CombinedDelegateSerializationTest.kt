@@ -17,14 +17,11 @@
 
 package net.transgressoft.lirp.persistence.fx
 
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.json.lirpSerializer
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.serialization.json.Json
 
 /**
@@ -33,23 +30,15 @@ import kotlinx.serialization.json.Json
  * and fx scalar delegates in a single class. Closes coverage Gap 5 from the CONCERNS.md audit:
  * all three delegate types coexisting in one entity was untested.
  */
-@OptIn(ExperimentalCoroutinesApi::class)
 class CombinedDelegateSerializationTest : StringSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
+    reactiveScope()
+
     val json = Json { prettyPrint = true }
     val serializer = lirpSerializer(CombinedDelegateEntity(0, ""))
 
     beforeSpec {
         FxToolkitInit.ensureInitialized()
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
     }
 
     "serializes entity with reactiveProperty, @Indexed, and FxScalar delegates" {

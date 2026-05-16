@@ -19,14 +19,10 @@ package net.transgressoft.lirp.event
 
 import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
 import net.transgressoft.lirp.event.StandardCrudEvent.Create
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.reactiveScope
+import net.transgressoft.lirp.testing.record
 import io.kotest.core.spec.style.DescribeSpec
 import io.kotest.matchers.shouldBe
-import java.util.concurrent.atomic.AtomicInteger
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Verifies that [FlowEventPublisher] remains fully operational after a subscriber throws an
@@ -38,23 +34,9 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * closeOnEmpty semantics. The test scope includes a [SupervisorJob] to mirror production
  * [ReactiveScope] behaviour so that child coroutine failures do not cancel the parent.
  */
-@ExperimentalCoroutinesApi
-@SerializeWithReactiveScope
 class PublisherResilienceTest : DescribeSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-
-    beforeSpec {
-        // SupervisorJob is REQUIRED: without it, a failing child coroutine would cancel the
-        // parent scope and prevent subsequent operations from working correctly.
-        ReactiveScope.flowScope = CoroutineScope(testDispatcher + SupervisorJob())
-        ReactiveScope.ioScope = CoroutineScope(testDispatcher + SupervisorJob())
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultFlowScope()
-        ReactiveScope.resetDefaultIoScope()
-    }
+    val reactive = reactiveScope(failOnUncaughtExceptions = false)
 
     describe("Publisher resilience after subscriber exception") {
 
@@ -69,19 +51,18 @@ class PublisherResilienceTest : DescribeSpec({
             repeat(5) { i ->
                 publisher.emitAsync(Create(TestEntity("e-$i")))
             }
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             // Register a NEW subscriber after the throwing one has crashed
-            val newCounter = AtomicInteger(0)
-            publisher.subscribe { newCounter.incrementAndGet() }
+            val newRecorder = publisher.record()
 
             // Second emission phase: only new subscriber should be active
             repeat(5) { i ->
                 publisher.emitAsync(Create(TestEntity("new-e-$i")))
             }
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
-            newCounter.get() shouldBe 5
+            newRecorder.count shouldBe 5
             publisher.isClosed shouldBe false
         }
 
@@ -91,25 +72,24 @@ class PublisherResilienceTest : DescribeSpec({
 
             // Register both a throwing subscriber and a healthy one simultaneously
             publisher.subscribe { throw RuntimeException("intentional exception") }
-            val healthyCounter = AtomicInteger(0)
-            publisher.subscribe { healthyCounter.incrementAndGet() }
+            val healthy = publisher.record()
 
             // First emission phase: both subscribers active, throwing one crashes
             repeat(10) { i ->
                 publisher.emitAsync(Create(TestEntity("e-$i")))
             }
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             // Healthy subscriber must have received all events during the throwing phase
-            healthyCounter.get() shouldBe 10
+            healthy.count shouldBe 10
 
             // Second emission phase: throwing subscriber's coroutine is dead, healthy continues
             repeat(5) { i ->
                 publisher.emitAsync(Create(TestEntity("post-e-$i")))
             }
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
-            healthyCounter.get() shouldBe 15
+            healthy.count shouldBe 15
         }
 
         it("subscriberCount reflects only active subscribers after a subscriber exception") {
@@ -125,7 +105,7 @@ class PublisherResilienceTest : DescribeSpec({
             repeat(5) { i ->
                 publisher.emitAsync(Create(TestEntity("e-$i")))
             }
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             // The throwing subscriber's coroutine has terminated, so its count was decremented
             publisher.subscriberCount shouldBe 2

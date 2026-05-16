@@ -18,16 +18,12 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.CascadeAction
-import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Tests for cascade behavior on set-typed aggregate references ([AggregateSetRefDelegate]).
@@ -37,17 +33,9 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * [NoneMusicPlaylistGroup]) to exercise the [AggregateSetRefDelegate.executeCascade] code path.
  */
 @DisplayName("AggregateSetCascade")
-@OptIn(ExperimentalCoroutinesApi::class)
-@SerializeWithReactiveScope
 internal class AggregateSetCascadeTest : StringSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
+    val reactive = reactiveScope()
 
     lateinit var ctx: LirpContext
     lateinit var playlistRepo: AudioPlaylistVolatileRepository

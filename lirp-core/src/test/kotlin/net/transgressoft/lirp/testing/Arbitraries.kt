@@ -17,10 +17,24 @@
 
 package net.transgressoft.lirp.testing
 
+import net.transgressoft.lirp.persistence.Customer
+import io.kotest.property.Arb
+import io.kotest.property.arbitrary.arbitrary
+import io.kotest.property.arbitrary.positiveInt
+import io.kotest.property.arbitrary.stringPattern
+
+// Shared Kotest Arb builders for test entities. Centralised here so individual specs don't
+// redeclare identical generators; specialised arbitraries (e.g. polymorphic customer types in
+// persistence/json/JsonTestFixtures.kt) stay alongside their domain helpers.
+
 /**
- * Marks a spec that mutates the process-wide `ReactiveScope` and must therefore be serialized
- * against other specs with the same annotation when core spec-level parallelism is enabled.
+ * Builds a [Customer] with a random positive id (up to 500,000) and a 5+5 lowercase letter
+ * `initialName`. Pass [id] explicitly to pin the customer to a known key.
  */
-@Target(AnnotationTarget.CLASS)
-@Retention(AnnotationRetention.RUNTIME)
-annotation class SerializeWithReactiveScope
+internal fun arbitraryCustomer(id: Int = -1) =
+    arbitrary {
+        Customer(
+            id = if (id == -1) Arb.positiveInt(500_000).bind() else id,
+            initialName = Arb.stringPattern("[a-z]{5} [a-z]{5}").bind()
+        )
+    }

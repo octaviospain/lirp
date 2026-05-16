@@ -18,16 +18,12 @@
 package net.transgressoft.lirp.persistence.query
 
 import net.transgressoft.lirp.event.CrudEvent
-import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.reactiveScope
+import net.transgressoft.lirp.testing.record
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
-import java.util.concurrent.atomic.AtomicInteger
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Verifies the silent-by-default event contract for cross-aggregate queries (D-18):
@@ -37,22 +33,9 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * contract.
  */
 @DisplayName("Via event emission")
-@SerializeWithReactiveScope
-@OptIn(ExperimentalCoroutinesApi::class)
 internal class ViaEventEmissionTest : FunSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
-    }
+    val reactive = reactiveScope()
 
     test("child registry emits no READ events when parent registry runs a via query without enableEvents") {
         val tracks =
@@ -64,13 +47,12 @@ internal class ViaEventEmissionTest : FunSpec({
             PlaylistRepo().apply {
                 add(Playlist(1, "p", listOf(1, 2), null))
             }
-        val childReadCount = AtomicInteger(0)
-        tracks.subscribe(CrudEvent.Type.READ) { childReadCount.incrementAndGet() }
+        val childReads = tracks.record(CrudEvent.Type.READ)
 
         playlists.query { where { Playlist::trackIds via tracks anyMatch { Track::price gt 100.0 } } }.toList()
 
-        testDispatcher.scheduler.advanceUntilIdle()
-        childReadCount.get() shouldBe 0
+        reactive.advance()
+        childReads.count shouldBe 0
     }
 
     test("child registry emits no READ events even when parent registry has enableEvents set") {
@@ -83,14 +65,13 @@ internal class ViaEventEmissionTest : FunSpec({
             PlaylistRepo().apply {
                 add(Playlist(1, "p", listOf(1, 2), null))
             }
-        val childReadCount = AtomicInteger(0)
-        tracks.subscribe(CrudEvent.Type.READ) { childReadCount.incrementAndGet() }
+        val childReads = tracks.record(CrudEvent.Type.READ)
 
         playlists.activateEvents(CrudEvent.Type.READ)
         playlists.query { where { Playlist::trackIds via tracks anyMatch { Track::price gt 100.0 } } }.toList()
 
-        testDispatcher.scheduler.advanceUntilIdle()
-        childReadCount.get() shouldBe 0
+        reactive.advance()
+        childReads.count shouldBe 0
     }
 
     test("parent registry honors silent-by-default contract from Phase 52") {
@@ -104,18 +85,17 @@ internal class ViaEventEmissionTest : FunSpec({
                 add(Playlist(1, "p", listOf(1, 2), null))
                 add(Playlist(2, "q", listOf(1), null))
             }
-        val parentReadCount = AtomicInteger(0)
-        playlists.subscribe(CrudEvent.Type.READ) { parentReadCount.incrementAndGet() }
+        val parentReads = playlists.record(CrudEvent.Type.READ)
 
         // No activateEvents on parent -> silent
         playlists.query { where { Playlist::trackIds via tracks anyMatch { Track::price gt 100.0 } } }.toList()
-        testDispatcher.scheduler.advanceUntilIdle()
-        parentReadCount.get() shouldBe 0
+        reactive.advance()
+        parentReads.count shouldBe 0
 
         // Now opt in: READ events should fire on the parent
         playlists.activateEvents(CrudEvent.Type.READ)
         playlists.query { where { Playlist::trackIds via tracks anyMatch { Track::price gt 100.0 } } }.toList()
-        testDispatcher.scheduler.advanceUntilIdle()
-        parentReadCount.get() shouldBeGreaterThan 0
+        reactive.advance()
+        parentReads.count shouldBeGreaterThan 0
     }
 })

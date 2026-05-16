@@ -20,9 +20,8 @@ package net.transgressoft.lirp.entity
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.MutationEvent.Type.MUTATE
 import net.transgressoft.lirp.event.ReactiveMutationEvent
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.Customer
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
@@ -30,28 +29,12 @@ import io.kotest.matchers.string.shouldContain
 import java.util.concurrent.Flow
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.function.Consumer
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Tests for [ReactiveEntityBase] lifecycle states: Created, Active, Dormant, and Closed.
  */
-@ExperimentalCoroutinesApi
-@SerializeWithReactiveScope
 class ReactiveEntityLifecycleTest : StringSpec({
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
-    }
+    val reactive = reactiveScope()
 
     "ReactiveEntity isClosed returns false for new entity" {
         val entity = LazyTestEntity("lifecycle-1")
@@ -153,7 +136,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
         creationCounter.get() shouldBe 1
 
         subscription.cancel()
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         // Entity is dormant: next subscription must create a fresh publisher (counter = 2)
         val subscription2 = entity.subscribe { }
@@ -170,7 +153,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
         creationCounter.get() shouldBe 1
 
         subscriptions.forEach { it.cancel() }
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         // Entity is dormant: next subscription recreates the publisher
         val subscription = entity.subscribe { }
@@ -186,14 +169,14 @@ class ReactiveEntityLifecycleTest : StringSpec({
         // Go dormant
         val sub1 = entity.subscribe { }
         sub1.cancel()
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         // Reactivate: subscribe again — must not throw
         val receivedEvents = mutableListOf<MutationEvent<String, LazyTestEntity>>()
         val sub2 = entity.subscribe { event -> receivedEvents.add(event) }
 
         entity.value = "reactivated"
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         receivedEvents.size shouldBe 1
         receivedEvents[0].newEntity.value shouldBe "reactivated"
@@ -209,13 +192,13 @@ class ReactiveEntityLifecycleTest : StringSpec({
         val sub1 = entity.subscribe { }
         creationCounter.get() shouldBe 1
         sub1.cancel()
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         // Cycle 2: subscribe -> cancel -> dormant
         val sub2 = entity.subscribe { }
         creationCounter.get() shouldBe 2
         sub2.cancel()
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         // Cycle 3: subscribe (active), receive events
         val receivedEvents = mutableListOf<MutationEvent<String, LazyTestEntity>>()
@@ -223,7 +206,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
         creationCounter.get() shouldBe 3
 
         entity.value = "after-cycles"
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         receivedEvents.size shouldBe 1
 
@@ -244,7 +227,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
 
         // Dormant: all subscribers cancelled
         sub1.cancel()
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         // Active again: new subscription reactivates
         val sub2 = entity.subscribe { }
@@ -289,7 +272,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
         val subscription = customer.subscribe(MUTATE) { event -> received.add(event) }
 
         customer.updateName("Bob")
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         received.size shouldBe 1
         subscription.cancel()
@@ -303,14 +286,14 @@ class ReactiveEntityLifecycleTest : StringSpec({
 
         customer.suppressEvents()
         customer.updateName("Bob")
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         received.size shouldBe 0
         customer.name shouldBe "Bob"
 
         customer.restoreEvents()
         customer.updateName("Charlie")
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         received.size shouldBe 1
         received[0].newEntity.name shouldBe "Charlie"
@@ -327,12 +310,12 @@ class ReactiveEntityLifecycleTest : StringSpec({
         customer.silently {
             customer.updateName("Silent")
         }
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         received.size shouldBe 0
         customer.name shouldBe "Silent"
 
         customer.updateName("Loud")
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         received.size shouldBe 1
 
         subscription.cancel()
@@ -352,7 +335,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
         }
 
         customer.updateName("AfterError")
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         received.size shouldBe 1
 
         subscription.cancel()
@@ -366,7 +349,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
 
         customer.suppressEvents()
         customer.bulkUpdate("Silent")
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         received.size shouldBe 0
         customer.name shouldBe "Silent"

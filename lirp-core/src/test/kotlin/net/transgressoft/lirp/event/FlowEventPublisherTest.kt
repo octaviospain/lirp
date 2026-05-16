@@ -24,7 +24,7 @@ import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
 import net.transgressoft.lirp.event.StandardCrudEvent.Create
 import net.transgressoft.lirp.event.StandardCrudEvent.Delete
 import net.transgressoft.lirp.event.StandardCrudEvent.Update
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.DescribeSpec
 import io.kotest.matchers.maps.shouldContainExactly
@@ -39,31 +39,16 @@ import java.util.function.Consumer
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
-@ExperimentalCoroutinesApi
-@SerializeWithReactiveScope
 class FlowEventPublisherTest : DescribeSpec({
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
-    }
+    val reactive = reactiveScope()
 
     describe("ReactiveEntity event emission") {
         it("emits change event on property modification") {
@@ -79,7 +64,7 @@ class FlowEventPublisherTest : DescribeSpec({
             val newName = "Updated Name"
             entity.name = newName
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             receivedEvents.size shouldBe 1
             val event = receivedEvents[0]
@@ -100,7 +85,7 @@ class FlowEventPublisherTest : DescribeSpec({
 
             entity.addFriendAddress("John", "Apple avenue")
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             receivedEvents.size shouldBe 1
             val event = receivedEvents[0]
@@ -118,7 +103,7 @@ class FlowEventPublisherTest : DescribeSpec({
 
             entity.addUnmanagedProperty("John", "Apple avenue")
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             receivedEvents.size shouldBe 0
         }
@@ -135,7 +120,7 @@ class FlowEventPublisherTest : DescribeSpec({
             val oldName = entity.name
             entity.name = oldName // Same value
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             receivedEvents.size shouldBe 0
 
@@ -166,7 +151,7 @@ class FlowEventPublisherTest : DescribeSpec({
             val originalName = entity.name
             entity.name = "New Name"
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             receivedEvents.size shouldBe 1
             val event = receivedEvents[0]
@@ -183,14 +168,14 @@ class FlowEventPublisherTest : DescribeSpec({
 
         it("changes Flow can be collected by Kotlin Flow operators") {
             val entity = TestEntity(UUID.randomUUID().toString())
-            testScope.launch {
+            reactive.scope.launch {
                 val event = entity.changes.first()
                 event.shouldBeInstanceOf<MutationEvent<String, TestEntity>>()
                 event.newEntity.name shouldBe "Collected via Flow"
             }
 
             entity.name = "Collected via Flow"
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
         }
     }
 
@@ -212,7 +197,7 @@ class FlowEventPublisherTest : DescribeSpec({
             val entity = TestEntity(UUID.randomUUID().toString())
             publisher.emitAsync(Create(entity))
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             receivedEvents.size shouldBe 1
             val event = receivedEvents[0]
@@ -242,7 +227,7 @@ class FlowEventPublisherTest : DescribeSpec({
 
             publisher.emitAsync(Update(updatedEntity, originalEntity))
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             receivedEvents.size shouldBe 1
             val event = receivedEvents[0]
@@ -269,7 +254,7 @@ class FlowEventPublisherTest : DescribeSpec({
             val entity = TestEntity(UUID.randomUUID().toString())
             publisher.emitAsync(Delete(entity))
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             receivedEvents.size shouldBe 1
             val event = receivedEvents[0]
@@ -299,7 +284,7 @@ class FlowEventPublisherTest : DescribeSpec({
 
             publisher.emitAsync(Delete(entity))
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             createSubscription.cancel()
             updateSubscription.cancel()
@@ -345,7 +330,7 @@ class FlowEventPublisherTest : DescribeSpec({
             entity.name = "First update"
             entity.name = "Second update"
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             counter1.get() shouldBe 2
             counter2.get() shouldBe 2
@@ -353,7 +338,7 @@ class FlowEventPublisherTest : DescribeSpec({
             subscription1.cancel()
             entity.name = "Third update"
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             counter1.get() shouldBe 2 // Unchanged after cancellation
             counter2.get() shouldBe 3
@@ -369,7 +354,7 @@ class FlowEventPublisherTest : DescribeSpec({
 
             entity.name = "Updated via Consumer"
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             counter.get() shouldBe 1
 
@@ -399,7 +384,7 @@ class FlowEventPublisherTest : DescribeSpec({
 
             entity.name = "Updated via Flow.Subscriber"
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             counter.get() shouldBe 1
         }
@@ -412,13 +397,13 @@ class FlowEventPublisherTest : DescribeSpec({
             val subscription = publisher.subscribe { receivedEvents.add(it) }
 
             publisher.emitAsync(Create(TestEntity("before-cancel")))
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             receivedEvents.size shouldBe 1
 
             subscription.cancel()
 
             publisher.emitAsync(Create(TestEntity("after-cancel")))
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             // Should not have received event after cancellation
             receivedEvents.size shouldBe 1
@@ -442,7 +427,7 @@ class FlowEventPublisherTest : DescribeSpec({
                 publisher.emitAsync(Create(entity))
             }
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             receivedEvents.size shouldBe 100
             receivedEvents.forEachIndexed { index, event ->
@@ -468,7 +453,7 @@ class FlowEventPublisherTest : DescribeSpec({
                 publisher.emitAsync(Create(TestEntity("entity-$i")))
             }
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             subscriber1Events.size shouldBe 50
             subscriber2Events.size shouldBe 50
@@ -505,7 +490,7 @@ class FlowEventPublisherTest : DescribeSpec({
 
             publisher.emitAsync(Create(TestEntity("entity-1")))
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             // Should have processed: 1 CREATE + 1 UPDATE
             processedCount.get() shouldBe 2
@@ -534,7 +519,7 @@ class FlowEventPublisherTest : DescribeSpec({
                 publisher.emitAsync(Create(TestEntity("entity-$i")))
             }
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             // All events should be received despite slow processing
             receivedEvents.size shouldBe 1000
@@ -594,19 +579,19 @@ class FlowEventPublisherTest : DescribeSpec({
                 publisher.emitAsync(Create(TestEntity("early-$i")))
             }
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             val lateSubscriberEvents = mutableListOf<CrudEvent<String, TestEntity>>()
             val lateSubscription = publisher.subscribe { lateSubscriberEvents.add(it) }
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             // Late subscriber should not receive earlier events
             lateSubscriberEvents.size shouldBe 0
 
             // But should receive new events
             publisher.emitAsync(Create(TestEntity("new-1")))
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             lateSubscriberEvents.size shouldBe 1
             lateSubscriberEvents[0].entities.values.first().id shouldBe "new-1"
@@ -631,7 +616,7 @@ class FlowEventPublisherTest : DescribeSpec({
             val entity = TestEntity(UUID.randomUUID().toString())
             publisher.emitAsync(Create(entity))
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             receivedEvents.size shouldBe 1
             receivedEvents[0].entities.values.first().id shouldBe entity.id
@@ -654,7 +639,7 @@ class FlowEventPublisherTest : DescribeSpec({
             val entity = TestEntity(UUID.randomUUID().toString())
             publisher.emitAsync(Create(entity))
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             receivedEvents.size shouldBe 1
             receivedEvents[0].entities.values.first().id shouldBe entity.id
@@ -678,13 +663,13 @@ class FlowEventPublisherTest : DescribeSpec({
                 publisher.emitAsync(Create(entity))
             }
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             // Late subscriber should receive the last 3 events (replay count)
             val lateSubscriberEvents = mutableListOf<CrudEvent<String, TestEntity>>()
             val lateSubscription = publisher.subscribe { lateSubscriberEvents.add(it) }
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             // Should have received the replayed events
             lateSubscriberEvents.size shouldBe replayCount
@@ -695,7 +680,7 @@ class FlowEventPublisherTest : DescribeSpec({
             // New events should also be received
             val newEntity = TestEntity("new-entity")
             publisher.emitAsync(Create(newEntity))
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             lateSubscriberEvents.size shouldBe replayCount + 1
             lateSubscriberEvents.last().entities.values.first().id shouldBe newEntity.id
@@ -738,7 +723,7 @@ class FlowEventPublisherTest : DescribeSpec({
                 publisher.emitAsync(Create(TestEntity("entity-$i")))
             }
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             receivedEvents.size shouldBe 4
 
@@ -846,7 +831,7 @@ class FlowEventPublisherTest : DescribeSpec({
             publisher.subscribe { receivedEvents.add(it) }
 
             publisher.emitAsync(Create(TestEntity("before-close")))
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             receivedEvents.size shouldBe 1
 
             publisher.close()
@@ -855,7 +840,7 @@ class FlowEventPublisherTest : DescribeSpec({
             shouldThrow<IllegalStateException> {
                 publisher.emitAsync(Create(TestEntity("after-close")))
             }
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             receivedEvents.size shouldBe 1
         }
@@ -905,7 +890,7 @@ class FlowEventPublisherTest : DescribeSpec({
             val subscription = publisher.subscribe { receivedEvents.add(it) }
 
             publisher.emitAsync(Create(TestEntity("entity-1")))
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             receivedEvents.size shouldBe 0
 
@@ -951,7 +936,7 @@ class FlowEventPublisherTest : DescribeSpec({
 
             val sub = publisher.subscribe { }
             sub.cancel()
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             onEmptyCallCount.get() shouldBe 1
         }
@@ -966,11 +951,11 @@ class FlowEventPublisherTest : DescribeSpec({
             publisher.isClosed shouldBe false
 
             sub1.cancel()
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             publisher.isClosed shouldBe false
 
             sub2.cancel()
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             publisher.isClosed shouldBe true
         }
 
@@ -980,7 +965,7 @@ class FlowEventPublisherTest : DescribeSpec({
 
             val sub = publisher.subscribe { }
             sub.cancel()
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             // closeOnEmpty close is automatic — subscribe returns a no-op instead of throwing
             val noOpSub = publisher.subscribe { }
@@ -993,7 +978,7 @@ class FlowEventPublisherTest : DescribeSpec({
 
             val sub = publisher.subscribe { }
             sub.cancel()
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             shouldThrow<IllegalStateException> {
                 publisher.emitAsync(Create(TestEntity("entity-1")))
@@ -1025,7 +1010,7 @@ class FlowEventPublisherTest : DescribeSpec({
             publisher.subscriberCount shouldBe 1
 
             subscription.cancel()
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             publisher.subscriberCount shouldBe 0
         }
@@ -1040,11 +1025,11 @@ class FlowEventPublisherTest : DescribeSpec({
             publisher.subscriberCount shouldBe 2
 
             sub1.cancel()
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             publisher.subscriberCount shouldBe 1
 
             sub2.cancel()
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             publisher.subscriberCount shouldBe 0
         }
 

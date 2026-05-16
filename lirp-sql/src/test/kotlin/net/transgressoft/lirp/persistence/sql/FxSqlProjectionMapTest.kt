@@ -17,16 +17,14 @@
 
 package net.transgressoft.lirp.persistence.sql
 
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.RegistryBase
 import net.transgressoft.lirp.persistence.fx.fxAggregateList
 import net.transgressoft.lirp.persistence.fx.fxProjectionMap
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.DisplayName
 import java.util.UUID
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 
 /**
  * Integration tests verifying that [fxProjectionMap] correctly groups entities from
@@ -41,13 +39,10 @@ internal class FxSqlProjectionMapTest : FunSpec({
 
     fun freshJdbcUrl() = "jdbc:h2:mem:${UUID.randomUUID()};DB_CLOSE_DELAY=-1"
 
+    reactiveScope()
+
     beforeSpec {
         FxToolkitInit.ensureInitialized()
-        ReactiveScope.flowScope = CoroutineScope(Dispatchers.Unconfined)
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultFlowScope()
     }
 
     afterEach {

@@ -2,8 +2,9 @@ package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.CrudEvent.Type.READ
-import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.arbitraryCustomer
+import net.transgressoft.lirp.testing.reactiveScope
+import net.transgressoft.lirp.testing.record
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
@@ -17,23 +18,10 @@ import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 import io.kotest.property.Arb
 import io.kotest.property.arbitrary.next
-import io.kotest.property.arbitrary.positiveInt
 import io.kotest.property.arbitrary.set
-import io.kotest.property.arbitrary.stringPattern
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.stream.Collectors
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
-
-private fun arbitraryCustomer(id: Int = -1) =
-    io.kotest.property.arbitrary.arbitrary {
-        Customer(
-            id = if (id == -1) Arb.positiveInt(500_000).bind() else id,
-            initialName = Arb.stringPattern("[a-z]{5} [a-z]{5}").bind()
-        )
-    }
 
 /**
  * A minimal entity with `@Indexed` properties for secondary-index tests.
@@ -77,21 +65,13 @@ class IndexedProductVolatileRepo : VolatileRepository<Int, IndexedProduct>("Inde
  * early termination, backward compatibility of existing [Registry.search] overloads, and secondary index
  * O(1) lookup via [Registry.findByIndex] and [Registry.findFirstByIndex].
  */
-@ExperimentalCoroutinesApi
 @DisplayName("VolatileRepository search performance")
-@SerializeWithReactiveScope
 internal class SearchPerformanceTest : StringSpec({
 
     lateinit var ctx: LirpContext
     lateinit var repository: CustomerVolatileRepo
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
+    val reactive = reactiveScope()
 
     beforeTest {
         ctx = LirpContext()
@@ -105,11 +85,6 @@ internal class SearchPerformanceTest : StringSpec({
 
     afterTest {
         ctx.close()
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
     }
 
     "lazySearch returns matching entities as Sequence" {
@@ -153,7 +128,7 @@ internal class SearchPerformanceTest : StringSpec({
 
         repository.lazySearch { true }.toSet()
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         readEventEmitted.get() shouldBe false
     }
@@ -187,36 +162,34 @@ internal class SearchPerformanceTest : StringSpec({
 
         repository.searchStream { true }.collect(Collectors.toSet())
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         readEventEmitted.get() shouldBe false
     }
 
     "search(predicate) returns correct Set and emits Read event" {
-        val readEventCount = AtomicInteger(0)
-        repository.subscribe(READ) { readEventCount.incrementAndGet() }
+        val readEvents = repository.record(READ)
 
         val expected = repository.toList().take(3).toSet()
         val ids = expected.map { it.id }.toSet()
 
         val result = repository.search { it.id in ids }
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         result shouldContainOnly expected
-        readEventCount.get() shouldBeGreaterThan 0
+        readEvents.count shouldBeGreaterThan 0
     }
 
     "search(size, predicate) returns limited Set and emits Read event" {
-        val readEventCount = AtomicInteger(0)
-        repository.subscribe(READ) { readEventCount.incrementAndGet() }
+        val readEvents = repository.record(READ)
 
         val result = repository.search(3) { true }
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         result.size shouldBe 3
-        readEventCount.get() shouldBeGreaterThan 0
+        readEvents.count shouldBeGreaterThan 0
     }
 
     // Secondary index tests

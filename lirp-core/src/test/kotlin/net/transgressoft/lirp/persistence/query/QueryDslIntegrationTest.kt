@@ -18,11 +18,11 @@
 package net.transgressoft.lirp.persistence.query
 
 import net.transgressoft.lirp.event.CrudEvent
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.IndexedProduct
 import net.transgressoft.lirp.persistence.IndexedProductVolatileRepo
 import net.transgressoft.lirp.persistence.LirpContext
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.reactiveScope
+import net.transgressoft.lirp.testing.record
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.booleans.shouldBeTrue
@@ -31,31 +31,14 @@ import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.ints.shouldBeExactly
 import io.kotest.matchers.shouldBe
-import java.util.concurrent.atomic.AtomicInteger
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Integration tests for the Query DSL against real repositories.
  */
 @DisplayName("Query DSL Integration")
-@SerializeWithReactiveScope
-@OptIn(ExperimentalCoroutinesApi::class)
 internal class QueryDslIntegrationTest : FunSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
-    }
+    val reactive = reactiveScope()
 
     lateinit var ctx: LirpContext
     lateinit var productRepo: ProductVolatileRepo
@@ -179,20 +162,19 @@ internal class QueryDslIntegrationTest : FunSpec({
         productRepo.create(1, "books", 10.0, 5, "Book A")
 
         productRepo.activateEvents(CrudEvent.Type.READ)
-        val readCount = AtomicInteger(0)
-        productRepo.subscribe(CrudEvent.Type.READ) { readCount.incrementAndGet() }
+        val readEvents = productRepo.record(CrudEvent.Type.READ)
 
         val sequence = productRepo.query { where { Product::category eq "books" } }
 
         // Before terminal operation: no READ event should have fired
-        readCount.get() shouldBeExactly 0
+        readEvents.count shouldBeExactly 0
 
         // Terminal operation triggers execution and READ event
         sequence.toList()
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
-        readCount.get() shouldBeExactly 1
+        readEvents.count shouldBeExactly 1
     }
 
     test("query with custom @Indexed name resolves index correctly") {

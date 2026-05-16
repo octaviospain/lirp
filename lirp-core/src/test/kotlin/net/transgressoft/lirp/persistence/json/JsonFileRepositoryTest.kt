@@ -3,15 +3,14 @@ package net.transgressoft.lirp.persistence.json
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
 import net.transgressoft.lirp.event.LirpEventSubscription
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
 import net.transgressoft.lirp.persistence.DefaultAudioPlaylist
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpDeserializationException
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.PersistentRepositoryBase
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
 import net.transgressoft.lirp.testing.Stress
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.json.shouldEqualJson
 import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.assertions.throwables.shouldNotThrowAny
@@ -36,23 +35,13 @@ import java.util.Collections
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.time.Duration.Companion.seconds
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
-@ExperimentalCoroutinesApi
-@SerializeWithReactiveScope
 class JsonFileRepositoryTest : DescribeSpec({
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
+    val reactive = reactiveScope()
+
     lateinit var jsonFile: File
     lateinit var repository: StandardCustomerJsonFileRepository
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
 
     beforeEach {
         jsonFile = tempfile("json-repository-test", ".json").also { it.deleteOnExit() }
@@ -61,11 +50,6 @@ class JsonFileRepositoryTest : DescribeSpec({
 
     afterEach {
         repository.close()
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
     }
 
     fun getSubscriptionsMap(repo: JsonFileRepository<Int, PolymorphicCustomer>): MutableMap<Int, *> {
@@ -90,7 +74,7 @@ class JsonFileRepositoryTest : DescribeSpec({
             val arb = arbitraryStandardCustomer().next()
             val customer = repository.create(arb.id, arb.name, arb.email)
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             jsonFile.readText().isNotEmpty() shouldBe true
 
@@ -106,7 +90,7 @@ class JsonFileRepositoryTest : DescribeSpec({
 
             customer.updateName("Ken")
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             jsonFile.readText().isNotEmpty() shouldBe true
 
             repository.close()
@@ -118,10 +102,10 @@ class JsonFileRepositoryTest : DescribeSpec({
         it("serializes on entity mutation via name setter") {
             val arb = arbitraryStandardCustomer().next()
             val customer = repository.create(arb.id, arb.name, arb.email)
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             customer.name = "John Namechanged"
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             repository.findFirst { it.name == "John Namechanged" } shouldBePresent { it shouldBe customer }
         }
@@ -134,11 +118,11 @@ class JsonFileRepositoryTest : DescribeSpec({
 
             repeat(100) { i -> customer.updateName("Name-$i") }
             debounceRepo.findById(1).get().name shouldBe "Name-99"
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             debounceRepo.close()
             val reloaded = StandardCustomerJsonFileRepository(debounceFile)
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             reloaded.findById(1).get().name shouldBe "Name-99"
             reloaded.close()
         }
@@ -151,11 +135,11 @@ class JsonFileRepositoryTest : DescribeSpec({
             repository.close()
             repository = StandardCustomerJsonFileRepository(jsonFile)
             repository.size() shouldBe 1
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             repository.findById(arb.id) shouldBePresent { it.name shouldBe arb.name }
             val loaded = repository.findById(arb.id).get() as StandardCustomer
             loaded.name = "name changed"
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             repository.findFirst { it.name == "name changed" }.isPresent shouldBe true
         }
 
@@ -174,7 +158,7 @@ class JsonFileRepositoryTest : DescribeSpec({
             repository.jsonFile = newJsonFile
             val arb2 = arbitraryStandardCustomer().next()
             repository.create(arb2.id, arb2.name, arb2.email)
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             newJsonFile.readText().isNotEmpty() shouldBe true
         }
 
@@ -213,7 +197,7 @@ class JsonFileRepositoryTest : DescribeSpec({
             repository.findById(1) shouldBePresent { it.name shouldBe "John Doe" }
             val loaded = repository.findById(1).get() as StandardCustomer
             loaded.name = "John Namechanged"
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             repository.findFirst { it.name == "John Namechanged" }.isPresent shouldBe true
         }
 
@@ -224,11 +208,11 @@ class JsonFileRepositoryTest : DescribeSpec({
             val premiumFile = tempfile("premium-repo-test", ".json").also { it.deleteOnExit() }
             val premiumRepository = PremiumCustomerJsonFileRepository(premiumFile)
             val premium = premiumRepository.create(2, "Bob", "bob@example.com", 500)
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             premiumRepository.close()
 
             val reloadedStdRepo = StandardCustomerJsonFileRepository(jsonFile)
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             reloadedStdRepo.size() shouldBe 1
             reloadedStdRepo.findById(standard.id) shouldBePresent { loaded ->
                 loaded.shouldBeInstanceOf<StandardCustomer>()
@@ -237,7 +221,7 @@ class JsonFileRepositoryTest : DescribeSpec({
             reloadedStdRepo.close()
 
             val reloadedPremiumRepo = PremiumCustomerJsonFileRepository(premiumFile)
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             reloadedPremiumRepo.size() shouldBe 1
             reloadedPremiumRepo.findById(premium.id) shouldBePresent { loaded ->
                 loaded.shouldBeInstanceOf<PremiumCustomer>()
@@ -252,7 +236,7 @@ class JsonFileRepositoryTest : DescribeSpec({
             val premiumRepository = PremiumCustomerJsonFileRepository(premiumFile)
             val premium = premiumRepository.create(10, "Carol", "carol@example.com", 9999)
             premium.updateLoyaltyPoints(12000)
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             premiumRepository.close()
             val reloaded = PremiumCustomerJsonFileRepository(premiumFile)
             reloaded.findById(10) shouldBePresent { loaded ->
@@ -266,12 +250,12 @@ class JsonFileRepositoryTest : DescribeSpec({
     describe("Concurrency") {
         it("maintains state under concurrent additions").config(tags = setOf(Stress)) {
             val testCustomers = (1..100).map { arbitraryStandardCustomer(it).next() }
-            testScope.launch {
+            reactive.scope.launch {
                 testCustomers.chunked(10).forEach { chunk ->
                     launch { chunk.forEach { c -> repository.create(c.id, c.name, c.email) } }
                 }
             }
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             repository.size() shouldBe testCustomers.size
             repository.close()
             val reloadedRepo = StandardCustomerJsonFileRepository(jsonFile)
@@ -285,9 +269,9 @@ class JsonFileRepositoryTest : DescribeSpec({
                 repository.subscribe(CREATE) { events.add(it) }
             val testCustomers = (1..5_000).map { arbitraryStandardCustomer(it).next() }.distinct()
             testCustomers.chunked(500).map { chunk ->
-                testScope.launch { chunk.forEach { c -> repository.create(c.id, c.name, c.email) } }
+                reactive.scope.launch { chunk.forEach { c -> repository.create(c.id, c.name, c.email) } }
             }
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             val createdEntityIds = events.flatMap { it.entities.keys }
             createdEntityIds shouldContainAll testCustomers.map { it.id }
             subscription.source.changes shouldBe repository.changes
@@ -298,16 +282,16 @@ class JsonFileRepositoryTest : DescribeSpec({
 
         it("remains consistent under concurrent mutations").config(tags = setOf(Stress)) {
             (1..20).forEach { id -> repository.create(id, "Customer-$id", "c$id@example.com") }
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             (1..5).map { _ ->
-                testScope.launch {
+                reactive.scope.launch {
                     repeat(10) { i ->
                         val id = (i % 20) + 1
                         (repository.findById(id).orElse(null) as? StandardCustomer)?.updateName("Updated-$i")
                     }
                 }
             }
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             val inMemorySize = repository.size()
             repository.close()
             val reloadedRepo = StandardCustomerJsonFileRepository(jsonFile)
@@ -320,14 +304,14 @@ class JsonFileRepositoryTest : DescribeSpec({
         it("rapid additions are all persisted and queryable") {
             val customers = (1..100).map { arbitraryStandardCustomer(it).next() }
             customers.forEach { c -> repository.create(c.id, c.name, c.email) }
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             repository.size() shouldBe 100
         }
 
         it("rapid mutations followed by query returns latest state") {
             val customer = repository.create(1, "Original", null)
             repeat(50) { i -> customer.updateName("Name-$i") }
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             repository.findById(customer.id).get().name shouldBe "Name-49"
         }
 
@@ -335,7 +319,7 @@ class JsonFileRepositoryTest : DescribeSpec({
             val customer = repository.create(1, "Original", null)
             customer.updateName("Modified")
             repository.remove(customer)
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             repository.findById(customer.id).isEmpty shouldBe true
             repository.isEmpty shouldBe true
         }
@@ -347,16 +331,16 @@ class JsonFileRepositoryTest : DescribeSpec({
             repository.close()
             val repo1 = StandardCustomerJsonFileRepository(multiFile)
             val customer = repo1.create(1, "Original", "orig@example.com")
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             repo1.close()
             val repo2 = StandardCustomerJsonFileRepository(multiFile)
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             repo2.size() shouldBe 1
             (repo2.findById(customer.id).get() as StandardCustomer).updateName("Modified in repo2")
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             repo2.close()
             val repo3 = StandardCustomerJsonFileRepository(multiFile)
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             repo3.findById(customer.id).get().name shouldBe "Modified in repo2"
             repo3.close()
         }
@@ -377,7 +361,7 @@ class JsonFileRepositoryTest : DescribeSpec({
             val c2 = repository.create(2, "Bob", null)
             repository.create(3, "Charlie", null)
             repository.remove(c2)
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             receivedEvents shouldBe listOf("CREATE-1", "CREATE-2", "CREATE-3", "DELETE-2")
             subscription.cancel()
         }
@@ -386,18 +370,18 @@ class JsonFileRepositoryTest : DescribeSpec({
     describe("Subscription cleanup") {
         it("remove() atomically removes subscription from map before cancelling") {
             val customer = repository.create(1, "Test", "t@t.com")
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             val subscriptionsMap = getSubscriptionsMap(repository)
             subscriptionsMap.containsKey(customer.id) shouldBe true
             repository.remove(customer) shouldBe true
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             repository.findById(customer.id).isEmpty shouldBe true
             subscriptionsMap.containsKey(customer.id) shouldBe false
         }
 
         it("remove() throws IllegalStateException when subscription is missing from map") {
             val customer = repository.create(1, "Test", "t@t.com")
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             getSubscriptionsMap(repository).remove(customer.id)
             shouldThrow<IllegalStateException> { repository.remove(customer) }
         }
@@ -405,12 +389,12 @@ class JsonFileRepositoryTest : DescribeSpec({
         it("removeAll() atomically removes subscriptions from map before cancelling") {
             val customer1 = repository.create(1, "Test1", "t1@t.com")
             val customer2 = repository.create(2, "Test2", "t2@t.com")
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             val subscriptionsMap = getSubscriptionsMap(repository)
             subscriptionsMap.containsKey(customer1.id) shouldBe true
             subscriptionsMap.containsKey(customer2.id) shouldBe true
             repository.removeAll(listOf(customer1, customer2)) shouldBe true
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             subscriptionsMap.containsKey(customer1.id) shouldBe false
             subscriptionsMap.containsKey(customer2.id) shouldBe false
         }
@@ -418,7 +402,7 @@ class JsonFileRepositoryTest : DescribeSpec({
         it("removeAll() gracefully handles entities not present in the repository") {
             val customer1 = repository.create(1, "Test1", "t1@t.com")
             val customer2 = repository.create(2, "Test2", "t2@t.com")
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             getSubscriptionsMap(repository).remove(customer2.id)
             shouldNotThrowAny { repository.removeAll(listOf(customer1, customer2)) }
             repository.findById(customer1.id).isEmpty shouldBe true
@@ -428,30 +412,30 @@ class JsonFileRepositoryTest : DescribeSpec({
     describe("Dirty flag optimization") {
         it("skips serialization when no changes occur after last write") {
             repository.create(1, "Test", "t@t.com")
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             val lastModified = jsonFile.lastModified()
             jsonFile.readText().isNotEmpty() shouldBe true
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             jsonFile.lastModified() shouldBe lastModified
         }
 
         it("writes to new file on jsonFile switch even when state is unchanged") {
             repository.create(1, "Test", "t@t.com")
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             val newJsonFile = tempfile("json-repository-test", ".json").also { it.deleteOnExit() }
             repository.jsonFile = newJsonFile
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             newJsonFile.readText().isNotEmpty() shouldBe true
         }
 
         it("does not write back loaded state on initialization") {
             repository.create(1, "Test", "t@t.com")
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             repository.close()
             val contentAfterFirstWrite = jsonFile.readText()
             val lastModifiedBeforeReload = jsonFile.lastModified()
             val reloadedRepo = StandardCustomerJsonFileRepository(jsonFile)
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             jsonFile.lastModified() shouldBe lastModifiedBeforeReload
             jsonFile.readText().shouldEqualJson(contentAfterFirstWrite)
             getDirtyFlag(reloadedRepo).get() shouldBe false
@@ -460,7 +444,7 @@ class JsonFileRepositoryTest : DescribeSpec({
 
         it("close() skips write when repository is clean") {
             repository.create(1, "Test", "t@t.com")
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             val lastModified = jsonFile.lastModified()
             val content = jsonFile.readText()
             repository.close()
@@ -472,7 +456,7 @@ class JsonFileRepositoryTest : DescribeSpec({
             val dirtyFlag = getDirtyFlag(repository)
             repository.create(1, "Test", "t@t.com")
             dirtyFlag.get() shouldBe true
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
             dirtyFlag.get() shouldBe false
         }
     }
@@ -519,7 +503,7 @@ class JsonFileRepositoryTest : DescribeSpec({
             val customRepo = StandardCustomerJsonFileRepository(customDelayFile, 50L)
             try {
                 customRepo.create(1, "Test", "t@t.com")
-                testDispatcher.scheduler.advanceUntilIdle()
+                reactive.advance()
                 customDelayFile.readText().isNotEmpty() shouldBe true
             } finally {
                 customRepo.close()
@@ -587,7 +571,7 @@ class JsonFileRepositoryTest : DescribeSpec({
 
             repo.isEmpty shouldBe true
 
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             repo.close()
             ctx.close()
@@ -916,7 +900,7 @@ class JsonFileRepositoryTest : DescribeSpec({
                 val receivedEvents = AtomicReference(mutableListOf<CrudEvent<Int, PolymorphicCustomer>>())
                 deferred.subscribe { event -> receivedEvents.get().add(event) }
                 deferred.load()
-                testDispatcher.scheduler.advanceUntilIdle()
+                reactive.advance()
                 receivedEvents.get().filter { it.isCreate() || it.isUpdate() } shouldBe emptyList()
             } finally {
                 deferred.close()
@@ -958,7 +942,7 @@ class JsonFileRepositoryTest : DescribeSpec({
                 deferred.load()
                 val customer = deferred.create(1, "Alice", null)
                 deferred.size() shouldBe 1
-                testDispatcher.scheduler.advanceUntilIdle()
+                reactive.advance()
                 deferred.remove(customer)
                 deferred.size() shouldBe 0
             } finally {

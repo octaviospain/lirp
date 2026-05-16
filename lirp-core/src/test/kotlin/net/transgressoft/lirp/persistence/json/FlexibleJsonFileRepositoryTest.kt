@@ -1,7 +1,6 @@
 package net.transgressoft.lirp.persistence.json
 
-import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.json.shouldEqualJson
 import io.kotest.assertions.throwables.shouldThrowExactly
 import io.kotest.core.spec.style.StringSpec
@@ -10,23 +9,12 @@ import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import java.io.File
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
-@ExperimentalCoroutinesApi
-@SerializeWithReactiveScope
 class FlexibleJsonFileRepositoryTest : StringSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
+    val reactive = reactiveScope()
     lateinit var repository: FlexibleJsonFileRepository
     lateinit var jsonFile: File
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
 
     beforeEach {
         jsonFile = tempfile("json-repository-test", ".json").also { it.deleteOnExit() }
@@ -37,12 +25,7 @@ class FlexibleJsonFileRepositoryTest : StringSpec({
         repository.close()
     }
 
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
-    }
-
-    "Repository should create and serialize strings, booleans and integers" {
+    "Repository creates and serializes strings, booleans and integers" {
         val reactiveString = repository.getReactiveString("id1", "value1")
         val reactiveBoolean = repository.getReactiveBoolean("id2", true)
         val reactiveInt = repository.getReactiveInt("id3", 3)
@@ -51,7 +34,7 @@ class FlexibleJsonFileRepositoryTest : StringSpec({
         repository.findByUniqueId(reactiveBoolean.uniqueId) shouldBePresent { it shouldBe reactiveBoolean }
         repository.findFirst { it.value == 3 } shouldBePresent { it shouldBe reactiveInt }
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         jsonFile.readText().shouldEqualJson(
             """
@@ -63,7 +46,7 @@ class FlexibleJsonFileRepositoryTest : StringSpec({
         )
     }
 
-    "Repository should be created from a json string of string, booleans and integers" {
+    "Repository is created from a json string of string, booleans and integers" {
         jsonFile.writeText(
             """
             {
@@ -81,7 +64,7 @@ class FlexibleJsonFileRepositoryTest : StringSpec({
         repository.findFirst { it.value == 3 } shouldBePresent { it.id shouldBe "number_of" }
     }
 
-    "createReactiveX methods should return existing values from file, not overwrite with defaults" {
+    "createReactiveX methods return existing values from file, not overwrite with defaults" {
         jsonFile.writeText(
             """
             {
@@ -112,7 +95,7 @@ class FlexibleJsonFileRepositoryTest : StringSpec({
         // Changing values should persist to file
         serverPort.value = 9090
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         jsonFile.readText().shouldEqualJson(
             """

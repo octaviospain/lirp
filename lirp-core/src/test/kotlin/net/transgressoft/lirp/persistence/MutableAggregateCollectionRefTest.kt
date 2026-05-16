@@ -18,8 +18,7 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.event.MutationEvent
-import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
@@ -31,12 +30,9 @@ import io.kotest.matchers.comparables.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import java.time.LocalDateTime
 import java.util.Collections
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 
 /**
@@ -48,17 +44,9 @@ import kotlinx.coroutines.test.runTest
  * thread safety (CORE-04), and mutation event emission (EVT-01).
  */
 @DisplayName("MutableAggregateCollectionRefDelegate")
-@OptIn(ExperimentalCoroutinesApi::class)
-@SerializeWithReactiveScope
 internal class MutableAggregateCollectionRefTest : StringSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
+    val reactive = reactiveScope()
 
     lateinit var ctx: LirpContext
     lateinit var trackRepo: AudioItemVolatileRepository
@@ -181,7 +169,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         playlist.audioItems.add(t1)
 
         // Drive pending coroutines to completion
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         events shouldHaveSize 1
         playlist.lastDateModified shouldBeGreaterThan beforeModified
@@ -231,7 +219,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
 
         playlist.audioItems[0] = t2
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         playlist.audioItems[0] shouldBe t2
         playlist.audioItems.referenceIds shouldContainExactly listOf(2)
@@ -250,7 +238,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
 
         playlist.audioItems.add(1, t2)
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         playlist.audioItems shouldContainExactly listOf(t1, t2, t3)
         events shouldHaveSize 1
@@ -268,7 +256,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
 
         val removed = playlist.audioItems.removeAt(1)
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         removed shouldBe t2
         playlist.audioItems shouldContainExactly listOf(t1, t3)
@@ -289,7 +277,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         val sub = playlist.audioItems.subList(1, 3)
         sub.add(tNew)
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         playlist.audioItems shouldContain tNew
         events shouldHaveSize 1
@@ -309,7 +297,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         iter.next()
         iter.set(t3)
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         playlist.audioItems[0] shouldBe t3
         events shouldHaveSize 1
@@ -328,7 +316,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         iter.next()
         iter.remove()
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         group.playlists shouldHaveSize 1
         events shouldHaveSize 1

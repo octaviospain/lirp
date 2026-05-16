@@ -17,8 +17,7 @@
 
 package net.transgressoft.lirp.persistence
 
-import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
@@ -28,9 +27,7 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import java.util.concurrent.ConcurrentHashMap
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
 
@@ -41,20 +38,13 @@ import kotlinx.coroutines.test.TestCoroutineScheduler
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @DisplayName("PersistentRepositoryBase debounce queue")
-@SerializeWithReactiveScope
 internal class PersistentRepositoryDebounceTest : StringSpec({
 
     val testScheduler = TestCoroutineScheduler()
-    val testDispatcher = StandardTestDispatcher(testScheduler)
-    val testScope = CoroutineScope(testDispatcher + SupervisorJob())
+    reactiveScope(StandardTestDispatcher(testScheduler), failOnUncaughtExceptions = false)
 
     lateinit var ctx: LirpContext
     lateinit var repo: TestPersistentRepository
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
 
     beforeTest {
         ctx = LirpContext()
@@ -68,11 +58,6 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
             // close() may propagate flush errors from tests that deliberately inject failures
         }
         testScheduler.runCurrent()
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultFlowScope()
-        ReactiveScope.resetDefaultIoScope()
     }
 
     "rapid add() calls within debounce window produce exactly 1 writePending() call" {

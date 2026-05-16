@@ -17,29 +17,15 @@
 
 package net.transgressoft.lirp.persistence
 
-import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
 import net.transgressoft.lirp.testing.Stress
+import net.transgressoft.lirp.testing.arbitraryCustomer
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.core.spec.style.StringSpec
-import io.kotest.property.Arb
 import io.kotest.property.arbitrary.next
-import io.kotest.property.arbitrary.positiveInt
-import io.kotest.property.arbitrary.stringPattern
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
-
-private fun arbitraryCustomer(id: Int = -1) =
-    io.kotest.property.arbitrary.arbitrary {
-        Customer(
-            id = if (id == -1) Arb.positiveInt(500_000).bind() else id,
-            initialName = Arb.stringPattern("[a-z]{5} [a-z]{5}").bind()
-        )
-    }
 
 /**
  * Concurrency tests verifying that [RegistryBase] iteration and search operations are safe
@@ -49,23 +35,10 @@ private fun arbitraryCustomer(id: Int = -1) =
  * [java.util.ConcurrentModificationException] when entities are added or removed
  * concurrently via another coroutine.
  */
-@ExperimentalCoroutinesApi
-@SerializeWithReactiveScope
 internal class RegistryBaseConcurrencyTest : StringSpec({
     tags(Stress)
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
-    }
+    val reactive = reactiveScope()
 
     "iterator completes without error under concurrent entity additions" {
         val concurrentCoroutines = 50

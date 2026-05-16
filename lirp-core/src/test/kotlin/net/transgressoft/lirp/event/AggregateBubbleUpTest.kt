@@ -26,7 +26,7 @@ import net.transgressoft.lirp.persistence.EntityCVolatileRepo
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.MutableRefOrderVolatileRepo
 import net.transgressoft.lirp.persistence.OrderVolatileRepo
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.nondeterministic.continually
 import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.core.annotation.DisplayName
@@ -38,9 +38,6 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Tests for DDD-03: bubble-up event propagation from referenced child entities to parent entity subscribers.
@@ -49,18 +46,10 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * silenced when disabled, and that propagation is single-level only (no transitive forwarding).
  */
 @DisplayName("AggregateBubbleUpTest")
-@OptIn(ExperimentalCoroutinesApi::class)
 @Suppress("UNCHECKED_CAST")
-@SerializeWithReactiveScope
 internal class AggregateBubbleUpTest : FunSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
+    reactiveScope()
 
     lateinit var ctx: LirpContext
 

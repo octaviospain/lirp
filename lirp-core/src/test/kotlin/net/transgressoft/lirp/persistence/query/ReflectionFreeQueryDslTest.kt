@@ -18,9 +18,9 @@
 package net.transgressoft.lirp.persistence.query
 
 import net.transgressoft.lirp.event.CrudEvent
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.LirpContext
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.reactiveScope
+import net.transgressoft.lirp.testing.record
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.booleans.shouldBeFalse
@@ -30,32 +30,15 @@ import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Reflection-free verification, event emission correctness, and Java interop documentation
  * for the Query DSL.
  */
 @DisplayName("Query DSL Reflection-Free")
-@SerializeWithReactiveScope
-@OptIn(ExperimentalCoroutinesApi::class)
 internal class ReflectionFreeQueryDslTest : FunSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
-    }
+    val reactive = reactiveScope()
 
     lateinit var ctx: LirpContext
     lateinit var repo: ProductVolatileRepo
@@ -119,47 +102,44 @@ internal class ReflectionFreeQueryDslTest : FunSpec({
 
         repo.query { where { Product::category eq "books" } }.toList()
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         readEventEmitted.get().shouldBeFalse()
     }
 
     test("query emits READ on terminal operation when READ events enabled") {
-        val readEventCount = AtomicInteger(0)
         repo.activateEvents(CrudEvent.Type.READ)
-        repo.subscribe(CrudEvent.Type.READ) { readEventCount.incrementAndGet() }
+        val readEvents = repo.record(CrudEvent.Type.READ)
 
         repo.query { where { Product::category eq "books" } }.toList()
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
-        readEventCount.get() shouldBeGreaterThan 0
+        readEvents.count shouldBeGreaterThan 0
     }
 
     test("query firstOrNull emits READ when READ events enabled") {
-        val readEventCount = AtomicInteger(0)
         repo.activateEvents(CrudEvent.Type.READ)
-        repo.subscribe(CrudEvent.Type.READ) { readEventCount.incrementAndGet() }
+        val readEvents = repo.record(CrudEvent.Type.READ)
 
         repo.query { where { Product::category eq "books" } }.firstOrNull()
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
-        readEventCount.get() shouldBeGreaterThan 0
+        readEvents.count shouldBeGreaterThan 0
     }
 
     test("multiple terminal operations emit READ only on first consumption") {
-        val readEventCount = AtomicInteger(0)
         repo.activateEvents(CrudEvent.Type.READ)
-        repo.subscribe(CrudEvent.Type.READ) { readEventCount.incrementAndGet() }
+        val readEvents = repo.record(CrudEvent.Type.READ)
 
         val seq = repo.query { where { Product::category eq "books" } }
         seq.toList()
         seq.toList()
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
-        readEventCount.get() shouldBe 1
+        readEvents.count shouldBe 1
     }
 
     test("query with no matches and READ enabled emits empty READ event") {
@@ -169,7 +149,7 @@ internal class ReflectionFreeQueryDslTest : FunSpec({
 
         repo.query { where { Product::category eq "toys" } }.toList()
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         // Empty results still trigger the event wrapper, but the emitted set is empty
         readEventEmitted.get().shouldBeTrue()

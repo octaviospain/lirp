@@ -18,17 +18,13 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.ReactiveEntityBase
-import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.optional.shouldBeEmpty
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Verifies that aggregate reference operations execute without runtime reflection on the hot path.
@@ -42,17 +38,9 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * exist in the class, and the runtime proof is that all operations complete successfully without errors.
  */
 @DisplayName("RegistryBase")
-@OptIn(ExperimentalCoroutinesApi::class)
-@SerializeWithReactiveScope
 internal class ReflectionFreeVerificationTest : FunSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
+    val reactive = reactiveScope()
 
     lateinit var ctx: LirpContext
     lateinit var customerRepo: CustomerVolatileRepo
