@@ -25,7 +25,7 @@ class FlexibleJsonFileRepositoryTest : StringSpec({
         repository.close()
     }
 
-    "Repository should create and serialize strings, booleans and integers" {
+    "Repository creates and serializes strings, booleans and integers" {
         val reactiveString = repository.getReactiveString("id1", "value1")
         val reactiveBoolean = repository.getReactiveBoolean("id2", true)
         val reactiveInt = repository.getReactiveInt("id3", 3)
@@ -46,7 +46,7 @@ class FlexibleJsonFileRepositoryTest : StringSpec({
         )
     }
 
-    "Repository should be created from a json string of string, booleans and integers" {
+    "Repository is created from a json string of string, booleans and integers" {
         jsonFile.writeText(
             """
             {
@@ -64,7 +64,7 @@ class FlexibleJsonFileRepositoryTest : StringSpec({
         repository.findFirst { it.value == 3 } shouldBePresent { it.id shouldBe "number_of" }
     }
 
-    "createReactiveX methods should return existing values from file, not overwrite with defaults" {
+    "createReactiveX methods return existing values from file, not overwrite with defaults" {
         jsonFile.writeText(
             """
             {
