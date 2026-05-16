@@ -17,14 +17,12 @@
 
 package net.transgressoft.lirp.persistence
 
-import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.optional.shouldBeEmpty
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
@@ -37,16 +35,10 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  */
 @DisplayName("AggregateRefDelegate")
 @OptIn(ExperimentalCoroutinesApi::class)
-@SerializeWithReactiveScope
 internal class AggregateRefResolutionTest : FunSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
+    extension(ReactiveScopeExtension(testDispatcher))
 
     lateinit var ctx: LirpContext
     lateinit var customerRepo: CustomerVolatileRepo

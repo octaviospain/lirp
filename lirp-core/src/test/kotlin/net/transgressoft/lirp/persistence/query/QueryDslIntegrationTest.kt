@@ -18,11 +18,10 @@
 package net.transgressoft.lirp.persistence.query
 
 import net.transgressoft.lirp.event.CrudEvent
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.IndexedProduct
 import net.transgressoft.lirp.persistence.IndexedProductVolatileRepo
 import net.transgressoft.lirp.persistence.LirpContext
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.booleans.shouldBeTrue
@@ -32,7 +31,6 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.ints.shouldBeExactly
 import io.kotest.matchers.shouldBe
 import java.util.concurrent.atomic.AtomicInteger
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
@@ -40,22 +38,11 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * Integration tests for the Query DSL against real repositories.
  */
 @DisplayName("Query DSL Integration")
-@SerializeWithReactiveScope
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class QueryDslIntegrationTest : FunSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
-    }
+    extension(ReactiveScopeExtension(testDispatcher))
 
     lateinit var ctx: LirpContext
     lateinit var productRepo: ProductVolatileRepo

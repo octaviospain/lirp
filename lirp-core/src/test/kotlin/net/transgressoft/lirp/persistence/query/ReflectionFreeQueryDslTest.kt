@@ -18,9 +18,8 @@
 package net.transgressoft.lirp.persistence.query
 
 import net.transgressoft.lirp.event.CrudEvent
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.LirpContext
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.booleans.shouldBeFalse
@@ -31,7 +30,6 @@ import io.kotest.matchers.shouldBe
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
@@ -40,22 +38,11 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * for the Query DSL.
  */
 @DisplayName("Query DSL Reflection-Free")
-@SerializeWithReactiveScope
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class ReflectionFreeQueryDslTest : FunSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
-    }
+    extension(ReactiveScopeExtension(testDispatcher))
 
     lateinit var ctx: LirpContext
     lateinit var repo: ProductVolatileRepo

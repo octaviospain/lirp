@@ -17,8 +17,7 @@
 
 package net.transgressoft.lirp.persistence
 
-import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import net.transgressoft.lirp.testing.Stress
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.core.spec.style.StringSpec
@@ -26,7 +25,6 @@ import io.kotest.property.Arb
 import io.kotest.property.arbitrary.next
 import io.kotest.property.arbitrary.positiveInt
 import io.kotest.property.arbitrary.stringPattern
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.joinAll
@@ -50,22 +48,11 @@ private fun arbitraryCustomer(id: Int = -1) =
  * concurrently via another coroutine.
  */
 @ExperimentalCoroutinesApi
-@SerializeWithReactiveScope
 internal class RegistryBaseConcurrencyTest : StringSpec({
     tags(Stress)
 
     val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
-    }
+    extension(ReactiveScopeExtension(testDispatcher))
 
     "iterator completes without error under concurrent entity additions" {
         val concurrentCoroutines = 50

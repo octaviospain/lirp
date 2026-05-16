@@ -18,9 +18,9 @@
 package net.transgressoft.lirp.persistence.fx
 
 import net.transgressoft.lirp.event.MutationEvent
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
 import net.transgressoft.lirp.persistence.LirpContext
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
@@ -28,7 +28,6 @@ import io.kotest.matchers.shouldNotBe
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
@@ -42,21 +41,14 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * Uses the merged [FxAudioPlaylistEntity] which exercises all fx delegate types in a single entity.
  */
 @DisplayName("FxScalarRegistryIntegrationTest")
-@OptIn(ExperimentalCoroutinesApi::class)
+@ExperimentalCoroutinesApi
 class FxScalarRegistryIntegrationTest : StringSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
+    extension(ReactiveScopeExtension(testDispatcher))
 
     beforeSpec {
         FxToolkitInit.ensureInitialized()
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultFlowScope()
-        ReactiveScope.resetDefaultIoScope()
     }
 
     lateinit var trackRepo: AudioItemVolatileRepository

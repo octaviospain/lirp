@@ -17,8 +17,7 @@
 
 package net.transgressoft.lirp.persistence
 
-import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -26,7 +25,6 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
@@ -39,16 +37,10 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  */
 @DisplayName("AggregateCollectionRefDelegate")
 @OptIn(ExperimentalCoroutinesApi::class)
-@SerializeWithReactiveScope
 internal class AggregateCollectionRefResolutionTest : StringSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
+    extension(ReactiveScopeExtension(testDispatcher))
 
     lateinit var ctx: LirpContext
     lateinit var trackRepo: AudioItemVolatileRepository

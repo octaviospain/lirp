@@ -1,7 +1,6 @@
 package net.transgressoft.lirp.persistence.json
 
-import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.assertions.json.shouldEqualJson
 import io.kotest.assertions.throwables.shouldThrowExactly
 import io.kotest.core.spec.style.StringSpec
@@ -10,23 +9,16 @@ import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import java.io.File
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 @ExperimentalCoroutinesApi
-@SerializeWithReactiveScope
 class FlexibleJsonFileRepositoryTest : StringSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
+    extension(ReactiveScopeExtension(testDispatcher))
     lateinit var repository: FlexibleJsonFileRepository
     lateinit var jsonFile: File
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
 
     beforeEach {
         jsonFile = tempfile("json-repository-test", ".json").also { it.deleteOnExit() }
@@ -35,11 +27,6 @@ class FlexibleJsonFileRepositoryTest : StringSpec({
 
     afterEach {
         repository.close()
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
     }
 
     "Repository should create and serialize strings, booleans and integers" {

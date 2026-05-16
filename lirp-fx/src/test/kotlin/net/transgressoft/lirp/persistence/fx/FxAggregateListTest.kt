@@ -17,10 +17,10 @@
 
 package net.transgressoft.lirp.persistence.fx
 
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.AggregateCollectionRef
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.MutableAudioItem
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
@@ -29,26 +29,17 @@ import javafx.collections.ListChangeListener
 import javafx.collections.ObservableList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Tests for [FxAggregateList] verifying JavaFX [ListChangeListener.Change] notifications,
  * dispatch thread behavior, and type compatibility with [ObservableList] and [AggregateCollectionRef].
  */
-@OptIn(ExperimentalCoroutinesApi::class)
 class FxAggregateListTest : StringSpec({
 
-    val testScope = CoroutineScope(UnconfinedTestDispatcher())
+    extension(ReactiveScopeExtension())
 
     beforeSpec {
         FxToolkitInit.ensureInitialized()
-        ReactiveScope.flowScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultFlowScope()
     }
 
     "FxAggregateList returns correct size after add" {

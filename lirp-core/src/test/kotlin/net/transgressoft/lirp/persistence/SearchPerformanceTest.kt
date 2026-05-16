@@ -2,8 +2,7 @@ package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.CrudEvent.Type.READ
-import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
@@ -23,7 +22,6 @@ import io.kotest.property.arbitrary.stringPattern
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.stream.Collectors
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
@@ -79,19 +77,13 @@ class IndexedProductVolatileRepo : VolatileRepository<Int, IndexedProduct>("Inde
  */
 @ExperimentalCoroutinesApi
 @DisplayName("VolatileRepository search performance")
-@SerializeWithReactiveScope
 internal class SearchPerformanceTest : StringSpec({
 
     lateinit var ctx: LirpContext
     lateinit var repository: CustomerVolatileRepo
 
     val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
+    extension(ReactiveScopeExtension(testDispatcher))
 
     beforeTest {
         ctx = LirpContext()
@@ -105,11 +97,6 @@ internal class SearchPerformanceTest : StringSpec({
 
     afterTest {
         ctx.close()
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
     }
 
     "lazySearch returns matching entities as Sequence" {

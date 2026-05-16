@@ -24,7 +24,7 @@ import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
 import net.transgressoft.lirp.event.StandardCrudEvent.Create
 import net.transgressoft.lirp.event.StandardCrudEvent.Delete
 import net.transgressoft.lirp.event.StandardCrudEvent.Update
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.DescribeSpec
 import io.kotest.matchers.maps.shouldContainExactly
@@ -50,20 +50,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
 @ExperimentalCoroutinesApi
-@SerializeWithReactiveScope
 class FlowEventPublisherTest : DescribeSpec({
     val testDispatcher = UnconfinedTestDispatcher()
     val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
-    }
+    extension(ReactiveScopeExtension(testDispatcher))
 
     describe("ReactiveEntity event emission") {
         it("emits change event on property modification") {

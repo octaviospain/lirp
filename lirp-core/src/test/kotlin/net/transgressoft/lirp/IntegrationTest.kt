@@ -22,7 +22,6 @@ import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.PublisherConfig
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.event.StandardCrudEvent.Create
 import net.transgressoft.lirp.event.TestEntity
 import net.transgressoft.lirp.persistence.Customer
@@ -30,7 +29,7 @@ import net.transgressoft.lirp.persistence.CustomerVolatileRepo
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.json.PolymorphicCustomer
 import net.transgressoft.lirp.persistence.json.StandardCustomerJsonFileRepository
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import net.transgressoft.lirp.testing.Stress
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.core.spec.style.DescribeSpec
@@ -40,6 +39,7 @@ import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.BufferOverflow
@@ -50,21 +50,11 @@ import kotlinx.coroutines.withTimeout
 
 /** Integration tests for concurrent access, failure recovery, and resource lifecycle scenarios. */
 @ExperimentalCoroutinesApi
-@SerializeWithReactiveScope
 class IntegrationTest : DescribeSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()
     val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
-    }
+    extension(ReactiveScopeExtension(testDispatcher))
 
     describe("Concurrent subscriptions") {
         it("handles 200 subscribers with 2000 events without deadlocking").config(tags = setOf(Stress)) {
@@ -77,7 +67,7 @@ class IntegrationTest : DescribeSpec({
                 }
             val collectedCounts = Collections.synchronizedList(mutableListOf<Int>())
 
-            withTimeout(10_000) {
+            withTimeout(10.seconds) {
                 val subscriberJobs =
                     (1..subscriberCount).map {
                         testScope.launch {

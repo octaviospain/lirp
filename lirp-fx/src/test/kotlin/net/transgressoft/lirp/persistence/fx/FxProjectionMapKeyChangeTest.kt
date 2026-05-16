@@ -17,13 +17,10 @@
 
 package net.transgressoft.lirp.persistence.fx
 
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.AudioItem
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Tests for [FxProjectionMap] covering key-change scenarios. Closes coverage Gap 2 from the
@@ -33,18 +30,12 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * still in the source collection, causing [handleRemoved] to look up the new key (which has
  * no bucket) and fall through to a linear scan to find and remove the entity by reference.
  */
-@OptIn(ExperimentalCoroutinesApi::class)
 class FxProjectionMapKeyChangeTest : StringSpec({
 
-    val testScope = CoroutineScope(UnconfinedTestDispatcher())
+    extension(ReactiveScopeExtension())
 
     beforeSpec {
         FxToolkitInit.ensureInitialized()
-        ReactiveScope.flowScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultFlowScope()
     }
 
     "FxProjectionMap reflects new bucket after entity key changes and is removed then re-added" {

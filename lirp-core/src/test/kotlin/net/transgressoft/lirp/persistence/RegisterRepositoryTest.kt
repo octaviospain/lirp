@@ -18,12 +18,11 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.event.AggregateMutationEvent
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.json.BubbleUpOrderJsonFileRepository
 import net.transgressoft.lirp.persistence.json.JsonFileRepository
 import net.transgressoft.lirp.persistence.json.MutableAudioPlaylistJsonFileRepository
 import net.transgressoft.lirp.persistence.json.lirpSerializer
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
@@ -32,7 +31,6 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.mockk
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.serialization.KSerializer
@@ -49,21 +47,10 @@ import kotlinx.serialization.builtins.serializer
  */
 @ExperimentalCoroutinesApi
 @DisplayName("RegistryBase.registerRepository()")
-@SerializeWithReactiveScope
 internal class RegisterRepositoryTest : StringSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultFlowScope()
-        ReactiveScope.resetDefaultIoScope()
-    }
+    extension(ReactiveScopeExtension(testDispatcher))
 
     afterEach {
         LirpContext.resetDefault()

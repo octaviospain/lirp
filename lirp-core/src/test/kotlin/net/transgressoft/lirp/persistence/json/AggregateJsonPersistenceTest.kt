@@ -18,7 +18,6 @@
 package net.transgressoft.lirp.persistence.json
 
 import net.transgressoft.lirp.event.AggregateMutationEvent
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
 import net.transgressoft.lirp.persistence.BubbleUpOrder
 import net.transgressoft.lirp.persistence.CustomerVolatileRepo
@@ -27,7 +26,7 @@ import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpRepository
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.MutableAudioPlaylist
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempfile
 import io.kotest.matchers.collections.shouldContainExactly
@@ -40,7 +39,6 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration.Companion.milliseconds
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.serialization.KSerializer
@@ -58,21 +56,10 @@ import kotlinx.serialization.builtins.serializer
  * - Re-wiring of bubble-up subscriptions after reload
  */
 @ExperimentalCoroutinesApi
-@SerializeWithReactiveScope
 class AggregateJsonPersistenceTest : FunSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
-    }
+    extension(ReactiveScopeExtension(testDispatcher))
 
     test("serializes entity with aggregate ref as ID-only, no resolved object") {
         val ctx = LirpContext()

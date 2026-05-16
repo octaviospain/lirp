@@ -3,14 +3,13 @@ package net.transgressoft.lirp.persistence.json
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
 import net.transgressoft.lirp.event.LirpEventSubscription
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
 import net.transgressoft.lirp.persistence.DefaultAudioPlaylist
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpDeserializationException
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.PersistentRepositoryBase
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import net.transgressoft.lirp.testing.Stress
 import io.kotest.assertions.json.shouldEqualJson
 import io.kotest.assertions.nondeterministic.eventually
@@ -42,17 +41,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 @ExperimentalCoroutinesApi
-@SerializeWithReactiveScope
 class JsonFileRepositoryTest : DescribeSpec({
     val testDispatcher = UnconfinedTestDispatcher()
     val testScope = CoroutineScope(testDispatcher)
+    extension(ReactiveScopeExtension(testDispatcher))
+
     lateinit var jsonFile: File
     lateinit var repository: StandardCustomerJsonFileRepository
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
 
     beforeEach {
         jsonFile = tempfile("json-repository-test", ".json").also { it.deleteOnExit() }
@@ -61,11 +56,6 @@ class JsonFileRepositoryTest : DescribeSpec({
 
     afterEach {
         repository.close()
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
     }
 
     fun getSubscriptionsMap(repo: JsonFileRepository<Int, PolymorphicCustomer>): MutableMap<Int, *> {

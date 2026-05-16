@@ -18,14 +18,12 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.ReactiveEntityBase
-import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.assertions.throwables.shouldNotThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
@@ -41,16 +39,10 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  */
 @DisplayName("RegistryBase inner class and anonymous entity handling")
 @OptIn(ExperimentalCoroutinesApi::class)
-@SerializeWithReactiveScope
 internal class InnerClassRegistryTest : StringSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
+    extension(ReactiveScopeExtension(testDispatcher))
 
     lateinit var repo: VolatileRepository<Int, SimpleTestEntity>
 

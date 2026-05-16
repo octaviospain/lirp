@@ -80,6 +80,7 @@ dependencies {
     testFixturesImplementation project(path: ':lirp-api')
     testFixturesImplementation project(path: ':lirp-core')
     testFixturesImplementation files(rootProject.project(':lirp-core').sourceSets.test.output)
+    testImplementation files(rootProject.project(':lirp-core').sourceSets.test.output)
     integrationTestImplementation files(rootProject.project(':lirp-core').sourceSets.test.output)
     testFixturesImplementation platform(libs.exposed.bom)
     testFixturesImplementation libs.bundles.exposed

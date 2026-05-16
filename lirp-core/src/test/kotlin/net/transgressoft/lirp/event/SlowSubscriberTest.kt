@@ -18,7 +18,7 @@
 package net.transgressoft.lirp.event
 
 import net.transgressoft.lirp.persistence.CustomerVolatileRepo
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeSerialization
 import net.transgressoft.lirp.testing.Stress
 import io.kotest.core.spec.style.DescribeSpec
 import io.kotest.matchers.comparables.shouldBeGreaterThan
@@ -66,23 +66,12 @@ private const val EVENT_COUNT = 60
  * subscribers before the next arrives. In this spaced-emission scenario, the non-blocking
  * property is proven by the fast subscriber completing long before the slow subscriber.
  */
-@SerializeWithReactiveScope
 class SlowSubscriberTest : DescribeSpec({
     tags(Stress)
 
-    // Dedicated scope with unbounded Default dispatcher to avoid coroutine scheduling contention
-    // between publisher coroutines and Kotest's runBlocking event loop
+    extension(ReactiveScopeSerialization)
+
     val dedicatedScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-
-    beforeSpec {
-        ReactiveScope.flowScope = dedicatedScope
-        ReactiveScope.ioScope = dedicatedScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultFlowScope()
-        ReactiveScope.resetDefaultIoScope()
-    }
 
     describe("Slow subscriber isolation on entity publisher") {
         it("publisher emission is non-blocking when one subscriber is slow").config(timeout = 30.seconds) {

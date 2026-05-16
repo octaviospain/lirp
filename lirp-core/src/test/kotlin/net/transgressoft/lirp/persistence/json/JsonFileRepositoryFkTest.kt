@@ -21,7 +21,6 @@ import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.event.CrudEvent
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.Aggregate
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpDeserializationException
@@ -29,7 +28,7 @@ import net.transgressoft.lirp.persistence.LirpRepository
 import net.transgressoft.lirp.persistence.VolatileRepository
 import net.transgressoft.lirp.persistence.mutableAggregateSet
 import net.transgressoft.lirp.persistence.optionalAggregate
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.engine.spec.tempfile
@@ -38,7 +37,6 @@ import io.kotest.matchers.string.shouldContain
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.milliseconds
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.serialization.builtins.MapSerializer
@@ -55,21 +53,10 @@ import kotlinx.serialization.builtins.serializer
  * [LirpDeserializationException].
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-@SerializeWithReactiveScope
 internal class JsonFileRepositoryFkTest : StringSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
-    }
+    extension(ReactiveScopeExtension(testDispatcher))
 
     "JsonFileRepository drops dangling collection IDs on load" {
         val ctx1 = LirpContext()

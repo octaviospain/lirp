@@ -18,14 +18,12 @@
 package net.transgressoft.lirp.persistence.query
 
 import net.transgressoft.lirp.event.CrudEvent
-import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import java.util.concurrent.atomic.AtomicInteger
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
@@ -37,22 +35,11 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * contract.
  */
 @DisplayName("Via event emission")
-@SerializeWithReactiveScope
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class ViaEventEmissionTest : FunSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
-    }
+    extension(ReactiveScopeExtension(testDispatcher))
 
     test("child registry emits no READ events when parent registry runs a via query without enableEvents") {
         val tracks =

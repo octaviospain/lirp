@@ -17,8 +17,8 @@
 
 package net.transgressoft.lirp.persistence.fx
 
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.AudioItem
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import net.transgressoft.lirp.testing.Stress
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.assertions.throwables.shouldThrow
@@ -30,28 +30,19 @@ import javafx.collections.MapChangeListener
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Tests for [FxProjectionMap] verifying grouped projection from list and set sources,
  * [MapChangeListener.Change] notifications, key ordering, and unmodifiability.
  */
-@OptIn(ExperimentalCoroutinesApi::class)
 class FxProjectionMapTest : StringSpec({
 
-    val testScope = CoroutineScope(UnconfinedTestDispatcher())
+    extension(ReactiveScopeExtension())
 
     beforeSpec {
         FxToolkitInit.ensureInitialized()
-        ReactiveScope.flowScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultFlowScope()
     }
 
     "FxProjectionMap groups entities by key extractor on add" {

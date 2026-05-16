@@ -18,8 +18,7 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.event.MutationEvent
-import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
@@ -31,7 +30,6 @@ import io.kotest.matchers.comparables.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import java.time.LocalDateTime
 import java.util.Collections
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.joinAll
@@ -49,16 +47,10 @@ import kotlinx.coroutines.test.runTest
  */
 @DisplayName("MutableAggregateCollectionRefDelegate")
 @OptIn(ExperimentalCoroutinesApi::class)
-@SerializeWithReactiveScope
 internal class MutableAggregateCollectionRefTest : StringSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
+    extension(ReactiveScopeExtension(testDispatcher))
 
     lateinit var ctx: LirpContext
     lateinit var trackRepo: AudioItemVolatileRepository

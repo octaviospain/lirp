@@ -20,9 +20,8 @@ package net.transgressoft.lirp.entity
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.MutationEvent.Type.MUTATE
 import net.transgressoft.lirp.event.ReactiveMutationEvent
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.Customer
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
@@ -30,7 +29,6 @@ import io.kotest.matchers.string.shouldContain
 import java.util.concurrent.Flow
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.function.Consumer
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
@@ -38,20 +36,9 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * Tests for [ReactiveEntityBase] lifecycle states: Created, Active, Dormant, and Closed.
  */
 @ExperimentalCoroutinesApi
-@SerializeWithReactiveScope
 class ReactiveEntityLifecycleTest : StringSpec({
     val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
-    }
+    extension(ReactiveScopeExtension(testDispatcher))
 
     "ReactiveEntity isClosed returns false for new entity" {
         val entity = LazyTestEntity("lifecycle-1")

@@ -20,8 +20,7 @@ package net.transgressoft.lirp.entity
 import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.LirpEventPublisher
 import net.transgressoft.lirp.event.MutationEvent
-import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
@@ -29,25 +28,13 @@ import io.kotest.matchers.shouldBe
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 @ExperimentalCoroutinesApi
-@SerializeWithReactiveScope
 class ReactiveEntityLazyInitTest : StringSpec({
     val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
-    }
+    extension(ReactiveScopeExtension(testDispatcher))
 
     "Publisher is not created until first subscription" {
         val publisherCreationCounter = AtomicInteger(0)

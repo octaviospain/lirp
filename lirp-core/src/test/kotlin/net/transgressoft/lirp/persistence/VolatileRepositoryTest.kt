@@ -9,8 +9,7 @@ import net.transgressoft.lirp.event.EventType
 import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.LirpEventSubscriberBase
 import net.transgressoft.lirp.event.MutationEvent
-import net.transgressoft.lirp.event.ReactiveScope
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.assertions.assertSoftly
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainExactly
@@ -30,7 +29,6 @@ import java.util.Collections
 import java.util.Optional
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
@@ -43,7 +41,6 @@ private fun arbitraryCustomer(id: Int = -1) =
     }
 
 @ExperimentalCoroutinesApi
-@SerializeWithReactiveScope
 internal class VolatileRepositoryTest : FunSpec({
 
     class SomeClassSubscribedToEvents() : LirpEventSubscriberBase<Customer, CrudEvent.Type, CrudEvent<Int, Customer>>("Some Name") {
@@ -69,12 +66,7 @@ internal class VolatileRepositoryTest : FunSpec({
     lateinit var subscriber: SomeClassSubscribedToEvents
 
     val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
-
-    beforeSpec {
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
+    extension(ReactiveScopeExtension(testDispatcher))
 
     beforeTest {
         ctx = LirpContext()
@@ -88,11 +80,6 @@ internal class VolatileRepositoryTest : FunSpec({
 
     afterTest {
         ctx.close()
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
     }
 
     test("Repository reflects addition and deletion of entities") {

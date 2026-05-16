@@ -18,44 +18,20 @@
 package net.transgressoft.lirp.testing
 
 import io.kotest.core.config.AbstractProjectConfig
-import io.kotest.core.extensions.Extension
-import io.kotest.core.extensions.SpecExtension
-import io.kotest.core.spec.Spec
 import io.kotest.engine.concurrency.SpecExecutionMode
 import io.kotest.engine.concurrency.TestExecutionMode
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 /**
  * Kotest project configuration for core tests.
  *
  * Specs run with bounded concurrency while individual tests remain sequential so specs
  * with shared fixtures, virtual schedulers, or repository state keep deterministic ordering.
+ *
+ * Specs that mutate the process-wide [net.transgressoft.lirp.event.ReactiveScope] register
+ * [ReactiveScopeExtension] in their init block; the extension holds a shared mutex that
+ * serializes them against each other even when spec-level parallelism is enabled.
  */
 class CoreKotestProjectConfig : AbstractProjectConfig() {
     override val specExecutionMode = SpecExecutionMode.LimitedConcurrency(4)
     override val testExecutionMode = TestExecutionMode.Sequential
-    override val extensions: List<Extension> = listOf(ReactiveScopeSpecSerializationExtension)
-}
-
-/**
- * Serializes specs that mutate the process-wide [net.transgressoft.lirp.event.ReactiveScope].
- *
- * LIRP core tests already share that global hook extensively. Without this guard, project-level
- * spec parallelism causes unrelated specs to rebind the same scope while file-backed or
- * debounce-sensitive specs are still running.
- */
-private object ReactiveScopeSpecSerializationExtension : SpecExtension {
-
-    val mutex = Mutex()
-
-    override suspend fun intercept(spec: Spec, execute: suspend (Spec) -> Unit) {
-        if (spec::class.java.isAnnotationPresent(SerializeWithReactiveScope::class.java)) {
-            mutex.withLock {
-                execute(spec)
-            }
-        } else {
-            execute(spec)
-        }
-    }
 }

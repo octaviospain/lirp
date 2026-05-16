@@ -17,8 +17,8 @@
 
 package net.transgressoft.lirp.persistence.fx
 
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.json.lirpSerializer
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
@@ -27,9 +27,6 @@ import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import javafx.collections.ObservableList
 import javafx.collections.ObservableSet
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.serialization.json.Json
 
 /**
@@ -40,23 +37,15 @@ import kotlinx.serialization.json.Json
  * serialized/deserialized as part of the entity's JSON representation.
  */
 @DisplayName("FxJsonSerializationTest")
-@OptIn(ExperimentalCoroutinesApi::class)
 class FxJsonSerializationTest : StringSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    val testScope = CoroutineScope(testDispatcher)
+    extension(ReactiveScopeExtension())
+
     val json = Json { prettyPrint = true }
     val serializer = lirpSerializer(FxAudioPlaylistEntity(0, ""))
 
     beforeSpec {
         FxToolkitInit.ensureInitialized()
-        ReactiveScope.flowScope = testScope
-        ReactiveScope.ioScope = testScope
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultIoScope()
-        ReactiveScope.resetDefaultFlowScope()
     }
 
     "serializes entity with fxAggregateList as ID list only" {

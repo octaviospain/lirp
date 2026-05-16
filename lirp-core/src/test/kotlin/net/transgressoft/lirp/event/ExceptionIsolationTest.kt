@@ -19,13 +19,11 @@ package net.transgressoft.lirp.event
 
 import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
 import net.transgressoft.lirp.event.StandardCrudEvent.Create
-import net.transgressoft.lirp.testing.SerializeWithReactiveScope
+import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import io.kotest.core.spec.style.DescribeSpec
 import io.kotest.matchers.shouldBe
 import java.util.concurrent.atomic.AtomicInteger
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
@@ -38,22 +36,10 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * [ReactiveScope] behaviour so that child coroutine failures do not cancel the parent.
  */
 @ExperimentalCoroutinesApi
-@SerializeWithReactiveScope
 class ExceptionIsolationTest : DescribeSpec({
 
     val testDispatcher = UnconfinedTestDispatcher()
-
-    beforeSpec {
-        // SupervisorJob is REQUIRED: without it, a failing child coroutine would cancel the
-        // parent scope and prevent all other subscriber coroutines from running.
-        ReactiveScope.flowScope = CoroutineScope(testDispatcher + SupervisorJob())
-        ReactiveScope.ioScope = CoroutineScope(testDispatcher + SupervisorJob())
-    }
-
-    afterSpec {
-        ReactiveScope.resetDefaultFlowScope()
-        ReactiveScope.resetDefaultIoScope()
-    }
+    extension(ReactiveScopeExtension(testDispatcher, failOnUncaughtExceptions = false))
 
     describe("Subscriber exception isolation") {
 
