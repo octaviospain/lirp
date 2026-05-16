@@ -19,8 +19,8 @@ package net.transgressoft.lirp.persistence.fx
 
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.MutableAudioItem
-import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import net.transgressoft.lirp.testing.Stress
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import java.util.concurrent.CountDownLatch
@@ -38,7 +38,7 @@ import java.util.concurrent.TimeUnit
 class FxAggregateConcurrentMutationTest : StringSpec({
     tags(Stress)
 
-    extension(ReactiveScopeExtension())
+    reactiveScope()
 
     beforeSpec {
         FxToolkitInit.ensureInitialized()

@@ -26,7 +26,7 @@ import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpRepository
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.MutableAudioPlaylist
-import net.transgressoft.lirp.testing.ReactiveScopeExtension
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempfile
 import io.kotest.matchers.collections.shouldContainExactly
@@ -39,8 +39,6 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration.Companion.milliseconds
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
@@ -55,11 +53,9 @@ import kotlinx.serialization.builtins.serializer
  * - Bubble-up events triggering persistence writes via the existing `subscribeEntity` chain
  * - Re-wiring of bubble-up subscriptions after reload
  */
-@ExperimentalCoroutinesApi
 class AggregateJsonPersistenceTest : FunSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    extension(ReactiveScopeExtension(testDispatcher))
+    val reactive = reactiveScope()
 
     test("serializes entity with aggregate ref as ID-only, no resolved object") {
         val ctx = LirpContext()
@@ -70,7 +66,7 @@ class AggregateJsonPersistenceTest : FunSpec({
         customerRepo.create(1, "Alice")
         orderRepo.create(10L, 1)
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         val json = orderFile.readText()
         // Only the raw ID field should be present, not the delegate or resolved object
@@ -89,7 +85,7 @@ class AggregateJsonPersistenceTest : FunSpec({
         customerRepo.create(1, "Bob")
         orderRepo.create(10L, 1)
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         ctx1.close()
 
         // Reload from disk — the new repo must re-wire refs so resolve() works
@@ -99,7 +95,7 @@ class AggregateJsonPersistenceTest : FunSpec({
         customerRepo2.create(1, "Bob")
         val orderRepo2 = BubbleUpOrderJsonFileRepository(ctx2, orderFile)
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         val reloadedOrder = orderRepo2.findById(10L).get()
         reloadedOrder.customer.resolve() shouldBePresent { it.name shouldBe "Bob" }
@@ -116,7 +112,7 @@ class AggregateJsonPersistenceTest : FunSpec({
         val customer = customerRepo.create(1, "Carol")
         val order = orderRepo.create(10L, 1)
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         val initialJson = orderFile.readText()
         val persistenceLatch = CountDownLatch(1)
@@ -132,7 +128,7 @@ class AggregateJsonPersistenceTest : FunSpec({
 
         // Mutate the child — this should trigger bubble-up on the parent and mark the repo dirty
         customer.updateName("Carol Updated")
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         // Wait for debounce + write
         persistenceLatch.await(2, TimeUnit.SECONDS) shouldBe true
@@ -158,7 +154,7 @@ class AggregateJsonPersistenceTest : FunSpec({
         customerRepo.create(1, "Dave")
         orderRepo.create(10L, 1)
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         ctx1.close()
 
         // Reload — register customer repo and populate BEFORE creating order repo
@@ -168,7 +164,7 @@ class AggregateJsonPersistenceTest : FunSpec({
         customerRepo2.create(1, "Dave")
         val orderRepo2 = BubbleUpOrderJsonFileRepository(ctx2, orderFile, 50)
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         val reloadedOrder = orderRepo2.findById(10L).get()
         val bubbleUpLatch = CountDownLatch(1)
@@ -179,7 +175,7 @@ class AggregateJsonPersistenceTest : FunSpec({
 
         // Mutate child: bubble-up should flow to the reloaded order's subscribers
         customerRepo2.findById(1).get().updateName("Dave Updated")
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         bubbleUpLatch.await(2, TimeUnit.SECONDS) shouldBe true
 
@@ -196,7 +192,7 @@ class AggregateJsonPersistenceTest : FunSpec({
         trackRepo.add(MutableAudioItem(2, "Track B"))
         playlistRepo.create(100, "My Playlist", listOf(1, 2))
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         val json = playlistFile.readText()
         json shouldContain "\"audioItems\""
@@ -215,7 +211,7 @@ class AggregateJsonPersistenceTest : FunSpec({
         trackRepo1.add(MutableAudioItem(2, "Track B"))
         playlistRepo1.create(100, "My Playlist", listOf(1, 2))
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         ctx1.close()
 
         val ctx2 = LirpContext()
@@ -224,7 +220,7 @@ class AggregateJsonPersistenceTest : FunSpec({
         trackRepo2.add(MutableAudioItem(2, "Track B"))
         val playlistRepo2 = MutableAudioPlaylistJsonFileRepository(ctx2, playlistFile)
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         val reloaded = playlistRepo2.findById(100).get() as DefaultAudioPlaylist
         reloaded.audioItems.resolveAll().map { it.id } shouldContainExactly listOf(1, 2)
@@ -243,7 +239,7 @@ class AggregateJsonPersistenceTest : FunSpec({
         trackRepo1.add(MutableAudioItem(2, "Track B"))
         playlistRepo1.create(100, "Ordered", listOf(3, 1, 2))
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         ctx1.close()
 
         val ctx2 = LirpContext()
@@ -253,7 +249,7 @@ class AggregateJsonPersistenceTest : FunSpec({
         trackRepo2.add(MutableAudioItem(2, "Track B"))
         val playlistRepo2 = MutableAudioPlaylistJsonFileRepository(ctx2, playlistFile)
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         val reloaded = playlistRepo2.findById(100).get() as DefaultAudioPlaylist
         reloaded.audioItems.resolveAll().map { it.id } shouldContainExactly listOf(3, 1, 2)
@@ -270,14 +266,14 @@ class AggregateJsonPersistenceTest : FunSpec({
         trackRepo1.add(MutableAudioItem(1, "Track A"))
         playlistRepo1.create(100, "Ghost Refs", listOf(1, 99))
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         ctx1.close()
 
         val ctx2 = LirpContext()
         AudioItemVolatileRepository(ctx2) // register repo but don't add any tracks
         val playlistRepo2 = MutableAudioPlaylistJsonFileRepository(ctx2, playlistFile)
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         val reloaded = playlistRepo2.findById(100).get() as DefaultAudioPlaylist
         reloaded.audioItems.resolveAll().size shouldBe 0

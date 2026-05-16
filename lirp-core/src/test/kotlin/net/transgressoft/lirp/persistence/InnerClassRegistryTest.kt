@@ -18,14 +18,12 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.ReactiveEntityBase
-import net.transgressoft.lirp.testing.ReactiveScopeExtension
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldNotThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Verifies that [RegistryBase] gracefully handles anonymous, local, and nested inner class
@@ -38,11 +36,9 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * (which finds no accessor and proceeds with empty ref/index lists).
  */
 @DisplayName("RegistryBase inner class and anonymous entity handling")
-@OptIn(ExperimentalCoroutinesApi::class)
 internal class InnerClassRegistryTest : StringSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    extension(ReactiveScopeExtension(testDispatcher))
+    val reactive = reactiveScope()
 
     lateinit var repo: VolatileRepository<Int, SimpleTestEntity>
 

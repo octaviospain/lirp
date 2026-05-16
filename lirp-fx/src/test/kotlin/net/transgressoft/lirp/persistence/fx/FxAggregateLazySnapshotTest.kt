@@ -25,7 +25,7 @@ import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.FxObservableCollection
 import net.transgressoft.lirp.persistence.LirpRepository
 import net.transgressoft.lirp.persistence.VolatileRepository
-import net.transgressoft.lirp.testing.ReactiveScopeExtension
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
@@ -83,7 +83,7 @@ class LazyFxPlaylistRepo : VolatileRepository<Int, LazyFxPlaylistEntity>("LazyFx
  */
 class FxAggregateLazySnapshotTest : StringSpec({
 
-    extension(ReactiveScopeExtension())
+    reactiveScope()
 
     // Repositories registered once for the entire spec; cleared between tests
     val audioItemRepo = FxAudioItemVolatileRepository()

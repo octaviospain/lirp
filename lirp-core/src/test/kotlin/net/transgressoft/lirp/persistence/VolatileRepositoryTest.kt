@@ -9,7 +9,7 @@ import net.transgressoft.lirp.event.EventType
 import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.LirpEventSubscriberBase
 import net.transgressoft.lirp.event.MutationEvent
-import net.transgressoft.lirp.testing.ReactiveScopeExtension
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.assertSoftly
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainExactly
@@ -29,8 +29,6 @@ import java.util.Collections
 import java.util.Optional
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 private fun arbitraryCustomer(id: Int = -1) =
     io.kotest.property.arbitrary.arbitrary {
@@ -40,7 +38,6 @@ private fun arbitraryCustomer(id: Int = -1) =
         )
     }
 
-@ExperimentalCoroutinesApi
 internal class VolatileRepositoryTest : FunSpec({
 
     class SomeClassSubscribedToEvents() : LirpEventSubscriberBase<Customer, CrudEvent.Type, CrudEvent<Int, Customer>>("Some Name") {
@@ -65,8 +62,7 @@ internal class VolatileRepositoryTest : FunSpec({
     lateinit var repository: CustomerVolatileRepo
     lateinit var subscriber: SomeClassSubscribedToEvents
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    extension(ReactiveScopeExtension(testDispatcher))
+    val reactive = reactiveScope()
 
     beforeTest {
         ctx = LirpContext()
@@ -116,7 +112,7 @@ internal class VolatileRepositoryTest : FunSpec({
         repository.create(customer.id, customer.name)
         repository.create(customer2.id, customer2.name)
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         // Two separate create() calls produce two separate CREATE events;
         // receivedEvents[CREATE] holds only the last one, so check count via createEventEntities
@@ -126,7 +122,7 @@ internal class VolatileRepositoryTest : FunSpec({
 
         repository.removeAll(setOf(customer, customer2)) shouldBe true
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         assertSoftly(subscriber.receivedEvents[DELETE]) {
             this?.isDelete() shouldBe true
@@ -138,7 +134,7 @@ internal class VolatileRepositoryTest : FunSpec({
         repository.create(customer.id, customer.name)
         repository.findById(customer.id) shouldBePresent { it shouldBe customer }
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         assertSoftly(subscriber.receivedEvents[READ]) {
             this?.isRead() shouldBe true
@@ -149,7 +145,7 @@ internal class VolatileRepositoryTest : FunSpec({
 
         repository.clear()
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         assertSoftly(subscriber.receivedEvents[DELETE]) {
             this?.isDelete() shouldBe true
@@ -164,7 +160,7 @@ internal class VolatileRepositoryTest : FunSpec({
 
         repository.create(customer.id, customer.name)
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         subscriber.receivedEvents[CREATE] shouldNotBe null
         subscriber.createEventEntities.get() shouldBe 1
@@ -177,7 +173,7 @@ internal class VolatileRepositoryTest : FunSpec({
         val customer2 = arbitraryCustomer().next()
         repository.create(customer2.id, customer2.name)
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         subscriber.receivedEvents[CREATE] shouldBe null
         subscriber.createEventEntities.get() shouldBe 0
@@ -186,7 +182,7 @@ internal class VolatileRepositoryTest : FunSpec({
         val customer3 = arbitraryCustomer().next()
         repository.create(customer3.id, customer3.name)
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         subscriber.receivedEvents[CREATE] shouldNotBe null
         subscriber.createEventEntities.get() shouldBe 1
@@ -253,7 +249,7 @@ internal class VolatileRepositoryTest : FunSpec({
         val customer = arbitraryCustomer().next()
         repository.create(customer.id, customer.name) shouldNotBe null
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         createEventsReceived.get() shouldBe 1
         receivedCustomerIds shouldContainOnly setOf(customer.id)
@@ -264,7 +260,7 @@ internal class VolatileRepositoryTest : FunSpec({
         val customer2 = arbitraryCustomer().next()
         repository.create(customer2.id, customer2.name)
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         createEventsReceived.get() shouldBe 1
         receivedCustomerIds shouldContainOnly setOf(customer.id)
@@ -434,7 +430,7 @@ internal class VolatileRepositoryTest : FunSpec({
             playlist.subscribe { events.add(it) }
 
             playlist.audioItems.addAll(listOf(t1, t2, t3))
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             events shouldHaveSize 1
         }
@@ -457,7 +453,7 @@ internal class VolatileRepositoryTest : FunSpec({
             playlist.subscribe { events.add(it) }
 
             playlist.audioItems.removeAll(listOf(t1, t3))
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             events shouldHaveSize 1
         }
@@ -474,7 +470,7 @@ internal class VolatileRepositoryTest : FunSpec({
             playlist.subscribe { events.add(it) }
 
             val result = playlist.audioItems.addAll(emptyList())
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             result shouldBe false
             events shouldHaveSize 0
@@ -494,7 +490,7 @@ internal class VolatileRepositoryTest : FunSpec({
             playlist.subscribe { events.add(it) }
 
             val result = playlist.audioItems.removeAll(listOf(unrelated))
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             result shouldBe false
             events shouldHaveSize 0
@@ -515,7 +511,7 @@ internal class VolatileRepositoryTest : FunSpec({
             group.subscribe { events.add(it) }
 
             group.playlists.addAll(listOf(p1, p2, p3))
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             events shouldHaveSize 1
         }
@@ -534,7 +530,7 @@ internal class VolatileRepositoryTest : FunSpec({
             playlist.subscribe { events.add(it) }
 
             playlist.audioItems.add(t1)
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             events shouldHaveSize 1
         }
@@ -555,7 +551,7 @@ internal class VolatileRepositoryTest : FunSpec({
             playlist.subscribe { events.add(it) }
 
             playlist.audioItems.remove(t1)
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             events shouldHaveSize 1
         }
@@ -576,7 +572,7 @@ internal class VolatileRepositoryTest : FunSpec({
             playlist.subscribe { events.add(it) }
 
             playlist.audioItems.clear()
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             events shouldHaveSize 1
         }
@@ -632,7 +628,7 @@ internal class VolatileRepositoryTest : FunSpec({
             playlist.subscribe { events.add(it) }
 
             playlist.audioItems.retainAll(listOf(t2))
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             events shouldHaveSize 1
         }

@@ -18,7 +18,7 @@
 package net.transgressoft.lirp.persistence.fx
 
 import net.transgressoft.lirp.persistence.json.lirpSerializer
-import net.transgressoft.lirp.testing.ReactiveScopeExtension
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
@@ -39,7 +39,7 @@ import kotlinx.serialization.json.Json
 @DisplayName("FxJsonSerializationTest")
 class FxJsonSerializationTest : StringSpec({
 
-    extension(ReactiveScopeExtension())
+    reactiveScope()
 
     val json = Json { prettyPrint = true }
     val serializer = lirpSerializer(FxAudioPlaylistEntity(0, ""))

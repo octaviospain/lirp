@@ -17,8 +17,8 @@
 
 package net.transgressoft.lirp.persistence
 
-import net.transgressoft.lirp.testing.ReactiveScopeExtension
 import net.transgressoft.lirp.testing.Stress
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.property.Arb
@@ -26,10 +26,8 @@ import io.kotest.property.arbitrary.next
 import io.kotest.property.arbitrary.positiveInt
 import io.kotest.property.arbitrary.stringPattern
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 private fun arbitraryCustomer(id: Int = -1) =
     io.kotest.property.arbitrary.arbitrary {
@@ -47,12 +45,10 @@ private fun arbitraryCustomer(id: Int = -1) =
  * [java.util.ConcurrentModificationException] when entities are added or removed
  * concurrently via another coroutine.
  */
-@ExperimentalCoroutinesApi
 internal class RegistryBaseConcurrencyTest : StringSpec({
     tags(Stress)
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    extension(ReactiveScopeExtension(testDispatcher))
+    val reactive = reactiveScope()
 
     "iterator completes without error under concurrent entity additions" {
         val concurrentCoroutines = 50

@@ -1,6 +1,6 @@
 package net.transgressoft.lirp.persistence.json
 
-import net.transgressoft.lirp.testing.ReactiveScopeExtension
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.json.shouldEqualJson
 import io.kotest.assertions.throwables.shouldThrowExactly
 import io.kotest.core.spec.style.StringSpec
@@ -9,14 +9,10 @@ import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import java.io.File
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
-@ExperimentalCoroutinesApi
 class FlexibleJsonFileRepositoryTest : StringSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    extension(ReactiveScopeExtension(testDispatcher))
+    val reactive = reactiveScope()
     lateinit var repository: FlexibleJsonFileRepository
     lateinit var jsonFile: File
 
@@ -38,7 +34,7 @@ class FlexibleJsonFileRepositoryTest : StringSpec({
         repository.findByUniqueId(reactiveBoolean.uniqueId) shouldBePresent { it shouldBe reactiveBoolean }
         repository.findFirst { it.value == 3 } shouldBePresent { it shouldBe reactiveInt }
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         jsonFile.readText().shouldEqualJson(
             """
@@ -99,7 +95,7 @@ class FlexibleJsonFileRepositoryTest : StringSpec({
         // Changing values should persist to file
         serverPort.value = 9090
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         jsonFile.readText().shouldEqualJson(
             """

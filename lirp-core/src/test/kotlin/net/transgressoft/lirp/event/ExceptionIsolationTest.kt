@@ -19,12 +19,10 @@ package net.transgressoft.lirp.event
 
 import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
 import net.transgressoft.lirp.event.StandardCrudEvent.Create
-import net.transgressoft.lirp.testing.ReactiveScopeExtension
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.spec.style.DescribeSpec
 import io.kotest.matchers.shouldBe
 import java.util.concurrent.atomic.AtomicInteger
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Verifies that [FlowEventPublisher]'s SupervisorJob-based coroutine isolation guarantees hold:
@@ -35,11 +33,9 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * closeOnEmpty semantics. The test scope includes a [SupervisorJob] to mirror production
  * [ReactiveScope] behaviour so that child coroutine failures do not cancel the parent.
  */
-@ExperimentalCoroutinesApi
 class ExceptionIsolationTest : DescribeSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    extension(ReactiveScopeExtension(testDispatcher, failOnUncaughtExceptions = false))
+    val reactive = reactiveScope(failOnUncaughtExceptions = false)
 
     describe("Subscriber exception isolation") {
 
@@ -58,7 +54,7 @@ class ExceptionIsolationTest : DescribeSpec({
             repeat(15) { i ->
                 publisher.emitAsync(Create(TestEntity("e-$i")))
             }
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             healthyCounter1.get() shouldBe 15
             healthyCounter2.get() shouldBe 15
@@ -78,7 +74,7 @@ class ExceptionIsolationTest : DescribeSpec({
             repeat(15) { i ->
                 publisher.emitAsync(Create(TestEntity("e-$i")))
             }
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             healthyCounter.get() shouldBe 15
         }
@@ -97,7 +93,7 @@ class ExceptionIsolationTest : DescribeSpec({
             repeat(15) { i ->
                 publisher.emitAsync(Create(TestEntity("e-$i")))
             }
-            testDispatcher.scheduler.advanceUntilIdle()
+            reactive.advance()
 
             healthyCounter.get() shouldBe 15
         }

@@ -21,7 +21,7 @@ import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.persistence.IndexedProduct
 import net.transgressoft.lirp.persistence.IndexedProductVolatileRepo
 import net.transgressoft.lirp.persistence.LirpContext
-import net.transgressoft.lirp.testing.ReactiveScopeExtension
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.booleans.shouldBeTrue
@@ -31,18 +31,14 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.ints.shouldBeExactly
 import io.kotest.matchers.shouldBe
 import java.util.concurrent.atomic.AtomicInteger
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Integration tests for the Query DSL against real repositories.
  */
 @DisplayName("Query DSL Integration")
-@OptIn(ExperimentalCoroutinesApi::class)
 internal class QueryDslIntegrationTest : FunSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    extension(ReactiveScopeExtension(testDispatcher))
+    val reactive = reactiveScope()
 
     lateinit var ctx: LirpContext
     lateinit var productRepo: ProductVolatileRepo
@@ -177,7 +173,7 @@ internal class QueryDslIntegrationTest : FunSpec({
         // Terminal operation triggers execution and READ event
         sequence.toList()
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         readCount.get() shouldBeExactly 1
     }

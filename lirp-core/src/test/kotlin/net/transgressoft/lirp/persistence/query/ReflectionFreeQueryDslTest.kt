@@ -19,7 +19,7 @@ package net.transgressoft.lirp.persistence.query
 
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.persistence.LirpContext
-import net.transgressoft.lirp.testing.ReactiveScopeExtension
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.booleans.shouldBeFalse
@@ -30,19 +30,15 @@ import io.kotest.matchers.shouldBe
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Reflection-free verification, event emission correctness, and Java interop documentation
  * for the Query DSL.
  */
 @DisplayName("Query DSL Reflection-Free")
-@OptIn(ExperimentalCoroutinesApi::class)
 internal class ReflectionFreeQueryDslTest : FunSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    extension(ReactiveScopeExtension(testDispatcher))
+    val reactive = reactiveScope()
 
     lateinit var ctx: LirpContext
     lateinit var repo: ProductVolatileRepo
@@ -106,7 +102,7 @@ internal class ReflectionFreeQueryDslTest : FunSpec({
 
         repo.query { where { Product::category eq "books" } }.toList()
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         readEventEmitted.get().shouldBeFalse()
     }
@@ -118,7 +114,7 @@ internal class ReflectionFreeQueryDslTest : FunSpec({
 
         repo.query { where { Product::category eq "books" } }.toList()
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         readEventCount.get() shouldBeGreaterThan 0
     }
@@ -130,7 +126,7 @@ internal class ReflectionFreeQueryDslTest : FunSpec({
 
         repo.query { where { Product::category eq "books" } }.firstOrNull()
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         readEventCount.get() shouldBeGreaterThan 0
     }
@@ -144,7 +140,7 @@ internal class ReflectionFreeQueryDslTest : FunSpec({
         seq.toList()
         seq.toList()
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         readEventCount.get() shouldBe 1
     }
@@ -156,7 +152,7 @@ internal class ReflectionFreeQueryDslTest : FunSpec({
 
         repo.query { where { Product::category eq "toys" } }.toList()
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         // Empty results still trigger the event wrapper, but the emitted set is empty
         readEventEmitted.get().shouldBeTrue()

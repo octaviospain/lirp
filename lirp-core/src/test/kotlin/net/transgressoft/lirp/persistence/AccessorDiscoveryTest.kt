@@ -18,14 +18,12 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.ReactiveEntityBase
-import net.transgressoft.lirp.testing.ReactiveScopeExtension
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Verifies fail-fast behaviour in KSP accessor discovery: when an entity has [AggregateRefDelegate]
@@ -41,11 +39,9 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * of type [AggregateRefDelegate]) which are always visible regardless of annotation retention.
  */
 @DisplayName("RegistryBase")
-@OptIn(ExperimentalCoroutinesApi::class)
 internal class AccessorDiscoveryTest : FunSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    extension(ReactiveScopeExtension(testDispatcher))
+    val reactive = reactiveScope()
 
     lateinit var repo: VolatileRepository<Int, PlainEntity>
 

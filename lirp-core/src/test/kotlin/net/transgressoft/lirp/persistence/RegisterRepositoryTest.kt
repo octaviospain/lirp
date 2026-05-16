@@ -22,7 +22,7 @@ import net.transgressoft.lirp.persistence.json.BubbleUpOrderJsonFileRepository
 import net.transgressoft.lirp.persistence.json.JsonFileRepository
 import net.transgressoft.lirp.persistence.json.MutableAudioPlaylistJsonFileRepository
 import net.transgressoft.lirp.persistence.json.lirpSerializer
-import net.transgressoft.lirp.testing.ReactiveScopeExtension
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
@@ -31,8 +31,6 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.mockk
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
@@ -45,12 +43,10 @@ import kotlinx.serialization.builtins.serializer
  * duplicates throw [IllegalStateException], non-RegistryBase instances throw [IllegalArgumentException],
  * close() deregisters, and re-registration after close succeeds.
  */
-@ExperimentalCoroutinesApi
 @DisplayName("RegistryBase.registerRepository()")
 internal class RegisterRepositoryTest : StringSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    extension(ReactiveScopeExtension(testDispatcher))
+    val reactive = reactiveScope()
 
     afterEach {
         LirpContext.resetDefault()
@@ -147,7 +143,7 @@ internal class RegisterRepositoryTest : StringSpec({
         val child = authoringRepo.create(20, "Child")
         val parent = authoringRepo.create(10, "Parent")
         parent.playlists.add(child)
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         authoringRepo.close()
         LirpContext.resetDefault()
 
@@ -186,7 +182,7 @@ internal class RegisterRepositoryTest : StringSpec({
         val authoringOrders = BubbleUpOrderJsonFileRepository(LirpContext.default, orderFile, 5L)
         authoringCustomers.create(1, "Alice")
         authoringOrders.create(10L, 1)
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         authoringOrders.close()
         authoringCustomers.close()
         LirpContext.resetDefault()
@@ -219,7 +215,7 @@ internal class RegisterRepositoryTest : StringSpec({
             if (event is AggregateMutationEvent<*, *>) bubbleUpReceived.set(true)
         }
         customer.updateName("Alice Updated")
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         bubbleUpReceived.get() shouldBe true
 

@@ -19,7 +19,7 @@ package net.transgressoft.lirp.persistence.fx
 
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.LirpContext
-import net.transgressoft.lirp.testing.ReactiveScopeExtension
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
@@ -33,7 +33,7 @@ import io.kotest.matchers.shouldBe
 @DisplayName("FxProjectionMapIntegrationTest")
 class FxProjectionMapIntegrationTest : StringSpec({
 
-    extension(ReactiveScopeExtension())
+    reactiveScope()
 
     beforeSpec {
         FxToolkitInit.ensureInitialized()

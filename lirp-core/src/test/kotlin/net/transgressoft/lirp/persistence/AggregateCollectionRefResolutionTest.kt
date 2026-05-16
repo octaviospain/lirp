@@ -17,7 +17,7 @@
 
 package net.transgressoft.lirp.persistence
 
-import net.transgressoft.lirp.testing.ReactiveScopeExtension
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -25,8 +25,6 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Tests for collection reference resolution from a bound registry.
@@ -36,11 +34,9 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * via [RegistryBase]. Collection delegates are then resolved against the bound registry.
  */
 @DisplayName("AggregateCollectionRefDelegate")
-@OptIn(ExperimentalCoroutinesApi::class)
 internal class AggregateCollectionRefResolutionTest : StringSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    extension(ReactiveScopeExtension(testDispatcher))
+    val reactive = reactiveScope()
 
     lateinit var ctx: LirpContext
     lateinit var trackRepo: AudioItemVolatileRepository

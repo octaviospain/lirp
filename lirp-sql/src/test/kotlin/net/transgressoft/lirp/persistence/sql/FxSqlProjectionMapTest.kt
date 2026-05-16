@@ -20,7 +20,7 @@ package net.transgressoft.lirp.persistence.sql
 import net.transgressoft.lirp.persistence.RegistryBase
 import net.transgressoft.lirp.persistence.fx.fxAggregateList
 import net.transgressoft.lirp.persistence.fx.fxProjectionMap
-import net.transgressoft.lirp.testing.ReactiveScopeExtension
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.DisplayName
@@ -39,7 +39,7 @@ internal class FxSqlProjectionMapTest : FunSpec({
 
     fun freshJdbcUrl() = "jdbc:h2:mem:${UUID.randomUUID()};DB_CLOSE_DELAY=-1"
 
-    extension(ReactiveScopeExtension())
+    reactiveScope()
 
     beforeSpec {
         FxToolkitInit.ensureInitialized()

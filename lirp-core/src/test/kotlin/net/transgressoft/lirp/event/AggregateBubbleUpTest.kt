@@ -26,7 +26,7 @@ import net.transgressoft.lirp.persistence.EntityCVolatileRepo
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.MutableRefOrderVolatileRepo
 import net.transgressoft.lirp.persistence.OrderVolatileRepo
-import net.transgressoft.lirp.testing.ReactiveScopeExtension
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.nondeterministic.continually
 import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.core.annotation.DisplayName
@@ -49,7 +49,7 @@ import kotlin.time.Duration.Companion.seconds
 @Suppress("UNCHECKED_CAST")
 internal class AggregateBubbleUpTest : FunSpec({
 
-    extension(ReactiveScopeExtension())
+    reactiveScope()
 
     lateinit var ctx: LirpContext
 

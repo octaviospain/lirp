@@ -2,7 +2,7 @@ package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.CrudEvent.Type.READ
-import net.transgressoft.lirp.testing.ReactiveScopeExtension
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
@@ -22,8 +22,6 @@ import io.kotest.property.arbitrary.stringPattern
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.stream.Collectors
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 private fun arbitraryCustomer(id: Int = -1) =
     io.kotest.property.arbitrary.arbitrary {
@@ -75,15 +73,13 @@ class IndexedProductVolatileRepo : VolatileRepository<Int, IndexedProduct>("Inde
  * early termination, backward compatibility of existing [Registry.search] overloads, and secondary index
  * O(1) lookup via [Registry.findByIndex] and [Registry.findFirstByIndex].
  */
-@ExperimentalCoroutinesApi
 @DisplayName("VolatileRepository search performance")
 internal class SearchPerformanceTest : StringSpec({
 
     lateinit var ctx: LirpContext
     lateinit var repository: CustomerVolatileRepo
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    extension(ReactiveScopeExtension(testDispatcher))
+    val reactive = reactiveScope()
 
     beforeTest {
         ctx = LirpContext()
@@ -140,7 +136,7 @@ internal class SearchPerformanceTest : StringSpec({
 
         repository.lazySearch { true }.toSet()
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         readEventEmitted.get() shouldBe false
     }
@@ -174,7 +170,7 @@ internal class SearchPerformanceTest : StringSpec({
 
         repository.searchStream { true }.collect(Collectors.toSet())
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         readEventEmitted.get() shouldBe false
     }
@@ -188,7 +184,7 @@ internal class SearchPerformanceTest : StringSpec({
 
         val result = repository.search { it.id in ids }
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         result shouldContainOnly expected
         readEventCount.get() shouldBeGreaterThan 0
@@ -200,7 +196,7 @@ internal class SearchPerformanceTest : StringSpec({
 
         val result = repository.search(3) { true }
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
 
         result.size shouldBe 3
         readEventCount.get() shouldBeGreaterThan 0

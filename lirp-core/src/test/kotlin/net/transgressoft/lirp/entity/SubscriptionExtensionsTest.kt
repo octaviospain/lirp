@@ -25,7 +25,7 @@ import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
 import net.transgressoft.lirp.persistence.AudioPlaylistVolatileRepository
 import net.transgressoft.lirp.persistence.DefaultAudioPlaylist
 import net.transgressoft.lirp.persistence.LirpContext
-import net.transgressoft.lirp.testing.ReactiveScopeExtension
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
@@ -33,19 +33,15 @@ import io.kotest.matchers.types.shouldBeInstanceOf
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Tests for [subscribeToCollectionChanges] and [subscribeToMutations] extension functions,
  * covering event filtering semantics for the 3-tier subscription API.
  */
 @DisplayName("Subscription extension functions")
-@OptIn(ExperimentalCoroutinesApi::class)
 class SubscriptionExtensionsTest : StringSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    extension(ReactiveScopeExtension(testDispatcher))
+    val reactive = reactiveScope()
 
     lateinit var ctx: LirpContext
     lateinit var trackRepo: AudioItemVolatileRepository
@@ -116,7 +112,7 @@ class SubscriptionExtensionsTest : StringSpec({
 
         // Drain pending coroutines — UnconfinedTestDispatcher executes eagerly,
         // so any event that would fire has already fired after this call
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         eventCount shouldBe 0
     }
 
@@ -170,7 +166,7 @@ class SubscriptionExtensionsTest : StringSpec({
         playlist.audioItems.remove(t1)
 
         // Drain pending coroutines — any ReactiveMutationEvent that would fire has already fired
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         mutationEventCount shouldBe 0
     }
 

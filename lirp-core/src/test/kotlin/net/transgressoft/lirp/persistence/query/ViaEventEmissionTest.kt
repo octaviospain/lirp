@@ -18,14 +18,12 @@
 package net.transgressoft.lirp.persistence.query
 
 import net.transgressoft.lirp.event.CrudEvent
-import net.transgressoft.lirp.testing.ReactiveScopeExtension
+import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import java.util.concurrent.atomic.AtomicInteger
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
 /**
  * Verifies the silent-by-default event contract for cross-aggregate queries (D-18):
@@ -35,11 +33,9 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
  * contract.
  */
 @DisplayName("Via event emission")
-@OptIn(ExperimentalCoroutinesApi::class)
 internal class ViaEventEmissionTest : FunSpec({
 
-    val testDispatcher = UnconfinedTestDispatcher()
-    extension(ReactiveScopeExtension(testDispatcher))
+    val reactive = reactiveScope()
 
     test("child registry emits no READ events when parent registry runs a via query without enableEvents") {
         val tracks =
@@ -56,7 +52,7 @@ internal class ViaEventEmissionTest : FunSpec({
 
         playlists.query { where { Playlist::trackIds via tracks anyMatch { Track::price gt 100.0 } } }.toList()
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         childReadCount.get() shouldBe 0
     }
 
@@ -76,7 +72,7 @@ internal class ViaEventEmissionTest : FunSpec({
         playlists.activateEvents(CrudEvent.Type.READ)
         playlists.query { where { Playlist::trackIds via tracks anyMatch { Track::price gt 100.0 } } }.toList()
 
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         childReadCount.get() shouldBe 0
     }
 
@@ -96,13 +92,13 @@ internal class ViaEventEmissionTest : FunSpec({
 
         // No activateEvents on parent -> silent
         playlists.query { where { Playlist::trackIds via tracks anyMatch { Track::price gt 100.0 } } }.toList()
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         parentReadCount.get() shouldBe 0
 
         // Now opt in: READ events should fire on the parent
         playlists.activateEvents(CrudEvent.Type.READ)
         playlists.query { where { Playlist::trackIds via tracks anyMatch { Track::price gt 100.0 } } }.toList()
-        testDispatcher.scheduler.advanceUntilIdle()
+        reactive.advance()
         parentReadCount.get() shouldBeGreaterThan 0
     }
 })

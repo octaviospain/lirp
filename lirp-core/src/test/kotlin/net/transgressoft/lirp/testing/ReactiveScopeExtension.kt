@@ -51,18 +51,16 @@ internal val reactiveScopeMutex = Mutex()
  * at spec teardown so unexpected throws still fail the build. Specs that intentionally exercise
  * throwing subscribers should pass `failOnUncaughtExceptions = false`.
  *
- * Register per-spec in the spec init block:
+ * Register per-spec via the [reactiveScope] convenience factory:
  *
  *     class FooReactiveTest : StringSpec({
- *         val testDispatcher = UnconfinedTestDispatcher()
- *         extension(ReactiveScopeExtension(testDispatcher))
+ *         val reactive = reactiveScope()
  *
- *         "..." { /* ReactiveScope is wired to testDispatcher */ }
+ *         "..." {
+ *             reactive.scope.launch { /* runs on the wired scope */ }
+ *             reactive.advance() // drains the test scheduler
+ *         }
  *     })
- *
- * Tests that need to drive the scheduler call `testDispatcher.scheduler.advanceUntilIdle()`
- * on the dispatcher they own. Specs that only need [ReactiveScope] wiring can omit the
- * constructor argument to use an [UnconfinedTestDispatcher] by default.
  *
  * Specs that rely on real concurrent dispatching (stress and timing-sensitive tests) should
  * use [ReactiveScopeSerialization] instead — it shares the same mutex without rewiring.
@@ -79,11 +77,24 @@ class ReactiveScopeExtension(
     private val failOnUncaughtExceptions: Boolean = true
 ) : SpecExtension {
 
+    /**
+     * The [CoroutineScope] bound to [ReactiveScope.flowScope] and [ReactiveScope.ioScope] for
+     * the duration of the spec. Available inside test bodies; reading it before the spec has
+     * started is a programming error and throws [UninitializedPropertyAccessException].
+     */
+    lateinit var scope: CoroutineScope
+        private set
+
+    /** Drives the [dispatcher]'s scheduler until idle. Shorthand for the most common test verb. */
+    fun advance() {
+        dispatcher.scheduler.advanceUntilIdle()
+    }
+
     override suspend fun intercept(spec: Spec, execute: suspend (Spec) -> Unit) {
         reactiveScopeMutex.withLock {
             val uncaught = ConcurrentLinkedQueue<Throwable>()
             val handler = CoroutineExceptionHandler { _, throwable -> uncaught.add(throwable) }
-            val scope = CoroutineScope(dispatcher + SupervisorJob() + handler)
+            scope = CoroutineScope(dispatcher + SupervisorJob() + handler)
             ReactiveScope.flowScope = scope
             ReactiveScope.ioScope = scope
             try {
@@ -95,6 +106,29 @@ class ReactiveScopeExtension(
             if (failOnUncaughtExceptions) failOnUncaughtExceptions(spec, uncaught)
         }
     }
+}
+
+/**
+ * Convenience factory that constructs a [ReactiveScopeExtension], registers it on the spec,
+ * and returns it so the test body can access [ReactiveScopeExtension.dispatcher],
+ * [ReactiveScopeExtension.scope], and [ReactiveScopeExtension.advance].
+ *
+ *     class FooTest : StringSpec({
+ *         val reactive = reactiveScope()
+ *         "test" {
+ *             reactive.scope.launch { /* ... */ }
+ *             reactive.advance()
+ *         }
+ *     })
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+fun Spec.reactiveScope(
+    dispatcher: TestDispatcher = UnconfinedTestDispatcher(),
+    failOnUncaughtExceptions: Boolean = true
+): ReactiveScopeExtension {
+    val ext = ReactiveScopeExtension(dispatcher, failOnUncaughtExceptions)
+    extension(ext)
+    return ext
 }
 
 /**
