@@ -20,6 +20,7 @@ package net.transgressoft.lirp.persistence.query
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.testing.reactiveScope
+import net.transgressoft.lirp.testing.record
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.booleans.shouldBeFalse
@@ -29,7 +30,6 @@ import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Reflection-free verification, event emission correctness, and Java interop documentation
@@ -108,33 +108,30 @@ internal class ReflectionFreeQueryDslTest : FunSpec({
     }
 
     test("query emits READ on terminal operation when READ events enabled") {
-        val readEventCount = AtomicInteger(0)
         repo.activateEvents(CrudEvent.Type.READ)
-        repo.subscribe(CrudEvent.Type.READ) { readEventCount.incrementAndGet() }
+        val readEvents = repo.record(CrudEvent.Type.READ)
 
         repo.query { where { Product::category eq "books" } }.toList()
 
         reactive.advance()
 
-        readEventCount.get() shouldBeGreaterThan 0
+        readEvents.count shouldBeGreaterThan 0
     }
 
     test("query firstOrNull emits READ when READ events enabled") {
-        val readEventCount = AtomicInteger(0)
         repo.activateEvents(CrudEvent.Type.READ)
-        repo.subscribe(CrudEvent.Type.READ) { readEventCount.incrementAndGet() }
+        val readEvents = repo.record(CrudEvent.Type.READ)
 
         repo.query { where { Product::category eq "books" } }.firstOrNull()
 
         reactive.advance()
 
-        readEventCount.get() shouldBeGreaterThan 0
+        readEvents.count shouldBeGreaterThan 0
     }
 
     test("multiple terminal operations emit READ only on first consumption") {
-        val readEventCount = AtomicInteger(0)
         repo.activateEvents(CrudEvent.Type.READ)
-        repo.subscribe(CrudEvent.Type.READ) { readEventCount.incrementAndGet() }
+        val readEvents = repo.record(CrudEvent.Type.READ)
 
         val seq = repo.query { where { Product::category eq "books" } }
         seq.toList()
@@ -142,7 +139,7 @@ internal class ReflectionFreeQueryDslTest : FunSpec({
 
         reactive.advance()
 
-        readEventCount.get() shouldBe 1
+        readEvents.count shouldBe 1
     }
 
     test("query with no matches and READ enabled emits empty READ event") {

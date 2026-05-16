@@ -3,6 +3,7 @@ package net.transgressoft.lirp.persistence
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.CrudEvent.Type.READ
 import net.transgressoft.lirp.testing.reactiveScope
+import net.transgressoft.lirp.testing.record
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
@@ -176,8 +177,7 @@ internal class SearchPerformanceTest : StringSpec({
     }
 
     "search(predicate) returns correct Set and emits Read event" {
-        val readEventCount = AtomicInteger(0)
-        repository.subscribe(READ) { readEventCount.incrementAndGet() }
+        val readEvents = repository.record(READ)
 
         val expected = repository.toList().take(3).toSet()
         val ids = expected.map { it.id }.toSet()
@@ -187,19 +187,18 @@ internal class SearchPerformanceTest : StringSpec({
         reactive.advance()
 
         result shouldContainOnly expected
-        readEventCount.get() shouldBeGreaterThan 0
+        readEvents.count shouldBeGreaterThan 0
     }
 
     "search(size, predicate) returns limited Set and emits Read event" {
-        val readEventCount = AtomicInteger(0)
-        repository.subscribe(READ) { readEventCount.incrementAndGet() }
+        val readEvents = repository.record(READ)
 
         val result = repository.search(3) { true }
 
         reactive.advance()
 
         result.size shouldBe 3
-        readEventCount.get() shouldBeGreaterThan 0
+        readEvents.count shouldBeGreaterThan 0
     }
 
     // Secondary index tests
