@@ -2,7 +2,7 @@ name: OSV-Scanner
 
 on:
     schedule:
-        # Mondays 06:00 UTC — runs against the full dependency graph, complements
+        # Mondays 06:00 UTC — runs against the runtime classpath SBOM, complements
         # the per-PR dependency-review-action which only inspects the diff.
         -   cron: '0 6 * * 1'
     workflow_dispatch:
@@ -12,11 +12,70 @@ permissions:
     security-events: write
     actions: read
 
+env:
+    # Pin the OSV-Scanner CLI version. Bump together with renovate-tracked
+    # action SHAs; the binary itself is fetched over HTTPS from GitHub Releases.
+    OSV_SCANNER_VERSION: v2.3.8
+
 jobs:
     scan:
-        uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
-        with:
-            scan-args: |-
-                --recursive
-                ./
-            upload-sarif: true
+        runs-on: ubuntu-latest
+        steps:
+            -   uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+            -   name: Set up JDK 21
+                uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+                with:
+                    java-version: 21
+                    distribution: 'zulu'
+                    java-package: 'jdk+fx'
+
+            -   name: Cache Gradle packages
+                uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+                with:
+                    path: |
+                        ~/.gradle/caches
+                        ~/.gradle/wrapper
+                    key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+                    restore-keys: |
+                        ${{ runner.os }}-gradle-
+
+            # The aggregated SBOM is scoped to runtimeClasspath via
+            # `tasks.cyclonedxDirectBom { includeConfigs = ['runtimeClasspath'] }`
+            # in build.gradle. Scanning it instead of the repo avoids false
+            # positives from plugin-classpath transitives (Sonar/JGit/etc.) that
+            # live only in the Gradle daemon and never ship to consumers.
+            -   name: Generate CycloneDX SBOM
+                run: ./gradlew cyclonedxBom --no-parallel
+
+            -   name: Install OSV-Scanner CLI
+                # Verify the downloaded binary against the upstream-published
+                # SHA-256 sums before executing it. Fetching SHA256SUMS over
+                # the same HTTPS channel matches Google's own install guide;
+                # a future hardening step could pin the digest inline.
+                run: |
+                    set -euo pipefail
+                    base="https://github.com/google/osv-scanner/releases/download/${OSV_SCANNER_VERSION}"
+                    curl --proto '=https' --tlsv1.2 -fsSL \
+                        "${base}/osv-scanner_linux_amd64" -o /tmp/osv-scanner
+                    curl --proto '=https' --tlsv1.2 -fsSL \
+                        "${base}/osv-scanner_SHA256SUMS" -o /tmp/osv-scanner_SHA256SUMS
+                    ( cd /tmp && grep ' osv-scanner_linux_amd64$' osv-scanner_SHA256SUMS \
+                        | sha256sum --check --strict - )
+                    chmod +x /tmp/osv-scanner
+                    /tmp/osv-scanner --version
+
+            -   name: Scan SBOM
+                # OSV-Scanner exits non-zero on findings; keep going so the
+                # SARIF still gets uploaded to Code Scanning.
+                continue-on-error: true
+                run: |
+                    /tmp/osv-scanner \
+                        --sbom=build/reports/cyclonedx/bom.json \
+                        --format=sarif \
+                        --output=results.sarif
+
+            -   name: Upload SARIF to Code Scanning
+                uses: github/codeql-action/upload-sarif@cdefb33c0f6224e58673d9004f47f7cb3e328b89 # v4.31.10
+                with:
+                    sarif_file: results.sarif
