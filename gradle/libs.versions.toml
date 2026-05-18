@@ -15,7 +15,7 @@ sqlite = "3.53.1.0"
 jmh = "1.37"
 jol = "0.17"
 springDataJpa = "4.0.5"
-hibernate = "7.3.4.Final"
+hibernate = "7.3.5.Final"
 jakartaPersistence = "3.2.0"
 ch-qos-logback = "1.5.32"
 
