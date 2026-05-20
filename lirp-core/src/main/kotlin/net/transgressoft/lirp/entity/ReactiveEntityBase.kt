@@ -293,13 +293,16 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
             mutationBlock()
             return
         }
+        if (!shouldEmit) {
+            mutationBlock()
+            lastDateModified = LocalDateTime.now()
+            return
+        }
         val entityBeforeChange = clone()
         mutationBlock()
         lastDateModified = LocalDateTime.now()
-        if (shouldEmit) {
-            log.trace { "Firing fx scalar mutation event from $entityBeforeChange to $this" }
-            publisher.emitAsync(ReactiveMutationEvent(this as R, entityBeforeChange as R))
-        }
+        log.trace { "Firing fx scalar mutation event from $entityBeforeChange to $this" }
+        publisher.emitAsync(ReactiveMutationEvent(this as R, entityBeforeChange as R))
     }
 
     override fun subscribe(action: suspend (MutationEvent<K, R>) -> Unit): LirpEventSubscription<in LirpEntity, MutationEvent.Type, MutationEvent<K, R>> {
@@ -486,13 +489,16 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
                     return
                 }
 
+                if (!shouldEmit) {
+                    storedValue = value
+                    lastDateModified = LocalDateTime.now()
+                    return
+                }
                 val entityBeforeChange = clone()
                 storedValue = value
                 lastDateModified = LocalDateTime.now()
-                if (shouldEmit) {
-                    log.trace { "Firing entity update event from $entityBeforeChange to ${this@ReactiveEntityBase}" }
-                    publisher.emitAsync(ReactiveMutationEvent(this@ReactiveEntityBase as R, entityBeforeChange as R))
-                }
+                log.trace { "Firing entity update event from $entityBeforeChange to ${this@ReactiveEntityBase}" }
+                publisher.emitAsync(ReactiveMutationEvent(this@ReactiveEntityBase as R, entityBeforeChange as R))
             }
         }
     }
@@ -515,13 +521,16 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
                     setter(value)
                     return
                 }
+                if (!shouldEmit) {
+                    setter(value)
+                    lastDateModified = LocalDateTime.now()
+                    return
+                }
                 val entityBeforeChange = clone()
                 setter(value)
                 lastDateModified = LocalDateTime.now()
-                if (shouldEmit) {
-                    log.trace { "Firing entity update event from $entityBeforeChange to ${this@ReactiveEntityBase}" }
-                    publisher.emitAsync(ReactiveMutationEvent(this@ReactiveEntityBase as R, entityBeforeChange as R))
-                }
+                log.trace { "Firing entity update event from $entityBeforeChange to ${this@ReactiveEntityBase}" }
+                publisher.emitAsync(ReactiveMutationEvent(this@ReactiveEntityBase as R, entityBeforeChange as R))
             }
         }
     }

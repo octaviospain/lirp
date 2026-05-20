@@ -153,7 +153,10 @@ private data class CollapseEntry<K : Comparable<K>, R : ReactiveEntity<K, R>>(
  * @return the minimal ordered list of operations to execute.
  */
 fun <K : Comparable<K>, R : ReactiveEntity<K, R>> collapse(ops: List<PendingOp<K, R>>): List<PendingOp<K, R>> {
-    val state = LinkedHashMap<K, CollapseEntry<K, R>>()
+    // Pre-size to ops.size so the map does not resize while folding large batches.
+    // Worst case the map ends up oversized (one op may touch many entities, e.g. PendingBatchInsert),
+    // but the over-allocation is bounded and far cheaper than the rehash storm at 10K+ ops.
+    val state = LinkedHashMap<K, CollapseEntry<K, R>>(ops.size.coerceAtLeast(16))
     var hadClear = false
 
     for (op in ops) {
