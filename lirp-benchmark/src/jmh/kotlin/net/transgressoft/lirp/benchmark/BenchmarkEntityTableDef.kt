@@ -40,4 +40,10 @@ object BenchmarkEntityTableDef : SqlTableDef<BenchmarkEntity> {
             cols["name"]!! to entity.name
         )
     }
+
+    @Suppress("UNCHECKED_CAST")
+    override fun applyRow(entity: BenchmarkEntity, row: ResultRow, table: Table) {
+        val cols = table.columns.associateBy { it.name }
+        entity.name = row[cols["name"]!! as Column<String>]
+    }
 }
