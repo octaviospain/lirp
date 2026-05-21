@@ -21,12 +21,6 @@ import net.transgressoft.lirp.entity.ReactiveEntity
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.StandardCrudEvent
-import net.transgressoft.lirp.persistence.PendingBatchDelete
-import net.transgressoft.lirp.persistence.PendingBatchInsert
-import net.transgressoft.lirp.persistence.PendingClear
-import net.transgressoft.lirp.persistence.PendingDelete
-import net.transgressoft.lirp.persistence.PendingInsert
-import net.transgressoft.lirp.persistence.PendingOp
 import net.transgressoft.lirp.persistence.PendingUpdate
 import net.transgressoft.lirp.persistence.PersistentRepositoryBase
 import com.zaxxer.hikari.HikariConfig
@@ -61,10 +55,11 @@ import kotlin.uuid.toKotlinUuid
 /**
  * SQL-backed reactive repository using JetBrains Exposed and HikariCP connection pooling.
  *
- * Extends [PersistentRepositoryBase] with a queue-based write pipeline: CRUD operations update
- * in-memory state immediately (optimistic reads) and enqueue [PendingOp] entries. The base class
- * debounce timer collapses and flushes the queue to SQL via [writePending], which executes all
- * collapsed operations in a single transaction using batch SQL where applicable.
+ * Extends [PersistentRepositoryBase] with a per-key write pipeline: CRUD operations update
+ * in-memory state immediately (optimistic reads) and collapse incrementally into the base class'
+ * pending cell map. The debounce timer drains the per-key snapshot to SQL via [writePending],
+ * which executes the grouped (inserts/updates/deletes/clear) payload in a single transaction
+ * using batch SQL where applicable.
  *
  * On initialization, this repository:
  * 1. Auto-creates the table using [SchemaUtils.create] (no-op if it already exists).
@@ -507,11 +502,13 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     }
 
     /**
-     * Executes all collapsed pending operations against the database in a single transaction.
+     * Executes the grouped pending payload against the database in a single transaction.
      *
-     * Insert operations use [batchInsert] for efficient bulk inserts. Delete operations use
-     * `deleteWhere` (per-id within a batch) to stay dialect-portable. Updates are applied
-     * individually per entity. A [PendingClear] deletes all rows from the table.
+     * Inserts use [batchInsert] for efficient bulk inserts when more than one row is involved.
+     * Deletes use `deleteWhere` per id to stay dialect-portable. Updates are applied individually
+     * per entity. When [hadClear] is `true`, every row in the table is wiped first; the inserts,
+     * updates and deletes that arrived after the clear in the debounce window are then applied in
+     * that order — guaranteeing D-01 single-aggregate atomicity for the whole window.
      *
      * For versioned tables (tableDef carries a `@Version` column), UPDATE and DELETE augment
      * their WHERE clause with `AND version = ?`. A zero-row-affected result is treated as an
@@ -524,21 +521,24 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      * single-aggregate atomicity, but letting a single conflict throw mid-transaction would
      * roll back every earlier insert/update/delete and the base class would drop the drained
      * snapshot — silently losing work. Accumulating instead preserves non-conflicting writes.
-     *
-     * @param ops the minimal collapsed list of operations to execute.
      */
-    override fun writePending(ops: List<PendingOp<K, R>>) {
+    override fun writePending(
+        inserts: List<R>,
+        updates: List<PendingUpdate<K, R>>,
+        deletes: List<Pair<K, Long?>>,
+        hadClear: Boolean
+    ) {
         val conflicts = mutableListOf<PendingConflict<K>>()
         transaction(db = db) {
-            ops.forEach { op ->
-                when (op) {
-                    is PendingInsert -> executeInsert(op)
-                    is PendingBatchInsert -> executeBatchInsert(op)
-                    is PendingUpdate -> executeUpdate(op, conflicts)
-                    is PendingDelete -> executeDelete(op, conflicts)
-                    is PendingBatchDelete -> executeBatchDelete(op, conflicts)
-                    is PendingClear -> table.deleteAll()
-                }
+            if (hadClear) table.deleteAll()
+            when {
+                inserts.size > 1 -> executeBatchInsertList(inserts)
+                inserts.size == 1 -> executeInsertSingle(inserts.first())
+            }
+            updates.forEach { executeUpdate(it, conflicts) }
+            when {
+                deletes.size > 1 -> executeBatchDeleteList(deletes, conflicts)
+                deletes.size == 1 -> executeDeleteSingle(deletes.first(), conflicts)
             }
         }
         // The main transaction has committed. Recover every accumulated conflict — each path
@@ -556,23 +556,27 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                 }
             }
         }
+        // Honor the base-class contract: `dirty` signals pending work and must be cleared once
+        // the SQL transaction commits successfully. Without this, a repository reports itself as
+        // dirty forever after the first successful flush even when pendingCells is empty.
+        dirty.set(false)
     }
 
-    private fun executeInsert(op: PendingInsert<K, R>) {
+    private fun executeInsertSingle(entity: R) {
         table.insert { stmt ->
-            tableDef.toParams(op.entity, table).forEach { (col, value) ->
+            tableDef.toParams(entity, table).forEach { (col, value) ->
                 // Safe: col was registered by ExposedTableInterpreter from the declared LirpTableDef column type.
                 // Exposed erases Column<T> to Column<*> at the statement-builder level; Column<Any?> is the canonical workaround.
                 @Suppress("UNCHECKED_CAST")
                 stmt[col as Column<Any?>] = value
             }
         }
-        syncJunctionRows(op.entity)
+        syncJunctionRows(entity)
     }
 
-    private fun executeBatchInsert(op: PendingBatchInsert<K, R>) {
-        if (op.entities.isEmpty()) return
-        table.batchInsert(op.entities, shouldReturnGeneratedValues = false) { entity ->
+    private fun executeBatchInsertList(entities: List<R>) {
+        if (entities.isEmpty()) return
+        table.batchInsert(entities, shouldReturnGeneratedValues = false) { entity ->
             tableDef.toParams(entity, table).forEach { (col, value) ->
                 // Safe: col was registered by ExposedTableInterpreter from the declared LirpTableDef column type.
                 @Suppress("UNCHECKED_CAST")
@@ -582,7 +586,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         // Sync junction rows after the batch insert. A future optimisation could batch-insert every
         // junction row in a single statement; per-entity is correct and acceptable for typical
         // batch sizes (Spike 008).
-        op.entities.forEach { syncJunctionRows(it) }
+        entities.forEach { syncJunctionRows(it) }
     }
 
     /**
@@ -667,26 +671,26 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         syncJunctionRows(op.entity)
     }
 
-    private fun executeDelete(op: PendingDelete<K, R>, conflicts: MutableList<PendingConflict<K>>) {
-        val expected = op.expectedVersion
+    private fun executeDeleteSingle(idAndVersion: Pair<K, Long?>, conflicts: MutableList<PendingConflict<K>>) {
+        val (id, expected) = idAndVersion
         val vc = versionCol
         val rowsAffected =
             table.deleteWhere {
                 @Suppress("UNCHECKED_CAST")
-                val pkPred = (pkCol as Column<Any?>).eq(toExposedId(op.id))
+                val pkPred = (pkCol as Column<Any?>).eq(toExposedId(id))
                 if (expected != null && vc != null) pkPred and (vc eq expected) else pkPred
             }
         if (expected != null && vc != null && rowsAffected == 0) {
             // Accumulate instead of throwing — see executeUpdate rationale.
-            conflicts.add(PendingConflict(op.id, expected))
+            conflicts.add(PendingConflict(id, expected))
         }
     }
 
-    private fun executeBatchDelete(op: PendingBatchDelete<K, R>, conflicts: MutableList<PendingConflict<K>>) {
+    private fun executeBatchDeleteList(idsWithVersions: List<Pair<K, Long?>>, conflicts: MutableList<PendingConflict<K>>) {
         // per-id independent DELETE loop. Accumulate conflicts rather than throwing so
         // the other ids still commit in the same transaction.
         val vc = versionCol
-        op.idsWithVersions.forEach { (id, expected) ->
+        idsWithVersions.forEach { (id, expected) ->
             val rowsAffected =
                 table.deleteWhere {
                     @Suppress("UNCHECKED_CAST")

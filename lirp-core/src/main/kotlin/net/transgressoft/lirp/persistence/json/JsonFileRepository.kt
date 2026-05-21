@@ -24,7 +24,7 @@ import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpDeserializationException
 import net.transgressoft.lirp.persistence.MutableAggregateList
 import net.transgressoft.lirp.persistence.MutableAggregateSet
-import net.transgressoft.lirp.persistence.PendingOp
+import net.transgressoft.lirp.persistence.PendingUpdate
 import net.transgressoft.lirp.persistence.PersistentRepositoryBase
 import net.transgressoft.lirp.persistence.Registry
 import net.transgressoft.lirp.persistence.RegistryBase
@@ -46,11 +46,11 @@ import kotlinx.serialization.modules.SerializersModule
  * Base class for repositories that store entities in a JSON file.
  *
  * Extends [PersistentRepositoryBase] with JSON file persistence. All CRUD operations and entity
- * mutations enqueue [PendingOp] entries in the base class; the debounce pipeline calls
+ * mutations are collapsed per-key in the base class; the debounce pipeline calls
  * [writePending] which serializes the full in-memory state to the JSON file.
  *
- * Because JSON serialization always rewrites the complete file, the ops list passed to
- * [writePending] is intentionally ignored — the current in-memory state is the source of truth.
+ * Because JSON serialization always rewrites the complete file, the grouped parameters passed to
+ * [writePending] are intentionally ignored — the current in-memory state is the source of truth.
  *
  * Key features:
  * - Debounced write batching via [PersistentRepositoryBase]: multiple rapid mutations collapse
@@ -359,13 +359,19 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
         /**
          * Serializes the full in-memory entity state to [jsonFile].
          *
-         * The [ops] list is intentionally ignored: JSON persistence always rewrites the complete
-         * file from the current in-memory state rather than applying incremental changes. This
-         * simplifies the implementation and avoids partial-write correctness concerns.
+         * The grouped pending payload ([inserts], [updates], [deletes], [hadClear]) is intentionally
+         * ignored: JSON persistence always rewrites the complete file from the current in-memory
+         * state rather than applying incremental changes. This simplifies the implementation and
+         * avoids partial-write correctness concerns.
          *
-         * Called by [PersistentRepositoryBase.flush] after collapsing the pending-ops queue.
+         * Called by [PersistentRepositoryBase.flush] after draining the per-key pending cell map.
          */
-        override fun writePending(ops: List<PendingOp<K, R>>) {
+        override fun writePending(
+            inserts: List<R>,
+            updates: List<PendingUpdate<K, R>>,
+            deletes: List<Pair<K, Long?>>,
+            hadClear: Boolean
+        ) {
             val error = performSerialization()
             if (error != null) throw error
         }

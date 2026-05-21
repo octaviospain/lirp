@@ -1,0 +1,21 @@
+<configuration>
+    <!-- JMH-only logging config. Logback's default fallback is DEBUG at root, which adds
+         measurable per-iteration overhead (string formatting, appender I/O) and pollutes
+         the JMH output. We pin everything to WARN and route to stderr so genuine errors
+         during a long benchmark run are still visible but the steady-state hot path emits
+         nothing. -->
+    <appender name="STDERR" class="ch.qos.logback.core.ConsoleAppender">
+        <target>System.err</target>
+        <encoder>
+            <pattern>%-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <logger name="net.transgressoft" level="WARN"/>
+    <logger name="org.testcontainers" level="WARN"/>
+    <logger name="com.zaxxer.hikari" level="WARN"/>
+
+    <root level="WARN">
+        <appender-ref ref="STDERR"/>
+    </root>
+</configuration>
