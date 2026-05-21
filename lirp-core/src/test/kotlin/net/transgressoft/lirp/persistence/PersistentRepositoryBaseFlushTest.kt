@@ -38,7 +38,7 @@ internal class PersistentRepositoryBaseFlushTest : StringSpec({
     "OptimisticLockException drops the failed op and does not rethrow" {
         val repo =
             TestFlushRepo(
-                writeImpl = { _ ->
+                writeImpl = { _, _, _, _ ->
                     throw OptimisticLockException(
                         message = "test conflict",
                         entityId = 1,
@@ -63,7 +63,7 @@ internal class PersistentRepositoryBaseFlushTest : StringSpec({
     }
 
     "generic Exception re-enqueues the failed ops and rethrows" {
-        val repo = TestFlushRepo(writeImpl = { _ -> throw RuntimeException("transient") })
+        val repo = TestFlushRepo(writeImpl = { _, _, _, _ -> throw RuntimeException("transient") })
         try {
             repo.addForTest(FlushEntity(2, "v1"))
 
@@ -81,7 +81,7 @@ internal class PersistentRepositoryBaseFlushTest : StringSpec({
         val repoHolder = arrayOfNulls<TestFlushRepo>(1)
         val repo =
             TestFlushRepo(
-                writeImpl = { _ ->
+                writeImpl = { _, _, _, _ ->
                     // Simulate "an op arriving during the write" by adding another entity from inside writePending.
                     repoHolder[0]!!.addForTest(FlushEntity(99, "concurrent"))
                     throw RuntimeException("transient")
@@ -104,7 +104,7 @@ internal class PersistentRepositoryBaseFlushTest : StringSpec({
         val repoHolder = arrayOfNulls<TestFlushRepo>(1)
         val repo =
             TestFlushRepo(
-                writeImpl = { _ ->
+                writeImpl = { _, _, _, _ ->
                     repoHolder[0]!!.addForTest(FlushEntity(99, "concurrent"))
                     throw OptimisticLockException(
                         message = "test conflict",
@@ -139,9 +139,9 @@ private data class FlushEntity(
     override fun clone(): FlushEntity = copy()
 }
 
-/** Test subclass exposing flush() + pending queue size to the test harness. */
+/** Test subclass exposing flush() + pending cell map size to the test harness. */
 private class TestFlushRepo(
-    var writeImpl: (List<PendingOp<Int, FlushEntity>>) -> Unit
+    var writeImpl: (List<FlushEntity>, List<PendingUpdate<Int, FlushEntity>>, List<Pair<Int, Long?>>, Boolean) -> Unit
 ) : PersistentRepositoryBase<Int, FlushEntity>(name = "TestFlushRepo", loadOnInit = false) {
 
     val conflictHookInvocations = mutableListOf<OptimisticLockException>()
@@ -152,21 +152,26 @@ private class TestFlushRepo(
 
     override fun loadFromStore(): Map<Int, FlushEntity> = emptyMap()
 
-    override fun writePending(ops: List<PendingOp<Int, FlushEntity>>) {
-        writeImpl(ops)
+    override fun writePending(
+        inserts: List<FlushEntity>,
+        updates: List<PendingUpdate<Int, FlushEntity>>,
+        deletes: List<Pair<Int, Long?>>,
+        hadClear: Boolean
+    ) {
+        writeImpl(inserts, updates, deletes, hadClear)
     }
 
     override fun handleOptimisticLockConflict(e: OptimisticLockException) {
         conflictHookInvocations.add(e)
     }
 
-    /** Public façade: enqueue a PendingInsert without going through add()'s event overhead. */
+    /** Public façade: enqueue an insert without going through add()'s event overhead. */
     fun addForTest(entity: FlushEntity): Boolean = add(entity)
 
     /** Public façade over the protected [flush] method. */
     fun flushForTest() = flush()
 
-    /** Public façade over the internal pending queue size for test assertions. */
+    /** Public façade over the internal pending cell map size for test assertions. */
     fun pendingOpsSize(): Int = pendingOpsCount()
 
     // Deterministic test cleanup: swap writeImpl to no-op so any debounce/max-delay flush job
@@ -174,7 +179,7 @@ private class TestFlushRepo(
     // coroutines. Without this, delayed coroutines could fire in another test's time window
     // and cause cross-test flakiness.
     fun quiesceAndClose() {
-        writeImpl = { }
+        writeImpl = { _, _, _, _ -> }
         close()
     }
 }

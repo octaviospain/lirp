@@ -25,7 +25,6 @@ import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
-import io.kotest.matchers.types.shouldBeInstanceOf
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -70,16 +69,19 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
         repo.add(e3)
 
         // Before debounce fires, no write yet
-        repo.writtenOps.shouldBeEmpty()
+        repo.writtenPayloads.shouldBeEmpty()
 
         // Advance past debounce window (100ms default)
         testScheduler.advanceTimeBy(101)
         testScheduler.runCurrent()
 
-        // Exactly 1 writePending call, collapsed to PendingBatchInsert
-        repo.writtenOps shouldHaveSize 1
-        repo.writtenOps[0].shouldHaveSize(1)
-        repo.writtenOps[0][0].shouldBeInstanceOf<PendingBatchInsert<Int, Customer>>()
+        // Exactly 1 writePending call carrying all three inserts in one grouped payload
+        repo.writtenPayloads shouldHaveSize 1
+        val payload = repo.writtenPayloads[0]
+        payload.inserts shouldHaveSize 3
+        payload.updates.shouldBeEmpty()
+        payload.deletes.shouldBeEmpty()
+        payload.hadClear shouldBe false
     }
 
     "after debounceMillis of inactivity, writePending() is called with collapsed ops" {
@@ -88,15 +90,16 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
 
         testScheduler.advanceTimeBy(50)
         testScheduler.runCurrent()
-        repo.writtenOps.shouldBeEmpty()
+        repo.writtenPayloads.shouldBeEmpty()
 
         testScheduler.advanceTimeBy(55)
         testScheduler.runCurrent()
 
-        repo.writtenOps shouldHaveSize 1
-        repo.writtenOps[0][0].shouldBeInstanceOf<PendingInsert<Int, Customer>>()
-        val op = repo.writtenOps[0][0] as PendingInsert<Int, Customer>
-        op.entity shouldBe customer
+        repo.writtenPayloads shouldHaveSize 1
+        val payload = repo.writtenPayloads[0]
+        payload.inserts shouldContainExactly listOf(customer)
+        payload.updates.shouldBeEmpty()
+        payload.deletes.shouldBeEmpty()
     }
 
     "max-delay cap forces flush even under continuous mutations" {
@@ -118,7 +121,7 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
         testScheduler.runCurrent()
 
         // max-delay cap (500ms) should have fired
-        shortDebounce.writtenOps.isEmpty() shouldBe false
+        shortDebounce.writtenPayloads.isEmpty() shouldBe false
         shortDebounce.close()
     }
 
@@ -127,13 +130,13 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
         repo.add(customer)
 
         // Don't advance time — debounce not yet fired
-        repo.writtenOps.shouldBeEmpty()
+        repo.writtenPayloads.shouldBeEmpty()
 
         repo.close()
 
         // After close(), pending ops must be flushed synchronously
-        repo.writtenOps shouldHaveSize 1
-        repo.writtenOps[0][0].shouldBeInstanceOf<PendingInsert<Int, Customer>>()
+        repo.writtenPayloads shouldHaveSize 1
+        repo.writtenPayloads[0].inserts shouldContainExactly listOf(customer)
     }
 
     "operations after close() throw IllegalStateException" {
@@ -155,40 +158,42 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
         testScheduler.runCurrent()
 
         // No successful writes yet — the exception occurred inside the coroutine
-        repo.writtenOps.shouldBeEmpty()
+        repo.writtenPayloads.shouldBeEmpty()
 
         // Retry flush fires after another debounce window
         testScheduler.advanceTimeBy(101)
         testScheduler.runCurrent()
 
-        repo.writtenOps shouldHaveSize 1
-        repo.writtenOps[0][0].shouldBeInstanceOf<PendingInsert<Int, Customer>>()
+        repo.writtenPayloads shouldHaveSize 1
+        repo.writtenPayloads[0].inserts shouldContainExactly listOf(customer)
     }
 
-    "entity mutation enqueues PendingUpdate and is included in next flush" {
+    "entity mutation enqueues an update and is included in next flush" {
         val customer = Customer(60, "Kate")
         repo.add(customer)
         testScheduler.advanceTimeBy(101)
         testScheduler.runCurrent()
-        repo.writtenOps.clear()
+        repo.writtenPayloads.clear()
 
         customer.updateName("Kate Updated")
         testScheduler.advanceTimeBy(101)
         testScheduler.runCurrent()
 
-        repo.writtenOps shouldHaveSize 1
-        repo.writtenOps[0][0].shouldBeInstanceOf<PendingUpdate<Int, Customer>>()
-        val update = repo.writtenOps[0][0] as PendingUpdate<Int, Customer>
-        update.entity.name shouldBe "Kate Updated"
+        repo.writtenPayloads shouldHaveSize 1
+        val payload = repo.writtenPayloads[0]
+        payload.updates shouldHaveSize 1
+        payload.updates[0].entity.name shouldBe "Kate Updated"
+        payload.inserts.shouldBeEmpty()
+        payload.deletes.shouldBeEmpty()
     }
 
-    "clear followed by add produces PendingClear then PendingInsert" {
+    "clear followed by add propagates hadClear=true and the post-clear insert in one flush" {
         val c1 = Customer(80, "Mia")
         val c2 = Customer(81, "Noah")
         repo.add(c1)
         testScheduler.advanceTimeBy(101)
         testScheduler.runCurrent()
-        repo.writtenOps.clear()
+        repo.writtenPayloads.clear()
 
         repo.clear()
         repo.add(c2)
@@ -196,40 +201,38 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
         testScheduler.advanceTimeBy(101)
         testScheduler.runCurrent()
 
-        repo.writtenOps shouldHaveSize 1
-        val ops = repo.writtenOps[0]
-        ops shouldHaveSize 2
-        ops[0].shouldBeInstanceOf<PendingClear<Int, Customer>>()
-        ops[1].shouldBeInstanceOf<PendingInsert<Int, Customer>>()
+        repo.writtenPayloads shouldHaveSize 1
+        val payload = repo.writtenPayloads[0]
+        payload.hadClear shouldBe true
+        payload.inserts shouldContainExactly listOf(c2)
+        payload.updates.shouldBeEmpty()
+        payload.deletes.shouldBeEmpty()
     }
 
-    "flush failure with interleaved enqueue preserves chronological order" {
+    "flush failure with interleaved enqueue preserves both ops in the retry payload" {
         val c1 = Customer(90, "Olivia")
         repo.add(c1)
         repo.failNextWrite = true
 
-        // First flush: fails, re-enqueues
+        // First flush: fails, snapshot restored via mergeOlder
         testScheduler.advanceTimeBy(101)
         testScheduler.runCurrent()
-        repo.writtenOps.shouldBeEmpty()
+        repo.writtenPayloads.shouldBeEmpty()
 
         // Interleaved enqueue while retry is pending
         val c2 = Customer(91, "Pete")
         repo.add(c2)
 
-        // Retry flush: should contain both ops in chronological order
+        // Retry flush: should contain both inserts
         testScheduler.advanceTimeBy(101)
         testScheduler.runCurrent()
 
-        repo.writtenOps shouldHaveSize 1
-        val ops = repo.writtenOps[0]
-        ops shouldHaveSize 1
-        ops[0].shouldBeInstanceOf<PendingBatchInsert<Int, Customer>>()
-        val batch = ops[0] as PendingBatchInsert<Int, Customer>
-        batch.entities.map { it.id } shouldContainExactly listOf(c1.id, c2.id)
+        repo.writtenPayloads shouldHaveSize 1
+        val payload = repo.writtenPayloads[0]
+        payload.inserts.map { it.id } shouldContainExactly listOf(c1.id, c2.id)
     }
 
-    "init via addToMemoryOnly() does NOT enqueue any PendingOps" {
+    "init via addToMemoryOnly() does NOT enqueue any pending writes" {
         val preloaded = Customer(70, "Leo")
         val initRepo = TestPersistentRepository(ctx)
         initRepo.loadFromStorage(preloaded)
@@ -238,10 +241,18 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
         testScheduler.advanceTimeBy(200)
         testScheduler.runCurrent()
 
-        initRepo.writtenOps.shouldBeEmpty()
+        initRepo.writtenPayloads.shouldBeEmpty()
         initRepo.close()
     }
 })
+
+/** Captured grouped payload from one `writePending` invocation. */
+internal data class CapturedPayload(
+    val inserts: List<Customer>,
+    val updates: List<PendingUpdate<Int, Customer>>,
+    val deletes: List<Pair<Int, Long?>>,
+    val hadClear: Boolean
+)
 
 private class TestPersistentRepository(
     context: LirpContext,
@@ -251,7 +262,7 @@ private class TestPersistentRepository(
         context, "TestPersistentRepo", ConcurrentHashMap(),
         debounceMillis, maxDelayMillis
     ) {
-    val writtenOps = mutableListOf<List<PendingOp<Int, Customer>>>()
+    val writtenPayloads = mutableListOf<CapturedPayload>()
     var failNextWrite = false
 
     init {
@@ -260,12 +271,26 @@ private class TestPersistentRepository(
 
     override fun loadFromStore(): Map<Int, Customer> = emptyMap()
 
-    override fun writePending(ops: List<PendingOp<Int, Customer>>) {
+    override fun writePending(
+        inserts: List<Customer>,
+        updates: List<PendingUpdate<Int, Customer>>,
+        deletes: List<Pair<Int, Long?>>,
+        hadClear: Boolean
+    ) {
         if (failNextWrite) {
             failNextWrite = false
             throw RuntimeException("Simulated write failure")
         }
-        writtenOps.add(ops)
+        // Inserts arrive in HashMap iteration order across keys after per-key collapse, sort by id
+        // so assertions remain stable across implementations of ConcurrentHashMap.
+        writtenPayloads.add(
+            CapturedPayload(
+                inserts = inserts.sortedBy { it.id },
+                updates = updates.sortedBy { it.entity.id },
+                deletes = deletes.sortedBy { it.first },
+                hadClear = hadClear
+            )
+        )
     }
 
     val repoIsClosed: Boolean get() = closed
