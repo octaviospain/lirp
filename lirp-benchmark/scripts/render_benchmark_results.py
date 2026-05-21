@@ -1,0 +1,328 @@
+#!/usr/bin/env python3
+"""
+Post-processes the JMH results.json from `gradle :lirp-benchmark:jmh` into:
+  1. One CSV file per benchmark class under build/reports/jmh/csv/
+  2. A rendered Performance-Benchmarks.md by substituting tokens in
+     scripts/Performance-Benchmarks.template.md
+
+Usage:
+    python3 render_benchmark_results.py [--results PATH] [--template PATH] [--out PATH]
+
+Token grammar in the template:
+    {{ METRIC | CLASS | METHOD | PARAMS | FORMAT? }}
+
+Where:
+    METRIC = score | mean | p50 | p95 | p99
+    CLASS  = simple class name, e.g. SqlRepoBenchmark
+    METHOD = benchmark method name, e.g. addEntity
+    PARAMS = "" for paramless | "<n>" shorthand for entityCount=<n>
+           | "k1=v1,k2=v2" for arbitrary param combinations
+    FORMAT = optional: int | thousand | us | ms | ns | bare
+             (default: smart, comma-separated thousands)
+
+Environment placeholders (substituted before benchmark tokens):
+    {{ TODAY }} {{ JVM_VERSION }} {{ OS_VERSION }} {{ CPU_MODEL }} {{ RAM_GB }}
+
+Examples:
+    {{ score | VolatileRepoBenchmark | addEntity | 100 }}
+    {{ p50 | MemoryProfilingBenchmark | peakMemoryDuringInit | entityCount=10000,subscriberCount=5 }}
+    {{ score | CollapseBenchmark | collapseOps | opCount=10000 }}
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import datetime
+import json
+import platform
+import re
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+# Matches {{ env_placeholder }} with no internal pipes.
+ENV_TOKEN_RE = re.compile(r"\{\{\s*(?P<name>[A-Z_][A-Z0-9_]*)\s*\}\}")
+
+# Matches {{ metric | class | method | params | format? }}
+BENCH_TOKEN_RE = re.compile(
+    r"\{\{\s*(?P<metric>score|mean|p50|p95|p99)\s*\|"
+    r"\s*(?P<cls>\w+)\s*\|"
+    r"\s*(?P<method>\w+)\s*\|"
+    r"\s*(?P<params>[^|}]*?)\s*"
+    r"(?:\|\s*(?P<fmt>\w+)\s*)?\}\}"
+)
+
+
+def parse_params(spec: str) -> dict[str, str]:
+    """Parse the params field of a token.
+
+    Empty -> {} (paramless benchmark)
+    Bare value (no '=') -> {'entityCount': value}  (shorthand)
+    Otherwise comma-separated key=value pairs
+    """
+    spec = spec.strip()
+    if not spec:
+        return {}
+    if "=" not in spec:
+        return {"entityCount": spec}
+    out: dict[str, str] = {}
+    for pair in spec.split(","):
+        if "=" not in pair:
+            raise ValueError(f"invalid param fragment: {pair!r}")
+        k, v = pair.split("=", 1)
+        out[k.strip()] = v.strip()
+    return out
+
+
+def load(results_path: Path) -> list[dict[str, Any]]:
+    with results_path.open() as f:
+        return json.load(f)
+
+
+def index(rows: list[dict[str, Any]]) -> list[tuple[str, str, dict[str, str], dict[str, Any]]]:
+    """Linear index: [(class, method, params_dict, row), ...].
+
+    Multi-param benchmarks are kept as separate entries; lookup matches on
+    all key-value pairs requested by the token. This avoids the dedup
+    problem the first version had.
+    """
+    out: list[tuple[str, str, dict[str, str], dict[str, Any]]] = []
+    for r in rows:
+        full = r["benchmark"]
+        cls = full.split(".")[-2]
+        method = full.split(".")[-1]
+        params = {k: str(v) for k, v in (r.get("params") or {}).items()}
+        out.append((cls, method, params, r))
+    return out
+
+
+def lookup(
+    idx: list[tuple[str, str, dict[str, str], dict[str, Any]]],
+    cls: str,
+    method: str,
+    want: dict[str, str],
+) -> dict[str, Any] | None:
+    for c, m, p, row in idx:
+        if c != cls or m != method:
+            continue
+        if all(p.get(k) == v for k, v in want.items()) and set(p.keys()) >= set(want.keys()):
+            return row
+    return None
+
+
+def fmt_number(value: float, unit: str, fmt: str | None) -> str:
+    if value is None:
+        return "—"
+    if fmt == "int" or fmt == "thousand":
+        return f"{int(round(value)):,}"
+    if fmt == "bare":
+        # Integer-typed measurements (e.g. ns latency p50) come through as 26.0; show "26".
+        # Fractional values keep two decimals.
+        if abs(value - round(value)) < 1e-9:
+            return f"{int(round(value))}"
+        return f"{value:.2f}"
+    if fmt in ("us", "ms", "ns"):
+        return f"{value:,.2f}"
+    # smart default by unit
+    if unit == "ops/s":
+        return f"{int(round(value)):,}"
+    if value >= 1000:
+        return f"{value:,.0f}"
+    if value >= 1:
+        return f"{value:.2f}"
+    return f"{value:.3f}"
+
+
+def resolve(metric: str, row: dict[str, Any]) -> tuple[float | None, str]:
+    pm = row["primaryMetric"]
+    unit = pm["scoreUnit"]
+    if metric in ("score", "mean"):
+        return pm["score"], unit
+    pcts = pm.get("scorePercentiles") or {}
+    if metric == "p50":
+        return pcts.get("50.0"), unit
+    if metric == "p95":
+        return pcts.get("95.0"), unit
+    if metric == "p99":
+        return pcts.get("99.0"), unit
+    raise ValueError(f"unknown metric: {metric}")
+
+
+def gather_env() -> dict[str, str]:
+    today = datetime.date.today().isoformat()
+    # JVM
+    try:
+        jv = subprocess.run(
+            ["java", "-version"], capture_output=True, text=True, check=False
+        )
+        jvm_line = (jv.stderr or jv.stdout).splitlines()[0] if (jv.stderr or jv.stdout) else "unknown"
+    except FileNotFoundError:
+        jvm_line = "unknown"
+    # OS
+    os_version = f"{platform.system()} {platform.release()} ({platform.machine()})"
+    # CPU
+    cpu_model = "unknown"
+    try:
+        with open("/proc/cpuinfo") as f:
+            for line in f:
+                if line.startswith("model name"):
+                    cpu_model = line.split(":", 1)[1].strip()
+                    break
+    except FileNotFoundError:
+        pass
+    # RAM (Linux)
+    ram_gb = "unknown"
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    kb = int(line.split()[1])
+                    ram_gb = f"{kb / (1024 * 1024):.0f}"
+                    break
+    except FileNotFoundError:
+        pass
+
+    return {
+        "TODAY": today,
+        "JVM_VERSION": jvm_line,
+        "OS_VERSION": os_version,
+        "CPU_MODEL": cpu_model,
+        "RAM_GB": ram_gb,
+    }
+
+
+def render(
+    template: str,
+    idx: list[tuple[str, str, dict[str, str], dict[str, Any]]],
+    env: dict[str, str],
+) -> str:
+    def env_sub(m: re.Match[str]) -> str:
+        name = m.group("name")
+        if name in env:
+            return env[name]
+        # Leave unknown ALL_CAPS tokens untouched (so e.g. SQL examples aren't mangled).
+        return m.group(0)
+
+    def bench_sub(m: re.Match[str]) -> str:
+        metric = m.group("metric")
+        cls = m.group("cls")
+        method = m.group("method")
+        params_raw = m.group("params") or ""
+        fmt = m.group("fmt")
+        try:
+            want = parse_params(params_raw)
+        except ValueError as e:
+            sys.stderr.write(f"warning: bad params {params_raw!r}: {e}\n")
+            return "—"
+        row = lookup(idx, cls, method, want)
+        if row is None:
+            sys.stderr.write(
+                f"warning: missing benchmark {cls}.{method} (params={want!r})\n"
+            )
+            return "—"
+        value, unit = resolve(metric, row)
+        return fmt_number(value, unit, fmt) if value is not None else "—"
+
+    template = BENCH_TOKEN_RE.sub(bench_sub, template)
+    template = ENV_TOKEN_RE.sub(env_sub, template)
+    return template
+
+
+def write_csvs(rows: list[dict[str, Any]], csv_dir: Path) -> None:
+    csv_dir.mkdir(parents=True, exist_ok=True)
+    by_class: dict[str, list[dict[str, Any]]] = {}
+    for r in rows:
+        cls = r["benchmark"].split(".")[-2]
+        by_class.setdefault(cls, []).append(r)
+    # Deterministic class, header, and row ordering keeps archived CSV diffs stable across runs.
+    for cls in sorted(by_class.keys()):
+        group = sorted(
+            by_class[cls],
+            key=lambda r: (
+                r["benchmark"],
+                r.get("mode", ""),
+                json.dumps(r.get("params") or {}, sort_keys=True),
+            ),
+        )
+        param_keys = sorted({k for r in group for k in (r.get("params") or {})})
+        out = csv_dir / f"{cls}.csv"
+        with out.open("w", newline="") as f:
+            w = csv.writer(f)
+            header = ["benchmark", "method", "mode"] + param_keys + [
+                "score",
+                "scoreError",
+                "scoreUnit",
+                "p50",
+                "p95",
+                "p99",
+            ]
+            w.writerow(header)
+            for r in group:
+                method = r["benchmark"].split(".")[-1]
+                params = r.get("params") or {}
+                pm = r["primaryMetric"]
+                pcts = pm.get("scorePercentiles") or {}
+                row = [r["benchmark"], method, r["mode"]]
+                row += [params.get(k, "") for k in param_keys]
+                row += [
+                    pm["score"],
+                    pm.get("scoreError", ""),
+                    pm["scoreUnit"],
+                    pcts.get("50.0", ""),
+                    pcts.get("95.0", ""),
+                    pcts.get("99.0", ""),
+                ]
+                w.writerow(row)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--results",
+        type=Path,
+        default=Path("lirp-benchmark/build/reports/jmh/results.json"),
+    )
+    parser.add_argument(
+        "--template",
+        type=Path,
+        default=Path("lirp-benchmark/scripts/Performance-Benchmarks.template.md"),
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=Path("lirp-benchmark/build/reports/jmh/Performance-Benchmarks.md"),
+    )
+    parser.add_argument(
+        "--csv-dir",
+        type=Path,
+        default=Path("lirp-benchmark/build/reports/jmh/csv"),
+    )
+    args = parser.parse_args()
+
+    if not args.results.exists():
+        sys.stderr.write(f"error: {args.results} does not exist\n")
+        return 1
+
+    rows = load(args.results)
+    write_csvs(rows, args.csv_dir)
+    idx = index(rows)
+    env = gather_env()
+
+    if args.template.exists():
+        rendered = render(args.template.read_text(), idx, env)
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(rendered)
+        print(f"wrote {args.out}")
+    else:
+        sys.stderr.write(
+            f"warning: template {args.template} not found; skipping markdown render\n"
+        )
+
+    print(f"wrote {len(rows)} benchmark rows to CSVs in {args.csv_dir}/")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

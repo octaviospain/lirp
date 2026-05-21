@@ -41,6 +41,31 @@ jmh {
     ]
 }
 
+// Post-process JMH results.json into CSV files and a rendered Performance-Benchmarks.md.
+// Wired via finalizedBy below so it runs automatically after every successful :jmh execution.
+tasks.register('renderBenchmarkReport', Exec) {
+    description = 'Render CSV files and Performance-Benchmarks.md from the JMH results.json.'
+    group = 'verification'
+    workingDir rootProject.projectDir
+    def resultsJson = layout.buildDirectory.file('reports/jmh/results.json')
+    def template = file('scripts/Performance-Benchmarks.template.md')
+    def outMd = layout.buildDirectory.file('reports/jmh/Performance-Benchmarks.md')
+    def csvDir = layout.buildDirectory.dir('reports/jmh/csv')
+    inputs.file(resultsJson).optional()
+    inputs.file(template).optional()
+    outputs.file(outMd)
+    outputs.dir(csvDir)
+    commandLine 'python3',
+        file('scripts/render_benchmark_results.py').absolutePath,
+        '--results', resultsJson.get().asFile.absolutePath,
+        '--template', template.absolutePath,
+        '--out', outMd.get().asFile.absolutePath,
+        '--csv-dir', csvDir.get().asFile.absolutePath
+    onlyIf { resultsJson.get().asFile.exists() }
+}
+
+tasks.named('jmh').configure { finalizedBy 'renderBenchmarkReport' }
+
 // Benchmark module is never published to Maven Central
 tasks.withType(PublishToMavenRepository).configureEach { enabled = false }
 tasks.withType(PublishToMavenLocal).configureEach { enabled = false }

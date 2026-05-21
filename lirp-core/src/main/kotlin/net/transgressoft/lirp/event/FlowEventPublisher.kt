@@ -225,6 +225,12 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
 
         override fun emitAsync(event: E) {
             check(!isClosed) { "Publisher '$id' is closed" }
+            // Short-circuit when nobody is listening and no replay is configured: the event would
+            // be funneled through eventChannel → changesFlow and dropped on the floor anyway.
+            // Skipping here avoids the trySend allocation, the activeTypes lookup, and the
+            // persistent-coroutine wakeup. Safe because replay == 0 means no late subscriber can
+            // observe events emitted before they subscribed.
+            if (_subscriberCount.get() == 0 && config.replay == 0) return
             // Read the volatile reference once to get a consistent snapshot; a concurrent disableEvents()
             // replacing the reference after this read will not affect the check or the send
             val activeTypes = activatedEventTypes
