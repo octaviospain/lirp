@@ -239,18 +239,18 @@ For applications exceeding these bounds, consider SQL-level pagination or stream
 
 ---
 
-## Section 5 — lirp SqlRepository vs Direct JDBC (Zero-Overhead Baseline)
+## Section 4 — lirp SqlRepository vs Direct JDBC (Zero-Overhead Baseline)
 
 **Date:** {{ TODAY }}
 **Configuration:** 2 warmup iterations, 3 measurement iterations, 1 fork
 
 This is the most direct comparison in the benchmark suite: lirp `SqlRepository` measured against raw `java.sql.PreparedStatement` with no ORM or framework overhead. Both sides use the same H2 in-memory engine with separate databases per trial.
 
-The key insight is that lirp's architecture inverts the naive trade-off: its `add()` and `findById()` operations are faster than raw JDBC (not slower), because they operate entirely in memory. The cost appears only in the full batch flush, which writes all accumulated changes in a single transaction.
+The key insight is that lirp's architecture inverts the naive trade-off on the read path: `findById()` is faster than raw JDBC because it serves from an in-memory `ConcurrentHashMap`. On the write path, raw JDBC `add()` is faster per call (a single autocommit INSERT is tiny), but lirp amortizes I/O across the full batch flush at `close()` — see Section 4.3.
 
 ---
 
-### 5.1 add() Throughput — lirp vs Direct JDBC (ops/s)
+### 4.1 add() Throughput — lirp vs Direct JDBC (ops/s)
 
 Direct JDBC `add()` executes one `INSERT` + autoCommit per call. lirp `add()` enqueues in memory; the SQL write is deferred and batched.
 
@@ -261,11 +261,11 @@ Direct JDBC `add()` executes one `INSERT` + autoCommit per call. lirp `add()` en
 | 10,000      | {{ score | DirectJdbcBenchmark | lirpAdd | 10000 }} | {{ score | DirectJdbcBenchmark | directJdbcAdd | 10000 }} |
 | 50,000      | {{ score | DirectJdbcBenchmark | lirpAdd | 50000 }} | {{ score | DirectJdbcBenchmark | directJdbcAdd | 50000 }} |
 
-**Interpretation:** Direct JDBC `add()` is faster here because each call is a single row insert with immediate autoCommit — tiny and constant. lirp `add()` has additional overhead from event publication, the debounce pipeline enqueue, and the in-memory map put. However, the lirp cost is also constant regardless of entity count — and critically, the SQL I/O cost is amortized across all inserts in a single batch transaction (see Section 5.3).
+**Interpretation:** Direct JDBC `add()` is faster here because each call is a single row insert with immediate autoCommit — tiny and constant. lirp `add()` has additional overhead from event publication, the debounce pipeline enqueue, and the in-memory map put. However, the lirp cost is also constant regardless of entity count — and critically, the SQL I/O cost is amortized across all inserts in a single batch transaction (see Section 4.3).
 
 ---
 
-### 5.2 findById() Latency — lirp vs Direct JDBC (ns/op, p50)
+### 4.2 findById() Latency — lirp vs Direct JDBC (ns/op, p50)
 
 Direct JDBC `findById()` executes `SELECT ... WHERE id = ?` and reads the result set. lirp reads from a `ConcurrentHashMap`.
 
@@ -280,7 +280,7 @@ Direct JDBC `findById()` executes `SELECT ... WHERE id = ?` and reads the result
 
 ---
 
-### 5.3 Full Flush/Update Latency — lirp vs Direct JDBC (µs/op, p50)
+### 4.3 Full Flush/Update Latency — lirp vs Direct JDBC (µs/op, p50)
 
 lirp `update` mutates one entity then calls `close()`, which flushes ALL entities in the repository as a batch transaction. Direct JDBC `update` executes a single `UPDATE WHERE id = ?` + autoCommit.
 
@@ -295,7 +295,7 @@ lirp `update` mutates one entity then calls `close()`, which flushes ALL entitie
 
 ---
 
-## Section 4 — How to Run
+## Section 5 — How to Run
 
 Run all benchmarks (full production configuration: 5 warmup, 10 measurement, 1 fork):
 

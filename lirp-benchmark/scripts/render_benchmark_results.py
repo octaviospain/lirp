@@ -236,13 +236,17 @@ def write_csvs(rows: list[dict[str, Any]], csv_dir: Path) -> None:
     for r in rows:
         cls = r["benchmark"].split(".")[-2]
         by_class.setdefault(cls, []).append(r)
-    # Determine the union of param keys across all rows so the CSV header is stable per class
-    for cls, group in by_class.items():
-        param_keys: list[str] = []
-        for r in group:
-            for k in (r.get("params") or {}):
-                if k not in param_keys:
-                    param_keys.append(k)
+    # Deterministic class, header, and row ordering keeps archived CSV diffs stable across runs.
+    for cls in sorted(by_class.keys()):
+        group = sorted(
+            by_class[cls],
+            key=lambda r: (
+                r["benchmark"],
+                r.get("mode", ""),
+                json.dumps(r.get("params") or {}, sort_keys=True),
+            ),
+        )
+        param_keys = sorted({k for r in group for k in (r.get("params") or {})})
         out = csv_dir / f"{cls}.csv"
         with out.open("w", newline="") as f:
             w = csv.writer(f)

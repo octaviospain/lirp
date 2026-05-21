@@ -15,13 +15,13 @@ section below.
 ## Files
 
 - `render_benchmark_results.py` — the post-processor.
-- `Performance-Benchmarks.template.md` — a partial template demonstrating the
-  token syntax. Currently covers Section 1.1–1.3 as a proof of concept; extend
-  it to cover the full wiki page as a follow-up.
+- `Performance-Benchmarks.template.md` — the canonical wiki template. Covers
+  the full report (repository microbenchmarks, comparative benchmarks, memory
+  profiling, JDBC baseline, and the how-to-run section).
 
 ## Token syntax
 
-```
+```text
 {{ METRIC | CLASS | METHOD | PARAMS | FORMAT? }}
 ```
 
@@ -56,7 +56,7 @@ python3 lirp-benchmark/scripts/render_benchmark_results.py
 
 CLI flags:
 
-```
+```text
 --results   PATH   default: lirp-benchmark/build/reports/jmh/results.json
 --template  PATH   default: lirp-benchmark/scripts/Performance-Benchmarks.template.md
 --out       PATH   default: lirp-benchmark/build/reports/jmh/Performance-Benchmarks.md
@@ -112,7 +112,7 @@ require human judgment about whether a delta is signal or noise.
 The current workflow is:
 
 1. `gradle :lirp-benchmark:jmh --rerun-tasks` regenerates the data.
-2. `cp build/reports/jmh/Performance-Benchmarks.md ../lirp.wiki/`.
+2. `cp lirp-benchmark/build/reports/jmh/Performance-Benchmarks.md ../lirp.wiki/` (run from repo root).
 3. Read the diff; add or update interpretive notes by hand where deltas warrant them.
 
 ## Follow-ups
