@@ -46,6 +46,7 @@ import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.jetbrains.exposed.v1.jdbc.update
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import javax.sql.DataSource
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -168,6 +169,21 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      */
     private val junctionTables: Map<JunctionTableDef, ExposedJunctionTable> =
         tableDef.junctionTableDefs.associateWith { interpreter.interpretJunction(it) }
+
+    /**
+     * Bounded retry queue of entity ids whose post-commit `recoverEntityFromConflict` invocation
+     * has thrown. Drained at the start of each [writePending] cycle; entries that succeed are
+     * removed, entries that fail [MAX_RECOVERY_ATTEMPTS] times in total escalate to a
+     * [StandardCrudEvent.RecoveryFailed] event and are removed. Capped at [STALE_IDS_CAP].
+     */
+    private val staleIds: ConcurrentHashMap<K, StaleEntry> = ConcurrentHashMap()
+
+    init {
+        // Activate RECOVERY_FAILED events: SqlRepository is the only emitter today, but the
+        // event type is declared on the lirp-api CrudEvent contract so subscribers across modules
+        // can react.
+        activateEvents(CrudEvent.Type.RECOVERY_FAILED)
+    }
 
     init {
         // Fail-loud: a SqlTableDef that declares junction descriptors but supplies no matching
@@ -528,9 +544,20 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         deletes: List<Pair<K, Long?>>,
         hadClear: Boolean
     ) {
+        // Drain the bounded retry queue from previous flush cycles before applying new writes.
+        // A successful retry observes the freshest canonical state; a permanently-failing entry
+        // escalates to RecoveryFailed and is removed.
+        drainStaleIds()
         val conflicts = mutableListOf<PendingConflict<K>>()
         transaction(db = db) {
-            if (hadClear) table.deleteAll()
+            // #202: junction rows must be wiped before the parent table when FKs may not yet be
+            // installed (the construction-time window before installJunctionForeignKeys() runs).
+            // When FKs ARE installed with ON DELETE CASCADE the explicit delete is a harmless
+            // no-op; Exposed handles the redundant wipe gracefully.
+            if (hadClear) {
+                junctionTables.values.forEach { it.table.deleteAll() }
+                table.deleteAll()
+            }
             when {
                 inserts.size > 1 -> executeBatchInsertList(inserts)
                 inserts.size == 1 -> executeInsertSingle(inserts.first())
@@ -554,6 +581,34 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                     "recoverEntityFromConflict threw for id=${conflict.id} " +
                         "(expectedVersion=${conflict.expectedVersion}); conflict may not have been fully recovered"
                 }
+                // Enqueue for bounded retry on the next flush cycle. The retry loop in
+                // drainStaleIds() escalates to a RecoveryFailed event after MAX_RECOVERY_ATTEMPTS
+                // total failures for the same id.
+                // Preserve the ORIGINAL expectedVersion across retries for an id: once an entry
+                // is queued, its expectedVersion is the row state at first-conflict capture and
+                // must not be overwritten by a subsequent conflict carrying a newer version, or
+                // the retry would silently re-target a different row generation.
+                staleIds.compute(conflict.id) { _, prev ->
+                    prev?.copy(attempts = prev.attempts + 1)
+                        ?: StaleEntry(conflict.expectedVersion, 1)
+                }
+            }
+        }
+        // Hard backstop against unbounded growth under pathological recovery failure. Per
+        // CONTEXT.md this is a round-number cap, not a precision LRU — ConcurrentHashMap iteration
+        // order is acceptable as the eviction heuristic.
+        if (staleIds.size > STALE_IDS_CAP) {
+            val overflow = staleIds.size - STALE_IDS_CAP
+            log.warn {
+                "staleIds cap exceeded (${staleIds.size} > $STALE_IDS_CAP); " +
+                    "dropping $overflow oldest entries to prevent unbounded growth"
+            }
+            val it = staleIds.keys.iterator()
+            var dropped = 0
+            while (dropped < overflow && it.hasNext()) {
+                it.next()
+                it.remove()
+                dropped++
             }
         }
         // Honor the base-class contract: `dirty` signals pending work and must be cleared once
@@ -671,9 +726,24 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         syncJunctionRows(op.entity)
     }
 
+    /**
+     * Removes a single entity by id, deleting any junction rows referencing it first so the
+     * parent delete cannot leave orphans when FKs have not yet been installed. When FKs are
+     * installed with `ON DELETE CASCADE` the manual junction delete is a harmless no-op (rows
+     * are already gone or will be reaped by the cascade). All deletes run inside `writePending`'s
+     * outer transaction; no nested transactions are opened.
+     */
     private fun executeDeleteSingle(idAndVersion: Pair<K, Long?>, conflicts: MutableList<PendingConflict<K>>) {
         val (id, expected) = idAndVersion
         val vc = versionCol
+        // #202: wipe junction rows for this id before the parent delete so the operation is
+        // idempotent w.r.t. FK installation timing.
+        if (junctionTables.isNotEmpty()) {
+            val parentId: Any = toExposedId(id as Any)
+            junctionTables.values.forEach { junction ->
+                junction.table.deleteWhere { junction.parentIdCol eq parentId }
+            }
+        }
         val rowsAffected =
             table.deleteWhere {
                 @Suppress("UNCHECKED_CAST")
@@ -686,11 +756,25 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         }
     }
 
+    /**
+     * Removes a batch of entities by id. Junction rows referencing each id are deleted before
+     * the corresponding parent row so the operation is idempotent w.r.t. FK installation timing.
+     * All deletes run inside `writePending`'s outer transaction. See [executeDeleteSingle] for
+     * the single-id variant.
+     */
     private fun executeBatchDeleteList(idsWithVersions: List<Pair<K, Long?>>, conflicts: MutableList<PendingConflict<K>>) {
         // per-id independent DELETE loop. Accumulate conflicts rather than throwing so
         // the other ids still commit in the same transaction.
         val vc = versionCol
+        val hasJunctions = junctionTables.isNotEmpty()
         idsWithVersions.forEach { (id, expected) ->
+            // #202: wipe junction rows for this id before the parent delete.
+            if (hasJunctions) {
+                val parentId: Any = toExposedId(id as Any)
+                junctionTables.values.forEach { junction ->
+                    junction.table.deleteWhere { junction.parentIdCol eq parentId }
+                }
+            }
             val rowsAffected =
                 table.deleteWhere {
                     @Suppress("UNCHECKED_CAST")
@@ -807,6 +891,54 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     private data class PendingConflict<K>(val id: K, val expectedVersion: Long)
 
     /**
+     * Tracks a single id's retry state across flush cycles. `attempts` counts the total number
+     * of `recoverEntityFromConflict` failures observed for the id (including the original
+     * post-commit failure that enqueued it); on reaching [MAX_RECOVERY_ATTEMPTS] the entry is
+     * escalated to a [StandardCrudEvent.RecoveryFailed] event and removed.
+     */
+    private data class StaleEntry(val expectedVersion: Long, val attempts: Int)
+
+    /**
+     * Drains [staleIds] in iteration order. For each entry, attempts the recovery again in a
+     * fresh transaction so one failure does not roll back another's success. On success the
+     * entry is removed; on failure with attempts already at [MAX_RECOVERY_ATTEMPTS] the entry
+     * is escalated via [StandardCrudEvent.RecoveryFailed] and removed; otherwise the entry's
+     * attempt count is incremented and it remains queued for the next flush cycle.
+     */
+    private fun drainStaleIds() {
+        if (staleIds.isEmpty()) return
+        // Snapshot to avoid mutation-during-iteration; concurrent inserts from the post-commit
+        // loop in this same flush would race otherwise.
+        val snapshot = staleIds.toMap()
+        for ((id, entry) in snapshot) {
+            try {
+                transaction(db = db) {
+                    recoverEntityFromConflict(id, entry.expectedVersion)
+                }
+                staleIds.remove(id)
+            } catch (e: Exception) {
+                // Count this drain attempt BEFORE deciding to escalate so escalation fires on
+                // the MAX_RECOVERY_ATTEMPTS-th failure (not the (MAX+1)-th). The initial
+                // post-commit failure already records attempts=1, so the on-disk semantics are
+                // "escalate after exactly MAX_RECOVERY_ATTEMPTS total failures for this id".
+                val nextAttempts = entry.attempts + 1
+                if (nextAttempts >= MAX_RECOVERY_ATTEMPTS) {
+                    log.error(e) {
+                        "recoverEntityFromConflict permanently failed for id=$id after " +
+                            "$MAX_RECOVERY_ATTEMPTS attempts; emitting RecoveryFailed"
+                    }
+                    publisher.emitAsync(StandardCrudEvent.RecoveryFailed<K, R>(id, entry.expectedVersion, e))
+                    staleIds.remove(id)
+                } else {
+                    staleIds.compute(id) { _, prev ->
+                        (prev ?: entry).copy(attempts = nextAttempts)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * Emits a [CrudEvent.Type.UPDATE] event to repository subscribers when an entity mutation is detected.
      *
      * The [MutationEvent] carries both the previous and current entity state, allowing subscribers
@@ -840,6 +972,20 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
 
     companion object {
         private val log = KotlinLogging.logger(SqlRepository::class.java.name)
+
+        /**
+         * Hard backstop for the [staleIds] retry queue. If recovery is failing on more than 1024
+         * distinct ids the repository is in an unrecoverable state — the cap merely prevents
+         * unbounded heap growth. Eviction order falls back to ConcurrentHashMap iteration order;
+         * a precision LRU is not warranted at the cap-overflow boundary.
+         */
+        const val STALE_IDS_CAP: Int = 1024
+
+        /**
+         * Maximum number of consecutive failed recovery attempts for the same id before the
+         * retry path escalates to a [StandardCrudEvent.RecoveryFailed] event and drops the entry.
+         */
+        const val MAX_RECOVERY_ATTEMPTS: Int = 3
 
         // SQLState codes that indicate a duplicate/already-existing constraint, which is the expected
         // idempotency condition for installFk(). All other SQLStates are genuine errors and re-thrown.

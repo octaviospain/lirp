@@ -379,11 +379,16 @@ class JsonFileRepositoryTest : DescribeSpec({
             subscriptionsMap.containsKey(customer.id) shouldBe false
         }
 
-        it("remove() throws IllegalStateException when subscription is missing from map") {
+        it("remove() returns false when subscription is missing from map") {
+            // Pre-#200 the missing-subscription state tripped an `error(...)` invariant
+            // detector. Under cancel-first lifecycle ordering (Issue #200) the subscription
+            // map is the atomic ownership token: a remove() whose claim returns null exits
+            // early with false. This matches the contract that remove() of an absent or
+            // already-being-removed entity is a no-op false return.
             val customer = repository.create(1, "Test", "t@t.com")
             reactive.advance()
             getSubscriptionsMap(repository).remove(customer.id)
-            shouldThrow<IllegalStateException> { repository.remove(customer) }
+            repository.remove(customer) shouldBe false
         }
 
         it("removeAll() atomically removes subscriptions from map before cancelling") {

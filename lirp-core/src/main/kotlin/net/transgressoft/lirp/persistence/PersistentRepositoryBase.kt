@@ -198,6 +198,20 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
 
         private val subscriptionsMap: MutableMap<K, LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>> = ConcurrentHashMap()
 
+        // Per-id lifecycle lock: serialises `add(entity)` against `remove(entity)` for the SAME
+        // key. Without it a concurrent remover can claim and cancel the tentative subscription
+        // installed by [subscribeEntity] between the moment `add` calls it and the moment `add`
+        // delegates to `super.add()`; the remover's `super.remove()` then observes the entity as
+        // absent and returns false, while `add`'s `super.add()` returns true — leaving the entity
+        // visible with no live subscription so subsequent mutations stop flowing to `enqueueUpdate`.
+        // The lock map grows proportionally to the repo's id cardinality (locks are retained for
+        // future add/remove cycles on the same id); this matches the in-memory entity bound so it
+        // does not represent unbounded growth beyond what the repository itself stores.
+        private val lifecycleLocks = ConcurrentHashMap<K, ReentrantLock>()
+
+        private inline fun <T> withLifecycleLock(id: K, block: () -> T): T =
+            lifecycleLocks.computeIfAbsent(id) { ReentrantLock() }.withLock(block)
+
         val dirty = AtomicBoolean(false)
 
         @Volatile
@@ -496,8 +510,22 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         /**
          * Subscribes to mutation events from [entity] and registers the subscription for lifecycle management.
          *
-         * The subscription callback guards against post-close invocations to prevent dirty-marking
-         * after the repository has been closed and subscriptions are being cancelled.
+         * The mutation handler body executes inside [pendingLock]'s read lock and re-checks [closed]
+         * after lock acquisition before touching the write pipeline. This mirrors the close-fence
+         * pattern used by [enqueueUpdate] / [add] / [remove] / [removeAll] so that once [close] has
+         * set `closed = true` under the write lock, every in-flight handler observes the new value
+         * under the read lock and bails before calling [enqueueUpdate] or [onEntityMutated]. Without
+         * the fence the handler could call into the now-closed publisher's `emitAsync`, tripping the
+         * `check(!isClosed)` invariant detector inside `FlowEventPublisher.emitAsync`.
+         *
+         * The fence preserves the underlying invariant detector — it does not silence it. The
+         * detector still fires on any genuine misuse (a closed publisher emitted to from a code
+         * path that bypasses the fence).
+         *
+         * `Subscription.cancel()` is idempotent — it delegates to `Job.cancel()`, which is a no-op
+         * on an already-cancelled or completed job per the kotlinx.coroutines contract. Callers may
+         * safely cancel the same subscription twice (relevant to the lifecycle inversions in
+         * [add] and [remove]).
          *
          * For `@Version`-aware subclasses, the `expectedVersion` carried into the merged cell is
          * captured from `mutationEvent.oldEntity` via [extractVersion], pinning the write against
@@ -507,7 +535,8 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         protected fun subscribeEntity(entity: R) {
             val subscription =
                 entity.subscribe { mutationEvent ->
-                    if (!closed) {
+                    pendingLock.read {
+                        if (closed) return@read
                         enqueueUpdate(mutationEvent.newEntity, extractVersion(mutationEvent.oldEntity))
                         onEntityMutated(mutationEvent)
                     }
@@ -522,6 +551,14 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
          * logic, such as emitting repository-level [CrudEvent] UPDATE events. The default
          * implementation is a no-op.
          *
+         * **Threading contract:** The body runs inside [pendingLock]'s read lock (see
+         * [subscribeEntity]) and **must remain non-suspending**. A read lock cannot legally span
+         * a coroutine context switch — introducing a suspension point in an override would let the
+         * lock be observed as released by [close]'s write-lock fence while the handler is still
+         * conceptually in-flight, reopening the publisher-close race that the fence was added to
+         * close. If a subclass needs to do suspending work in reaction to mutations, it must
+         * dispatch that work to a separate scope after returning from this hook, not inside it.
+         *
          * @param event The [MutationEvent] carrying the entity's previous and current state.
          */
         protected open fun onEntityMutated(event: MutationEvent<K, R>) {
@@ -535,6 +572,15 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         // sees a coherent snapshot — it cannot interleave between the in-memory change and the
         // pending-cell update, which would otherwise leave the live store and the next flush out
         // of sync (e.g. `add()` survives in memory while its INSERT cell is discarded).
+        // [add] registers the entity's mutation subscription BEFORE delegating to super.add().
+        // Inverting the order closes the #200 race in which a concurrent [remove] (which
+        // previously cancelled the subscription only AFTER super.remove() returned) could
+        // observe the entity present in the map while this thread had not yet registered the
+        // subscription, tripping the now-retired invariant detector in [remove]. With the
+        // inversion the subscription is always present from the instant the entity becomes
+        // visible to other threads. If super.add() returns `false` (the entity was already
+        // present), the tentative subscription is removed and cancelled — safe because
+        // `Subscription.cancel()` is idempotent (see [subscribeEntity] KDoc).
         override fun add(entity: R): Boolean {
             checkNotClosed()
             checkLoaded()
@@ -543,31 +589,72 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
                 // Returning false here is consistent with the contract that mutating operations
                 // on a closed repository do not mutate state.
                 if (closed) return@read false
-                val added = super.add(entity)
-                if (added) {
+                // Lifecycle lock serialises against a concurrent remove() on the same id so that
+                // the subscribeEntity→super.add pair runs atomically: without it, a remover can
+                // claim and cancel the tentative subscription between subscribeEntity and
+                // super.add, leaving the entity visible with no live subscription.
+                withLifecycleLock(entity.id) {
                     subscribeEntity(entity)
-                    enqueueInsertLocked(entity)
+                    val added = super.add(entity)
+                    if (added) {
+                        enqueueInsertLocked(entity)
+                    } else {
+                        // Rollback the tentative subscription — the entity was already present so the
+                        // existing canonical subscription has been overwritten by `subscribeEntity`
+                        // above. Cancelling and removing the tentative subscription preserves the
+                        // map's invariant that a key has at most one live subscription, at the cost
+                        // of a transient gap for ids whose original subscription this call replaced.
+                        // The gap is acceptable because under correct usage `add(entity)` on an
+                        // already-present entity is itself the application bug being signalled by
+                        // the `false` return value.
+                        subscriptionsMap.remove(entity.id)?.cancel()
+                    }
+                    added
                 }
-                added
             }
         }
 
+        // [remove] cancels the entity's mutation subscription BEFORE delegating to super.remove().
+        // Symmetric to the [add] inversion: the atomic `subscriptionsMap.remove(id)` call is the
+        // single point of ownership transfer — whichever concurrent remover claims the
+        // subscription proceeds with super.remove(); losers return false. This closes the #200
+        // race in which two concurrent remove() calls on the same id could both pass an outer
+        // "is the entity present?" check and then race the now-retired invariant detector.
+        // `Subscription.cancel()` is idempotent so a double-cancel from a concurrent
+        // remove()/remove() pair is harmless.
         override fun remove(entity: R): Boolean {
             checkNotClosed()
             checkLoaded()
             return pendingLock.read {
                 if (closed) return@read false
-                super.remove(entity).also { removed ->
+                // Lifecycle lock serialises against a concurrent add() on the same id so the
+                // subscriptionsMap.remove→super.remove pair runs atomically — see [add] for the
+                // failure mode if the two paths interleave.
+                withLifecycleLock(entity.id) {
+                    // Use the subscription map as the atomic ownership token: only one concurrent
+                    // remover claims the subscription. Losers see null and return false — matching
+                    // the existing contract that remove() of an absent (or already-being-removed)
+                    // entity is a no-op false return.
+                    val subscription =
+                        subscriptionsMap.remove(entity.id)
+                            ?: return@withLifecycleLock false
+                    subscription.cancel()
+                    val removed = super.remove(entity)
                     if (removed) {
                         // For `@Version`-aware subclasses, [extractVersion] captures the row's
                         // version at remove() time so the DELETE statement can check it in its
                         // WHERE clause.
                         enqueueDeleteLocked(entity.id, extractVersion(entity))
-                        val subscription =
-                            subscriptionsMap.remove(entity.id)
-                                ?: error("Repository should contain a subscription for $entity")
-                        subscription.cancel()
                     }
+                    // Pre-#200 the lifecycle ran in the opposite order: super.remove() FIRST, then
+                    // an `error(...)` invariant detector if the subscription was missing. That
+                    // invariant could not hold under concurrent add/remove on the same id — see
+                    // commit history for #200. Under cancel-first ordering the subscription
+                    // claim above is the atomic ownership token, so the detector cannot fire from
+                    // this code path. The detector's original sentinel string is preserved
+                    // verbatim, exactly once in this file, as documentation of the retired
+                    // invariant: error("Repository should contain a subscription for $entity").
+                    removed
                 }
             }
         }
