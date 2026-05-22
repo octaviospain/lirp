@@ -14,36 +14,6 @@
 
 A Kotlin/Java library where domain entities own their reactivity — property changes automatically notify subscribers, and repositories persist transparently.
 
-## Breaking change — KSP is now mandatory
-
-From this release onwards, every entity persisted via `JsonFileRepository` or `SqlRepository`
-**must** be processed by `lirp-ksp` at build time. The previous reflection fallback in
-`LirpEntitySerializer` (`KProperty1.get` + `Method.invoke`) and the `--add-opens=java.base/*`
-JVM flags it required have been removed.
-
-**Remediation — configure KSP:**
-
-- Consumers using the `net.transgressoft.lirp.sql` Gradle plugin already have KSP wired
-  automatically; no action required.
-- Consumers without the plugin should add the following to their `build.gradle`:
-
-  ```groovy
-  plugins {
-      id 'com.google.devtools.ksp' version '<ksp-version>'
-  }
-
-  dependencies {
-      ksp 'net.transgressoft:lirp-ksp:<lirp-version>'
-  }
-  ```
-
-**Build-time failure mode.** A persisted entity that is not processed by KSP fails the build
-through `LirpAccessorValidationProcessor` with a clear message pointing back to this section.
-At runtime, the first attempt to construct a `LirpEntitySerializer` or to load a row from a
-KSP-processed module without a generated accessor throws an `IllegalStateException` whose
-message contains the literal phrase `configure KSP`, so the error reads the same in logs as it
-does in this README.
-
 ## What is LIRP?
 
 LIRP solves a specific problem: **most reactive libraries make you wire streams manually, and most persistence libraries treat entities as passive data**. LIRP does both — your entities are reactive objects that automatically notify subscribers on property changes, and repositories keep your data in sync with a database or file.
@@ -65,6 +35,89 @@ LIRP's sweet spot: **small-to-medium datasets where entities need both reactivit
 Built on Kotlin Coroutines and Kotlin Serialization. Targets **JVM 17+, Kotlin 2.3.10**.
 
 ## Quick Start
+
+### Installation
+
+LIRP is published to Maven Central under the `net.transgressoft` group. Pull `lirp-core` for the
+reactive entity + in-memory / JSON repository surface; add `lirp-sql` for the SQL repository and
+`lirp-fx` for the JavaFX bridge. The `net.transgressoft.lirp.sql` Gradle plugin wires up the KSP
+processor for you so generated accessors are produced at build time.
+
+**Requirements:** JVM 17+, Kotlin 2.3.10.
+
+Gradle (Kotlin DSL):
+```kotlin
+plugins {
+    id("net.transgressoft.lirp.sql") version "<lirp-version>"
+}
+
+dependencies {
+    implementation("net.transgressoft:lirp-core:<lirp-version>")
+    implementation("net.transgressoft:lirp-sql:<lirp-version>")   // optional — SQL persistence
+    implementation("net.transgressoft:lirp-fx:<lirp-version>")    // optional — JavaFX bridge
+}
+```
+
+Gradle without the LIRP plugin (manual KSP wiring):
+
+```kotlin
+plugins {
+    id("com.google.devtools.ksp") version "<ksp-version>"
+}
+
+dependencies {
+    implementation("net.transgressoft:lirp-core:<lirp-version>")
+    ksp("net.transgressoft:lirp-ksp:<lirp-version>")
+
+    implementation("net.transgressoft:lirp-sql:<lirp-version>")   // optional
+    implementation("net.transgressoft:lirp-fx:<lirp-version>")    // optional
+}
+```
+
+Maven:
+
+```xml
+<dependencies>
+    <dependency>
+        <groupId>net.transgressoft</groupId>
+        <artifactId>lirp-core</artifactId>
+        <version>${lirp.version}</version>
+    </dependency>
+    <!-- optional: SQL persistence -->
+    <dependency>
+        <groupId>net.transgressoft</groupId>
+        <artifactId>lirp-sql</artifactId>
+        <version>${lirp.version}</version>
+    </dependency>
+    <!-- optional: JavaFX bridge -->
+    <dependency>
+        <groupId>net.transgressoft</groupId>
+        <artifactId>lirp-fx</artifactId>
+        <version>${lirp.version}</version>
+    </dependency>
+</dependencies>
+
+<build>
+    <plugins>
+        <!-- KSP compiler plugin — runs lirp-ksp during the compile phase. -->
+        <plugin>
+            <groupId>com.dyescape</groupId>
+            <artifactId>kotlin-maven-symbol-processing</artifactId>
+            <version>${ksp-maven.version}</version>
+            <configuration>
+                <processors>
+                    <processor>net.transgressoft:lirp-ksp:${lirp.version}</processor>
+                </processors>
+            </configuration>
+        </plugin>
+    </plugins>
+</build>
+```
+
+See [Consuming LIRP](https://github.com/octaviospain/lirp/wiki/Consuming-LIRP) for the
+compatibility matrix and troubleshooting common setup failures.
+
+### Hello world
 
 Declare a reactive entity, register a repository, subscribe — no event bus, no manual Flow collection:
 
@@ -224,29 +277,6 @@ The planner picks per-parent loop or child-set hash-join per query from a live c
 | MS SQL Server, Oracle | `lirp-sql` | Not tested |
 
 Deep coverage of the write pipeline, collapse algorithm, transactional guarantees, `@Version` optimistic locking, aggregate references, cascade semantics, collection delegates, JSON persistence, and JavaFX integration lives on the wiki — see [Documentation](#documentation) below.
-
-## Installation
-
-```kotlin
-plugins {
-    id("com.google.devtools.ksp") version "2.3.6"
-    id("net.transgressoft.lirp.sql") version "<lirp-version>"  // optional: auto-detects lirp-sql
-}
-
-dependencies {
-    implementation("net.transgressoft:lirp-api:<version>")
-    implementation("net.transgressoft:lirp-core:<version>")
-    ksp("net.transgressoft:lirp-ksp:<version>")
-
-    // SQL persistence (optional)
-    implementation("net.transgressoft:lirp-sql:<version>")
-    runtimeOnly("org.postgresql:postgresql:<version>")
-}
-```
-
-**Requirements:** JVM 17+, Kotlin 2.3.10.
-
-For Gradle without the LIRP plugin (manual KSP configuration), **Maven consumers**, the compatibility matrix, and troubleshooting for common setup failures, see [Consuming LIRP](https://github.com/octaviospain/lirp/wiki/Consuming-LIRP).
 
 ## Features
 

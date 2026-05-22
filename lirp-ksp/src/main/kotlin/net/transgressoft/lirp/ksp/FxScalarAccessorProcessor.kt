@@ -193,11 +193,7 @@ class FxScalarAccessorProcessor(
         val baseName = type.declaration.qualifiedName?.asString() ?: return "String"
         val args = type.arguments
         if (args.isEmpty()) return baseName
-        val renderedArgs =
-            args.joinToString(", ") { arg ->
-                val argType = arg.type?.resolve()
-                if (argType != null) renderKsType(argType) else "*"
-            }
+        val renderedArgs = args.joinToString(", ") { arg -> renderKsTypeArgument(arg) }
         return "$baseName<$renderedArgs>"
     }
 }

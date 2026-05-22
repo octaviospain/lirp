@@ -17,7 +17,7 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.google.devtools.ksp.getVisibility
+import com.google.devtools.ksp.isAbstract
 import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.Dependencies
 import com.google.devtools.ksp.processing.KSPLogger
@@ -26,7 +26,6 @@ import com.google.devtools.ksp.processing.SymbolProcessor
 import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
-import com.google.devtools.ksp.symbol.Visibility
 import com.google.devtools.ksp.validate
 
 private const val PERSISTENCE_IGNORE_FQN = "net.transgressoft.lirp.persistence.PersistenceIgnore"
@@ -96,8 +95,9 @@ class RawInitializerProcessor(
     private fun shouldSkip(classDecl: KSClassDeclaration, fqn: String): Boolean {
         if (fqn in generatedAccessors) return true
         // Generic abstract bases cannot have a non-parameterized initializer; concrete
-        // subclasses get their own initializer.
-        if (classDecl.typeParameters.isNotEmpty()) return true
+        // subclasses get their own initializer. Abstract entities cannot be instantiated
+        // by `fromRow` either, so any generated initializer would be unreachable.
+        if (classDecl.typeParameters.isNotEmpty() || classDecl.isAbstract()) return true
         // Private/internal entities — and any nested entity whose enclosing class is
         // non-public — cannot be referenced from a public generated class. Skip to avoid
         // emitting uncompilable "public exposes internal type argument" code.
@@ -137,21 +137,7 @@ class RawInitializerProcessor(
         return entries
     }
 
-    private fun isPubliclyVisible(decl: KSClassDeclaration): Boolean {
-        var current: KSClassDeclaration? = decl
-        while (current != null) {
-            val visibility = current.getVisibility()
-            if (visibility != Visibility.PUBLIC && visibility != Visibility.JAVA_PACKAGE) return false
-            current = current.parentDeclaration as? KSClassDeclaration
-        }
-        return true
-    }
-
-    private fun renderTypeRef(prop: KSPropertyDeclaration): String {
-        val type = prop.type.resolve()
-        val base = type.declaration.qualifiedName?.asString() ?: "kotlin.Any"
-        return if (type.isMarkedNullable) "$base?" else base
-    }
+    private fun renderTypeRef(prop: KSPropertyDeclaration): String = renderKsType(prop.type.resolve())
 
     private fun KSPropertyDeclaration.isCollectionTyped(): Boolean {
         val fqn = type.resolve().makeNotNullable().declaration.qualifiedName?.asString() ?: return false

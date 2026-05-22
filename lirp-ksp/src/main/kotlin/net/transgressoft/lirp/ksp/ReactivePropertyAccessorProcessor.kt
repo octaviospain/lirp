@@ -17,7 +17,7 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.google.devtools.ksp.getVisibility
+import com.google.devtools.ksp.isAbstract
 import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.Dependencies
 import com.google.devtools.ksp.processing.KSPLogger
@@ -26,8 +26,6 @@ import com.google.devtools.ksp.processing.SymbolProcessor
 import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
-import com.google.devtools.ksp.symbol.KSType
-import com.google.devtools.ksp.symbol.Visibility
 import com.google.devtools.ksp.validate
 
 /**
@@ -62,12 +60,13 @@ class ReactivePropertyAccessorProcessor(private val codeGenerator: CodeGenerator
                 if (fqn in generatedAccessors) return@forEach
                 // Generic abstract bases (e.g. ReactivePrimitiveWrapper<R, V>) cannot have a
                 // non-parameterized accessor. Concrete subclasses get their own accessor.
-                if (classDecl.typeParameters.isNotEmpty()) return@forEach
-                // Skip entities that aren't visible to a public generated accessor in the same
-                // package — private/internal test fixtures will have their generated accessors
-                // fail to compile because the entity type is inaccessible from the public class.
-                val visibility = classDecl.getVisibility()
-                if (visibility != Visibility.PUBLIC && visibility != Visibility.JAVA_PACKAGE) return@forEach
+                // Abstract entities cannot be instantiated from persisted rows, so any accessor
+                // generated for them would be unreachable.
+                if (classDecl.typeParameters.isNotEmpty() || classDecl.isAbstract()) return@forEach
+                // Walk the parent declaration chain: a `public` nested entity inside an
+                // `internal`/`private` outer would still produce `public exposes internal type`
+                // compile errors on the generated `public class ... : LirpReactivePropertyAccessor<E>`.
+                if (!isPubliclyVisible(classDecl)) return@forEach
                 val reactiveProps = collectReactivePropertiesIncludingInherited(classDecl)
                 if (reactiveProps.isNotEmpty()) {
                     generateAccessor(classDecl, reactiveProps)
@@ -147,23 +146,6 @@ class ReactivePropertyAccessorProcessor(private val codeGenerator: CodeGenerator
         file.close()
 
         logger.info("Generated $packageName.$accessorName for $kotlinName")
-    }
-
-    private fun renderKsType(type: KSType): String {
-        val baseName = type.declaration.qualifiedName?.asString() ?: return "Any?"
-        val args = type.arguments
-        val rendered =
-            if (args.isEmpty()) {
-                baseName
-            } else {
-                val renderedArgs =
-                    args.joinToString(", ") { arg ->
-                        val argType = arg.type?.resolve()
-                        if (argType != null) renderKsType(argType) else "*"
-                    }
-                "$baseName<$renderedArgs>"
-            }
-        return if (type.isMarkedNullable) "$rendered?" else rendered
     }
 }
 

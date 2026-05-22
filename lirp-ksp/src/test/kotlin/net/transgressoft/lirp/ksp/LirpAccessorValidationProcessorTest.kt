@@ -251,6 +251,11 @@ internal class LirpAccessorValidationProcessorTest : StringSpec({
         val result = compilation.compile()
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
+        // Lock the failure path explicitly: the entity has reactive-property delegates AND no
+        // raw initializer, so generic hint matching alone could pass on the wrong branch.
+        // Assert on the reactive-accessor message and the entity name to pin the intent.
+        result.messages shouldContain "ReactiveEntity"
+        result.messages shouldContain "LirpReactivePropertyAccessor"
         result.messages shouldContain "apply the net.transgressoft.lirp.sql Gradle plugin or add lirp-ksp to your build.gradle dependencies block"
     }
 

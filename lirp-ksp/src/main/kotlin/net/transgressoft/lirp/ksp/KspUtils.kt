@@ -18,11 +18,15 @@
 package net.transgressoft.lirp.ksp
 
 import com.google.devtools.ksp.getDeclaredProperties
+import com.google.devtools.ksp.getVisibility
 import com.google.devtools.ksp.symbol.ClassKind
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.symbol.KSTypeAlias
+import com.google.devtools.ksp.symbol.KSTypeArgument
+import com.google.devtools.ksp.symbol.Variance
+import com.google.devtools.ksp.symbol.Visibility
 
 internal const val REACTIVE_ENTITY_BASE_FQN = "net.transgressoft.lirp.entity.ReactiveEntityBase"
 internal const val IDENTIFIABLE_ENTITY_FQN = "net.transgressoft.lirp.entity.IdentifiableEntity"
@@ -140,6 +144,25 @@ internal fun isFxScalarType(type: KSType, visited: MutableSet<String> = mutableS
 }
 
 /**
+ * Returns true when [decl] and every enclosing class declaration is `public` (or Java
+ * package-private, treated as public from Kotlin's perspective).
+ *
+ * Generated accessor types are always `public`. If a nested entity sits under an
+ * `internal`/`private` outer class, emitting a `public class <Entity>_LirpReactivePropertyAccessor :
+ * LirpReactivePropertyAccessor<Entity>` would surface "public exposes internal type" and fail to
+ * compile. Walking the parent chain catches that case before code generation begins.
+ */
+internal fun isPubliclyVisible(decl: KSClassDeclaration): Boolean {
+    var current: KSClassDeclaration? = decl
+    while (current != null) {
+        val visibility = current.getVisibility()
+        if (visibility != Visibility.PUBLIC && visibility != Visibility.JAVA_PACKAGE) return false
+        current = current.parentDeclaration as? KSClassDeclaration
+    }
+    return true
+}
+
+/**
  * Returns true when [prop] is a `var ... by reactiveProperty(...)` delegate on an entity class.
  *
  * KSP does not expose the delegate-expression type directly — `prop.type.resolve()` returns the
@@ -152,16 +175,61 @@ internal fun isFxScalarType(type: KSType, visited: MutableSet<String> = mutableS
  *   and `aggregateSet` delegates whose declared types are `List`/`Set`).
  *
  * The remaining set covers ordinary `reactiveProperty(initialValue)`, `@Version`-annotated
- * `var version: Long by reactiveProperty(0L)`, and `@Aggregate` single-ref Id properties — all of
- * which are reactive-backed per the phase research.
+ * `var version: Long by reactiveProperty(0L)`, and `@Aggregate` single-ref Id properties — all
+ * reactive-backed delegate types.
  */
 internal fun isReactivePropertyDelegate(prop: KSPropertyDeclaration): Boolean {
     if (!prop.isDelegated() || !prop.isMutable) return false
     val resolvedType = prop.type.resolve()
     if (isFxScalarType(resolvedType)) return false
-    val typeFqn = resolvedType.declaration.qualifiedName?.asString() ?: return false
-    if (typeFqn in KOTLIN_COLLECTION_FQNS) return false
+    // Type-parameter properties (e.g. `var value: V by reactiveProperty(...)` on a generic base)
+    // have a null qualifiedName because `V` has no FQN. They are still reactive — concrete
+    // subclasses inherit them as reactive-backed fields and need accessor/raw-init entries.
+    val typeFqn = resolvedType.declaration.qualifiedName?.asString()
+    if (typeFqn != null && typeFqn in KOTLIN_COLLECTION_FQNS) return false
     return true
+}
+
+/**
+ * Renders a [KSType] back to a Kotlin source representation that preserves its generic type
+ * arguments and nullability, e.g. `kotlin.collections.Map<kotlin.String, kotlin.Long?>`.
+ *
+ * Used by generated code where the rendered string is interpolated into an `as` cast. Dropping
+ * type arguments here would produce an unchecked raw-type cast and lose the static guarantees the
+ * declared property type already gave us.
+ *
+ * When the type's declaration has no FQN (type-parameter references like `V` or `T`), falls back
+ * to `kotlin.Any?` — the generated cast then matches the erased upper bound, which is the most
+ * specific thing the compiler can verify for an unconstrained type parameter.
+ */
+internal fun renderKsType(type: KSType): String {
+    val baseName = type.declaration.qualifiedName?.asString() ?: return "kotlin.Any?"
+    val args = type.arguments
+    val rendered =
+        if (args.isEmpty()) {
+            baseName
+        } else {
+            val renderedArgs = args.joinToString(", ") { arg -> renderKsTypeArgument(arg) }
+            "$baseName<$renderedArgs>"
+        }
+    return if (type.isMarkedNullable) "$rendered?" else rendered
+}
+
+/**
+ * Renders a single [KSTypeArgument] preserving its use-site variance — `out X` for `COVARIANT`,
+ * `in X` for `CONTRAVARIANT`, `*` for `STAR` projections or unresolved argument types. Without
+ * this, projected property types like `Box<out Foo>` would collapse to `Box<Foo>` in generated
+ * casts and serializer type arguments, silently widening the type used at the generation site.
+ */
+internal fun renderKsTypeArgument(arg: KSTypeArgument): String {
+    if (arg.variance == Variance.STAR) return "*"
+    val argType = arg.type?.resolve() ?: return "*"
+    val rendered = renderKsType(argType)
+    return when (arg.variance) {
+        Variance.COVARIANT -> "out $rendered"
+        Variance.CONTRAVARIANT -> "in $rendered"
+        else -> rendered
+    }
 }
 
 /**

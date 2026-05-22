@@ -49,7 +49,6 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.jetbrains.exposed.v1.jdbc.update
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicReference
 import javax.sql.DataSource
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -428,22 +427,20 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      * primary key. Must be called from within an Exposed transaction.
      */
     private fun JdbcTransaction.loadEntities(): Map<K, R> {
-        val rawInitRef = AtomicReference<LirpRawInitializer<R>?>()
-        // Tracks whether we already attempted (and failed) to resolve a raw initializer
-        // for the entity class. Hand-written SqlTableDefs that bypass KSP populate the
-        // entity entirely inside [fromRow] and have no raw initializer — for those we
-        // skip the applyScalarRow fast path silently. The KSP-mandatory contract is
-        // surfaced when the entity is part of a KSP-processed module (validator + the
-        // generated `<Entity>_LirpTableDef.applyScalarRow` are produced in lock-step).
-        var rawInitResolutionAttempted = false
+        // Cache the raw initializer per concrete entity class. `fromRow` is free to materialize
+        // subclasses on a per-row basis (e.g. discriminator-driven polymorphic hydration), so a
+        // single resolved-once initializer would feed the wrong silent setters into later rows.
+        // Hand-written SqlTableDefs that bypass KSP populate the entity entirely inside
+        // [fromRow] and have no raw initializer — for those the cached value is `null` and the
+        // applyScalarRow fast path is skipped silently. The KSP-mandatory contract is surfaced
+        // when the entity is part of a KSP-processed module (validator + the generated
+        // `<Entity>_LirpTableDef.applyScalarRow` are produced in lock-step).
+        val rawInitByClass = mutableMapOf<Class<*>, LirpRawInitializer<R>?>()
         val entities =
             table.selectAll().map { row ->
                 val entity = tableDef.fromRow(row, table)
-                if (!rawInitResolutionAttempted) {
-                    rawInitResolutionAttempted = true
-                    rawInitRef.set(resolveRawInitializer(entity))
-                }
-                rawInitRef.get()?.let { applyScalarRow(entity, row, it) }
+                val rawInit = rawInitByClass.getOrPut(entity::class.java) { resolveRawInitializer(entity) }
+                rawInit?.let { applyScalarRow(entity, row, it) }
                 entity
             }
         return entities.associateBy { it.id }

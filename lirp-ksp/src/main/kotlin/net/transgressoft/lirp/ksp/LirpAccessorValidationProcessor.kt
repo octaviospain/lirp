@@ -17,7 +17,7 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.google.devtools.ksp.getVisibility
+import com.google.devtools.ksp.isAbstract
 import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.Dependencies
 import com.google.devtools.ksp.processing.KSPLogger
@@ -29,7 +29,6 @@ import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.symbol.KSTypeAlias
-import com.google.devtools.ksp.symbol.Visibility
 
 private const val INDEXED_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.Indexed"
 
@@ -146,7 +145,7 @@ class LirpAccessorValidationProcessor(
                 // Mirror the per-processor skip rules: generic abstract bases and non-public
                 // entities never get a generated accessor, so validating their absence would
                 // produce false-positive errors.
-                if (classDecl.typeParameters.isNotEmpty()) return@mapNotNull null
+                if (classDecl.typeParameters.isNotEmpty() || classDecl.isAbstract()) return@mapNotNull null
                 // Walk parent declarations too — a nested entity whose enclosing class is
                 // internal/private cannot receive a public generated accessor, mirroring the
                 // skip rules in RawInitializerProcessor and ReactivePropertyAccessorProcessor.
@@ -177,16 +176,6 @@ class LirpAccessorValidationProcessor(
                 }
             }
             .toList()
-    }
-
-    private fun isPubliclyVisible(decl: KSClassDeclaration): Boolean {
-        var current: KSClassDeclaration? = decl
-        while (current != null) {
-            val visibility = current.getVisibility()
-            if (visibility != Visibility.PUBLIC && visibility != Visibility.JAVA_PACKAGE) return false
-            current = current.parentDeclaration as? KSClassDeclaration
-        }
-        return true
     }
 
     private fun allClassDeclarations(classDecl: KSClassDeclaration): Sequence<KSClassDeclaration> =

@@ -19,11 +19,9 @@ package net.transgressoft.lirp.persistence.json
 
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import io.kotest.core.spec.style.StringSpec
-import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import java.io.File
-import java.lang.management.ManagementFactory
 import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.serialization.builtins.MapSerializer
@@ -116,13 +114,33 @@ class JsonFileRepositoryRawInitLoadTest : StringSpec({
         file.parentFile?.deleteRecursively()
     }
 
-    "[JsonFileRepository] bulk load runs without --add-opens JVM flags" {
-        val jvmArgs = ManagementFactory.getRuntimeMXBean().inputArguments
-        val javaBaseAddOpens =
-            jvmArgs.filter {
-                it.contains("--add-opens") &&
-                    it.contains("java.base/")
-            }
-        javaBaseAddOpens.shouldBeEmpty()
+    "[JsonFileRepository] bulk load restores reactive backing fields without java.base reflection" {
+        // Behavioral guarantee for the deleted reflection fallback: a fresh load must populate
+        // every reactive-backed property to its persisted value via the KSP-generated silent
+        // setter. Under the old `KProperty1.get` + `Method.invoke(setValueMethod)` path this
+        // required `--add-opens=java.base/java.lang` at JVM start; the test process here runs
+        // without that flag, so any retained reflection in the load path would surface as an
+        // InaccessibleObjectException rather than as a quiet correctness failure.
+        val file = freshJsonFile()
+        val seedRepo = JsonFileRepository(file, bulkSerializer())
+        repeat(5) { i ->
+            seedRepo.add(
+                BulkLoadEntity(i).apply {
+                    label = "reflection-free-$i"
+                    counter = i * 7
+                }
+            )
+        }
+        seedRepo.close()
+
+        val repo = JsonFileRepository(file, bulkSerializer())
+        repo.size() shouldBe 5
+        for (i in 0 until 5) {
+            val loaded = repo.findById(i).orElseThrow()
+            loaded.label shouldBe "reflection-free-$i"
+            loaded.counter shouldBe i * 7
+        }
+        repo.close()
+        file.parentFile?.deleteRecursively()
     }
 })

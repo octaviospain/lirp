@@ -115,6 +115,9 @@ fun <T> writeReactivePropertyBackingField(
     propertyName: String,
     value: T
 ) {
+    check(!entity.isClosed) {
+        "Entity '${entity::class.java.simpleName}' is closed; cannot write backing field '$propertyName'"
+    }
     val delegate =
         entity.delegateRegistry[propertyName]
             ?: error("No delegate registered for property '$propertyName' on ${entity::class.qualifiedName}")

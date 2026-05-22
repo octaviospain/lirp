@@ -198,11 +198,11 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
                 if (seen.add(concreteClass)) {
                     // Trigger Class.forName + cache the LirpRawInitializer to surface a
                     // `configure KSP` error at load time when an entity participates in a
-                    // KSP-processed module but no accessor was generated. Hand-written test
-                    // fixtures that bypass KSP entirely are tolerated — LirpEntitySerializer
-                    // already populated every persisted field via the configure-KSP-gated
-                    // reactive-property path.
-                    runCatching { RegistryBase.rawInitializerFor(concreteClass) }
+                    // KSP-processed module but no accessor was generated. The failure is
+                    // load-fatal by design — swallowing it would hide the very `configure KSP`
+                    // contract this pass exists to enforce, plus any constructor/linkage
+                    // failure in the generated initializer.
+                    RegistryBase.rawInitializerFor(concreteClass)
                 }
             }
         }
