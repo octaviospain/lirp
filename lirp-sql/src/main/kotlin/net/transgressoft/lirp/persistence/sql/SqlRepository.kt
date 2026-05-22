@@ -584,8 +584,13 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                 // Enqueue for bounded retry on the next flush cycle. The retry loop in
                 // drainStaleIds() escalates to a RecoveryFailed event after MAX_RECOVERY_ATTEMPTS
                 // total failures for the same id.
+                // Preserve the ORIGINAL expectedVersion across retries for an id: once an entry
+                // is queued, its expectedVersion is the row state at first-conflict capture and
+                // must not be overwritten by a subsequent conflict carrying a newer version, or
+                // the retry would silently re-target a different row generation.
                 staleIds.compute(conflict.id) { _, prev ->
-                    StaleEntry(conflict.expectedVersion, (prev?.attempts ?: 0) + 1)
+                    prev?.copy(attempts = prev.attempts + 1)
+                        ?: StaleEntry(conflict.expectedVersion, 1)
                 }
             }
         }
@@ -912,7 +917,12 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                 }
                 staleIds.remove(id)
             } catch (e: Exception) {
-                if (entry.attempts >= MAX_RECOVERY_ATTEMPTS) {
+                // Count this drain attempt BEFORE deciding to escalate so escalation fires on
+                // the MAX_RECOVERY_ATTEMPTS-th failure (not the (MAX+1)-th). The initial
+                // post-commit failure already records attempts=1, so the on-disk semantics are
+                // "escalate after exactly MAX_RECOVERY_ATTEMPTS total failures for this id".
+                val nextAttempts = entry.attempts + 1
+                if (nextAttempts >= MAX_RECOVERY_ATTEMPTS) {
                     log.error(e) {
                         "recoverEntityFromConflict permanently failed for id=$id after " +
                             "$MAX_RECOVERY_ATTEMPTS attempts; emitting RecoveryFailed"
@@ -920,9 +930,8 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                     publisher.emitAsync(StandardCrudEvent.RecoveryFailed<K, R>(id, entry.expectedVersion, e))
                     staleIds.remove(id)
                 } else {
-                    val next = entry.attempts + 1
                     staleIds.compute(id) { _, prev ->
-                        prev?.copy(attempts = next) ?: StaleEntry(entry.expectedVersion, next)
+                        (prev ?: entry).copy(attempts = nextAttempts)
                     }
                 }
             }

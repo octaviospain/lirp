@@ -198,6 +198,20 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
 
         private val subscriptionsMap: MutableMap<K, LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>> = ConcurrentHashMap()
 
+        // Per-id lifecycle lock: serialises `add(entity)` against `remove(entity)` for the SAME
+        // key. Without it a concurrent remover can claim and cancel the tentative subscription
+        // installed by [subscribeEntity] between the moment `add` calls it and the moment `add`
+        // delegates to `super.add()`; the remover's `super.remove()` then observes the entity as
+        // absent and returns false, while `add`'s `super.add()` returns true — leaving the entity
+        // visible with no live subscription so subsequent mutations stop flowing to `enqueueUpdate`.
+        // The lock map grows proportionally to the repo's id cardinality (locks are retained for
+        // future add/remove cycles on the same id); this matches the in-memory entity bound so it
+        // does not represent unbounded growth beyond what the repository itself stores.
+        private val lifecycleLocks = ConcurrentHashMap<K, ReentrantLock>()
+
+        private inline fun <T> withLifecycleLock(id: K, block: () -> T): T =
+            lifecycleLocks.computeIfAbsent(id) { ReentrantLock() }.withLock(block)
+
         val dirty = AtomicBoolean(false)
 
         @Volatile
@@ -575,22 +589,28 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
                 // Returning false here is consistent with the contract that mutating operations
                 // on a closed repository do not mutate state.
                 if (closed) return@read false
-                subscribeEntity(entity)
-                val added = super.add(entity)
-                if (added) {
-                    enqueueInsertLocked(entity)
-                } else {
-                    // Rollback the tentative subscription — the entity was already present so the
-                    // existing canonical subscription has been overwritten by `subscribeEntity`
-                    // above. Cancelling and removing the tentative subscription preserves the
-                    // map's invariant that a key has at most one live subscription, at the cost
-                    // of a transient gap for ids whose original subscription this call replaced.
-                    // The gap is acceptable because under correct usage `add(entity)` on an
-                    // already-present entity is itself the application bug being signalled by
-                    // the `false` return value.
-                    subscriptionsMap.remove(entity.id)?.cancel()
+                // Lifecycle lock serialises against a concurrent remove() on the same id so that
+                // the subscribeEntity→super.add pair runs atomically: without it, a remover can
+                // claim and cancel the tentative subscription between subscribeEntity and
+                // super.add, leaving the entity visible with no live subscription.
+                withLifecycleLock(entity.id) {
+                    subscribeEntity(entity)
+                    val added = super.add(entity)
+                    if (added) {
+                        enqueueInsertLocked(entity)
+                    } else {
+                        // Rollback the tentative subscription — the entity was already present so the
+                        // existing canonical subscription has been overwritten by `subscribeEntity`
+                        // above. Cancelling and removing the tentative subscription preserves the
+                        // map's invariant that a key has at most one live subscription, at the cost
+                        // of a transient gap for ids whose original subscription this call replaced.
+                        // The gap is acceptable because under correct usage `add(entity)` on an
+                        // already-present entity is itself the application bug being signalled by
+                        // the `false` return value.
+                        subscriptionsMap.remove(entity.id)?.cancel()
+                    }
+                    added
                 }
-                added
             }
         }
 
@@ -607,30 +627,35 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
             checkLoaded()
             return pendingLock.read {
                 if (closed) return@read false
-                // Use the subscription map as the atomic ownership token: only one concurrent
-                // remover claims the subscription. Losers see null and return false — matching
-                // the existing contract that remove() of an absent (or already-being-removed)
-                // entity is a no-op false return.
-                val subscription =
-                    subscriptionsMap.remove(entity.id)
-                        ?: return@read false
-                subscription.cancel()
-                val removed = super.remove(entity)
-                if (removed) {
-                    // For `@Version`-aware subclasses, [extractVersion] captures the row's
-                    // version at remove() time so the DELETE statement can check it in its
-                    // WHERE clause.
-                    enqueueDeleteLocked(entity.id, extractVersion(entity))
+                // Lifecycle lock serialises against a concurrent add() on the same id so the
+                // subscriptionsMap.remove→super.remove pair runs atomically — see [add] for the
+                // failure mode if the two paths interleave.
+                withLifecycleLock(entity.id) {
+                    // Use the subscription map as the atomic ownership token: only one concurrent
+                    // remover claims the subscription. Losers see null and return false — matching
+                    // the existing contract that remove() of an absent (or already-being-removed)
+                    // entity is a no-op false return.
+                    val subscription =
+                        subscriptionsMap.remove(entity.id)
+                            ?: return@withLifecycleLock false
+                    subscription.cancel()
+                    val removed = super.remove(entity)
+                    if (removed) {
+                        // For `@Version`-aware subclasses, [extractVersion] captures the row's
+                        // version at remove() time so the DELETE statement can check it in its
+                        // WHERE clause.
+                        enqueueDeleteLocked(entity.id, extractVersion(entity))
+                    }
+                    // Pre-#200 the lifecycle ran in the opposite order: super.remove() FIRST, then
+                    // an `error(...)` invariant detector if the subscription was missing. That
+                    // invariant could not hold under concurrent add/remove on the same id — see
+                    // commit history for #200. Under cancel-first ordering the subscription
+                    // claim above is the atomic ownership token, so the detector cannot fire from
+                    // this code path. The detector's original sentinel string is preserved
+                    // verbatim, exactly once in this file, as documentation of the retired
+                    // invariant: error("Repository should contain a subscription for $entity").
+                    removed
                 }
-                // Pre-#200 the lifecycle ran in the opposite order: super.remove() FIRST, then
-                // an `error(...)` invariant detector if the subscription was missing. That
-                // invariant could not hold under concurrent add/remove on the same id — see
-                // commit history for #200. Under cancel-first ordering the subscription
-                // claim above is the atomic ownership token, so the detector cannot fire from
-                // this code path. The detector's original sentinel string is preserved
-                // verbatim, exactly once in this file, as documentation of the retired
-                // invariant: error("Repository should contain a subscription for $entity").
-                removed
             }
         }
 

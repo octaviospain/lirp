@@ -21,7 +21,6 @@ import com.zaxxer.hikari.HikariDataSource
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.DisplayName
-import java.sql.SQLException
 
 /**
  * Regression test for #202 — `SqlRepository`'s `clear()` and per-id `remove()` paths must wipe
@@ -43,17 +42,17 @@ import java.sql.SQLException
 class SqlRepositoryJunctionOrphanIntegrationTest : StringSpec({
 
     fun resetSchema(dataSource: HikariDataSource) {
+        // DROP TABLE IF EXISTS already handles the "table missing" case across PostgreSQL, MySQL,
+        // MariaDB and SQLite, so any propagated SQLException is a real setup failure that must
+        // surface — silently swallowing it would mask schema corruption and let regression tests
+        // pass for the wrong reason.
         for (sql in listOf(
             "DROP TABLE IF EXISTS fk_parent_children",
             "DROP TABLE IF EXISTS fk_parents",
             "DROP TABLE IF EXISTS fk_children"
         )) {
-            try {
-                dataSource.connection.use { conn ->
-                    conn.createStatement().use { stmt -> stmt.execute(sql) }
-                }
-            } catch (_: SQLException) {
-                // ignore — table may not exist on a fresh database
+            dataSource.connection.use { conn ->
+                conn.createStatement().use { stmt -> stmt.execute(sql) }
             }
         }
     }
