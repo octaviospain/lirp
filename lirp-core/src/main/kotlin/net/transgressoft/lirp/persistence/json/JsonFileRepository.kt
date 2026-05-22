@@ -22,6 +22,7 @@ import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.persistence.AbstractMutableAggregateCollectionRefDelegate
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpDeserializationException
+import net.transgressoft.lirp.persistence.LirpRawInitializer
 import net.transgressoft.lirp.persistence.MutableAggregateList
 import net.transgressoft.lirp.persistence.MutableAggregateSet
 import net.transgressoft.lirp.persistence.PendingUpdate
@@ -166,9 +167,44 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
             }
             val entities = decodeFromJson() ?: emptyMap()
             log.info { "${entities.size} objects deserialized from file $jsonFile" }
+            // Symmetric with SqlRepository.loadFromStore: resolve the KSP-generated raw initializer
+            // for each decoded entity and re-affirm every persisted field via its silent setter
+            // inside withEventsDisabled. LirpEntitySerializer.deserialize already restored reactive
+            // fields via LirpReactivePropertyAccessor; this pass also covers non-reactive var fields
+            // (e.g. lastDateModified) that bypass the entity's reactive setter. Subscribers attached
+            // after load() observe no retroactive MutationEvent.
+            applyRawInitializerSilently(entities)
             reconcileDanglingRefs(entities)
             dirty.set(false)
             return entities
+        }
+
+        /**
+         * Validates that every loaded entity has a KSP-generated [LirpRawInitializer] available.
+         *
+         * `LirpEntitySerializer.deserialize` already routes reactive-property restoration through
+         * the KSP-generated `<Entity>_LirpReactivePropertyAccessor.silentSetter`, so the JSON
+         * bulk-load path is symmetric with the SQL path — both bypass the reactive setter when
+         * populating freshly constructed entities. This pass resolves the raw initializer for each
+         * distinct entity class to surface a clear `configure KSP` error at load time if a consumer
+         * has not applied `lirp-ksp` to one of their entity modules. It does not re-apply values:
+         * the entity is already in its desired state once `deserialize` returns.
+         */
+        private fun applyRawInitializerSilently(entities: Map<K, R>) {
+            if (entities.isEmpty()) return
+            val seen = mutableSetOf<Class<*>>()
+            for (entity in entities.values) {
+                val concreteClass = entity::class.java
+                if (seen.add(concreteClass)) {
+                    // Trigger Class.forName + cache the LirpRawInitializer to surface a
+                    // `configure KSP` error at load time when an entity participates in a
+                    // KSP-processed module but no accessor was generated. The failure is
+                    // load-fatal by design — swallowing it would hide the very `configure KSP`
+                    // contract this pass exists to enforce, plus any constructor/linkage
+                    // failure in the generated initializer.
+                    RegistryBase.rawInitializerFor(concreteClass)
+                }
+            }
         }
 
         /**

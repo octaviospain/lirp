@@ -147,8 +147,11 @@ internal class LirpAccessorValidationProcessorTest : StringSpec({
                 inheritClassPath = true
             }
         compilation.configureKsp { withCompilation = true }
-        // Both the generator and the validator are registered — no false positive expected
+        // Both the generator and the validator are registered — no false positive expected.
+        // RawInitializerProcessor is registered to satisfy the raw-init validation now applied
+        // to every persisted entity.
         compilation.symbolProcessorProviders += IndexedProcessorProvider()
+        compilation.symbolProcessorProviders += RawInitializerProcessorProvider()
         compilation.symbolProcessorProviders += LirpAccessorValidationProcessorProvider()
         val result = compilation.compile()
 
@@ -180,8 +183,11 @@ internal class LirpAccessorValidationProcessorTest : StringSpec({
                 inheritClassPath = true
             }
         compilation.configureKsp { withCompilation = true }
-        // Both the generator and the validator are registered — no false positive expected
+        // Both the generator and the validator are registered — no false positive expected.
+        // RawInitializerProcessor is registered to satisfy the raw-init validation now applied
+        // to every persisted entity.
         compilation.symbolProcessorProviders += FxScalarAccessorProcessorProvider()
+        compilation.symbolProcessorProviders += RawInitializerProcessorProvider()
         compilation.symbolProcessorProviders += LirpAccessorValidationProcessorProvider()
         val result = compilation.compile()
 
@@ -218,6 +224,41 @@ internal class LirpAccessorValidationProcessorTest : StringSpec({
         result.messages shouldNotContain "has FxScalar delegates but no generated LirpFxScalarAccessor"
     }
 
+    "fails build when entity has reactive-property fields but no LirpReactivePropertyAccessor" {
+        val compilation =
+            KotlinCompilation().apply {
+                sources =
+                    listOf(
+                        SourceFile.kotlin(
+                            "ReactiveEntity.kt",
+                            """
+                            package test
+                            import net.transgressoft.lirp.entity.ReactiveEntityBase
+
+                            data class ReactiveEntity(override val id: Int) : ReactiveEntityBase<Int, ReactiveEntity>() {
+                                override val uniqueId: String get() = "${'$'}id"
+                                override fun clone() = copy()
+                                var x: Int by reactiveProperty(0)
+                            }
+                            """
+                        )
+                    )
+                inheritClassPath = true
+            }
+        compilation.configureKsp { withCompilation = true }
+        // Only the validation processor, not the ReactivePropertyAccessorProcessor
+        compilation.symbolProcessorProviders += LirpAccessorValidationProcessorProvider()
+        val result = compilation.compile()
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
+        // Lock the failure path explicitly: the entity has reactive-property delegates AND no
+        // raw initializer, so generic hint matching alone could pass on the wrong branch.
+        // Assert on the reactive-accessor message and the entity name to pin the intent.
+        result.messages shouldContain "ReactiveEntity"
+        result.messages shouldContain "LirpReactivePropertyAccessor"
+        result.messages shouldContain "apply the net.transgressoft.lirp.sql Gradle plugin or add lirp-ksp to your build.gradle dependencies block"
+    }
+
     "error message contains entity name, missing accessor type, and fix hint" {
         val compilation =
             KotlinCompilation().apply {
@@ -248,5 +289,41 @@ internal class LirpAccessorValidationProcessorTest : StringSpec({
         result.messages shouldContain "CustomerEntity"
         result.messages shouldContain "LirpIndexAccessor"
         result.messages shouldContain "Ensure lirp-ksp is applied"
+    }
+
+    "fails build when entity is missing LirpRawInitializer" {
+        val compilation =
+            KotlinCompilation().apply {
+                sources =
+                    listOf(
+                        fxPropertyStubs,
+                        SourceFile.kotlin(
+                            "OrderEntity.kt",
+                            """
+                            package test
+                            import net.transgressoft.lirp.entity.ReactiveEntityBase
+                            import net.transgressoft.lirp.persistence.StubStringProperty
+
+                            data class OrderEntity(override val id: Int) : ReactiveEntityBase<Int, OrderEntity>() {
+                                override val uniqueId: String get() = "${'$'}id"
+                                override fun clone() = copy()
+                                val name by StubStringProperty()
+                            }
+                            """
+                        )
+                    )
+                inheritClassPath = true
+            }
+        compilation.configureKsp { withCompilation = true }
+        // ReactivePropertyAccessor + FxScalar generators present but NOT RawInitializerProcessor —
+        // the validator must surface the missing raw initializer with the remediation message.
+        compilation.symbolProcessorProviders += ReactivePropertyAccessorProcessorProvider()
+        compilation.symbolProcessorProviders += FxScalarAccessorProcessorProvider()
+        compilation.symbolProcessorProviders += LirpAccessorValidationProcessorProvider()
+        val result = compilation.compile()
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
+        result.messages shouldContain "has no generated LirpRawInitializer"
+        result.messages shouldContain "apply the net.transgressoft.lirp.sql Gradle plugin or add lirp-ksp to your build.gradle dependencies block"
     }
 })

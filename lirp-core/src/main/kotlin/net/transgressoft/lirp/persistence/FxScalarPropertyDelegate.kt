@@ -29,7 +29,7 @@ package net.transgressoft.lirp.persistence
  *
  * The injected [callback] parameter accepts a mutation block supplied by the delegate —
  * typically a lambda that calls `super.set(newValue)` on the underlying Simple*Property.
- * RegistryBase wraps this block in [net.transgressoft.lirp.entity.ReactiveEntityBase.emitFxScalarMutation]
+ * RegistryBase wraps this block in [net.transgressoft.lirp.entity.ReactiveEntityBase.emitReactiveMutation]
  * to ensure clone-before-mutation ordering and correct event emission.
  */
 fun interface FxScalarPropertyDelegate {

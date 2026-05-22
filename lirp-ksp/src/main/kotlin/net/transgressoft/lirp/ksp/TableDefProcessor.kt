@@ -560,6 +560,8 @@ class TableDefProcessor(
             appendToParams(className, columns)
             appendLine()
             appendApplyRow(className, columns)
+            appendLine()
+            appendApplyScalarRow(className, columns)
             appendBumpVersion(className, columns)
             appendForeignKeys(foreignKeys)
             appendJunctionOverrides(className, junctionRefs)
@@ -710,6 +712,35 @@ class TableDefProcessor(
                 val rowAccess = buildRowAccess(col)
                 appendLine("        entity.${col.propertyName} = $rowAccess")
             }
+        }
+        appendLine("    }")
+    }
+
+    private fun StringBuilder.appendApplyScalarRow(className: String, columns: List<ColumnMeta>) {
+        // Override the default applyScalarRow on SqlTableDef. The default body throws — the override
+        // walks the supplied LirpRawInitializer entries, resolves each entry's Kotlin property name
+        // to its column on the table, reads the row value with the same conversion semantics as
+        // fromRow / applyRow (UUID, LocalDate, LocalDateTime, Enum), and dispatches to the entry's
+        // silentSetter so reactive backing fields are written without firing events.
+        appendLine("    override fun applyScalarRow(")
+        appendLine("        entity: $className,")
+        appendLine("        row: org.jetbrains.exposed.v1.core.ResultRow,")
+        appendLine("        table: org.jetbrains.exposed.v1.core.Table,")
+        appendLine("        rawInit: net.transgressoft.lirp.persistence.LirpRawInitializer<$className>")
+        appendLine("    ) {")
+        if (columns.isEmpty()) {
+            appendLine("        // No mapped columns — applyScalarRow is a no-op.")
+        } else {
+            appendLine("        for (entry in rawInit.entries) {")
+            appendLine("            val value: Any? = when (entry.name) {")
+            for (col in columns) {
+                val rowAccess = buildRowAccess(col)
+                appendLine("                \"${col.propertyName}\" -> $rowAccess")
+            }
+            appendLine("                else -> continue")
+            appendLine("            }")
+            appendLine("            entry.silentSetter(entity, value)")
+            appendLine("        }")
         }
         appendLine("    }")
     }

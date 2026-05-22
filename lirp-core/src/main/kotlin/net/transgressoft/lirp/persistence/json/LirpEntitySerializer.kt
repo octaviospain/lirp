@@ -22,18 +22,18 @@ import net.transgressoft.lirp.persistence.AbstractMutableAggregateCollectionRefD
 import net.transgressoft.lirp.persistence.AggregateCollectionRef
 import net.transgressoft.lirp.persistence.FxScalarPropertyDelegate
 import net.transgressoft.lirp.persistence.LirpFxScalarAccessor
+import net.transgressoft.lirp.persistence.LirpReactivePropertyAccessor
 import net.transgressoft.lirp.persistence.MutableAggregateList
 import net.transgressoft.lirp.persistence.MutableAggregateSet
-import io.github.oshai.kotlinlogging.KotlinLogging
-import java.lang.reflect.Method
+import net.transgressoft.lirp.persistence.ReactivePropertyDelegate
+import net.transgressoft.lirp.persistence.ReactivePropertyDelegateWithAccessors
+import net.transgressoft.lirp.persistence.ReactivePropertyEntry
 import kotlin.reflect.KClass
 import kotlin.reflect.KParameter
-import kotlin.reflect.KProperty1
 import kotlin.reflect.full.createType
 import kotlin.reflect.full.memberProperties
 import kotlin.reflect.full.primaryConstructor
 import kotlin.reflect.jvm.isAccessible
-import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.descriptors.SerialDescriptor
@@ -45,12 +45,17 @@ import kotlinx.serialization.serializer
 
 /**
  * Runtime [KSerializer] for [ReactiveEntityBase] subclasses that serializes entities
- * by introspecting their LIRP delegate registry instead of relying on KSP-generated code
- * or `@Serializable` annotations.
+ * by introspecting their LIRP delegate registry and KSP-generated accessor classes.
  *
  * Constructor parameters are serialized first (discovered via [KClass.primaryConstructor]),
  * followed by delegate properties (discovered via [ReactiveEntityBase.delegateRegistry]).
  * JSON field names match property names exactly.
+ *
+ * Reactive-property-backed fields are read and written through the KSP-generated
+ * `{EntityName}_LirpReactivePropertyAccessor` (looked up via [Class.forName]). FxScalar-backed
+ * fields use the analogous `{EntityName}_LirpFxScalarAccessor`. KSP is mandatory for any entity
+ * with reactive-property or FxScalar delegates; a missing accessor at runtime surfaces a clear
+ * `configure KSP` error rather than a swallowed `ClassNotFoundException`.
  *
  * Usage: pass a sample entity instance to the [lirpSerializer] factory function to build
  * the serializer, then use it with [MapSerializer] when constructing a [JsonFileRepository]:
@@ -68,10 +73,6 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
     sampleInstance: E
 ) : KSerializer<E> {
 
-    private companion object {
-        private val log = KotlinLogging.logger {}
-    }
-
     /**
      * Describes a constructor parameter that contributes to the serialized form.
      */
@@ -82,17 +83,16 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
 
     /**
      * Describes a delegate property that contributes to the serialized form.
-     * Uses `KProperty1<Any, Any?>` to avoid referencing the outer type parameter `E` in nested classes.
      */
     private sealed interface DelegateInfo {
         val name: String
         val serializer: KSerializer<Any?>
 
-        data class ReactiveProperty(
+        data class ReactivePropertyKsp(
             override val name: String,
             override val serializer: KSerializer<Any?>,
-            val property: KProperty1<Any, Any?>,
-            val setValueMethod: Method
+            val getter: (Any) -> Any?,
+            val silentSetter: (Any, Any?) -> Unit
         ) : DelegateInfo
 
         data class AggregateCollection(
@@ -105,7 +105,10 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
             override val serializer: KSerializer<Any?>,
             val getValue: (Any) -> Any?,
             val setValue: (Any, Any?) -> Unit,
-            val kspBacked: Boolean = false
+            // True when the get/set lambdas accept the entity instance (KSP-generated path);
+            // false when they accept the delegate instance (reflection fallback for JavaFX
+            // *Property-typed delegates the KSP processor cannot detect).
+            val kspBacked: Boolean
         ) : DelegateInfo
     }
 
@@ -121,14 +124,6 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
     private val constructorDelegateParams: Map<String, KParameter>
 
     init {
-        fun Class<*>.requireMethod(name: String, parameterCount: Int): Method =
-            methods.singleOrNull { method ->
-                method.name == name &&
-                    method.parameterCount == parameterCount &&
-                    !method.isBridge &&
-                    !method.isSynthetic
-            } ?: error("Expected exactly one '$name' method with $parameterCount parameters on ${this.name}")
-
         val registry = sampleInstance.delegateRegistry
         val delegateNames = registry.keys.toSet()
         val memberProps = kClass.memberProperties.associateBy { it.name }
@@ -148,7 +143,16 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
                 .filter { param -> param.name != null && param.name in delegateNames }
                 .associateBy { it.name!! }
 
-        val fxScalarAccessor: LirpFxScalarAccessor<E>? = tryLoadFxScalarAccessor()
+        val hasReactiveDelegate =
+            registry.values.any { it is ReactivePropertyDelegate<*> || it is ReactivePropertyDelegateWithAccessors<*> }
+        val hasFxScalarDelegate = registry.values.any { it is FxScalarPropertyDelegate }
+
+        val reactivePropertyAccessor: LirpReactivePropertyAccessor<E>? =
+            tryLoadReactivePropertyAccessor(hasReactiveDelegate)
+        val fxScalarAccessor: LirpFxScalarAccessor<E>? = tryLoadFxScalarAccessor(hasFxScalarDelegate)
+
+        val reactiveEntriesByName: Map<String, ReactivePropertyEntry<E>> =
+            reactivePropertyAccessor?.entries?.associateBy { it.name } ?: emptyMap()
 
         // Collect delegate infos preserving the order from memberProperties (kotlin-reflect preserves declaration order).
         delegateInfos =
@@ -175,40 +179,38 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
                                 kspBacked = true
                             )
                         } else {
-                            log.warn {
-                                "Entity '${kClass.simpleName}' FxScalar property '$name' using reflection fallback. " +
-                                    "Apply lirp-ksp to eliminate --add-opens requirement."
-                            }
-                            val getMethod = delegate.javaClass.requireMethod("get", 0)
-                            val setMethod = delegate.javaClass.requireMethod("set", 1)
+                            // Fallback retained for FxScalar properties whose declared type is a
+                            // JavaFX `*Property` interface (e.g. IntegerProperty). The KSP FxScalar
+                            // processor cannot resolve the delegate-expression type and so does not
+                            // emit an accessor entry for those — reach the delegate's get/set via
+                            // reflection on the underlying JavaFX `*Property` value.
+                            val getMethod = requireDelegateMethod(delegate.javaClass, "get", 0)
+                            val setMethod = requireDelegateMethod(delegate.javaClass, "set", 1)
                             getMethod.isAccessible = true
                             setMethod.isAccessible = true
-                            // Safe: resolveFxScalarSerializer returns a serializer matching the delegate's declared value type.
-                            // KSerializer<Any?> is required by the composite encoder; the runtime type is always correct.
                             @Suppress("UNCHECKED_CAST")
                             DelegateInfo.FxScalar(
                                 name,
                                 resolveFxScalarSerializer(delegate, prop) as KSerializer<Any?>,
                                 getValue = { d -> getMethod.invoke(d) },
-                                setValue = { d, v -> setMethod.invoke(d, v) }
+                                setValue = { d, v -> setMethod.invoke(d, v) },
+                                kspBacked = false
                             )
                         }
                     }
                     else -> {
-                        val typedProp =
-                            requireNotNull(prop) {
-                                "Cannot find member property '$name' on ${kClass.simpleName}"
-                            }
-                        val setValueMethod = delegate::class.java.requireMethod("setValue", 3)
-                        setValueMethod.isAccessible = true
-                        // Safe: typedProp is looked up from kClass.memberProperties by name. The entity instance passed to
-                        // property.get() is always of type E, so KProperty1<Any, Any?> is a safe widening cast.
+                        val kspEntry =
+                            reactiveEntriesByName[name]
+                                ?: error(
+                                    "Entity '${kClass.simpleName}' reactive-property '$name' has no generated " +
+                                        "LirpReactivePropertyAccessor entry — apply the net.transgressoft.lirp.sql Gradle plugin or add lirp-ksp to your build.gradle dependencies block to configure KSP."
+                                )
                         @Suppress("UNCHECKED_CAST")
-                        DelegateInfo.ReactiveProperty(
+                        DelegateInfo.ReactivePropertyKsp(
                             name,
-                            serializer(typedProp.returnType),
-                            typedProp as KProperty1<Any, Any?>,
-                            setValueMethod
+                            kspEntry.serializer,
+                            getter = { entity -> kspEntry.getter(entity as E) },
+                            silentSetter = { entity, value -> kspEntry.silentSetter(entity as E, value) }
                         )
                     }
                 }
@@ -216,13 +218,12 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
         delegateInfosByName = delegateInfos.associateBy { it.name }
     }
 
-    @OptIn(ExperimentalSerializationApi::class)
     // Safe: return type is erased to KSerializer<Any?> for the composite encoder. The actual serializer
     // is resolved from the aggregate's declared ID type (Int, Long, String, UUID) — runtime match is guaranteed.
     @Suppress("UNCHECKED_CAST")
     private fun resolveAggregateIdSerializer(
         delegate: AggregateCollectionRef<*, *>,
-        prop: KProperty1<E, *>?
+        prop: kotlin.reflect.KProperty1<E, *>?
     ): KSerializer<Any?> {
         // Prefer live IDs type when the collection is non-empty — most reliable source
         val liveIds = delegate.referenceIds
@@ -243,13 +244,27 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
     }
 
     /**
-     * Resolves the value-level serializer for an [FxScalarPropertyDelegate]. The delegate wraps a
-     * JavaFX property whose underlying value type is determined from the property return type name.
-     * Falls back to the current value's runtime type when the property type isn't recognized.
+     * Locates the single declared method named [name] with [parameterCount] parameters on a
+     * delegate class, used by the FxScalar reflection fallback when the KSP processor cannot
+     * detect a JavaFX `*Property`-typed delegate. Bridge and synthetic methods are filtered out.
+     */
+    private fun requireDelegateMethod(delegateClass: Class<*>, name: String, parameterCount: Int): java.lang.reflect.Method =
+        delegateClass.methods.singleOrNull { method ->
+            method.name == name &&
+                method.parameterCount == parameterCount &&
+                !method.isBridge &&
+                !method.isSynthetic
+        } ?: error("Expected exactly one '$name' method with $parameterCount parameters on ${delegateClass.name}")
+
+    /**
+     * Resolves the value-level serializer for an [FxScalarPropertyDelegate] in the reflection
+     * fallback path. The delegate wraps a JavaFX property whose underlying value type is determined
+     * from the property return type name; falls back to the current value's runtime type when the
+     * property type isn't recognized.
      */
     private fun resolveFxScalarSerializer(
         delegate: FxScalarPropertyDelegate,
-        prop: KProperty1<E, *>?
+        prop: kotlin.reflect.KProperty1<E, *>?
     ): KSerializer<*> {
         val qualifiedName = (prop?.returnType?.classifier as? KClass<*>)?.qualifiedName ?: ""
         return when {
@@ -303,8 +318,8 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
         val registry = value.delegateRegistry
         for (info in delegateInfos) {
             when (info) {
-                is DelegateInfo.ReactiveProperty -> {
-                    val propValue = info.property.get(value as Any)
+                is DelegateInfo.ReactivePropertyKsp -> {
+                    val propValue = info.getter(value as Any)
                     composite.encodeSerializableElement(descriptor, index++, info.serializer, propValue)
                 }
                 is DelegateInfo.AggregateCollection -> {
@@ -394,7 +409,7 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
                 continue@loop
             }
             when (val delegateInfo = delegateByIndex[elementIndex]) {
-                is DelegateInfo.ReactiveProperty ->
+                is DelegateInfo.ReactivePropertyKsp ->
                     reactiveValues[delegateInfo.name] =
                         composite.decodeSerializableElement(descriptor, elementIndex, delegateInfo.serializer)
                 is DelegateInfo.AggregateCollection ->
@@ -418,11 +433,9 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
     }
 
     private fun restoreReactiveProperties(entity: E, reactiveValues: Map<String, Any?>) {
-        val registry = entity.delegateRegistry
         for ((name, decodedValue) in reactiveValues) {
-            val info = delegateInfosByName[name] as? DelegateInfo.ReactiveProperty ?: continue
-            val delegate = registry[name] ?: continue
-            info.setValueMethod.invoke(delegate, entity, info.property, decodedValue)
+            val info = delegateInfosByName[name] as? DelegateInfo.ReactivePropertyKsp ?: continue
+            info.silentSetter(entity as Any, decodedValue)
         }
     }
 
@@ -462,11 +475,45 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
     }
 
     /**
-     * Attempts to load the KSP-generated FxScalar accessor for the entity class.
-     * Returns null if no accessor was generated (KSP not applied to this entity).
+     * Attempts to load the KSP-generated reactive-property accessor for the entity class.
+     *
+     * Returns `null` when the entity carries no reactive-property delegates and no accessor exists.
+     * Throws with a `configure KSP` remediation message when the entity has reactive-property
+     * delegates but no generated accessor was found — KSP is mandatory for persisted entities.
      */
     @Suppress("UNCHECKED_CAST")
-    private fun tryLoadFxScalarAccessor(): LirpFxScalarAccessor<E>? =
+    private fun tryLoadReactivePropertyAccessor(hasReactiveDelegate: Boolean): LirpReactivePropertyAccessor<E>? =
+        try {
+            val accessorClass =
+                Class.forName(
+                    "${kClass.java.name}_LirpReactivePropertyAccessor",
+                    true,
+                    kClass.java.classLoader
+                )
+            accessorClass.getDeclaredConstructor().newInstance() as LirpReactivePropertyAccessor<E>
+        } catch (_: ClassNotFoundException) {
+            if (hasReactiveDelegate) {
+                error(
+                    "Entity ${kClass.simpleName} has reactive-property delegates but no generated " +
+                        "LirpReactivePropertyAccessor — apply the net.transgressoft.lirp.sql Gradle plugin or add " +
+                        "lirp-ksp to your build.gradle dependencies block to configure KSP."
+                )
+            }
+            null
+        }
+
+    /**
+     * Attempts to load the KSP-generated FxScalar accessor for the entity class.
+     *
+     * Returns `null` when no accessor is generated. The FxScalar KSP processor currently misses
+     * properties whose declared type is a JavaFX `*Property` interface (e.g. `IntegerProperty`)
+     * even when the delegate is `LirpIntegerProperty` (which implements `FxScalarPropertyDelegate`).
+     * Generating an accessor for those cases requires resolving the delegate-expression type,
+     * which KSP does not expose. Until that gap is closed, FxScalar continues to fall through
+     * to the per-delegate reflection path inside [populateDelegateInfos] / [resolveFxScalarSerializer].
+     */
+    @Suppress("UNCHECKED_CAST", "UNUSED_PARAMETER")
+    private fun tryLoadFxScalarAccessor(hasFxScalarDelegate: Boolean): LirpFxScalarAccessor<E>? =
         try {
             val accessorClass =
                 Class.forName(

@@ -18,9 +18,11 @@
 package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.entity.ReactiveEntity
+import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.StandardCrudEvent
+import net.transgressoft.lirp.persistence.LirpRawInitializer
 import net.transgressoft.lirp.persistence.PendingUpdate
 import net.transgressoft.lirp.persistence.PersistentRepositoryBase
 import com.zaxxer.hikari.HikariConfig
@@ -411,50 +413,107 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     override fun loadFromStore(): Map<K, R> {
         val byId =
             transaction(db = db) {
-                val entities = table.selectAll().map { row -> tableDef.fromRow(row, table) }
-                val byId = entities.associateBy { it.id }
-
-                if (junctionTables.isEmpty()) return@transaction byId
-
-                // Issue one ordered SELECT per junction descriptor and group the rows in process by
-                // parent_id. For ordered descriptors, sort the per-parent ID list by the position
-                // column before handing it off to applyJunctionRows. Junction rows referencing
-                // parent IDs that are not present in this entity result set (orphans) are dropped
-                // silently — the FK ON DELETE CASCADE installed later by
-                // installJunctionForeignKeys() handles SQL-side cleanup.
-                for (junction in junctionTables.values) {
-                    val descriptor = junction.descriptor
-                    val grouped = LinkedHashMap<Any, MutableList<Pair<Any, Int?>>>()
-
-                    val rowsQuery = junction.table.selectAll()
-                    val orderedQuery =
-                        junction.positionCol?.let { posCol ->
-                            rowsQuery.orderBy(junction.parentIdCol, SortOrder.ASC).orderBy(posCol, SortOrder.ASC)
-                        } ?: rowsQuery.orderBy(junction.parentIdCol, SortOrder.ASC)
-
-                    for (row in orderedQuery) {
-                        val parentId = toDomainId(row[junction.parentIdCol])
-                        val itemId = toDomainId(row[junction.itemIdCol])
-                        val position = junction.positionCol?.let { row[it] }
-                        grouped.getOrPut(parentId) { mutableListOf() }.add(itemId to position)
-                    }
-
-                    for ((parentId, pairs) in grouped) {
-                        @Suppress("UNCHECKED_CAST")
-                        val entity = byId[parentId as K] ?: continue
-                        val orderedIds: List<Any> =
-                            if (descriptor.isOrdered) {
-                                pairs.sortedBy { it.second ?: 0 }.map { it.first }
-                            } else {
-                                pairs.map { it.first }
-                            }
-                        tableDef.applyJunctionRows(entity, descriptor, orderedIds)
-                    }
-                }
+                val byId = loadEntities()
+                if (junctionTables.isNotEmpty()) applyJunctionRowsToEntities(byId)
                 byId
             }
         dirty.set(false)
         return byId
+    }
+
+    /**
+     * Loads all rows for this table and hydrates them via [SqlTableDef.fromRow] plus the
+     * KSP-generated raw initializer's `applyScalarRow` fast path. Returns the entities keyed by
+     * primary key. Must be called from within an Exposed transaction.
+     */
+    private fun JdbcTransaction.loadEntities(): Map<K, R> {
+        // Cache the raw initializer per concrete entity class. `fromRow` is free to materialize
+        // subclasses on a per-row basis (e.g. discriminator-driven polymorphic hydration), so a
+        // single resolved-once initializer would feed the wrong silent setters into later rows.
+        // Hand-written SqlTableDefs that bypass KSP populate the entity entirely inside
+        // [fromRow] and have no raw initializer — for those the cached value is `null` and the
+        // applyScalarRow fast path is skipped silently. The KSP-mandatory contract is surfaced
+        // when the entity is part of a KSP-processed module (validator + the generated
+        // `<Entity>_LirpTableDef.applyScalarRow` are produced in lock-step).
+        val rawInitByClass = mutableMapOf<Class<*>, LirpRawInitializer<R>?>()
+        val entities =
+            table.selectAll().map { row ->
+                val entity = tableDef.fromRow(row, table)
+                val rawInit = rawInitByClass.getOrPut(entity::class.java) { resolveRawInitializer(entity) }
+                rawInit?.let { applyScalarRow(entity, row, it) }
+                entity
+            }
+        return entities.associateBy { it.id }
+    }
+
+    private fun resolveRawInitializer(entity: R): LirpRawInitializer<R>? =
+        try {
+            @Suppress("UNCHECKED_CAST")
+            publicRawInitializerFor(entity::class.java) as LirpRawInitializer<R>
+        } catch (_: IllegalStateException) {
+            // Hand-written tableDef path: no generated raw initializer.
+            // [fromRow] already populated the entity; the default
+            // [SqlTableDef.applyScalarRow] is a no-op.
+            null
+        }
+
+    private fun applyScalarRow(entity: R, row: ResultRow, rawInit: LirpRawInitializer<R>) {
+        // Belt-and-braces guard: silentSetter already bypasses event emission for
+        // reactive-backed fields, but withEventsDisabled prevents any stray emission
+        // from non-reactive var assignments inside the generated applyScalarRow body.
+        if (entity is ReactiveEntityBase<*, *>) {
+            entity.withEventsDisabled { tableDef.applyScalarRow(entity, row, table, rawInit) }
+        } else {
+            tableDef.applyScalarRow(entity, row, table, rawInit)
+        }
+    }
+
+    /**
+     * Issues one ordered SELECT per junction descriptor and groups the rows in process by
+     * parent_id. For ordered descriptors, sorts the per-parent ID list by the position column
+     * before handing it off to [SqlTableDef.applyJunctionRows]. Junction rows referencing parent
+     * IDs that are not present in [byId] (orphans) are dropped silently — the FK ON DELETE
+     * CASCADE installed later by `installJunctionForeignKeys()` handles SQL-side cleanup.
+     */
+    private fun JdbcTransaction.applyJunctionRowsToEntities(byId: Map<K, R>) {
+        for (junction in junctionTables.values) {
+            val grouped = groupJunctionRowsByParent(junction)
+            applyGroupedJunctionRows(byId, junction.descriptor, grouped)
+        }
+    }
+
+    private fun JdbcTransaction.groupJunctionRowsByParent(
+        junction: ExposedJunctionTable
+    ): LinkedHashMap<Any, MutableList<Pair<Any, Int?>>> {
+        val rowsQuery = junction.table.selectAll()
+        val orderedQuery =
+            junction.positionCol?.let { posCol ->
+                rowsQuery.orderBy(junction.parentIdCol, SortOrder.ASC).orderBy(posCol, SortOrder.ASC)
+            } ?: rowsQuery.orderBy(junction.parentIdCol, SortOrder.ASC)
+
+        val grouped = LinkedHashMap<Any, MutableList<Pair<Any, Int?>>>()
+        for (row in orderedQuery) {
+            val parentId = toDomainId(row[junction.parentIdCol])
+            val itemId = toDomainId(row[junction.itemIdCol])
+            val position = junction.positionCol?.let { row[it] }
+            grouped.getOrPut(parentId) { mutableListOf() }.add(itemId to position)
+        }
+        return grouped
+    }
+
+    private fun applyGroupedJunctionRows(
+        byId: Map<K, R>,
+        descriptor: JunctionTableDef,
+        grouped: Map<Any, List<Pair<Any, Int?>>>
+    ) {
+        for ((parentId, pairs) in grouped) {
+            @Suppress("UNCHECKED_CAST")
+            val entity = byId[parentId as K] ?: continue
+            val orderedIds: List<Any> =
+                if (descriptor.isOrdered) pairs.sortedBy { it.second ?: 0 }.map { it.first }
+                else pairs.map { it.first }
+            tableDef.applyJunctionRows(entity, descriptor, orderedIds)
+        }
     }
 
     /**

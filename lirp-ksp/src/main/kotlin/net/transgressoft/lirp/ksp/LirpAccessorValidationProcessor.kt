@@ -17,6 +17,7 @@
 
 package net.transgressoft.lirp.ksp
 
+import com.google.devtools.ksp.isAbstract
 import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.Dependencies
 import com.google.devtools.ksp.processing.KSPLogger
@@ -30,9 +31,6 @@ import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.symbol.KSTypeAlias
 
 private const val INDEXED_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.Indexed"
-private const val FX_SCALAR_DELEGATE_FQN = "net.transgressoft.lirp.persistence.FxScalarPropertyDelegate"
-private const val REACTIVE_ENTITY_BASE_FQN = "net.transgressoft.lirp.entity.ReactiveEntityBase"
-private const val IDENTIFIABLE_ENTITY_FQN = "net.transgressoft.lirp.entity.IdentifiableEntity"
 
 /**
  * KSP processor that validates accessor completeness for entity classes.
@@ -76,7 +74,9 @@ class LirpAccessorValidationProcessor(
         val simpleName: String,
         val accessorFqnPrefix: String,
         val hasIndexed: Boolean,
-        val hasFxScalar: Boolean
+        val hasFxScalar: Boolean,
+        val hasReactive: Boolean = false,
+        val hasRawInit: Boolean = false
     )
 
     override fun process(resolver: Resolver): List<KSAnnotated> {
@@ -142,9 +142,22 @@ class LirpAccessorValidationProcessor(
             .filter { !isAnonymousOrLocal(it) && isLirpEntity(it) }
             .mapNotNull { classDecl ->
                 val fqn = classDecl.qualifiedName?.asString() ?: return@mapNotNull null
+                // Mirror the per-processor skip rules: generic abstract bases and non-public
+                // entities never get a generated accessor, so validating their absence would
+                // produce false-positive errors.
+                if (classDecl.typeParameters.isNotEmpty() || classDecl.isAbstract()) return@mapNotNull null
+                // Walk parent declarations too — a nested entity whose enclosing class is
+                // internal/private cannot receive a public generated accessor, mirroring the
+                // skip rules in RawInitializerProcessor and ReactivePropertyAccessorProcessor.
+                if (!isPubliclyVisible(classDecl)) return@mapNotNull null
                 val hasIndexed = fqn in indexedClassFqns
                 val hasFxScalar = classDecl.getAllProperties().any { isFxScalarProperty(it) }
-                if (hasIndexed || hasFxScalar) {
+                val hasReactive = collectReactivePropertiesIncludingInherited(classDecl).isNotEmpty()
+                // Every persisted entity needs a raw initializer for bulk-load fast paths. Persisted
+                // here means: subtypes ReactiveEntityBase (or implements IdentifiableEntity) — that
+                // predicate is exactly isLirpEntity, already enforced by the filter above.
+                val hasRawInit = true
+                if (hasIndexed || hasFxScalar || hasReactive || hasRawInit) {
                     // Build the accessor FQN prefix from package + jvm binary name now, while
                     // the class declaration is still valid. Stored as a string to survive round 2.
                     val packageName = classDecl.packageName.asString()
@@ -154,7 +167,9 @@ class LirpAccessorValidationProcessor(
                         simpleName = classDecl.simpleName.asString(),
                         accessorFqnPrefix = accessorFqnPrefix,
                         hasIndexed = hasIndexed,
-                        hasFxScalar = hasFxScalar
+                        hasFxScalar = hasFxScalar,
+                        hasReactive = hasReactive,
+                        hasRawInit = hasRawInit
                     )
                 } else {
                     null
@@ -216,25 +231,36 @@ class LirpAccessorValidationProcessor(
      */
     private fun validateAccessorCompleteness(entities: List<EntityValidationInfo>, resolver: Resolver) {
         for (info in entities) {
-            if (info.hasIndexed) {
-                val accessorFqn = "${info.accessorFqnPrefix}_LirpIndexAccessor"
-                if (resolver.getClassDeclarationByName(resolver.getKSNameFromString(accessorFqn)) == null) {
-                    logger.error(
-                        "Entity '${info.simpleName}' has @Indexed delegates but no generated LirpIndexAccessor. " +
-                            "Ensure lirp-ksp is applied as a KSP processor in your build.gradle."
-                    )
-                }
+            checkAccessor(info, resolver, info.hasIndexed, "_LirpIndexAccessor") {
+                "Entity '${info.simpleName}' has @Indexed delegates but no generated LirpIndexAccessor. " +
+                    "Ensure lirp-ksp is applied as a KSP processor in your build.gradle."
             }
+            checkAccessor(info, resolver, info.hasFxScalar, "_LirpFxScalarAccessor") {
+                "Entity '${info.simpleName}' has FxScalar delegates but no generated LirpFxScalarAccessor. " +
+                    "Ensure lirp-ksp is applied as a KSP processor in your build.gradle."
+            }
+            checkAccessor(info, resolver, info.hasReactive, "_LirpReactivePropertyAccessor") {
+                "Entity '${info.simpleName}' has reactive-property delegates but no generated LirpReactivePropertyAccessor — " +
+                    "apply the net.transgressoft.lirp.sql Gradle plugin or add lirp-ksp to your build.gradle dependencies block."
+            }
+            checkAccessor(info, resolver, info.hasRawInit, "_LirpRawInitializer") {
+                "Entity '${info.simpleName}' has no generated LirpRawInitializer — " +
+                    "apply the net.transgressoft.lirp.sql Gradle plugin or add lirp-ksp to your build.gradle dependencies block."
+            }
+        }
+    }
 
-            if (info.hasFxScalar) {
-                val accessorFqn = "${info.accessorFqnPrefix}_LirpFxScalarAccessor"
-                if (resolver.getClassDeclarationByName(resolver.getKSNameFromString(accessorFqn)) == null) {
-                    logger.error(
-                        "Entity '${info.simpleName}' has FxScalar delegates but no generated LirpFxScalarAccessor. " +
-                            "Ensure lirp-ksp is applied as a KSP processor in your build.gradle."
-                    )
-                }
-            }
+    private fun checkAccessor(
+        info: EntityValidationInfo,
+        resolver: Resolver,
+        shouldCheck: Boolean,
+        suffix: String,
+        errorMessage: () -> String
+    ) {
+        if (!shouldCheck) return
+        val accessorFqn = "${info.accessorFqnPrefix}$suffix"
+        if (resolver.getClassDeclarationByName(resolver.getKSNameFromString(accessorFqn)) == null) {
+            logger.error(errorMessage())
         }
     }
 }

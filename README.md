@@ -36,6 +36,89 @@ Built on Kotlin Coroutines and Kotlin Serialization. Targets **JVM 17+, Kotlin 2
 
 ## Quick Start
 
+### Installation
+
+LIRP is published to Maven Central under the `net.transgressoft` group. Pull `lirp-core` for the
+reactive entity + in-memory / JSON repository surface; add `lirp-sql` for the SQL repository and
+`lirp-fx` for the JavaFX bridge. The `net.transgressoft.lirp.sql` Gradle plugin wires up the KSP
+processor for you so generated accessors are produced at build time.
+
+**Requirements:** JVM 17+, Kotlin 2.3.10.
+
+Gradle (Kotlin DSL):
+```kotlin
+plugins {
+    id("net.transgressoft.lirp.sql") version "<lirp-version>"
+}
+
+dependencies {
+    implementation("net.transgressoft:lirp-core:<lirp-version>")
+    implementation("net.transgressoft:lirp-sql:<lirp-version>")   // optional — SQL persistence
+    implementation("net.transgressoft:lirp-fx:<lirp-version>")    // optional — JavaFX bridge
+}
+```
+
+Gradle without the LIRP plugin (manual KSP wiring):
+
+```kotlin
+plugins {
+    id("com.google.devtools.ksp") version "<ksp-version>"
+}
+
+dependencies {
+    implementation("net.transgressoft:lirp-core:<lirp-version>")
+    ksp("net.transgressoft:lirp-ksp:<lirp-version>")
+
+    implementation("net.transgressoft:lirp-sql:<lirp-version>")   // optional
+    implementation("net.transgressoft:lirp-fx:<lirp-version>")    // optional
+}
+```
+
+Maven:
+
+```xml
+<dependencies>
+    <dependency>
+        <groupId>net.transgressoft</groupId>
+        <artifactId>lirp-core</artifactId>
+        <version>${lirp.version}</version>
+    </dependency>
+    <!-- optional: SQL persistence -->
+    <dependency>
+        <groupId>net.transgressoft</groupId>
+        <artifactId>lirp-sql</artifactId>
+        <version>${lirp.version}</version>
+    </dependency>
+    <!-- optional: JavaFX bridge -->
+    <dependency>
+        <groupId>net.transgressoft</groupId>
+        <artifactId>lirp-fx</artifactId>
+        <version>${lirp.version}</version>
+    </dependency>
+</dependencies>
+
+<build>
+    <plugins>
+        <!-- KSP compiler plugin — runs lirp-ksp during the compile phase. -->
+        <plugin>
+            <groupId>com.dyescape</groupId>
+            <artifactId>kotlin-maven-symbol-processing</artifactId>
+            <version>${ksp-maven.version}</version>
+            <configuration>
+                <processors>
+                    <processor>net.transgressoft:lirp-ksp:${lirp.version}</processor>
+                </processors>
+            </configuration>
+        </plugin>
+    </plugins>
+</build>
+```
+
+See [Consuming LIRP](https://github.com/octaviospain/lirp/wiki/Consuming-LIRP) for the
+compatibility matrix and troubleshooting common setup failures.
+
+### Hello world
+
 Declare a reactive entity, register a repository, subscribe — no event bus, no manual Flow collection:
 
 ```kotlin
@@ -194,29 +277,6 @@ The planner picks per-parent loop or child-set hash-join per query from a live c
 | MS SQL Server, Oracle | `lirp-sql` | Not tested |
 
 Deep coverage of the write pipeline, collapse algorithm, transactional guarantees, `@Version` optimistic locking, aggregate references, cascade semantics, collection delegates, JSON persistence, and JavaFX integration lives on the wiki — see [Documentation](#documentation) below.
-
-## Installation
-
-```kotlin
-plugins {
-    id("com.google.devtools.ksp") version "2.3.6"
-    id("net.transgressoft.lirp.sql") version "<lirp-version>"  // optional: auto-detects lirp-sql
-}
-
-dependencies {
-    implementation("net.transgressoft:lirp-api:<version>")
-    implementation("net.transgressoft:lirp-core:<version>")
-    ksp("net.transgressoft:lirp-ksp:<version>")
-
-    // SQL persistence (optional)
-    implementation("net.transgressoft:lirp-sql:<version>")
-    runtimeOnly("org.postgresql:postgresql:<version>")
-}
-```
-
-**Requirements:** JVM 17+, Kotlin 2.3.10.
-
-For Gradle without the LIRP plugin (manual KSP configuration), **Maven consumers**, the compatibility matrix, and troubleshooting for common setup failures, see [Consuming LIRP](https://github.com/octaviospain/lirp/wiki/Consuming-LIRP).
 
 ## Features
 

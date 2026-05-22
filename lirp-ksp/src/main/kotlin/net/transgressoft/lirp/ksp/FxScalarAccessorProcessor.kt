@@ -22,7 +22,6 @@ import com.google.devtools.ksp.processing.Dependencies
 import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.processing.Resolver
 import com.google.devtools.ksp.processing.SymbolProcessor
-import com.google.devtools.ksp.symbol.ClassKind
 import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
@@ -30,9 +29,6 @@ import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.symbol.KSTypeAlias
 import com.google.devtools.ksp.validate
 
-private const val FX_SCALAR_DELEGATE_FQN = "net.transgressoft.lirp.persistence.FxScalarPropertyDelegate"
-private const val REACTIVE_ENTITY_BASE_FQN = "net.transgressoft.lirp.entity.ReactiveEntityBase"
-private const val IDENTIFIABLE_ENTITY_FQN = "net.transgressoft.lirp.entity.IdentifiableEntity"
 private const val NULLABLE_STRING_SERIALIZER = "@Suppress(\"UNCHECKED_CAST\") serializer<String?>() as KSerializer<Any?>"
 private const val NULLABLE_STRING_CAST_TYPE = "String?"
 
@@ -75,36 +71,6 @@ class FxScalarAccessorProcessor(
                 }
             }
         return emptyList()
-    }
-
-    private fun allClassDeclarations(classDecl: KSClassDeclaration): Sequence<KSClassDeclaration> =
-        sequence {
-            yield(classDecl)
-            classDecl.declarations.filterIsInstance<KSClassDeclaration>().forEach {
-                yieldAll(allClassDeclarations(it))
-            }
-        }
-
-    private fun isAnonymousOrLocal(classDecl: KSClassDeclaration): Boolean =
-        (classDecl.classKind == ClassKind.OBJECT && classDecl.simpleName.asString().isEmpty()) ||
-            classDecl.qualifiedName == null
-
-    private fun isLirpEntity(classDecl: KSClassDeclaration): Boolean =
-        isTypeByFqn(classDecl, REACTIVE_ENTITY_BASE_FQN) || isTypeByFqn(classDecl, IDENTIFIABLE_ENTITY_FQN)
-
-    private fun isTypeByFqn(
-        classDecl: KSClassDeclaration,
-        fqn: String,
-        visited: MutableSet<String> = mutableSetOf()
-    ): Boolean {
-        val declFqn = classDecl.qualifiedName?.asString() ?: return false
-        if (!visited.add(declFqn)) return false
-        if (declFqn == fqn) return true
-        for (superType in classDecl.superTypes) {
-            val declaration = superType.resolve().declaration
-            if (declaration is KSClassDeclaration && isTypeByFqn(declaration, fqn, visited)) return true
-        }
-        return false
     }
 
     private fun isFxScalarProperty(prop: KSPropertyDeclaration): Boolean =
@@ -227,11 +193,7 @@ class FxScalarAccessorProcessor(
         val baseName = type.declaration.qualifiedName?.asString() ?: return "String"
         val args = type.arguments
         if (args.isEmpty()) return baseName
-        val renderedArgs =
-            args.joinToString(", ") { arg ->
-                val argType = arg.type?.resolve()
-                if (argType != null) renderKsType(argType) else "*"
-            }
+        val renderedArgs = args.joinToString(", ") { arg -> renderKsTypeArgument(arg) }
         return "$baseName<$renderedArgs>"
     }
 }
