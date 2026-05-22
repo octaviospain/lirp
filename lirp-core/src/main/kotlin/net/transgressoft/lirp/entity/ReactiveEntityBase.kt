@@ -30,13 +30,14 @@ import net.transgressoft.lirp.persistence.AggregateRefDelegate
 import net.transgressoft.lirp.persistence.FxObservableCollection
 import net.transgressoft.lirp.persistence.LirpDelegate
 import net.transgressoft.lirp.persistence.LirpRefAccessor
+import net.transgressoft.lirp.persistence.ReactivePropertyDelegate
+import net.transgressoft.lirp.persistence.ReactivePropertyDelegateWithAccessors
 import io.github.oshai.kotlinlogging.KotlinLogging
 import java.time.LocalDateTime
 import java.util.concurrent.Flow
 import java.util.concurrent.atomic.AtomicReference
 import java.util.function.Consumer
 import kotlin.properties.ReadWriteProperty
-import kotlin.reflect.KProperty
 import kotlin.reflect.KProperty1
 import kotlin.reflect.full.memberProperties
 import kotlin.reflect.jvm.isAccessible
@@ -274,20 +275,20 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     }
 
     /**
-     * Emits a [ReactiveMutationEvent] triggered by a JavaFX scalar property delegate mutation.
+     * Emits a [ReactiveMutationEvent] around the supplied [mutationBlock], which is expected to
+     * perform the actual backing-field write for the mutated property.
      *
-     * Called by fx scalar property delegates via a callback injected by RegistryBase. The supplied
-     * [mutationBlock] contains the `super.set(newValue)` call on the underlying Simple*Property.
-     * This method wraps it in a clone-before-mutation sequence: it captures the entity state before
-     * [mutationBlock] executes, then emits a [ReactiveMutationEvent] after if subscribers are present.
+     * Called by reactive property and FxScalar delegates that share the same clone-before-mutation
+     * control flow: capture the entity state before [mutationBlock] runs, execute the mutation,
+     * stamp [lastDateModified], then emit if subscribers are present.
      *
      * Respects the [eventsDisabled] flag — when events are suppressed (e.g., during [clone]),
      * the mutation still executes but no event is published.
      *
-     * @param mutationBlock the lambda that performs the actual property mutation (super.set call)
+     * @param mutationBlock the lambda that performs the actual property mutation
      */
     @Suppress("UNCHECKED_CAST")
-    internal fun emitFxScalarMutation(mutationBlock: () -> Unit) {
+    internal fun emitReactiveMutation(mutationBlock: () -> Unit) {
         check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
         if (eventsDisabled) {
             mutationBlock()
@@ -301,7 +302,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
         val entityBeforeChange = clone()
         mutationBlock()
         lastDateModified = LocalDateTime.now()
-        log.trace { "Firing fx scalar mutation event from $entityBeforeChange to $this" }
+        log.trace { "Firing reactive mutation event from $entityBeforeChange to $this" }
         publisher.emitAsync(ReactiveMutationEvent(this as R, entityBeforeChange as R))
     }
 
@@ -369,7 +370,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
      * @return A [ReadWriteProperty] delegate that tracks mutations and emits events
      */
     protected fun <T> reactiveProperty(initialValue: T): ReadWriteProperty<ReactiveEntityBase<K, R>, T> =
-        ReactivePropertyDelegate(initialValue)
+        ReactivePropertyDelegate(this, initialValue)
 
     /**
      * Creates a reactive property delegate backed by external getter/setter lambdas.
@@ -387,7 +388,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
      * @return A [ReadWriteProperty] delegate that tracks mutations and emits events
      */
     protected fun <T> reactiveProperty(getter: () -> T, setter: (T) -> Unit): ReadWriteProperty<ReactiveEntityBase<K, R>, T> =
-        ReactivePropertyDelegateWithAccessors(getter, setter)
+        ReactivePropertyDelegateWithAccessors(this, getter, setter)
 
     @Suppress("UNCHECKED_CAST")
     protected fun <T> mutateAndPublish(mutationAction: () -> T): T {
@@ -472,66 +473,4 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
                 return map
             }
         }
-
-    private inner class ReactivePropertyDelegate<T>(private var storedValue: T) :
-        ReadWriteProperty<Any?, T>,
-        LirpDelegate {
-
-        override fun getValue(thisRef: Any?, property: KProperty<*>): T = storedValue
-
-        @Suppress("UNCHECKED_CAST")
-        override fun setValue(thisRef: Any?, property: KProperty<*>, value: T) {
-            check(!isClosed) { "Entity '${this@ReactiveEntityBase::class.java.simpleName}' is closed" }
-
-            if (value != storedValue) {
-                if (eventsDisabled) {
-                    storedValue = value
-                    return
-                }
-
-                if (!shouldEmit) {
-                    storedValue = value
-                    lastDateModified = LocalDateTime.now()
-                    return
-                }
-                val entityBeforeChange = clone()
-                storedValue = value
-                lastDateModified = LocalDateTime.now()
-                log.trace { "Firing entity update event from $entityBeforeChange to ${this@ReactiveEntityBase}" }
-                publisher.emitAsync(ReactiveMutationEvent(this@ReactiveEntityBase as R, entityBeforeChange as R))
-            }
-        }
-    }
-
-    private inner class ReactivePropertyDelegateWithAccessors<T>(
-        private val getter: () -> T,
-        private val setter: (T) -> Unit
-    ) : ReadWriteProperty<Any?, T>,
-        LirpDelegate {
-
-        override fun getValue(thisRef: Any?, property: KProperty<*>): T = getter()
-
-        @Suppress("UNCHECKED_CAST")
-        override fun setValue(thisRef: Any?, property: KProperty<*>, value: T) {
-            check(!isClosed) { "Entity '${this@ReactiveEntityBase::class.java.simpleName}' is closed" }
-
-            val oldValue = getter()
-            if (value != oldValue) {
-                if (eventsDisabled) {
-                    setter(value)
-                    return
-                }
-                if (!shouldEmit) {
-                    setter(value)
-                    lastDateModified = LocalDateTime.now()
-                    return
-                }
-                val entityBeforeChange = clone()
-                setter(value)
-                lastDateModified = LocalDateTime.now()
-                log.trace { "Firing entity update event from $entityBeforeChange to ${this@ReactiveEntityBase}" }
-                publisher.emitAsync(ReactiveMutationEvent(this@ReactiveEntityBase as R, entityBeforeChange as R))
-            }
-        }
-    }
 }

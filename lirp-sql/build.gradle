@@ -1,5 +1,6 @@
 description = 'LIRP SQL - SQL Persistence via JetBrains Exposed'
 
+apply plugin: 'com.google.devtools.ksp'
 apply plugin: 'java-test-fixtures'
 
 // Gradle 9 changed `project(':x')` inside `dependencies { ... }` to return a Dependency, not a
@@ -38,6 +39,11 @@ dependencies {
     api project(path: ':lirp-api')
     api project(path: ':lirp-core')
 
+    ksp project(path: ':lirp-ksp')
+    kspTest project(path: ':lirp-ksp')
+    kspTestFixtures project(path: ':lirp-ksp')
+    kspIntegrationTest project(path: ':lirp-ksp')
+
     api platform(libs.exposed.bom)
     api libs.exposed.core
     api libs.exposed.kotlin.datetime
@@ -54,10 +60,12 @@ dependencies {
     testImplementation libs.coroutines.test
     testImplementation libs.h2
     testImplementation libs.junit.jupiter
+    testImplementation libs.serialization.json
     testRuntimeOnly libs.junit.platform.launcher
 
     integrationTestImplementation platform(libs.junit.bom)
     integrationTestImplementation libs.bundles.kotest
+    integrationTestImplementation libs.serialization.json
     integrationTestImplementation libs.kotest.extensions.testcontainers
     integrationTestImplementation libs.testcontainers.postgresql
     integrationTestImplementation libs.testcontainers.mysql
@@ -85,6 +93,7 @@ dependencies {
     integrationTestImplementation files(rootProject.project(':lirp-core').sourceSets.test.output)
     testFixturesImplementation platform(libs.exposed.bom)
     testFixturesImplementation libs.bundles.exposed
+    testFixturesImplementation libs.serialization.json
     testFixturesImplementation libs.hikari
     testFixturesImplementation libs.testcontainers.postgresql
     testFixturesImplementation libs.testcontainers.mysql
@@ -104,18 +113,11 @@ tasks.register('integrationTest', Test) {
     classpath = sourceSets.integrationTest.runtimeClasspath
     useJUnitPlatform()
     shouldRunAfter test
-    jvmArgs '--add-opens=java.base/java.lang=ALL-UNNAMED',
-            '--add-opens=java.base/sun.nio.ch=ALL-UNNAMED',
-            '--add-opens=java.base/java.io=ALL-UNNAMED'
 }
 
 // JavaFX module system args for fx delegate SQL tests (headless Monocle).
 // Uses doFirst to defer configuration resolution to execution time.
 tasks.named('test').configure {
-    jvmArgs '--add-opens=java.base/java.lang=ALL-UNNAMED',
-            '--add-opens=java.base/sun.nio.ch=ALL-UNNAMED',
-            '--add-opens=java.base/java.io=ALL-UNNAMED'
-
     doFirst {
         def fxJars = configurations.testRuntimeClasspath.files
                 .findAll { it.name.contains('javafx') }

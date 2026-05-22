@@ -17,6 +17,7 @@
 
 package net.transgressoft.lirp.persistence.sql
 
+import net.transgressoft.lirp.persistence.LirpRawInitializer
 import net.transgressoft.lirp.persistence.LirpTableDef
 import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.ResultRow
@@ -67,6 +68,33 @@ interface SqlTableDef<E> : LirpTableDef<E> {
      * @param table The [Table] object containing column references for column lookup.
      */
     fun applyRow(entity: E, row: ResultRow, table: Table)
+
+    /**
+     * Writes column values from [row] into the backing fields of an already-constructed [entity]
+     * via the supplied [rawInit], bypassing reactive setters so no events fire, no dirty flag is
+     * raised, and `lastDateModified` is not bumped.
+     *
+     * Used by `SqlRepository.loadFromStore` to materialize entities from a bulk SELECT. The caller
+     * is expected to first construct the entity via [fromRow] for primary-key + constructor-param
+     * values, then invoke this method to populate the remaining `var` / reactive-backed fields
+     * directly through [rawInit].entries.
+     *
+     * The default implementation throws — KSP must generate an override on each `_LirpTableDef`
+     * subclass mapping each `RawInitEntry.name` to its column on [table]. Hand-written
+     * `SqlTableDef`s that bypass KSP can either provide their own override or call only
+     * [fromRow] / [applyRow] and skip the raw-init fast path.
+     *
+     * @param entity The pre-constructed entity to populate. Must not be `null`.
+     * @param row The Exposed result row.
+     * @param table The [Table] object whose column references are looked up by name.
+     * @param rawInit Compile-time-resolved entries pairing property names with silent setters.
+     */
+    fun applyScalarRow(entity: E, row: ResultRow, table: Table, rawInit: LirpRawInitializer<E>) {
+        // Default: no-op. Hand-written SqlTableDefs that bypass KSP populate entity state inside
+        // [fromRow] itself and have no separate scalar-row apply step. Generated `_LirpTableDef`
+        // overrides this with a per-column dispatch driven by `rawInit.entries`. Hand-written
+        // implementations may either provide their own override or rely on [fromRow] alone.
+    }
 
     /**
      * Sets the `@Version` property of [entity] to [newVersion]. Symmetric to [applyRow] but scoped

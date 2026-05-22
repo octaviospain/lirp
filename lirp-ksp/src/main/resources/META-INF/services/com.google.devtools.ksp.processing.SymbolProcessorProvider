@@ -3,5 +3,7 @@ net.transgressoft.lirp.ksp.ReactiveEntityRefProcessorProvider
 net.transgressoft.lirp.ksp.LirpRepositoryProcessorProvider
 net.transgressoft.lirp.ksp.TableDefProcessorProvider
 net.transgressoft.lirp.ksp.FxScalarAccessorProcessorProvider
+net.transgressoft.lirp.ksp.ReactivePropertyAccessorProcessorProvider
+net.transgressoft.lirp.ksp.RawInitializerProcessorProvider
 net.transgressoft.lirp.ksp.LirpAccessorValidationProcessorProvider
 net.transgressoft.lirp.ksp.LirpViaAccessorProcessorProvider

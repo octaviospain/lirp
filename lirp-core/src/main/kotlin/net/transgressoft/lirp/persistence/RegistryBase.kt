@@ -395,7 +395,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
         for ((_, delegate) in entity.delegateRegistry) {
             if (delegate is FxScalarPropertyDelegate) {
                 delegate.bindMutationCallback { mutationBlock ->
-                    entity.emitFxScalarMutation(mutationBlock)
+                    entity.emitReactiveMutation(mutationBlock)
                 }
             }
         }
@@ -563,6 +563,14 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
         private val viaAccessorCache: ConcurrentHashMap<Class<*>, Optional<LirpViaAccessor<Any>>> = ConcurrentHashMap()
 
         /**
+         * Cache for [LirpRawInitializer] instances per entity class, mirroring [refAccessorCache].
+         * Used by repository bulk-load paths to apply persisted column values to a freshly constructed
+         * entity via silent setters. Lookup is O(1) after the first hit per entity class.
+         */
+        @JvmStatic
+        private val rawInitializerCache: ConcurrentHashMap<Class<*>, LirpRawInitializer<Any>> = ConcurrentHashMap()
+
+        /**
          * Registers a [RegistryBase] instance for the given entity class in the default [LirpContext].
          *
          * Intended for delegation-based repositories that do not extend [RegistryBase] directly
@@ -702,5 +710,43 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
                 }
             }.orElse(null)
         }
+
+        /**
+         * Returns the [LirpRawInitializer] for [entityClass], loading it via a convention-based
+         * [Class.forName] lookup on first call and caching the result.
+         *
+         * Throws a clear `configure KSP` error when [entityClass] is a persisted entity but no
+         * generated `<entityClass>_LirpRawInitializer` exists — KSP is mandatory for persisted
+         * entities, and silently falling back to reflection is no longer supported.
+         *
+         * @throws IllegalStateException when the entity has no generated raw initializer
+         */
+        @JvmStatic
+        @Suppress("UNCHECKED_CAST")
+        internal fun rawInitializerFor(entityClass: Class<*>): LirpRawInitializer<Any> =
+            rawInitializerCache.computeIfAbsent(entityClass) {
+                try {
+                    val accessorClass = Class.forName("${entityClass.name}_LirpRawInitializer")
+                    accessorClass.getDeclaredConstructor().newInstance() as LirpRawInitializer<Any>
+                } catch (_: ClassNotFoundException) {
+                    error(
+                        "Entity ${entityClass.simpleName} has no generated LirpRawInitializer — apply the net.transgressoft.lirp.sql Gradle plugin or add lirp-ksp to your build.gradle dependencies block to configure KSP."
+                    )
+                }
+            }
+
+        /**
+         * Public cross-module entry point for [rawInitializerFor].
+         *
+         * `lirp-sql` (a separate Gradle / Kotlin module) needs to resolve raw initializers from
+         * `SqlRepository.loadFromStore`. Kotlin `internal` visibility is module-scoped, so the
+         * cross-module call site goes through this thin public wrapper. The actual cache and
+         * `Class.forName` lookup live in [rawInitializerFor].
+         *
+         * @throws IllegalStateException when the entity has no generated raw initializer
+         */
+        @JvmStatic
+        fun publicRawInitializerFor(entityClass: Class<*>): LirpRawInitializer<Any> =
+            rawInitializerFor(entityClass)
     }
 }

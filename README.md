@@ -14,6 +14,36 @@
 
 A Kotlin/Java library where domain entities own their reactivity — property changes automatically notify subscribers, and repositories persist transparently.
 
+## Breaking change — KSP is now mandatory
+
+From this release onwards, every entity persisted via `JsonFileRepository` or `SqlRepository`
+**must** be processed by `lirp-ksp` at build time. The previous reflection fallback in
+`LirpEntitySerializer` (`KProperty1.get` + `Method.invoke`) and the `--add-opens=java.base/*`
+JVM flags it required have been removed.
+
+**Remediation — configure KSP:**
+
+- Consumers using the `net.transgressoft.lirp.sql` Gradle plugin already have KSP wired
+  automatically; no action required.
+- Consumers without the plugin should add the following to their `build.gradle`:
+
+  ```groovy
+  plugins {
+      id 'com.google.devtools.ksp' version '<ksp-version>'
+  }
+
+  dependencies {
+      ksp 'net.transgressoft:lirp-ksp:<lirp-version>'
+  }
+  ```
+
+**Build-time failure mode.** A persisted entity that is not processed by KSP fails the build
+through `LirpAccessorValidationProcessor` with a clear message pointing back to this section.
+At runtime, the first attempt to construct a `LirpEntitySerializer` or to load a row from a
+KSP-processed module without a generated accessor throws an `IllegalStateException` whose
+message contains the literal phrase `configure KSP`, so the error reads the same in logs as it
+does in this README.
+
 ## What is LIRP?
 
 LIRP solves a specific problem: **most reactive libraries make you wire streams manually, and most persistence libraries treat entities as passive data**. LIRP does both — your entities are reactive objects that automatically notify subscribers on property changes, and repositories keep your data in sync with a database or file.

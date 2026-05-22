@@ -21,13 +21,9 @@ import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.persistence.Aggregate
-import net.transgressoft.lirp.persistence.AggregateCollectionRef
-import net.transgressoft.lirp.persistence.CollectionRefEntry
 import net.transgressoft.lirp.persistence.ColumnDef
 import net.transgressoft.lirp.persistence.ColumnType
-import net.transgressoft.lirp.persistence.LirpRefAccessor
 import net.transgressoft.lirp.persistence.LirpRegistryInfo
-import net.transgressoft.lirp.persistence.RefEntry
 import net.transgressoft.lirp.persistence.fx.fxAggregateList
 import net.transgressoft.lirp.persistence.fx.fxBoolean
 import net.transgressoft.lirp.persistence.fx.fxDouble
@@ -229,31 +225,4 @@ class FxSqlTestEntityRepository(jdbcUrl: String) : SqlRepository<Int, FxSqlTestE
 @Suppress("ClassName")
 class `FxSqlTestEntityRepository_LirpRegistryInfo` : LirpRegistryInfo {
     override val entityClass: Class<*> = FxSqlTestEntity::class.java
-}
-
-/**
- * Manual [LirpRefAccessor] for [FxSqlTestEntity]. Required because lirp-sql does not apply
- * the KSP processor, and the entity has an @Aggregate delegate that triggers the fail-fast
- * check in RegistryBase.discoverRefs.
- */
-@Suppress("ktlint:standard:class-naming")
-class `FxSqlTestEntity_LirpRefAccessor` : LirpRefAccessor<FxSqlTestEntity> {
-    override val entries: List<RefEntry<*, FxSqlTestEntity>> = emptyList()
-
-    override val collectionEntries: List<CollectionRefEntry<*, FxSqlTestEntity>> =
-        listOf(
-            @Suppress("UNCHECKED_CAST")
-            CollectionRefEntry(
-                refName = "items",
-                idsGetter = { it.items.referenceIds },
-                delegateGetter = { it.items as AggregateCollectionRef<*, *> },
-                referencedClass = FxSqlTestItem::class.java,
-                cascadeAction = CascadeAction.NONE,
-                isOrdered = true
-            )
-        )
-
-    override fun cancelAllBubbleUp(entity: FxSqlTestEntity) {
-        entries.forEach { entry -> entry.delegateGetter(entity).cancelBubbleUp() }
-    }
 }

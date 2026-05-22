@@ -40,7 +40,7 @@ import kotlinx.serialization.json.Json
 /**
  * Minimal entity with a single reactive property — proves no @Serializable or backing field needed.
  */
-private class SimpleDelegate(override val id: Int) : ReactiveEntityBase<Int, SimpleDelegate>() {
+class SimpleDelegate(override val id: Int) : ReactiveEntityBase<Int, SimpleDelegate>() {
     var name by reactiveProperty("default")
     override val uniqueId: String get() = id.toString()
 
@@ -61,7 +61,7 @@ private class SimpleDelegate(override val id: Int) : ReactiveEntityBase<Int, Sim
 /**
  * Entity with a nullable reactive property — proves nullable KSER-01 variant.
  */
-private class NullableDelegate(override val id: Int) : ReactiveEntityBase<Int, NullableDelegate>() {
+class NullableDelegate(override val id: Int) : ReactiveEntityBase<Int, NullableDelegate>() {
     var name by reactiveProperty<String?>(null)
     override val uniqueId: String get() = id.toString()
 
@@ -103,7 +103,7 @@ private class DelegateWithCollection(override val id: Int) : ReactiveEntityBase<
 /**
  * Entity combining a constructor param, a reactive property, and an aggregate delegate — tests combined round-trip.
  */
-private class CombinedDelegate(override val id: Int) : ReactiveEntityBase<Int, CombinedDelegate>() {
+class CombinedDelegate(override val id: Int) : ReactiveEntityBase<Int, CombinedDelegate>() {
     var name by reactiveProperty("combined")
     val tracks by mutableAggregateList<Int, AudioItem>()
     override val uniqueId: String get() = id.toString()
@@ -242,14 +242,14 @@ class LirpEntitySerializerTest : StringSpec({
         }.message shouldContain "Expected exactly one 'get' method with 0 parameters"
     }
 
-    "LirpEntitySerializer init fails when reactive delegate lacks member property" {
+    "LirpEntitySerializer init fails with configure KSP message when reactive delegate has no generated accessor entry" {
         val entity = SimpleDelegate(1)
         val orphanDelegate = OrphanReactiveDelegate()
         injectDelegate(entity, "ghost", orphanDelegate)
 
-        shouldThrow<IllegalArgumentException> {
+        shouldThrow<IllegalStateException> {
             lirpSerializer(entity)
-        }.message shouldContain "Cannot find member property 'ghost'"
+        }.message shouldContain "configure KSP"
     }
 })
 
