@@ -37,14 +37,24 @@ interface CrudEvent<K, out T: IdentifiableEntity<K>>: LirpEvent<CrudEvent.Type> 
         CREATE(100),
         READ(200),
         UPDATE(300),
-        DELETE(900),
+        DELETE(400),
 
         /**
          * Fired when an optimistic lock failure is detected during a persistent write.
          * Carries both the attempted local state and the canonical state re-fetched from the store.
          * See [net.transgressoft.lirp.event.StandardCrudEvent.Conflict].
          */
-        CONFLICT(950);
+        CONFLICT(950),
+
+        /**
+         * Emitted after the SQL flush layer's `recoverEntityFromConflict` has thrown for the
+         * same entity id for three consecutive flush cycles without ever succeeding. The id
+         * should be treated as permanently lost from canonical SQL state until manually
+         * reconciled by the application.
+         *
+         * See [net.transgressoft.lirp.event.StandardCrudEvent.RecoveryFailed].
+         */
+        RECOVERY_FAILED(960);
 
         override fun toString() = "StandardDataEvent($name, $code)"
     }

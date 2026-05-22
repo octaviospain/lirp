@@ -121,4 +121,35 @@ sealed class StandardCrudEvent {
 
         override val type: CrudEvent.Type = CrudEvent.Type.CONFLICT
     }
+
+    /**
+     * Emitted when the SQL flush layer's optimistic-lock recovery path has exhausted its bounded
+     * retry budget for a single entity id.
+     *
+     * `SqlRepository.writePending` accumulates ids whose post-commit
+     * `recoverEntityFromConflict` invocation throws. The retry queue is drained at the start of
+     * each subsequent flush; on the third consecutive failure for the same id, the id is removed
+     * from the queue and this event is emitted in its place.
+     *
+     * Subscribers receiving a `RecoveryFailed` event should treat the id as permanently lost from
+     * canonical SQL state until manually reconciled — do not blindly re-add the entity, since its
+     * canonical state on the backing store is unknown at the moment of emission. The companion
+     * `MAX_RECOVERY_ATTEMPTS` constant on `SqlRepository` documents the retry budget (currently 3).
+     *
+     * @param id the entity identifier whose recovery failed
+     * @param expectedVersion the version the original failing write observed at conflict-detection
+     *   time; preserved across retries so the application can reason about which generation of
+     *   state was lost
+     * @param cause the last `Throwable` thrown by `recoverEntityFromConflict` before escalation
+     */
+    data class RecoveryFailed<K : Comparable<K>, out T : IdentifiableEntity<K>>(
+        val id: K,
+        val expectedVersion: Long,
+        val cause: Throwable
+    ): CrudEvent<K, T> {
+
+        override val entities: Map<K, T> = emptyMap()
+        override val oldEntities: Map<K, T> = emptyMap()
+        override val type: CrudEvent.Type = CrudEvent.Type.RECOVERY_FAILED
+    }
 }
