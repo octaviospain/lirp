@@ -18,7 +18,7 @@
 package net.transgressoft.lirp.persistence
 
 /**
- * Marks a property for O(1) equality index maintenance in repositories that extend `RegistryBase`.
+ * Marks a property for secondary index maintenance in repositories that extend `RegistryBase`.
  *
  * At compile time, the LIRP KSP processor scans for `@Indexed` annotations and generates a
  * [LirpIndexAccessor] implementation per entity class. The generated accessor contains direct
@@ -38,6 +38,19 @@ package net.transgressoft.lirp.persistence
  *
  * Null property values are silently skipped — entities with a null value for an indexed property
  * are simply not included in that index.
+ *
+ * When `sorted = true` the property is added to a `NavigableMap`-backed bucket structure and the
+ * property type MUST implement `Comparable`; the constraint is enforced at KSP compile time. Range
+ * queries (`gt`/`gte`/`lt`/`lte`) on a sorted-indexed property are O(log N + |result|); Eq on
+ * sorted buckets is O(log N). Null property values are still silently skipped.
+ *
+ * **Index staleness:** For repositories backed by `PersistentRepositoryBase` subclasses (such as
+ * `SqlRepository` and `JsonFileRepository`), index entries are kept in sync with reactive property
+ * mutations — changing an `@Indexed` property via a `reactiveProperty` delegate triggers an
+ * automatic re-index. For entities held directly in `VolatileRepository` (without a persistent
+ * backing store), mutations do **not** trigger re-indexing; index values reflect the state at
+ * entity-add time. In that case, `@Indexed` properties should be immutable (e.g. declared `val`),
+ * or changes must be made by removing the entity and re-adding it with the updated value.
  *
  * **Requires the `lirp-ksp` processor** to be applied via the KSP Gradle plugin. Without it,
  * `@Indexed` annotations have no effect and [Registry.findByIndex] throws [IllegalArgumentException].
@@ -60,7 +73,9 @@ package net.transgressoft.lirp.persistence
  * ```
  *
  * @param name The name of the index. Defaults to the property name when empty.
+ * @param sorted When `true`, opts the property into a sorted (`NavigableMap`-backed) index bucket.
+ *   The property type must implement `Comparable`; non-conforming types cause a KSP compile error.
  */
 @Target(AnnotationTarget.PROPERTY)
 @Retention(AnnotationRetention.BINARY)
-annotation class Indexed(val name: String = "")
+annotation class Indexed(val name: String = "", val sorted: Boolean = false)

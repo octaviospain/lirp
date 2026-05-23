@@ -26,6 +26,6 @@ open class SmokeTestBenchmark {
 
     @Benchmark
     fun entityCreation(bh: Blackhole) {
-        bh.consume(BenchmarkEntity(1, "test"))
+        bh.consume(BenchmarkEntity(1, "test", 1))
     }
 }

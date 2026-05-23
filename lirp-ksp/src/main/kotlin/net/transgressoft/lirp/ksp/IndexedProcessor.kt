@@ -25,6 +25,8 @@ import com.google.devtools.ksp.processing.SymbolProcessor
 import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
+import com.google.devtools.ksp.symbol.KSType
+import com.google.devtools.ksp.symbol.KSTypeParameter
 import com.google.devtools.ksp.validate
 
 private const val INDEXED_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.Indexed"
@@ -36,6 +38,10 @@ private const val INDEXED_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.I
  *
  * For each entity class, a `{ClassName}_LirpIndexAccessor` is generated in the same package, providing
  * direct property getter lambdas compiled to regular method calls — zero runtime reflection.
+ *
+ * When a property is annotated with `@Indexed(sorted = true)`, the processor verifies at compile time
+ * that the property type implements `Comparable<*>`. Non-conforming types produce a KSP build error
+ * naming both the property and the entity.
  */
 class IndexedProcessor(
     private val codeGenerator: CodeGenerator,
@@ -70,16 +76,28 @@ class IndexedProcessor(
         val className = classDecl.simpleName.asString()
         val accessorName = "${className}_LirpIndexAccessor"
 
-        val entries =
-            properties.map { prop ->
-                val annotation =
-                    prop.annotations.first {
-                        it.annotationType.resolve().declaration.qualifiedName?.asString() == INDEXED_ANNOTATION_FQN
-                    }
-                val customName = annotation.arguments.firstOrNull { it.name?.asString() == "name" }?.value as? String
-                val indexName = if (!customName.isNullOrEmpty()) customName else prop.simpleName.asString()
-                IndexedPropertyMeta(indexName, prop.simpleName.asString())
+        val entries = mutableListOf<IndexedPropertyMeta>()
+        for (prop in properties) {
+            val annotation =
+                prop.annotations.first {
+                    it.annotationType.resolve().declaration.qualifiedName?.asString() == INDEXED_ANNOTATION_FQN
+                }
+            val customName = annotation.arguments.firstOrNull { it.name?.asString() == "name" }?.value as? String
+            val indexName = if (!customName.isNullOrEmpty()) customName else prop.simpleName.asString()
+            val sortedArg = annotation.arguments.firstOrNull { it.name?.asString() == "sorted" }?.value as? Boolean == true
+
+            if (sortedArg && !isComparableType(prop)) {
+                logger.error(
+                    "@Indexed(sorted = true) requires a Comparable property type; " +
+                        "property '${prop.simpleName.asString()}' on entity '${classDecl.simpleName.asString()}' " +
+                        "has non-Comparable type. Either implement Comparable or set sorted = false (the default).",
+                    prop
+                )
+                continue
             }
+
+            entries.add(IndexedPropertyMeta(indexName, prop.simpleName.asString(), sortedArg))
+        }
 
         val file =
             codeGenerator.createNewFile(
@@ -96,10 +114,10 @@ class IndexedProcessor(
             entries.joinToString(",\n        ") { meta ->
                 val idx = meta.indexName.escapeForKotlinStringLiteral()
                 val prop = meta.propertyName // identifier, not a string literal
-                if (meta.indexName == meta.propertyName) {
-                    "IndexEntry(\"$idx\") { it.$prop }"
-                } else {
-                    "IndexEntry(\"$idx\", \"$prop\") { it.$prop }"
+                when {
+                    meta.sorted -> "IndexEntry(\"$idx\", \"$prop\", sorted = true) { it.$prop }"
+                    meta.indexName == meta.propertyName -> "IndexEntry(\"$idx\") { it.$prop }"
+                    else -> "IndexEntry(\"$idx\", \"$prop\") { it.$prop }"
                 }
             }
 
@@ -127,6 +145,35 @@ class IndexedProcessor(
 
         logger.info("Generated $packageName.$accessorName for $className")
     }
+
+    /**
+     * Returns true when the property's resolved type (or its non-nullable form for nullable properties)
+     * implements `kotlin.Comparable` anywhere in its supertype chain.
+     */
+    private fun isComparableType(prop: KSPropertyDeclaration): Boolean {
+        val resolvedType = prop.type.resolve().makeNotNullable()
+        return isKsTypeComparable(resolvedType, mutableSetOf())
+    }
+
+    private fun isKsTypeComparable(
+        type: KSType,
+        visited: MutableSet<String>
+    ): Boolean =
+        when (val decl = type.declaration) {
+            is KSClassDeclaration -> {
+                val fqn = decl.qualifiedName?.asString()
+                when {
+                    fqn == null -> false
+                    !visited.add("class:$fqn") -> false
+                    fqn == "kotlin.Comparable" -> true
+                    else -> decl.superTypes.any { isKsTypeComparable(it.resolve(), visited) }
+                }
+            }
+            is KSTypeParameter ->
+                visited.add("typeparam:${decl.name.asString()}") &&
+                    decl.bounds.any { isKsTypeComparable(it.resolve(), visited) }
+            else -> false
+        }
 }
 
-private data class IndexedPropertyMeta(val indexName: String, val propertyName: String)
+private data class IndexedPropertyMeta(val indexName: String, val propertyName: String, val sorted: Boolean = false)

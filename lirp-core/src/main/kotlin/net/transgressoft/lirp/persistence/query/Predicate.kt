@@ -27,9 +27,10 @@ import kotlin.reflect.KProperty1
  * and [KProperty1.name], both of which resolve via compiler-synthesized property
  * references without the `kotlin-reflect` artifact.
  *
- * Only [Eq] leaf nodes are eligible for index acceleration by [QueryPlanner].
- * Other leaf types ([Gt], [Gte], [Lt], [Lte]) and composite nodes ([And], [Or], [Not])
- * fall back to in-memory filtering or full scans as determined by the planner.
+ * [Eq] and [In] leaf nodes are eligible for index acceleration by [QueryPlanner].
+ * Range leaves ([Gt], [Gte], [Lt], [Lte]) are also index-accelerated when the target
+ * property is sorted-indexed; otherwise they fall back to scan/filter behavior.
+ * Composite nodes ([And], [Or], [Not]) are planned according to leaf resolvability.
  *
  * @param T the type of entity being evaluated
  */
@@ -111,6 +112,29 @@ sealed class Predicate<T : IdentifiableEntity<*>> {
             val v = prop.get(t) ?: return false
             return v <= value
         }
+    }
+
+    /**
+     * Collection-membership leaf: matches when `prop.get(t)` equals any element of [values].
+     *
+     * Values are frozen into a `Set<V?>` at construction so `matches` is amortised O(1) per entity.
+     * The infix surface ([isIn][net.transgressoft.lirp.persistence.query.isIn]) is the canonical entry
+     * point and performs the `Collection<V>` → `Set<V?>` materialisation exactly once.
+     *
+     * `null` inside [values] matches a `null` property value. This is Kotlin `Collection.contains`
+     * semantics and **diverges from SQL three-valued logic**; document this divergence to consumers.
+     *
+     * Eligible for index acceleration when [prop] is `@Indexed`: the planner evaluates the union of
+     * per-value `findByIndex` lookups.
+     *
+     * @param T the entity type
+     * @param V the property value type
+     * @param prop the property reference
+     * @param values the frozen set of values to test membership against
+     */
+    class In<T : IdentifiableEntity<*>, V>(val prop: KProperty1<T, V>, val values: Set<V?>) : Predicate<T>() {
+        /** Returns `true` if [prop] of [t] is contained in [values]. */
+        override fun matches(t: T): Boolean = prop.get(t) in values
     }
 
     /**

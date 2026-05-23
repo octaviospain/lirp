@@ -538,6 +538,11 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
                     pendingLock.read {
                         if (closed) return@read
                         enqueueUpdate(mutationEvent.newEntity, extractVersion(mutationEvent.oldEntity))
+
+                        // Keep secondary indexes in sync before invoking the subclass hook so a
+                        // throwing override of onEntityMutated cannot leave findByIndex / range
+                        // queries returning stale results.
+                        reindexEntity(mutationEvent.oldEntity, mutationEvent.newEntity)
                         onEntityMutated(mutationEvent)
                     }
                 }

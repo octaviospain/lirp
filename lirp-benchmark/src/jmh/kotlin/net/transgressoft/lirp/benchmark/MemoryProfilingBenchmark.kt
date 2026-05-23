@@ -50,7 +50,7 @@ open class MemoryProfilingBenchmark {
 
     @Setup(Level.Trial)
     fun setup() {
-        subscriberEntity = BenchmarkEntity(1, "mem-probe")
+        subscriberEntity = BenchmarkEntity(1, "mem-probe", 1)
         repeat(subscriberCount) { _ ->
             subscriberEntity.subscribe { _: MutationEvent<Int, BenchmarkEntity> -> }
         }
@@ -88,7 +88,7 @@ open class MemoryProfilingBenchmark {
      */
     @Benchmark
     fun heapWithSecondaryIndex(bh: Blackhole) {
-        val entity = BenchmarkEntity(999_999, "index-probe")
+        val entity = BenchmarkEntity(999_999, "index-probe", 50)
         val beforeBytes = GraphLayout.parseInstance(entity).totalSize()
         indexRepo.add(entity)
         val repoBytes = GraphLayout.parseInstance(indexRepo).totalSize()
@@ -110,7 +110,7 @@ open class MemoryProfilingBenchmark {
         val beforeUsed = rt.totalMemory() - rt.freeMemory()
 
         val repo = VolatileRepository<Int, BenchmarkEntity>("mem-init-bench")
-        repeat(entityCount) { i -> repo.add(BenchmarkEntity(i, "init-$i")) }
+        repeat(entityCount) { i -> repo.add(BenchmarkEntity(i, "init-$i", i % 100 + 1)) }
 
         val afterUsed = rt.totalMemory() - rt.freeMemory()
         val deltaBytes = afterUsed - beforeUsed

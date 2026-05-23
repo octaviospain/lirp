@@ -54,7 +54,7 @@ open class JsonRepoBenchmark {
 
     // Cached at field level to avoid recreating the serializer on every mutationFlush invocation
     val mapSerializer: KSerializer<Map<Int, BenchmarkEntity>> =
-        MapSerializer(Int.serializer(), lirpSerializer(BenchmarkEntity(0, "sample")))
+        MapSerializer(Int.serializer(), lirpSerializer(BenchmarkEntity(0, "sample", 0)))
 
     private val nextId = AtomicInteger()
 
@@ -64,7 +64,7 @@ open class JsonRepoBenchmark {
         jsonFile = File(tempDir, "benchmark.json").also { it.createNewFile() }
 
         repo = JsonFileRepository(jsonFile, mapSerializer)
-        repeat(entityCount) { i -> repo.add(BenchmarkEntity(i, "entity-$i")) }
+        repeat(entityCount) { i -> repo.add(BenchmarkEntity(i, "entity-$i", i % 100 + 1)) }
         // Force initial flush so all entities are on disk before measurement starts
         repo.close()
 
@@ -94,7 +94,7 @@ open class JsonRepoBenchmark {
     @OutputTimeUnit(TimeUnit.SECONDS)
     fun addEntity(bh: Blackhole) {
         val id = nextId.getAndIncrement()
-        bh.consume(repo.add(BenchmarkEntity(id, "entity-$id")))
+        bh.consume(repo.add(BenchmarkEntity(id, "entity-$id", id % 100 + 1)))
     }
 
     /**

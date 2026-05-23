@@ -57,7 +57,7 @@ open class InitTimeBenchmark {
     lateinit var jsonFile: File
 
     val mapSerializer: KSerializer<Map<Int, BenchmarkEntity>>
-        get() = MapSerializer(Int.serializer(), lirpSerializer(BenchmarkEntity(0, "sample")))
+        get() = MapSerializer(Int.serializer(), lirpSerializer(BenchmarkEntity(0, "sample", 0)))
 
     // SQL init state
     lateinit var sqlDataSource: HikariDataSource
@@ -69,7 +69,7 @@ open class InitTimeBenchmark {
         val tempDir = Files.createTempDirectory("lirp-init-bench-json").toFile()
         jsonFile = File(tempDir, "init-benchmark.json").also { it.createNewFile() }
         val prepRepo = JsonFileRepository(jsonFile, mapSerializer)
-        repeat(entityCount) { i -> prepRepo.add(BenchmarkEntity(i, "entity-$i")) }
+        repeat(entityCount) { i -> prepRepo.add(BenchmarkEntity(i, "entity-$i", i % 100 + 1)) }
         prepRepo.close()
 
         // --- SQL pre-population ---
@@ -85,7 +85,7 @@ open class InitTimeBenchmark {
 
         // Pre-create schema and insert rows
         val prepSqlRepo = SqlRepository(sqlDataSource, BenchmarkEntityTableDef)
-        repeat(entityCount) { i -> prepSqlRepo.add(BenchmarkEntity(i, "entity-$i")) }
+        repeat(entityCount) { i -> prepSqlRepo.add(BenchmarkEntity(i, "entity-$i", i % 100 + 1)) }
         // Force flush of all inserts to the database
         prepSqlRepo.close()
     }
@@ -107,7 +107,7 @@ open class InitTimeBenchmark {
     @Benchmark
     fun initVolatile(bh: Blackhole) {
         val repo = VolatileRepository<Int, BenchmarkEntity>("init-bench")
-        repeat(entityCount) { i -> repo.add(BenchmarkEntity(i, "entity-$i")) }
+        repeat(entityCount) { i -> repo.add(BenchmarkEntity(i, "entity-$i", i % 100 + 1)) }
         bh.consume(repo.size())
         repo.clear()
     }

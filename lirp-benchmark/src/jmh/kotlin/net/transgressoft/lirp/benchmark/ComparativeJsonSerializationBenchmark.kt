@@ -70,12 +70,12 @@ open class ComparativeJsonSerializationBenchmark {
         // JsonFileRepository side
         repoJsonFile = File(tempDir, "repo-$trial.json").also { it.createNewFile() }
         jsonRepo = JsonFileRepository(repoJsonFile, BenchmarkEntityMapSerializer.instance)
-        repeat(entityCount) { i -> jsonRepo.add(BenchmarkEntity(i, "entity-$i")) }
+        repeat(entityCount) { i -> jsonRepo.add(BenchmarkEntity(i, "entity-$i", i % 100 + 1)) }
 
         // Raw serialization side: pre-built mutable entity map
         rawEntities =
             (0 until entityCount).associateWithTo(LinkedHashMap()) { i ->
-                SerializableBenchmarkEntity(i, "entity-$i", "entity-$i")
+                SerializableBenchmarkEntity(i, "entity-$i", i % 100 + 1, "entity-$i")
             }
         rawJsonFile = File(tempDir, "raw-$trial.json").also { it.createNewFile() }
     }
@@ -92,7 +92,7 @@ open class ComparativeJsonSerializationBenchmark {
      */
     @Benchmark
     fun jsonRepoAdd(bh: Blackhole) {
-        val entity = BenchmarkEntity(entityCount + System.nanoTime().toInt(), "new")
+        val entity = BenchmarkEntity(entityCount + System.nanoTime().toInt(), "new", 50)
         val result = jsonRepo.add(entity)
         jsonRepo.remove(entity)
         bh.consume(result)
@@ -133,7 +133,7 @@ open class ComparativeJsonSerializationBenchmark {
     @Benchmark
     fun rawSerializationMutationWrite(bh: Blackhole) {
         val id = entityCount / 2
-        rawEntities[id] = SerializableBenchmarkEntity(id, "entity-$id", "mutated-${System.nanoTime()}")
+        rawEntities[id] = SerializableBenchmarkEntity(id, "entity-$id", id % 100 + 1, "mutated-${System.nanoTime()}")
         val jsonString = json.encodeToString(rawSerializer, rawEntities)
         rawJsonFile.writeText(jsonString)
         bh.consume(jsonString.length)
@@ -145,10 +145,10 @@ open class ComparativeJsonSerializationBenchmark {
  *
  * [BenchmarkEntity] extends [ReactiveEntityBase][net.transgressoft.lirp.entity.ReactiveEntityBase]
  * which is not [@Serializable][Serializable]. This data class carries the same logical fields
- * (id, label, name) for a fair comparison without the reactive overhead.
+ * (id, label, age, name) for a fair comparison without the reactive overhead.
  */
 @Serializable
-data class SerializableBenchmarkEntity(val id: Int, val label: String, val name: String)
+data class SerializableBenchmarkEntity(val id: Int, val label: String, val age: Int, val name: String)
 
 /**
  * Manual [KSerializer] for [Map] of [Int] to [BenchmarkEntity] used by [JsonFileRepository]
@@ -161,18 +161,19 @@ object BenchmarkEntityMapSerializer {
 
 /**
  * Minimal [KSerializer] for [BenchmarkEntity] that encodes only the fields relevant
- * to the benchmark comparison: [BenchmarkEntity.id], [BenchmarkEntity.label], and [BenchmarkEntity.name].
+ * to the benchmark comparison: [BenchmarkEntity.id], [BenchmarkEntity.label],
+ * [BenchmarkEntity.age], and [BenchmarkEntity.name].
  */
 object BenchmarkEntityKSerializer : KSerializer<BenchmarkEntity> {
     private val delegate = SerializableBenchmarkEntity.serializer()
     override val descriptor = delegate.descriptor
 
     override fun serialize(encoder: kotlinx.serialization.encoding.Encoder, value: BenchmarkEntity) {
-        delegate.serialize(encoder, SerializableBenchmarkEntity(value.id, value.label, value.name))
+        delegate.serialize(encoder, SerializableBenchmarkEntity(value.id, value.label, value.age, value.name))
     }
 
     override fun deserialize(decoder: kotlinx.serialization.encoding.Decoder): BenchmarkEntity {
         val data = delegate.deserialize(decoder)
-        return BenchmarkEntity(data.id, data.label).also { it.name = data.name }
+        return BenchmarkEntity(data.id, data.label, data.age).also { it.name = data.name }
     }
 }

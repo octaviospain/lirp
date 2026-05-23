@@ -46,7 +46,7 @@ open class VolatileRepoBenchmark {
     @Setup(Level.Trial)
     fun setup() {
         repo = VolatileRepository("volatile-bench")
-        repeat(entityCount) { i -> repo.add(BenchmarkEntity(i, "entity-$i")) }
+        repeat(entityCount) { i -> repo.add(BenchmarkEntity(i, "entity-$i", i % 100 + 1)) }
         nextId.set(entityCount)
     }
 
@@ -65,7 +65,7 @@ open class VolatileRepoBenchmark {
     @OutputTimeUnit(TimeUnit.SECONDS)
     fun addEntity(bh: Blackhole) {
         val id = nextId.getAndIncrement()
-        bh.consume(repo.add(BenchmarkEntity(id, "entity-$id")))
+        bh.consume(repo.add(BenchmarkEntity(id, "entity-$id", id % 100 + 1)))
     }
 
     /**

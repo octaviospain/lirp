@@ -30,6 +30,24 @@ infix fun <T : IdentifiableEntity<*>, V> KProperty1<T, V>.eq(value: V): Predicat
     Predicate.Eq(this, value)
 
 /**
+ * Constructs a [Predicate.In] frozen at call time. The values collection is materialised into
+ * a `Set<V?>` once; subsequent `matches` calls are O(1) per entity.
+ *
+ * `prop isIn emptyList()` short-circuits at planner level to an empty result — no entities are scanned.
+ *
+ * `null` inside [values] matches `null` property values; this diverges from SQL's `IN` three-valued logic.
+ *
+ * @param values the collection of values to test membership against
+ * @return a [Predicate.In] leaf node
+ */
+@Suppress("UNCHECKED_CAST")
+infix fun <T : IdentifiableEntity<*>, V> KProperty1<T, V>.isIn(values: Collection<V>): Predicate<T> =
+    // Widen to Set<V?> so Predicate.In<T, V> can hold a set that potentially contains null.
+    // toHashSet() makes a defensive copy, so the cast cannot be defeated by mutating the
+    // original Collection after the call.
+    Predicate.In(this, values.toHashSet() as Set<V?>)
+
+/**
  * Creates a greater-than predicate: `property > value`.
  *
  * Accepts nullable property types — rows whose property value is `null` never match the

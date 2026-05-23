@@ -72,7 +72,7 @@ open class ComparativeExposedBenchmark {
                 }
             )
         sqlRepo = SqlRepository(repoDataSource, BenchmarkEntityTableDef)
-        repeat(entityCount) { i -> sqlRepo.add(BenchmarkEntity(i, "entity-$i")) }
+        repeat(entityCount) { i -> sqlRepo.add(BenchmarkEntity(i, "entity-$i", i % 100 + 1)) }
 
         // Direct Exposed side: separate H2 in-memory database
         val exposedDbUrl = "jdbc:h2:mem:bench_exposed_$trial;DB_CLOSE_DELAY=-1"
@@ -92,6 +92,7 @@ open class ComparativeExposedBenchmark {
                     it[exposedTable.id] = i
                     it[exposedTable.label] = "entity-$i"
                     it[exposedTable.name] = "entity-$i"
+                    it[exposedTable.age] = i % 100 + 1
                 }
             }
         }
@@ -110,7 +111,7 @@ open class ComparativeExposedBenchmark {
     @Benchmark
     fun sqlRepoAdd(bh: Blackhole) {
         val id = addIdGen.getAndIncrement().toInt()
-        bh.consume(sqlRepo.add(BenchmarkEntity(id, "new-$id")))
+        bh.consume(sqlRepo.add(BenchmarkEntity(id, "new-$id", id % 100 + 1)))
     }
 
     /** Adds a new row via direct Exposed transaction. Paired with [sqlRepoAdd]. */
@@ -123,6 +124,7 @@ open class ComparativeExposedBenchmark {
                     it[exposedTable.id] = id
                     it[exposedTable.label] = "new-$id"
                     it[exposedTable.name] = "new-$id"
+                    it[exposedTable.age] = id % 100 + 1
                 }
             }
         )
@@ -157,5 +159,6 @@ class BenchmarkExposedTable : Table("benchmark_entities") {
     val id = integer("id")
     val label = varchar("label", 255)
     val name = varchar("name", 255)
+    val age = integer("age")
     override val primaryKey = PrimaryKey(id)
 }

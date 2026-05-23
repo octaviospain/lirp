@@ -1,5 +1,10 @@
 package net.transgressoft.lirp.benchmark
 
+import net.transgressoft.lirp.persistence.query.and
+import net.transgressoft.lirp.persistence.query.gt
+import net.transgressoft.lirp.persistence.query.isIn
+import net.transgressoft.lirp.persistence.query.lt
+import net.transgressoft.lirp.persistence.query.query
 import net.transgressoft.lirp.persistence.sql.ExposedTableInterpreter
 import net.transgressoft.lirp.persistence.sql.SqlRepository
 import com.zaxxer.hikari.HikariConfig
@@ -96,7 +101,7 @@ open class SqlRepoBenchmark {
 
         // SqlRepository creates the schema (no-op since already created above) and loads on init
         repo = SqlRepository(dataSource, BenchmarkEntityTableDef)
-        repeat(entityCount) { i -> repo.add(BenchmarkEntity(i, "entity-$i")) }
+        repeat(entityCount) { i -> repo.add(BenchmarkEntity(i, "entity-${i % 100}", age = (i % 100) + 1)) }
         // Force initial flush so setup rows are in the database before measurements begin
         repo.close()
 
@@ -126,7 +131,7 @@ open class SqlRepoBenchmark {
     @BenchmarkMode(Mode.Throughput)
     @OutputTimeUnit(TimeUnit.SECONDS)
     fun addEntity(bh: Blackhole) {
-        val entity = BenchmarkEntity(nextId.getAndIncrement(), "entity")
+        val entity = BenchmarkEntity(nextId.getAndIncrement(), "entity", 50)
         val result = repo.add(entity)
         repo.remove(entity)
         bh.consume(result)
@@ -157,7 +162,9 @@ open class SqlRepoBenchmark {
     @BenchmarkMode(Mode.SampleTime)
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
     fun findByLabel(bh: Blackhole) {
-        val targetLabel = "entity-${entityCount / 2}"
+        // setup seeds labels with cardinality 100 ("entity-${i % 100}"); modulo keeps the
+        // target inside the seeded label range so findByLabel exercises the hit path.
+        val targetLabel = "entity-${(entityCount / 2) % 100}"
         val results =
             transaction(db) {
                 exposedTable
@@ -165,6 +172,51 @@ open class SqlRepoBenchmark {
                     .where { labelCol eq targetLabel }
                     .map { BenchmarkEntityTableDef.fromRow(it, exposedTable) }
             }
+        bh.consume(results)
+    }
+
+    /**
+     * Measures sorted-index range acceleration: `age gt 30 and age lt 36` on a 50K-entity dataset
+     * (~5% selectivity). Before the sorted-index path (plans 01–04) this is O(N); after, it is
+     * O(log N + |result|).
+     *
+     * The repository's `age` column is `@Indexed(sorted = true)` (see [BenchmarkEntity]).
+     */
+    @Benchmark
+    @BenchmarkMode(Mode.SampleTime)
+    @OutputTimeUnit(TimeUnit.NANOSECONDS)
+    fun findByAgeRange(bh: Blackhole) {
+        val results =
+            repo.query {
+                where { BenchmarkEntity::age gt 30 and (BenchmarkEntity::age lt 36) }
+            }.toList()
+        bh.consume(results)
+    }
+
+    /**
+     * Measures the indexed union-of-lookups path: `label isIn listOf(...8 values)` on a 50K-entity
+     * dataset. Before plans 01–04 this would translate to chained `or` and scan; after, it issues
+     * 8 `findByIndex` calls and unions the results.
+     */
+    @Benchmark
+    @BenchmarkMode(Mode.SampleTime)
+    @OutputTimeUnit(TimeUnit.NANOSECONDS)
+    fun findByIsIn(bh: Blackhole) {
+        val targets =
+            listOf(
+                "entity-10",
+                "entity-20",
+                "entity-30",
+                "entity-40",
+                "entity-50",
+                "entity-60",
+                "entity-70",
+                "entity-80"
+            )
+        val results =
+            repo.query {
+                where { BenchmarkEntity::label isIn targets }
+            }.toList()
         bh.consume(results)
     }
 
