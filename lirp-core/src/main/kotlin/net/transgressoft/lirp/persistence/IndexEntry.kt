@@ -28,10 +28,13 @@ package net.transgressoft.lirp.persistence
  * @param T The entity type
  * @property indexName The resolved index name (from [Indexed.name] or the property name)
  * @property propertyName The property name of the entity
+ * @property sorted `true` when the source `@Indexed(sorted = true)`; consumed by `RegistryBase.discoverIndexes`
+ *   to select between `ConcurrentHashMap` and `ConcurrentSkipListMap` bucket storage.
  * @property getter Direct property accessor function — compiled to a regular method call, not reflection
  */
 data class IndexEntry<T>(
     val indexName: String,
     val propertyName: String = indexName,
+    val sorted: Boolean = false,
     val getter: (T) -> Any?
 )

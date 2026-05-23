@@ -78,7 +78,7 @@ open class DirectJdbcBenchmark {
                 }
             )
         lirpRepo = SqlRepository(lirpDataSource, BenchmarkEntityTableDef)
-        repeat(entityCount) { i -> lirpRepo.add(BenchmarkEntity(i, "entity-$i")) }
+        repeat(entityCount) { i -> lirpRepo.add(BenchmarkEntity(i, "entity-$i", i % 100 + 1)) }
         lirpRepo.close()
         lirpRepo = SqlRepository(lirpDataSource, BenchmarkEntityTableDef)
 
@@ -98,19 +98,21 @@ open class DirectJdbcBenchmark {
                     """CREATE TABLE IF NOT EXISTS benchmark_entities (
                         id INT PRIMARY KEY,
                         label VARCHAR(255) NOT NULL,
+                        age INT NOT NULL,
                         "name" VARCHAR(255) NOT NULL
                     )"""
                 )
             }
             val ps =
                 conn.prepareStatement(
-                    "INSERT INTO benchmark_entities (id, label, \"name\") VALUES (?, ?, ?)"
+                    "INSERT INTO benchmark_entities (id, label, age, \"name\") VALUES (?, ?, ?, ?)"
                 )
             ps.use {
                 repeat(entityCount) { i ->
                     it.setInt(1, i)
                     it.setString(2, "entity-$i")
-                    it.setString(3, "entity-$i")
+                    it.setInt(3, i % 100 + 1)
+                    it.setString(4, "entity-$i")
                     it.addBatch()
                 }
                 it.executeBatch()
@@ -141,7 +143,7 @@ open class DirectJdbcBenchmark {
     @OutputTimeUnit(TimeUnit.SECONDS)
     fun lirpAdd(bh: Blackhole) {
         val id = addIdGen.getAndIncrement().toInt()
-        bh.consume(lirpRepo.add(BenchmarkEntity(id, "entity-$id")))
+        bh.consume(lirpRepo.add(BenchmarkEntity(id, "entity-$id", id % 100 + 1)))
     }
 
     /**
@@ -158,11 +160,12 @@ open class DirectJdbcBenchmark {
         val id = addIdGen.getAndIncrement().toInt()
         jdbcDataSource.connection.use { conn ->
             conn.prepareStatement(
-                "INSERT INTO benchmark_entities (id, label, \"name\") VALUES (?, ?, ?)"
+                "INSERT INTO benchmark_entities (id, label, age, \"name\") VALUES (?, ?, ?, ?)"
             ).use { ps ->
                 ps.setInt(1, id)
                 ps.setString(2, "entity-$id")
-                ps.setString(3, "entity-$id")
+                ps.setInt(3, id % 100 + 1)
+                ps.setString(4, "entity-$id")
                 bh.consume(ps.executeUpdate())
             }
         }
@@ -192,14 +195,15 @@ open class DirectJdbcBenchmark {
     fun directJdbcFindById(bh: Blackhole) {
         jdbcDataSource.connection.use { conn ->
             conn.prepareStatement(
-                "SELECT id, label, \"name\" FROM benchmark_entities WHERE id = ?"
+                "SELECT id, label, age, \"name\" FROM benchmark_entities WHERE id = ?"
             ).use { ps ->
                 ps.setInt(1, entityCount / 2)
                 ps.executeQuery().use { rs ->
                     if (rs.next()) {
                         bh.consume(rs.getInt(1))
                         bh.consume(rs.getString(2))
-                        bh.consume(rs.getString(3))
+                        bh.consume(rs.getInt(3))
+                        bh.consume(rs.getString(4))
                     }
                 }
             }

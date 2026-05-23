@@ -67,7 +67,9 @@ fun <K, T> Registry<K, T>.query(block: QueryBuilder<T>.() -> Unit): Sequence<T>
         if (base != null) {
             QueryPlanner(
                 isIndexed = { base.isPropertyIndexed(it) },
-                indexNameFor = { base.indexNameFor(it) ?: it.name }
+                indexNameFor = { base.indexNameFor(it) ?: it.name },
+                isSortedIndexed = { base.isPropertySortedIndexed(it) },
+                sortedBucketFor = { name -> base.sortedBucketFor(name) }
             )
         } else {
             QueryPlanner(isIndexed = { false }, indexNameFor = { it.name })

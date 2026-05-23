@@ -29,6 +29,8 @@ import net.transgressoft.lirp.persistence.FxScalarPropertyDelegate
 import io.github.oshai.kotlinlogging.KotlinLogging
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentMap
+import java.util.concurrent.ConcurrentSkipListMap
 import java.util.function.Predicate
 import java.util.stream.Stream
 import java.util.stream.StreamSupport
@@ -65,10 +67,26 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
     ) : this(LirpContext.default, entitiesById, publisher)
 
     /**
-     * Nested map structure: indexName -> (fieldValue -> set of entities).
-     * Populated lazily on first entity add by [discoverIndexes]; entries are created per discovered @Indexed property.
+     * Hash-bucket secondary indexes: indexName -> (fieldValue -> set of entities).
+     * Populated lazily on first entity add by [discoverIndexes] for every [IndexEntry] with [IndexEntry.sorted] == false.
+     * An index name that appears here will never appear in [sortedIndexes] — the bucket kind is fixed at discovery time.
      */
-    private val secondaryIndexes: MutableMap<String, MutableMap<Any, MutableSet<T>>> = ConcurrentHashMap()
+    private val hashIndexes: MutableMap<String, ConcurrentMap<Any, MutableSet<T>>> = ConcurrentHashMap()
+
+    /**
+     * Sorted-bucket secondary indexes: indexName -> (fieldValue -> set of entities), backed by [ConcurrentSkipListMap].
+     * Populated lazily on first entity add by [discoverIndexes] for every [IndexEntry] with [IndexEntry.sorted] == true.
+     * An index name that appears here will never appear in [hashIndexes] — the bucket kind is fixed at discovery time.
+     * The live map is exposed via [sortedBucketFor] for lock-free range-slice access by the query planner.
+     *
+     * **Invariant:** each [ConcurrentSkipListMap] in this map is scoped to a single
+     * `(registry, indexName)` pair and must only receive values of a single runtime type. Index names
+     * must not collide across entity types registered to the same [LirpContext]; if they do, the
+     * explicit comparator below surfaces a clear [ClassCastException] with type information rather
+     * than an opaque JVM-level cast failure.
+     */
+    private val sortedIndexes: MutableMap<String, ConcurrentSkipListMap<Comparable<Any>, MutableSet<T>>> =
+        ConcurrentHashMap()
 
     /**
      * Cached index entries loaded from the KSP-generated [LirpIndexAccessor] for this entity type.
@@ -147,7 +165,6 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
      * Anonymous and local class entities are skipped early — they can never have KSP-generated
      * accessors because they lack stable binary names.
      */
-    @Suppress("UNCHECKED_CAST")
     protected fun discoverIndexes(entity: T) {
         if (indexEntries != null) return
         synchronized(this) {
@@ -156,56 +173,126 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
                 indexEntries = emptyList()
                 return
             }
-            val entries =
-                try {
-                    val accessorClass = Class.forName("${entity.javaClass.name}_LirpIndexAccessor")
-                    val accessor = accessorClass.getDeclaredConstructor().newInstance() as LirpIndexAccessor<T>
-                    accessor.entries
-                } catch (_: ClassNotFoundException) {
-                    // No LirpIndexAccessor generated — warn only since @Indexed delegate is not a runtime-visible pattern
-                    emptyList()
-                }
-            for (entry in entries) {
-                secondaryIndexes.putIfAbsent(entry.indexName, ConcurrentHashMap())
-            }
+            val entries = loadAccessorEntries(entity)
+            registerIndexBuckets(entries)
             indexEntries = entries
         }
     }
 
+    @Suppress("UNCHECKED_CAST")
+    private fun loadAccessorEntries(entity: T): List<IndexEntry<T>> =
+        try {
+            val accessorClass = Class.forName("${entity.javaClass.name}_LirpIndexAccessor")
+            val accessor = accessorClass.getDeclaredConstructor().newInstance() as LirpIndexAccessor<T>
+            accessor.entries
+        } catch (_: ClassNotFoundException) {
+            // No LirpIndexAccessor generated — warn only since @Indexed delegate is not a runtime-visible pattern
+            emptyList()
+        }
+
+    private fun registerIndexBuckets(entries: List<IndexEntry<T>>) {
+        for (entry in entries) {
+            if (entry.sorted) {
+                sortedIndexes.putIfAbsent(entry.indexName, ConcurrentSkipListMap(sortedIndexComparator(entry.indexName)))
+            } else {
+                hashIndexes.putIfAbsent(entry.indexName, ConcurrentHashMap())
+            }
+        }
+    }
+
+    private fun sortedIndexComparator(indexName: String): Comparator<Comparable<Any>> =
+        Comparator { a, b ->
+            try {
+                a.compareTo(b)
+            } catch (_: ClassCastException) {
+                throw ClassCastException(
+                    "Sorted index '$indexName' received incompatible key types: " +
+                        "${a::class.simpleName} vs ${b::class.simpleName}. " +
+                        "Each @Indexed(sorted=true) property must have a consistent runtime type."
+                )
+            }
+        }
+
     /**
      * Adds [entity] to all secondary indexes. For each @Indexed property whose value is non-null,
-     * the entity is inserted into the corresponding value bucket. Null values are silently skipped
-     * because [ConcurrentHashMap] does not permit null keys.
+     * the entity is inserted into the corresponding value bucket (sorted or hash). Null values are
+     * silently skipped because neither [ConcurrentHashMap] nor [ConcurrentSkipListMap]
+     * permits null keys.
      */
+    @Suppress("UNCHECKED_CAST")
     protected fun indexEntity(entity: T) {
         val entries = indexEntries ?: return
         for (entry in entries) {
             val value = entry.getter(entity) ?: continue
-            secondaryIndexes[entry.indexName]
-                ?.computeIfAbsent(value) { ConcurrentHashMap.newKeySet() }
-                ?.add(entity)
+            if (entry.sorted) {
+                sortedIndexes[entry.indexName]
+                    ?.computeIfAbsent(value as Comparable<Any>) { ConcurrentHashMap.newKeySet() }
+                    ?.add(entity)
+            } else {
+                hashIndexes[entry.indexName]
+                    ?.computeIfAbsent(value) { ConcurrentHashMap.newKeySet() }
+                    ?.add(entity)
+            }
         }
     }
 
     /**
      * Removes [entity] from all secondary indexes. Null property values are silently skipped.
      */
+    @Suppress("UNCHECKED_CAST")
     protected fun deindexEntity(entity: T) {
         val entries = indexEntries ?: return
         for (entry in entries) {
             val value = entry.getter(entity) ?: continue
-            secondaryIndexes[entry.indexName]
-                ?.get(value)
-                ?.remove(entity)
+            if (entry.sorted) {
+                removeFromBucket(sortedIndexes[entry.indexName], value as Comparable<Any>, entity)
+            } else {
+                removeFromBucket(hashIndexes[entry.indexName], value, entity)
+            }
         }
     }
 
     /**
-     * Clears all value buckets in every secondary index. O(n_indexes) operation — does not iterate entities.
+     * Moves [liveEntity] from its old index positions (keyed by property values on [snapshot]) to
+     * its new index positions (keyed by property values on [liveEntity]).
+     *
+     * Called from entity mutation handlers where `snapshot` is the pre-mutation clone and
+     * `liveEntity` is the updated in-memory object. The set stored in each index bucket holds the
+     * live object reference, so the removal must use the live reference — hence the two-parameter
+     * signature rather than a simple `deindexEntity(old); indexEntity(new)` pair.
+     */
+    @Suppress("UNCHECKED_CAST")
+    protected fun reindexEntity(snapshot: T, liveEntity: T) {
+        val entries = indexEntries ?: return
+        for (entry in entries) {
+            val oldValue = entry.getter(snapshot) ?: continue
+            if (entry.sorted) {
+                removeFromBucket(sortedIndexes[entry.indexName], oldValue as Comparable<Any>, liveEntity)
+            } else {
+                removeFromBucket(hashIndexes[entry.indexName], oldValue, liveEntity)
+            }
+        }
+        indexEntity(liveEntity)
+    }
+
+    // Atomically remove [entity] from the value bucket and prune the key if the set becomes empty.
+    // ConcurrentMap.computeIfPresent guarantees the remove + emptiness check happen within the
+    // same per-key lock, so a concurrent add for the same key never observes a transient empty set.
+    private fun <K : Any> removeFromBucket(bucket: ConcurrentMap<K, MutableSet<T>>?, key: K, entity: T) {
+        bucket?.computeIfPresent(key) { _, set ->
+            set.remove(entity)
+            if (set.isEmpty()) null else set
+        }
+    }
+
+    /**
+     * Clears all value buckets in every secondary index, across both hash and sorted bucket kinds.
+     * O(n_indexes) operation — does not iterate entities.
      * Intended for use in bulk-clear operations such as [net.transgressoft.lirp.persistence.VolatileRepository.clear].
      */
     protected fun clearSecondaryIndexes() {
-        secondaryIndexes.values.forEach { it.clear() }
+        hashIndexes.values.forEach { it.clear() }
+        sortedIndexes.values.forEach { it.clear() }
     }
 
     /**
@@ -226,6 +313,26 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
      */
     internal fun indexNameFor(prop: KProperty1<T, *>): String? =
         indexEntries?.find { it.propertyName == prop.name }?.indexName
+
+    /**
+     * Returns `true` iff the given property has a declared `@Indexed(sorted = true)` entry.
+     *
+     * The sorted flag drives the query planner's choice between a sorted range-slice and a hash lookup,
+     * so callers can use this to guard range operations before calling [sortedBucketFor].
+     */
+    internal fun isPropertySortedIndexed(prop: KProperty1<T, *>): Boolean =
+        indexEntries?.any { it.propertyName == prop.name && it.sorted } == true
+
+    /**
+     * Returns the live [java.util.NavigableMap] backing the sorted index for [indexName], or `null`
+     * when the index is hash-bucketed or not declared.
+     *
+     * The returned map is the same [ConcurrentSkipListMap] used for entity storage —
+     * callers must not mutate it. The lock-free `tailMap`/`headMap`/`subMap` views it provides are the
+     * intended entry point for range-slice queries in the query planner.
+     */
+    internal fun sortedBucketFor(indexName: String): java.util.NavigableMap<Comparable<Any>, MutableSet<T>>? =
+        sortedIndexes[indexName]
 
     /**
      * Loads the KSP-generated [LirpRefAccessor] for the entity's class via a convention-based
@@ -476,18 +583,37 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
     }
 
     override fun findByIndex(indexName: String, value: Any): Set<T> {
-        val indexMap =
-            secondaryIndexes[indexName]
+        val sortedBucket = sortedIndexes[indexName]
+        if (sortedBucket != null) {
+            return sortedBucket[requireComparableKey(indexName, value)]?.toSet() ?: emptySet()
+        }
+        val hashBucket =
+            hashIndexes[indexName]
                 ?: throw IllegalArgumentException("No index declared for property '$indexName'")
-        return indexMap[value]?.toSet() ?: emptySet()
+        return hashBucket[value]?.toSet() ?: emptySet()
     }
 
     override fun findFirstByIndex(indexName: String, value: Any): Optional<out T> {
-        val indexMap =
-            secondaryIndexes[indexName]
+        val sortedBucket = sortedIndexes[indexName]
+        if (sortedBucket != null) {
+            return Optional.ofNullable(sortedBucket[requireComparableKey(indexName, value)]?.firstOrNull())
+        }
+        val hashBucket =
+            hashIndexes[indexName]
                 ?: throw IllegalArgumentException("No index declared for property '$indexName'")
-        return Optional.ofNullable(indexMap[value]?.firstOrNull())
+        return Optional.ofNullable(hashBucket[value]?.firstOrNull())
     }
+
+    // Sorted-index buckets are NavigableMaps keyed by Comparable<Any>; an unchecked cast on a
+    // non-Comparable caller value would throw a low-context ClassCastException deep inside the
+    // map. Validate up-front and report which index and runtime type were involved.
+    @Suppress("UNCHECKED_CAST")
+    private fun requireComparableKey(indexName: String, value: Any): Comparable<Any> =
+        value as? Comparable<Any>
+            ?: throw IllegalArgumentException(
+                "Sorted index '$indexName' expects a Comparable key, " +
+                    "got ${value::class.qualifiedName ?: value::class.java.name}"
+            )
 
     override fun iterator(): Iterator<T> = entitiesById.values.iterator()
 

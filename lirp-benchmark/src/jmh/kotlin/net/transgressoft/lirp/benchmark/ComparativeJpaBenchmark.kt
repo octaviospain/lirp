@@ -68,7 +68,7 @@ open class ComparativeJpaBenchmark {
                 }
             )
         sqlRepo = SqlRepository(repoDataSource, BenchmarkEntityTableDef)
-        repeat(entityCount) { i -> sqlRepo.add(BenchmarkEntity(i, "entity-$i")) }
+        repeat(entityCount) { i -> sqlRepo.add(BenchmarkEntity(i, "entity-$i", i % 100 + 1)) }
 
         // JPA side: Hibernate EntityManagerFactory with overridden JDBC URL for unique trial isolation
         val jpaDbUrl = "jdbc:h2:mem:bench_jpa_$trial;DB_CLOSE_DELAY=-1"
@@ -84,6 +84,7 @@ open class ComparativeJpaBenchmark {
                 JpaBenchmarkEntity().apply {
                     id = i
                     label = "entity-$i"
+                    age = i % 100 + 1
                     name = "entity-$i"
                 }
             )
@@ -106,7 +107,7 @@ open class ComparativeJpaBenchmark {
     @OutputTimeUnit(TimeUnit.SECONDS)
     fun sqlRepoAdd(bh: Blackhole) {
         val id = addIdGen.getAndIncrement().toInt()
-        bh.consume(sqlRepo.add(BenchmarkEntity(id, "new-$id")))
+        bh.consume(sqlRepo.add(BenchmarkEntity(id, "new-$id", id % 100 + 1)))
     }
 
     /** Persists a new entity via JPA [EntityManager]. Paired with [sqlRepoAdd]. */
@@ -120,6 +121,7 @@ open class ComparativeJpaBenchmark {
             JpaBenchmarkEntity().apply {
                 this.id = id
                 label = "new-$id"
+                age = id % 100 + 1
                 name = "new-$id"
             }
         em.persist(entity)
@@ -164,5 +166,6 @@ open class JpaBenchmarkEntity {
     @Id
     var id: Int = 0
     var label: String = ""
+    var age: Int = 0
     var name: String = ""
 }

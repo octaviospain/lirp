@@ -20,6 +20,7 @@ package net.transgressoft.lirp.persistence.query
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.persistence.Registry
 import io.github.oshai.kotlinlogging.KotlinLogging
+import java.util.NavigableMap
 import kotlin.reflect.KProperty1
 
 private val log = KotlinLogging.logger {}
@@ -52,19 +53,34 @@ enum class ViaStrategy {
  * retrieval strategy based on indexed property metadata.
  *
  * The planner operates in three modes:
- * - [Strategy.INDEX_ONLY]: every predicate leaf is an indexed equality check;
- *   results come directly from the index with no re-filtering.
+ * - [Strategy.INDEX_ONLY]: every predicate leaf is an indexed equality, membership, or
+ *   sorted-range check; results come directly from the index with no re-filtering.
  * - [Strategy.INDEX_THEN_FILTER]: some predicate leaves are indexed equality checks,
  *   but others (range, negation, OR) require post-filtering.
  * - [Strategy.SCAN_ONLY]: no indexed equality leaves are present; a full scan is required.
  *
+ * `Predicate.In` leaves on indexed properties evaluate as the union of per-value `findByIndex`
+ * lookups (no cardinality threshold). Empty-`In` short-circuits at planner level to `emptySequence()`.
+ *
+ * `Predicate.Gt`/`Gte`/`Lt`/`Lte` leaves on `@Indexed(sorted = true)` properties slice the
+ * registry's `NavigableMap` bucket (`tailMap` for `Gt`/`Gte`, `headMap` for `Lt`/`Lte`) and
+ * flatten the matching value sets into a candidate `Set<T>` (O(log N + |result|)). The slice
+ * is pre-materialised at plan time via [IndexableLeaf.RangeSlice], bypassing per-key
+ * `findByIndex` dispatch to avoid the per-key overhead of O(|slice| × hash-lookup).
+ *
  * @param T the entity type
  * @param isIndexed returns `true` if the given property is indexed
  * @param indexNameFor returns the index name for a property (fallback to [KProperty1.name])
+ * @param isSortedIndexed returns `true` if the given property is `@Indexed(sorted = true)`;
+ *   defaults to `false` so callers that do not opt in retain current behavior
+ * @param sortedBucketFor returns the live `NavigableMap` bucket for the given index name, or
+ *   `null` if the index is not sorted; defaults to `{ null }` so non-sorted callers are unaffected
  */
 internal class QueryPlanner<T : IdentifiableEntity<*>>(
     private val isIndexed: (KProperty1<T, *>) -> Boolean,
-    private val indexNameFor: (KProperty1<T, *>) -> String = { it.name }
+    private val indexNameFor: (KProperty1<T, *>) -> String = { it.name },
+    private val isSortedIndexed: (KProperty1<T, *>) -> Boolean = { false },
+    private val sortedBucketFor: (String) -> NavigableMap<Comparable<Any>, MutableSet<T>>? = { null }
 ) {
 
     /**
@@ -89,6 +105,28 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
      * @param results a lazy sequence of matching entities
      */
     data class Plan<T>(val strategy: Strategy, val results: Sequence<T>)
+
+    /**
+     * Internal discriminated leaf representation used during index candidate extraction.
+     *
+     * [Single] carries a single exact value (from [Predicate.Eq]); [Multi] carries a value-set
+     * (from [Predicate.In]) and is resolved as a union of per-value `findByIndex` lookups.
+     * [RangeSlice] carries a pre-materialised candidate set from a `NavigableMap` range slice
+     * (from `Gt`/`Gte`/`Lt`/`Lte` on sorted-indexed properties); no further `findByIndex`
+     * dispatch is needed — the candidates are already flattened from the bucket sets.
+     * The [RangeSlice.candidates] set holds `T` instances erased to `Any`; callers must
+     * suppress the unchecked-cast warning when retrieving them as `Set<T>`.
+     */
+    private sealed interface IndexableLeaf {
+        val indexName: String
+
+        data class Single(override val indexName: String, val value: Any) : IndexableLeaf
+
+        data class Multi(override val indexName: String, val values: Set<Any>) : IndexableLeaf
+
+        /** [candidates] erased to `Set<Any>` — type-safely `Set<T>` at construction. */
+        data class RangeSlice(override val indexName: String, val candidates: Set<Any>) : IndexableLeaf
+    }
 
     /**
      * Executes [query] against [registry], selecting the optimal strategy.
@@ -137,34 +175,144 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
         registry: Registry<*, T>
     ): Pair<Strategy, Sequence<T>> {
         if (pred == null) return Strategy.SCAN_ONLY to registry.asSequence()
+        // Empty-In short-circuit: x ∈ ∅ is always false — no entities can match.
+        if (pred is Predicate.In<*, *> && (pred as Predicate.In<T, *>).values.isEmpty()) {
+            return Strategy.INDEX_ONLY to emptySequence()
+        }
         if (containsVia(pred)) {
             // Cross-aggregate path: split hybrid predicate, choose Via strategy, apply
             // any NonVia arm as a lazy post-filter (W-2). Strategy reported to callers is
             // still SCAN_ONLY at the parent level (no index acceleration on Via* nodes).
             return Strategy.SCAN_ONLY to executeViaPlan(pred, registry)
         }
-        val indexable = extractIndexableEqs(pred)
+        val indexable = extractIndexableLeaves(pred)
         if (indexable.isEmpty()) return Strategy.SCAN_ONLY to registry.asSequence().filter { pred.matches(it) }
         return indexAcceleratedCandidates(pred, indexable, registry)
     }
 
     private fun indexAcceleratedCandidates(
         pred: Predicate<T>,
-        indexable: List<Pair<String, Any>>,
+        indexable: List<IndexableLeaf>,
         registry: Registry<*, T>
     ): Pair<Strategy, Sequence<T>> {
         var working: Set<T>? = null
-        for ((name, value) in indexable) {
-            val hit = registry.findByIndex(name, value)
+        for (leaf in indexable) {
+            val hit: Set<T> =
+                when (leaf) {
+                    is IndexableLeaf.Single -> registry.findByIndex(leaf.indexName, leaf.value)
+                    is IndexableLeaf.Multi -> leaf.values.flatMapTo(HashSet()) { registry.findByIndex(leaf.indexName, it) }
+                    // RangeSlice candidates are pre-materialised from NavigableMap bucket sets —
+                    // no further findByIndex dispatch needed. The cast is safe: RangeSlice is
+                    // constructed only via rangeLeaf(), which receives Set<T> from rangeSlice().
+                    is IndexableLeaf.RangeSlice -> {
+                        @Suppress("UNCHECKED_CAST")
+                        leaf.candidates as Set<T>
+                    }
+                }
             working = working?.let { it intersect hit } ?: hit
             if (working.isEmpty()) break
         }
         val candidateSet = working ?: emptySet()
         val strategy = if (allLeavesAreIndexedEq(pred)) Strategy.INDEX_ONLY else Strategy.INDEX_THEN_FILTER
         val candidates =
-            if (strategy == Strategy.INDEX_ONLY) candidateSet.asSequence()
-            else candidateSet.asSequence().filter { pred.matches(it) }
+            when (strategy) {
+                Strategy.INDEX_ONLY -> candidateSet.asSequence()
+                // When any In leaf contains null, null-valued entities are not reachable via the index
+                // (null keys are not stored). A full registry scan with pred.matches is required so
+                // null-matching entities are included alongside the index-resolved candidates.
+                Strategy.INDEX_THEN_FILTER ->
+                    if (containsInWithNull(pred)) {
+                        registry.asSequence().filter { pred.matches(it) }
+                    } else {
+                        candidateSet.asSequence().filter { pred.matches(it) }
+                    }
+                else -> candidateSet.asSequence().filter { pred.matches(it) }
+            }
         return strategy to candidates
+    }
+
+    /**
+     * Returns `true` if [pred] contains a [Predicate.In] leaf whose [Predicate.In.values] set
+     * contains `null`. Such predicates require a full registry scan even when the property is
+     * indexed, because null values are never stored in the index.
+     *
+     * Recurses into [Predicate.And], [Predicate.Or], and [Predicate.Not] composites so that
+     * a null-valued `In` leaf nested inside an `Or` branch is correctly detected.
+     */
+    private fun containsInWithNull(pred: Predicate<T>): Boolean =
+        when (pred) {
+            is Predicate.In<*, *> -> null in (pred as Predicate.In<T, *>).values
+            is Predicate.And<*> -> {
+                @Suppress("UNCHECKED_CAST")
+                val a = pred as Predicate.And<T>
+                containsInWithNull(a.left) || containsInWithNull(a.right)
+            }
+            is Predicate.Or<*> -> {
+                @Suppress("UNCHECKED_CAST")
+                val o = pred as Predicate.Or<T>
+                containsInWithNull(o.left) || containsInWithNull(o.right)
+            }
+            is Predicate.Not<*> -> {
+                @Suppress("UNCHECKED_CAST")
+                containsInWithNull((pred as Predicate.Not<T>).inner)
+            }
+            else -> false
+        }
+
+    /**
+     * Materialises a `NavigableMap` range slice for a range predicate leaf, returning the
+     * flattened candidate set or `null` when the index is unavailable.
+     *
+     * The cast `v as Comparable<Any>` is safe because [Predicate.Gt], [Predicate.Gte],
+     * [Predicate.Lt], and [Predicate.Lte] all declare `V : Comparable<V>` on their value
+     * parameter. Kotlin type erasure forces the cast at the call site; the type bound on the
+     * predicate class guarantees no `ClassCastException` at runtime.
+     *
+     * When [sortedBucketFor] returns `null` (defensive — the storage invariant should prevent
+     * this for any sorted-indexed property) the method returns `null`, causing the call site
+     * to fall back to the scan path for that leaf.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun rangeSlice(leaf: Predicate<T>): Set<T>? {
+        return when (leaf) {
+            is Predicate.Gt<*, *> -> {
+                val pred = leaf as Predicate.Gt<T, Comparable<Any>>
+                val bucket =
+                    sortedBucketFor(indexNameFor(pred.prop)) ?: run {
+                        log.debug { "sortedBucketFor returned null for ${pred.prop.name}; falling back to scan" }
+                        return null
+                    }
+                bucket.tailMap(pred.value, false).values.flatMapTo(HashSet()) { it }
+            }
+            is Predicate.Gte<*, *> -> {
+                val pred = leaf as Predicate.Gte<T, Comparable<Any>>
+                val bucket =
+                    sortedBucketFor(indexNameFor(pred.prop)) ?: run {
+                        log.debug { "sortedBucketFor returned null for ${pred.prop.name}; falling back to scan" }
+                        return null
+                    }
+                bucket.tailMap(pred.value, true).values.flatMapTo(HashSet()) { it }
+            }
+            is Predicate.Lt<*, *> -> {
+                val pred = leaf as Predicate.Lt<T, Comparable<Any>>
+                val bucket =
+                    sortedBucketFor(indexNameFor(pred.prop)) ?: run {
+                        log.debug { "sortedBucketFor returned null for ${pred.prop.name}; falling back to scan" }
+                        return null
+                    }
+                bucket.headMap(pred.value, false).values.flatMapTo(HashSet()) { it }
+            }
+            is Predicate.Lte<*, *> -> {
+                val pred = leaf as Predicate.Lte<T, Comparable<Any>>
+                val bucket =
+                    sortedBucketFor(indexNameFor(pred.prop)) ?: run {
+                        log.debug { "sortedBucketFor returned null for ${pred.prop.name}; falling back to scan" }
+                        return null
+                    }
+                bucket.headMap(pred.value, true).values.flatMapTo(HashSet()) { it }
+            }
+            else -> null
+        }
     }
 
     private fun applyOrdering(candidates: Sequence<T>, orderBy: List<OrderClause<T>>): Sequence<T> {
@@ -179,42 +327,112 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
     }
 
     /**
-     * Walks the predicate AST and extracts every [Predicate.Eq] leaf whose property
-     * is indexed and whose value is non-null.
+     * Walks the predicate AST and extracts every indexed leaf as an [IndexableLeaf].
      *
-     * [Predicate.And] nodes are recursed into; [Predicate.Or], [Predicate.Not],
-     * and range predicates short-circuit to empty for the subtree (conservative fallback).
+     * [Predicate.Eq] on an indexed property with a non-null value produces [IndexableLeaf.Single].
+     * [Predicate.In] on an indexed property with non-empty non-null values produces [IndexableLeaf.Multi].
+     * `Gt`/`Gte`/`Lt`/`Lte` on a sorted-indexed property produce [IndexableLeaf.RangeSlice] with
+     * candidates pre-materialised via the `NavigableMap` slice. Non-sorted-indexed range leaves
+     * return `emptyList()` (conservative fallback to scan for that subtree).
+     * [Predicate.And] nodes are recursed into; [Predicate.Or] and [Predicate.Not] short-circuit.
      */
-    private fun extractIndexableEqs(pred: Predicate<T>): List<Pair<String, Any>> =
+    @Suppress("UNCHECKED_CAST")
+    private fun extractIndexableLeaves(pred: Predicate<T>): List<IndexableLeaf> =
         when (pred) {
             is Predicate.Eq<*, *> -> {
-                @Suppress("UNCHECKED_CAST")
                 val eq = pred as Predicate.Eq<T, Any?>
                 if (isIndexed(eq.prop) && eq.value != null) {
-                    listOf(indexNameFor(eq.prop) to eq.value)
+                    listOf(IndexableLeaf.Single(indexNameFor(eq.prop), eq.value))
                 } else {
                     emptyList()
                 }
             }
+            is Predicate.In<*, *> -> {
+                val inPred = pred as Predicate.In<T, Any?>
+                if (!isIndexed(inPred.prop)) return emptyList()
+                // Empty values: emit an empty Multi so AND-intersection in
+                // indexAcceleratedCandidates collapses the candidate set to ∅. Without this,
+                // allLeavesAreIndexedEq classifies the leaf as resolved (null !in []) while it
+                // contributes no candidates, and a sibling Eq's candidates leak through INDEX_ONLY.
+                if (inPred.values.isEmpty()) {
+                    return listOf(IndexableLeaf.Multi(indexNameFor(inPred.prop), emptySet()))
+                }
+                val nonNullValues = inPred.values.filterNotNull().toSet()
+                if (nonNullValues.isEmpty()) emptyList()
+                else listOf(IndexableLeaf.Multi(indexNameFor(inPred.prop), nonNullValues))
+            }
+            is Predicate.Gt<*, *> -> rangeLeaf(pred as Predicate.Gt<T, *>)
+            is Predicate.Gte<*, *> -> rangeLeaf(pred as Predicate.Gte<T, *>)
+            is Predicate.Lt<*, *> -> rangeLeaf(pred as Predicate.Lt<T, *>)
+            is Predicate.Lte<*, *> -> rangeLeaf(pred as Predicate.Lte<T, *>)
             is Predicate.And<*> -> {
-                @Suppress("UNCHECKED_CAST")
                 val a = pred as Predicate.And<T>
-                extractIndexableEqs(a.left) + extractIndexableEqs(a.right)
+                extractIndexableLeaves(a.left) + extractIndexableLeaves(a.right)
             }
             else -> emptyList()
         }
 
+    private fun rangeLeafResolved(prop: KProperty1<T, *>): Boolean =
+        isSortedIndexed(prop) && sortedBucketFor(indexNameFor(prop)) != null
+
+    /** Produces a [IndexableLeaf.RangeSlice] for range leaves on sorted-indexed properties. */
+    private fun rangeLeaf(pred: Predicate<T>): List<IndexableLeaf> {
+        val prop =
+            when (pred) {
+                is Predicate.Gt<*, *> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    (pred as Predicate.Gt<T, *>).prop
+                }
+                is Predicate.Gte<*, *> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    (pred as Predicate.Gte<T, *>).prop
+                }
+                is Predicate.Lt<*, *> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    (pred as Predicate.Lt<T, *>).prop
+                }
+                is Predicate.Lte<*, *> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    (pred as Predicate.Lte<T, *>).prop
+                }
+                else -> return emptyList()
+            }
+        if (!isSortedIndexed(prop)) return emptyList()
+        val candidates = rangeSlice(pred) ?: return emptyList()
+        @Suppress("UNCHECKED_CAST")
+        return listOf(IndexableLeaf.RangeSlice(indexNameFor(prop), candidates as Set<Any>))
+    }
+
     /**
-     * Returns `true` if every leaf in the AST is an indexed [Predicate.Eq].
+     * Returns `true` if every leaf in the AST is fully resolved by the index with no residual scan.
+     *
+     * Covers:
+     * - [Predicate.Eq] on an indexed property with a non-null value
+     * - [Predicate.In] on an indexed property with no null values
+     * - `Gt`/`Gte`/`Lt`/`Lte` on a sorted-indexed property (range slice is complete — no residual)
+     *
+     * The function name is historical (`allLeavesAreIndexedEq`); renaming is deferred to avoid
+     * call-site churn — it now also covers `In` and sorted-range leaves.
      */
+    @Suppress("UNCHECKED_CAST")
     private fun allLeavesAreIndexedEq(pred: Predicate<T>): Boolean =
         when (pred) {
-            is Predicate.Eq<*, *> -> {
-                @Suppress("UNCHECKED_CAST")
+            is Predicate.Eq<*, *> ->
                 (pred as Predicate.Eq<T, Any?>).let { eq -> isIndexed(eq.prop) && eq.value != null }
+            is Predicate.In<*, *> -> {
+                val inPred = pred as Predicate.In<T, Any?>
+                isIndexed(inPred.prop) && null !in inPred.values
             }
+            // A sorted-indexed range leaf is only safely "resolved" if the registry has
+            // actually allocated the NavigableMap bucket. If sortedBucketFor returns null,
+            // rangeLeaf emits no candidates — classifying the leaf as resolved anyway would
+            // let a sibling indexed leaf's candidates leak through INDEX_ONLY without the
+            // range predicate applied.
+            is Predicate.Gt<*, *> -> rangeLeafResolved((pred as Predicate.Gt<T, *>).prop)
+            is Predicate.Gte<*, *> -> rangeLeafResolved((pred as Predicate.Gte<T, *>).prop)
+            is Predicate.Lt<*, *> -> rangeLeafResolved((pred as Predicate.Lt<T, *>).prop)
+            is Predicate.Lte<*, *> -> rangeLeafResolved((pred as Predicate.Lte<T, *>).prop)
             is Predicate.And<*> -> {
-                @Suppress("UNCHECKED_CAST")
                 val a = pred as Predicate.And<T>
                 allLeavesAreIndexedEq(a.left) && allLeavesAreIndexedEq(a.right)
             }
