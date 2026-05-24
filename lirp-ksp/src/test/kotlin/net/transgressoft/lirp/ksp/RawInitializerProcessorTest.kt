@@ -140,6 +140,140 @@ internal class RawInitializerProcessorTest : StringSpec({
         content shouldContain "writeReactivePropertyBackingField"
     }
 
+    "RawInitializerProcessor skips private var properties" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "WithPrivate.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+
+                    data class WithPrivate(override val id: Int) : ReactiveEntityBase<Int, WithPrivate>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                        var publicName: String by reactiveProperty("")
+                        private var secret: Int = 0
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("WithPrivate_LirpRawInitializer.kt")
+        content shouldContain "name = \"publicName\""
+        content shouldNotContain "name = \"secret\""
+        content shouldNotContain "entity.secret"
+    }
+
+    "RawInitializerProcessor emits entries for public var properties when private siblings are present" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "MixedVisibility.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+
+                    data class MixedVisibility(override val id: Int) : ReactiveEntityBase<Int, MixedVisibility>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                        var publicA: String by reactiveProperty("")
+                        var publicB: Int by reactiveProperty(0)
+                        private var hiddenA: Int = 0
+                        private var hiddenB: String = ""
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("MixedVisibility_LirpRawInitializer.kt")
+        content shouldContain "name = \"publicA\""
+        content shouldContain "name = \"publicB\""
+        content shouldNotContain "name = \"hiddenA\""
+        content shouldNotContain "name = \"hiddenB\""
+    }
+
+    "RawInitializerProcessor still excludes @PersistenceIgnore-annotated public var" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "WithIgnore.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.PersistenceIgnore
+
+                    data class WithIgnore(override val id: Int) : ReactiveEntityBase<Int, WithIgnore>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                        var kept: String by reactiveProperty("")
+                        @PersistenceIgnore var ignored: Int by reactiveProperty(0)
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("WithIgnore_LirpRawInitializer.kt")
+        content shouldContain "name = \"kept\""
+        content shouldNotContain "name = \"ignored\""
+    }
+
+    "RawInitializerProcessor still excludes @Transient-annotated public var" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "WithTransient.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+
+                    data class WithTransient(override val id: Int) : ReactiveEntityBase<Int, WithTransient>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                        var kept: String by reactiveProperty("")
+                        @Transient var t: Int = 0
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("WithTransient_LirpRawInitializer.kt")
+        content shouldContain "name = \"kept\""
+        content shouldNotContain "name = \"t\""
+    }
+
+    "RawInitializerProcessor compiles entity with only private var fields" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "OnlyPrivate.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+
+                    data class OnlyPrivate(override val id: Int) : ReactiveEntityBase<Int, OnlyPrivate>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                        private var cache: Int = 0
+                        private var flag: Boolean = false
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("OnlyPrivate_LirpRawInitializer.kt")
+        content shouldContain "class OnlyPrivate_LirpRawInitializer"
+        content shouldNotContain "name = \"cache\""
+        content shouldNotContain "name = \"flag\""
+        content shouldNotContain "entity.cache"
+        content shouldNotContain "entity.flag"
+    }
+
     "skips collection-ref properties" {
         val result =
             compileWithProcessor(

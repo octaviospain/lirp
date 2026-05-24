@@ -1,0 +1,8 @@
+description = 'LIRP SQL API - Persistence-agnostic SQL contracts (Exposed core only)'
+
+dependencies {
+    api project(path: ':lirp-api')
+
+    api platform(libs.exposed.bom)
+    api libs.exposed.core
+}
