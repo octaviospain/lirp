@@ -48,7 +48,8 @@ object DatabaseTestSupport {
             DbConfig("PostgreSQL") { PostgresContainerSupport.buildDataSource() },
             DbConfig("MySQL") { MysqlContainerSupport.buildDataSource() },
             DbConfig("MariaDB") { MariaDbContainerSupport.buildDataSource() },
-            DbConfig("SQLite") { SqliteFileSupport.buildDataSource() }
+            DbConfig("SQLite") { SqliteFileSupport.buildDataSource() },
+            DbConfig("H2") { H2ContainerSupport.buildH2DataSource() }
         )
 
     fun dropTable(dataSource: HikariDataSource, tableDef: SqlTableDef<*>) {

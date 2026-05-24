@@ -131,7 +131,12 @@ class RawInitializerProcessor(
             // (such as `lastDateModified`) need a raw-init entry to be hydrated.
             // Collection-typed backing fields are excluded — junction-row materialization
             // is handled separately by `SqlTableDef.applyJunctionRows`.
-            if (prop.isMutable && propName !in ctorParams && !prop.isDelegated() && !prop.isCollectionTyped()) {
+            if (prop.isMutable &&
+                prop.hasPublicSetter() &&
+                propName !in ctorParams &&
+                !prop.isDelegated() &&
+                !prop.isCollectionTyped()
+            ) {
                 entries.add(RawInitPropMeta(propName, isReactive = false, castType = renderTypeRef(prop)))
             }
         }
@@ -144,6 +149,16 @@ class RawInitializerProcessor(
         val fqn = type.resolve().makeNotNullable().declaration.qualifiedName?.asString() ?: return false
         return fqn in COLLECTION_FQNS
     }
+
+    // A `var x; private set` declaration is mutable from the type's own perspective but cannot be
+    // reassigned from the sibling-package generated initializer. Emitting an entry for such a
+    // property would produce `entity.x = value as T` that fails Kotlin compile. `protected` and
+    // `internal` setters fail the same way from external module boundaries; conservative
+    // public-only gating keeps the contract simple.
+    private fun KSPropertyDeclaration.hasPublicSetter(): Boolean =
+        setter?.modifiers?.none {
+            it == Modifier.PRIVATE || it == Modifier.PROTECTED || it == Modifier.INTERNAL
+        } ?: true
 
     /**
      * Returns `true` if [this] property must not receive a `RawInitEntry` in the generated

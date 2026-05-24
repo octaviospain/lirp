@@ -195,6 +195,59 @@ internal class RawInitializerProcessorTest : StringSpec({
         content shouldNotContain "name = \"hiddenB\""
     }
 
+    "RawInitializerProcessor skips non-ctor var with private set" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "WithPrivateSetter.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+
+                    data class WithPrivateSetter(override val id: Int) : ReactiveEntityBase<Int, WithPrivateSetter>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                        var publicCounter: Int = 0
+                        var lockedNote: String = ""
+                            private set
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("WithPrivateSetter_LirpRawInitializer.kt")
+        content shouldContain "name = \"publicCounter\""
+        content shouldNotContain "name = \"lockedNote\""
+        content shouldNotContain "entity.lockedNote"
+    }
+
+    "RawInitializerProcessor skips non-ctor var with internal set" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "WithInternalSetter.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+
+                    data class WithInternalSetter(override val id: Int) : ReactiveEntityBase<Int, WithInternalSetter>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                        var openCounter: Int = 0
+                        var crateOnly: String = ""
+                            internal set
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("WithInternalSetter_LirpRawInitializer.kt")
+        content shouldContain "name = \"openCounter\""
+        content shouldNotContain "name = \"crateOnly\""
+    }
+
     "RawInitializerProcessor still excludes @PersistenceIgnore-annotated public var" {
         val result =
             compileWithProcessor(

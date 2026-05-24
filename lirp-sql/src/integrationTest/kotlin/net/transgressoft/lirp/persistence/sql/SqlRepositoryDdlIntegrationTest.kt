@@ -105,7 +105,7 @@ internal class SqlRepositoryDdlIntegrationTest : FunSpec({
     context("detects dialect automatically from DataSource") {
         withTests(databases) { db ->
             val dataSource = db.buildDataSource()
-            try {
+            dataSource.use { dataSource ->
                 val exposedDb = Database.connect(dataSource)
                 val dialectName = transaction(exposedDb) { exposedDb.dialect.name }
 
@@ -114,11 +114,12 @@ internal class SqlRepositoryDdlIntegrationTest : FunSpec({
                         "PostgreSQL" to "PostgreSQL",
                         "MySQL" to "MySQL",
                         "MariaDB" to "MariaDB",
-                        "SQLite" to "SQLite"
+                        "SQLite" to "SQLite",
+                        // H2 runs with `MODE=PostgreSQL` so identifier folding matches Postgres (see
+                        // H2ContainerSupport); Exposed reports the compatibility mode in the dialect name.
+                        "H2" to "H2 (PostgreSQL Mode)"
                     )
                 dialectName shouldBe expectedDialects[db.name]
-            } finally {
-                dataSource.close()
             }
         }
     }

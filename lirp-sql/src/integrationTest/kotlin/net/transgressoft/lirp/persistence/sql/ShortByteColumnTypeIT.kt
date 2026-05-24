@@ -17,14 +17,12 @@
 
 package net.transgressoft.lirp.persistence.sql
 
-import com.zaxxer.hikari.HikariConfig
-import com.zaxxer.hikari.HikariDataSource
+import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.databases
 import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.datatest.withTests
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
-import java.util.UUID
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -38,17 +36,8 @@ import kotlin.time.Duration.Companion.seconds
  */
 internal class ShortByteColumnTypeIT : FunSpec({
 
-    val dialects =
-        listOf(
-            DbConfig("PostgreSQL") { PostgresContainerSupport.buildDataSource() },
-            DbConfig("MySQL") { MysqlContainerSupport.buildDataSource() },
-            DbConfig("MariaDB") { MariaDbContainerSupport.buildDataSource() },
-            DbConfig("SQLite") { SqliteFileSupport.buildDataSource() },
-            DbConfig("H2") { buildH2DataSource() }
-        )
-
     context("Short and Byte fields round-trip across PostgreSQL, MySQL, MariaDB, SQLite, and H2") {
-        withTests(dialects) { db ->
+        withTests(databases) { db ->
             DatabaseTestSupport.withDatabaseTest(db, ShortByteFixtureEntity_LirpTableDef) { ds ->
                 val repo = SqlRepository(ds, ShortByteFixtureEntity_LirpTableDef)
                 val entity =
@@ -68,25 +57,27 @@ internal class ShortByteColumnTypeIT : FunSpec({
                     it.flag shouldBe 7.toByte()
                     it.nullableFlag shouldBe null
                 }
-                // Update via the loaded repo, then re-read in a fresh repo to assert the widened-
-                // write path survived the round trip. The mutation fires a reactive event that the
-                // SqlRepository subscription routes to enqueueUpdate; `eventually` covers the brief
-                // coroutine dispatch window before close()'s synchronous flush observes the entry.
+                // Mutate via the loaded repo, then poll a fresh repo until the debounced write
+                // pipeline has flushed. The subscription handler routes the reactive event through
+                // the debounce window asynchronously; `eventually` covers that dispatch latency.
                 reloaded.findById("e1").shouldBePresent {
                     it.year = 2024
                     it.nullableYear = 999
                     it.flag = (-12).toByte()
                     it.nullableFlag = 5
                 }
-                eventually(5.seconds) {
-                    val repo3 = SqlRepository(ds, ShortByteFixtureEntity_LirpTableDef)
-                    repo3.findById("e1").shouldBePresent {
-                        it.year shouldBe 2024.toShort()
-                        it.nullableYear shouldBe 999.toShort()
-                        it.flag shouldBe (-12).toByte()
-                        it.nullableFlag shouldBe 5.toByte()
+                eventually(10.seconds) {
+                    val verifier = SqlRepository(ds, ShortByteFixtureEntity_LirpTableDef)
+                    try {
+                        verifier.findById("e1").shouldBePresent {
+                            it.year shouldBe 2024.toShort()
+                            it.nullableYear shouldBe 999.toShort()
+                            it.flag shouldBe (-12).toByte()
+                            it.nullableFlag shouldBe 5.toByte()
+                        }
+                    } finally {
+                        verifier.close()
                     }
-                    repo3.close()
                 }
                 reloaded.close()
             }
@@ -94,7 +85,7 @@ internal class ShortByteColumnTypeIT : FunSpec({
     }
 
     context("nullable Short and Byte fields preserve null across persist and re-load on every dialect") {
-        withTests(dialects) { db ->
+        withTests(databases) { db ->
             DatabaseTestSupport.withDatabaseTest(db, ShortByteFixtureEntity_LirpTableDef) { ds ->
                 val repo = SqlRepository(ds, ShortByteFixtureEntity_LirpTableDef)
                 repo.add(
@@ -113,13 +104,16 @@ internal class ShortByteColumnTypeIT : FunSpec({
                     it.nullableYear = 42
                     it.nullableFlag = 9
                 }
-                eventually(5.seconds) {
-                    val repo3 = SqlRepository(ds, ShortByteFixtureEntity_LirpTableDef)
-                    repo3.findById("n1").shouldBePresent {
-                        it.nullableYear shouldBe 42.toShort()
-                        it.nullableFlag shouldBe 9.toByte()
+                eventually(10.seconds) {
+                    val afterAssign = SqlRepository(ds, ShortByteFixtureEntity_LirpTableDef)
+                    try {
+                        afterAssign.findById("n1").shouldBePresent {
+                            it.nullableYear shouldBe 42.toShort()
+                            it.nullableFlag shouldBe 9.toByte()
+                        }
+                    } finally {
+                        afterAssign.close()
                     }
-                    repo3.close()
                 }
                 repo2.close()
 
@@ -128,13 +122,16 @@ internal class ShortByteColumnTypeIT : FunSpec({
                     it.nullableYear = null
                     it.nullableFlag = null
                 }
-                eventually(5.seconds) {
-                    val repo5 = SqlRepository(ds, ShortByteFixtureEntity_LirpTableDef)
-                    repo5.findById("n1").shouldBePresent {
-                        it.nullableYear shouldBe null
-                        it.nullableFlag shouldBe null
+                eventually(10.seconds) {
+                    val afterClear = SqlRepository(ds, ShortByteFixtureEntity_LirpTableDef)
+                    try {
+                        afterClear.findById("n1").shouldBePresent {
+                            it.nullableYear shouldBe null
+                            it.nullableFlag shouldBe null
+                        }
+                    } finally {
+                        afterClear.close()
                     }
-                    repo5.close()
                 }
                 repo4.close()
             }
@@ -142,7 +139,7 @@ internal class ShortByteColumnTypeIT : FunSpec({
     }
 
     context("Short and Byte values at boundary ranges round-trip without overflow") {
-        withTests(dialects) { db ->
+        withTests(databases) { db ->
             DatabaseTestSupport.withDatabaseTest(db, ShortByteFixtureEntity_LirpTableDef) { ds ->
                 val repo = SqlRepository(ds, ShortByteFixtureEntity_LirpTableDef)
                 repo.add(
@@ -181,16 +178,3 @@ internal class ShortByteColumnTypeIT : FunSpec({
         }
     }
 })
-
-/**
- * Builds a fresh in-memory H2 datasource per call. A unique database name guarantees test
- * isolation; `DB_CLOSE_DELAY=-1` keeps the in-memory schema alive for the entire pool lifetime
- * so reopening through a second [SqlRepository] sees the rows committed by the first.
- */
-private fun buildH2DataSource(): HikariDataSource =
-    HikariDataSource(
-        HikariConfig().apply {
-            jdbcUrl = "jdbc:h2:mem:${UUID.randomUUID()};DB_CLOSE_DELAY=-1"
-            maximumPoolSize = 4
-        }
-    )

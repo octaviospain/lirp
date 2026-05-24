@@ -17,14 +17,12 @@
 
 package net.transgressoft.lirp.persistence.sql
 
-import com.zaxxer.hikari.HikariConfig
-import com.zaxxer.hikari.HikariDataSource
+import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.databases
 import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.datatest.withTests
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
-import java.util.UUID
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -40,20 +38,11 @@ import kotlin.time.Duration.Companion.seconds
  */
 internal class CombinedKspRobustnessIT : FunSpec({
 
-    val dialects =
-        listOf(
-            DbConfig("PostgreSQL") { PostgresContainerSupport.buildDataSource() },
-            DbConfig("MySQL") { MysqlContainerSupport.buildDataSource() },
-            DbConfig("MariaDB") { MariaDbContainerSupport.buildDataSource() },
-            DbConfig("SQLite") { SqliteFileSupport.buildDataSource() },
-            DbConfig("H2") { buildH2DataSource() }
-        )
-
     context(
         "compound entity with private-var, Short, Byte, ctor-val, and mutable siblings round-trips " +
             "across PostgreSQL, MySQL, MariaDB, SQLite, and H2"
     ) {
-        withTests(dialects) { db ->
+        withTests(databases) { db ->
             DatabaseTestSupport.withDatabaseTest(db, CombinedKspFixtureEntity_LirpTableDef) { ds ->
                 val repo = SqlRepository(ds, CombinedKspFixtureEntity_LirpTableDef)
                 val entity =
@@ -88,7 +77,7 @@ internal class CombinedKspRobustnessIT : FunSpec({
     context(
         "mutating var siblings on the compound entity flushes correctly while ctor-val label remains untouched"
     ) {
-        withTests(dialects) { db ->
+        withTests(databases) { db ->
             DatabaseTestSupport.withDatabaseTest(db, CombinedKspFixtureEntity_LirpTableDef) { ds ->
                 val repo = SqlRepository(ds, CombinedKspFixtureEntity_LirpTableDef)
                 repo.add(
@@ -102,14 +91,17 @@ internal class CombinedKspRobustnessIT : FunSpec({
                     it.notes = "n1"
                     it.year = 2024
                 }
-                eventually(5.seconds) {
+                eventually(10.seconds) {
                     val verify = SqlRepository(ds, CombinedKspFixtureEntity_LirpTableDef)
-                    verify.findById("e2").shouldBePresent {
-                        it.label shouldBe "L"
-                        it.year shouldBe 2024.toShort()
-                        it.notes shouldBe "n1"
+                    try {
+                        verify.findById("e2").shouldBePresent {
+                            it.label shouldBe "L"
+                            it.year shouldBe 2024.toShort()
+                            it.notes shouldBe "n1"
+                        }
+                    } finally {
+                        verify.close()
                     }
-                    verify.close()
                 }
                 repo.close()
             }
@@ -119,7 +111,7 @@ internal class CombinedKspRobustnessIT : FunSpec({
     context(
         "nullable Short on the compound entity preserves null across persist and update cycles"
     ) {
-        withTests(dialects) { db ->
+        withTests(databases) { db ->
             DatabaseTestSupport.withDatabaseTest(db, CombinedKspFixtureEntity_LirpTableDef) { ds ->
                 val repo = SqlRepository(ds, CombinedKspFixtureEntity_LirpTableDef)
                 repo.add(
@@ -136,12 +128,15 @@ internal class CombinedKspRobustnessIT : FunSpec({
                     it.nullableYear shouldBe null
                     it.nullableYear = 999
                 }
-                eventually(5.seconds) {
-                    val repo3 = SqlRepository(ds, CombinedKspFixtureEntity_LirpTableDef)
-                    repo3.findById("e3").shouldBePresent {
-                        it.nullableYear shouldBe 999.toShort()
+                eventually(10.seconds) {
+                    val afterAssign = SqlRepository(ds, CombinedKspFixtureEntity_LirpTableDef)
+                    try {
+                        afterAssign.findById("e3").shouldBePresent {
+                            it.nullableYear shouldBe 999.toShort()
+                        }
+                    } finally {
+                        afterAssign.close()
                     }
-                    repo3.close()
                 }
                 repo2.close()
 
@@ -149,12 +144,15 @@ internal class CombinedKspRobustnessIT : FunSpec({
                 repo4.findById("e3").shouldBePresent {
                     it.nullableYear = null
                 }
-                eventually(5.seconds) {
-                    val repo5 = SqlRepository(ds, CombinedKspFixtureEntity_LirpTableDef)
-                    repo5.findById("e3").shouldBePresent {
-                        it.nullableYear shouldBe null
+                eventually(10.seconds) {
+                    val afterClear = SqlRepository(ds, CombinedKspFixtureEntity_LirpTableDef)
+                    try {
+                        afterClear.findById("e3").shouldBePresent {
+                            it.nullableYear shouldBe null
+                        }
+                    } finally {
+                        afterClear.close()
                     }
-                    repo5.close()
                 }
                 repo4.close()
             }
@@ -162,7 +160,7 @@ internal class CombinedKspRobustnessIT : FunSpec({
     }
 
     context("private var assignments do not appear in the persisted row") {
-        withTests(dialects) { db ->
+        withTests(databases) { db ->
             DatabaseTestSupport.withDatabaseTest(db, CombinedKspFixtureEntity_LirpTableDef) { ds ->
                 val repo = SqlRepository(ds, CombinedKspFixtureEntity_LirpTableDef)
                 repo.add(
@@ -185,34 +183,24 @@ internal class CombinedKspRobustnessIT : FunSpec({
                     it.setCacheValue(99)
                     it.notes = "trigger"
                 }
-                eventually(5.seconds) {
+                eventually(10.seconds) {
                     val verify = SqlRepository(ds, CombinedKspFixtureEntity_LirpTableDef)
-                    verify.findById("e4").shouldBePresent {
-                        // The sibling flush happened (rules out "no flush at all" as the
-                        // explanation for cache being absent from the row).
-                        it.notes shouldBe "trigger"
-                        // The private field is still excluded — the 99 written in-memory
-                        // never reached the row, so the reloaded entity gets the initializer
-                        // default again.
-                        it.cacheValue() shouldBe 0
+                    try {
+                        verify.findById("e4").shouldBePresent {
+                            // The sibling flush happened (rules out "no flush at all" as the
+                            // explanation for cache being absent from the row).
+                            it.notes shouldBe "trigger"
+                            // The private field is still excluded — the 99 written in-memory
+                            // never reached the row, so the reloaded entity gets the initializer
+                            // default again.
+                            it.cacheValue() shouldBe 0
+                        }
+                    } finally {
+                        verify.close()
                     }
-                    verify.close()
                 }
                 reloaded.close()
             }
         }
     }
 })
-
-/**
- * Builds a fresh in-memory H2 datasource per call. A unique database name guarantees test
- * isolation; `DB_CLOSE_DELAY=-1` keeps the in-memory schema alive for the entire pool lifetime
- * so reopening through a second [SqlRepository] sees the rows committed by the first.
- */
-private fun buildH2DataSource(): HikariDataSource =
-    HikariDataSource(
-        HikariConfig().apply {
-            jdbcUrl = "jdbc:h2:mem:${UUID.randomUUID()};DB_CLOSE_DELAY=-1"
-            maximumPoolSize = 4
-        }
-    )

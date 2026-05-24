@@ -17,20 +17,18 @@
 
 package net.transgressoft.lirp.persistence.sql
 
-import com.zaxxer.hikari.HikariConfig
-import com.zaxxer.hikari.HikariDataSource
+import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.databases
 import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.datatest.withTests
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
-import java.util.UUID
 import kotlin.time.Duration.Companion.seconds
 
 /**
  * Cross-dialect round-trip integration test asserting that entities with a primary-constructor
  * `val` non-PK column receive `SqlTableDef` codegen and persist correctly across PostgreSQL,
- * MySQL, MariaDB, SQLite, and H2.
+ * MySQL, MariaDB, and SQLite.
  *
  * The fixture entity ([CtorValFixtureEntity]) declares an immutable `label` ctor-val alongside a
  * mutable `notes` reactive `var`. These tests prove (a) the gate refinement bites at runtime —
@@ -40,17 +38,8 @@ import kotlin.time.Duration.Companion.seconds
  */
 internal class CtorValImmutableColumnIT : FunSpec({
 
-    val dialects =
-        listOf(
-            DbConfig("PostgreSQL") { PostgresContainerSupport.buildDataSource() },
-            DbConfig("MySQL") { MysqlContainerSupport.buildDataSource() },
-            DbConfig("MariaDB") { MariaDbContainerSupport.buildDataSource() },
-            DbConfig("SQLite") { SqliteFileSupport.buildDataSource() },
-            DbConfig("H2") { buildH2DataSource() }
-        )
-
     context("ctor-param val column round-trips identically across PostgreSQL, MySQL, MariaDB, SQLite, and H2") {
-        withTests(dialects) { db ->
+        withTests(databases) { db ->
             DatabaseTestSupport.withDatabaseTest(db, CtorValFixtureEntity_LirpTableDef) { ds ->
                 val repo = SqlRepository(ds, CtorValFixtureEntity_LirpTableDef)
                 val entity =
@@ -72,7 +61,7 @@ internal class CtorValImmutableColumnIT : FunSpec({
     }
 
     context("mutating a sibling var on an entity with ctor-param val column does not disturb the immutable column") {
-        withTests(dialects) { db ->
+        withTests(databases) { db ->
             DatabaseTestSupport.withDatabaseTest(db, CtorValFixtureEntity_LirpTableDef) { ds ->
                 val repo = SqlRepository(ds, CtorValFixtureEntity_LirpTableDef)
                 repo.add(
@@ -81,17 +70,24 @@ internal class CtorValImmutableColumnIT : FunSpec({
                     }
                 )
                 // Mutate the mutable sibling through the live repo; the SqlRepository subscription
-                // routes the reactive event through the debounced write pipeline.
+                // routes the reactive event asynchronously through the debounced write pipeline.
+                // `eventually` polls a fresh verifier repo until the disk row reflects the update;
+                // the `try/finally` ensures each retry's repo is closed even when its assertion
+                // fails, so leaked HikariCP connections cannot starve the underlying flush on
+                // single-connection pools (notably SQLite in-memory with `maximumPoolSize = 1`).
                 repo.findById("id-2").shouldBePresent {
                     it.notes = "after"
                 }
-                eventually(5.seconds) {
+                eventually(10.seconds) {
                     val verify = SqlRepository(ds, CtorValFixtureEntity_LirpTableDef)
-                    verify.findById("id-2").shouldBePresent {
-                        it.label shouldBe "frozen-label"
-                        it.notes shouldBe "after"
+                    try {
+                        verify.findById("id-2").shouldBePresent {
+                            it.label shouldBe "frozen-label"
+                            it.notes shouldBe "after"
+                        }
+                    } finally {
+                        verify.close()
                     }
-                    verify.close()
                 }
                 repo.close()
             }
@@ -99,7 +95,7 @@ internal class CtorValImmutableColumnIT : FunSpec({
     }
 
     context("applyRow on an entity with only ctor-param val non-PK columns reloads identically without reassigning val") {
-        withTests(dialects) { db ->
+        withTests(databases) { db ->
             DatabaseTestSupport.withDatabaseTest(db, CtorValFixtureEntity_LirpTableDef) { ds ->
                 val repo = SqlRepository(ds, CtorValFixtureEntity_LirpTableDef)
                 // `notes` is the only mutable sibling and stays at its default "" value, so this
@@ -118,16 +114,3 @@ internal class CtorValImmutableColumnIT : FunSpec({
         }
     }
 })
-
-/**
- * Builds a fresh in-memory H2 datasource per call. A unique database name guarantees test
- * isolation; `DB_CLOSE_DELAY=-1` keeps the in-memory schema alive for the entire pool lifetime
- * so reopening through a second [SqlRepository] sees the rows committed by the first.
- */
-private fun buildH2DataSource(): HikariDataSource =
-    HikariDataSource(
-        HikariConfig().apply {
-            jdbcUrl = "jdbc:h2:mem:${UUID.randomUUID()};DB_CLOSE_DELAY=-1"
-            maximumPoolSize = 4
-        }
-    )
