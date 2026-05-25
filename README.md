@@ -289,6 +289,7 @@ Deep coverage of the write pipeline, collapse algorithm, transactional guarantee
 - **Type-safe Query DSL** — Kotlin-native filtering, ordering, and pagination with automatic index routing
 - **Optimistic locking** — `@Version` triggers versioned UPDATE/DELETE; conflicts surface as `StandardCrudEvent.Conflict` with canonical state
 - **Convention-over-configuration KSP codegen** — `@PersistenceMapping` generates table definitions; annotations only when you need to customize
+- **Custom column converters** — route non-scalar domain types (`java.nio.file.Path`, `java.time.Duration`, value wrappers) through a consumer-supplied `ColumnConverter<D, S>` `object` referenced via `@PersistenceProperty(converter = MyConverter::class)`. The contract lives in `lirp-api`; currently consumed by the SQL persistence path, while JSON-backed entities continue to rely on `kotlinx.serialization`.
 - **JSON persistence** — debounced file writes via `JsonFileRepository`, zero-reflection `LirpEntitySerializer`
 - **Repository-as-factory** — typed `create()` methods with automatic `@LirpRepository` registration
 - **JavaFX integration** (`lirp-fx`) — `fxAggregateList`/`fxAggregateSet` bridging lirp collections with `ObservableList`/`ObservableSet`, scalar delegates (`fxString`, `fxInteger`, etc.), read-only `ObservableMap` projections
