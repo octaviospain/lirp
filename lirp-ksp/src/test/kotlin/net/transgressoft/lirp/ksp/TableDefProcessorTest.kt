@@ -292,7 +292,7 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "cols[\"count\"]!! to entity.count"
     }
 
-    test("generates descriptor-only LirpTableDef when entity has immutable non-PK properties") {
+    test("generates SqlTableDef when every non-PK column is a primary-constructor val") {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -309,10 +309,14 @@ internal class TableDefProcessorTest : FunSpec({
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         val content = result.generatedFileContent("ImmutableEntity_LirpTableDef.kt")
-        content shouldContain "object ImmutableEntity_LirpTableDef : LirpTableDef<ImmutableEntity>"
-        content shouldNotContain "SqlTableDef"
-        content shouldNotContain "fromRow"
-        content shouldNotContain "toParams"
+        content shouldContain "object ImmutableEntity_LirpTableDef : SqlTableDef<ImmutableEntity>"
+        // fromRow rebuilds the entity through the primary constructor (both args are ctor params).
+        content shouldContain "val entity = ImmutableEntity("
+        // applyRow has no mutable non-PK columns to reassign — emits the documented no-op branch.
+        content shouldContain "No mutable non-PK columns"
+        // Critically: applyRow MUST NOT attempt `entity.name =` reassignment on the val column.
+        val applyRowBlock = content.substringAfter("override fun applyRow").substringBefore("override fun ")
+        applyRowBlock shouldNotContain "entity.name ="
     }
 
     test("generates correct Exposed v1 imports in SqlTableDef generated code") {
@@ -450,7 +454,7 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "name = \"active\""
     }
 
-    test("generates descriptor-only LirpTableDef for entity with mixed val/var non-PK properties") {
+    test("generates SqlTableDef for entity mixing ctor-param val and body-level var properties") {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -469,12 +473,77 @@ internal class TableDefProcessorTest : FunSpec({
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         val content = result.generatedFileContent("MixedEntity_LirpTableDef.kt")
-        content shouldContain "object MixedEntity_LirpTableDef : LirpTableDef<MixedEntity>"
-        content shouldNotContain "SqlTableDef"
-        content shouldNotContain "fromRow"
-        content shouldNotContain "toParams"
+        content shouldContain "object MixedEntity_LirpTableDef : SqlTableDef<MixedEntity>"
         content shouldContain "name = \"read_only\""
         content shouldContain "name = \"mutable\""
+        // fromRow constructs the entity passing readOnly through the primary constructor.
+        content shouldContain "val entity = MixedEntity("
+        // applyRow reassigns only the mutable body-level var; the immutable ctor-val is skipped.
+        val applyRowBlock = content.substringAfter("override fun applyRow").substringBefore("override fun ")
+        applyRowBlock shouldContain "entity.mutable ="
+        applyRowBlock shouldNotContain "entity.readOnly ="
+    }
+
+    test("generates SqlTableDef for ReactiveEntityBase data class with ctor-param val and sibling reactive var") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "CtorValReactive.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                data class CtorValReactive(
+                    override val id: String,
+                    val label: String
+                ) : ReactiveEntityBase<String, CtorValReactive>() {
+                    var notes: String by reactiveProperty("")
+                    override val uniqueId: String get() = id
+                    override fun clone() = CtorValReactive(id, label).also { it.notes = notes }
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("CtorValReactive_LirpTableDef.kt")
+        content shouldContain "object CtorValReactive_LirpTableDef : SqlTableDef<CtorValReactive>"
+        val fromRowBlock = content.substringAfter("override fun fromRow").substringBefore("override fun ")
+        // Both id and label are ctor params, so fromRow passes them positionally to the constructor.
+        fromRowBlock shouldContain "val entity = CtorValReactive("
+        fromRowBlock shouldContain "entity.notes ="
+        // The ctor-val `label` must never appear on the left-hand side of an assignment.
+        fromRowBlock shouldNotContain "entity.label ="
+        val applyRowBlock = content.substringAfter("override fun applyRow").substringBefore("override fun ")
+        applyRowBlock shouldContain "entity.notes ="
+        applyRowBlock shouldNotContain "entity.label ="
+    }
+
+    test("still falls back to LirpTableDef when a non-ctor non-PK property is immutable") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "BodyValEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                // `description` has a backing field, is not in the primary constructor, and is `val`.
+                // applyRow cannot reassign it, so the mutability gate must still reject this shape.
+                @PersistenceMapping
+                class BodyValEntity(val id: Int) {
+                    val description: String = "fixed"
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("BodyValEntity_LirpTableDef.kt")
+        content shouldContain "object BodyValEntity_LirpTableDef : LirpTableDef<BodyValEntity>"
+        content shouldNotContain "SqlTableDef"
     }
 
     test("generates correct descriptor for UUID PK entity with @PersistenceIgnore field") {
@@ -1455,5 +1524,155 @@ internal class TableDefProcessorTest : FunSpec({
         result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
         result.messages shouldContain "KSP[FK-04]"
         result.messages shouldContain "must be a 'var List<K>'"
+    }
+
+    // ---- Short / Byte column-type inference (#207-B2) ----
+
+    test("TableDefProcessor maps kotlin.Short to ColumnType.IntType and emits .toShort() narrowing in fromRow") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "ShortEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class ShortEntity(override val id: Int) : ReactiveEntityBase<Int, ShortEntity>() {
+                    var year: Short by reactiveProperty(0)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = ShortEntity(id).also { it.year = year }
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("ShortEntity_LirpTableDef.kt")
+        content shouldContain "name = \"year\", type = ColumnType.IntType"
+        content shouldContain "as Int).toShort()"
+        content shouldContain "entity.year.toInt()"
+    }
+
+    test("TableDefProcessor maps kotlin.Byte to ColumnType.IntType and emits .toByte() narrowing in fromRow") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "ByteEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class ByteEntity(override val id: Int) : ReactiveEntityBase<Int, ByteEntity>() {
+                    var flag: Byte by reactiveProperty(0)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = ByteEntity(id).also { it.flag = flag }
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("ByteEntity_LirpTableDef.kt")
+        content shouldContain "name = \"flag\", type = ColumnType.IntType"
+        content shouldContain "as Int).toByte()"
+        content shouldContain "entity.flag.toInt()"
+    }
+
+    test("TableDefProcessor maps nullable kotlin.Short to nullable ColumnType.IntType with safe narrowing") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "NullableShortEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class NullableShortEntity(override val id: Int) : ReactiveEntityBase<Int, NullableShortEntity>() {
+                    var year: Short? by reactiveProperty(null)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = NullableShortEntity(id).also { it.year = year }
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("NullableShortEntity_LirpTableDef.kt")
+        content shouldContain "name = \"year\", type = ColumnType.IntType, nullable = true"
+        content shouldContain "as? Int)?.toShort()"
+        content shouldContain "entity.year?.toInt()"
+    }
+
+    test("TableDefProcessor maps nullable kotlin.Byte to nullable ColumnType.IntType with safe narrowing") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "NullableByteEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class NullableByteEntity(override val id: Int) : ReactiveEntityBase<Int, NullableByteEntity>() {
+                    var flag: Byte? by reactiveProperty(null)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = NullableByteEntity(id).also { it.flag = flag }
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("NullableByteEntity_LirpTableDef.kt")
+        content shouldContain "name = \"flag\", type = ColumnType.IntType, nullable = true"
+        content shouldContain "as? Int)?.toByte()"
+        content shouldContain "entity.flag?.toInt()"
+    }
+
+    test("TableDefProcessor preserves existing kotlin.Int code generation when Short and Byte are also present") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "MixedIntegersEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class MixedIntegersEntity(override val id: Int) : ReactiveEntityBase<Int, MixedIntegersEntity>() {
+                    var a: Int by reactiveProperty(0)
+                    var b: Short by reactiveProperty(0)
+                    var c: Byte by reactiveProperty(0)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = MixedIntegersEntity(id).also { copy ->
+                        copy.a = a; copy.b = b; copy.c = c
+                    }
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("MixedIntegersEntity_LirpTableDef.kt")
+        // All three columns resolve to IntType.
+        content shouldContain "name = \"a\", type = ColumnType.IntType"
+        content shouldContain "name = \"b\", type = ColumnType.IntType"
+        content shouldContain "name = \"c\", type = ColumnType.IntType"
+        // The Int branch must NOT pick up Short/Byte narrowing.
+        content shouldContain "entity.a = row[table.columns.first { it.name == \"a\" }] as Int"
+        content shouldContain "cols[\"a\"]!! to entity.a"
+        // Short/Byte still get the narrowing/widening treatment.
+        content shouldContain "as Int).toShort()"
+        content shouldContain "as Int).toByte()"
+        content shouldContain "entity.b.toInt()"
+        content shouldContain "entity.c.toInt()"
     }
 })

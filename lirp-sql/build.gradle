@@ -37,6 +37,7 @@ def fxPlatform = osName.contains('mac') ? (isArm64 ? 'mac-aarch64' : 'mac') : os
 
 dependencies {
     api project(path: ':lirp-api')
+    api project(path: ':lirp-sql-api')
     api project(path: ':lirp-core')
 
     ksp project(path: ':lirp-ksp')
@@ -71,6 +72,7 @@ dependencies {
     integrationTestImplementation libs.testcontainers.mysql
     integrationTestImplementation libs.testcontainers.mariadb
     integrationTestImplementation libs.sqlite
+    integrationTestImplementation libs.h2
     integrationTestImplementation libs.coroutines.test
     integrationTestImplementation libs.junit.jupiter
     integrationTestRuntimeOnly libs.junit.platform.launcher

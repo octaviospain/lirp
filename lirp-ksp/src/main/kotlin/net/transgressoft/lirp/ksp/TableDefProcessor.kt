@@ -417,11 +417,15 @@ class TableDefProcessor(
         val columnNames = columns.map { it.propertyName }.toSet()
         val unmappedCtorParams = constructorParamNames.filter { it !in columnNames }
 
-        // Generate SqlTableDef only when: (1) all non-PK columns are mutable, and (2) every constructor
-        // parameter maps to a known column. Unmapped params would produce invalid constructor calls.
+        // Generate SqlTableDef only when (1) every non-PK column that is NOT a primary-constructor
+        // parameter is mutable, and (2) every constructor parameter maps to a known column.
+        // Ctor-param `val` columns are exempt from the mutability requirement: `fromRow` rebuilds
+        // them through the primary-constructor invocation, and `applyRow`'s existing
+        // `mutableNonPk` filter already excludes non-mutable properties — so the runtime invariant
+        // "applyRow never reassigns a `val`" is preserved without the gate.
         val canGenerateSqlMapping =
             sqlTableDefAvailable &&
-                columns.filter { !it.isPrimaryKey }.all { it.isMutable } &&
+                columns.filter { !it.isPrimaryKey && !it.isCtorParam }.all { it.isMutable } &&
                 unmappedCtorParams.isEmpty()
         if (unmappedCtorParams.isNotEmpty() && sqlTableDefAvailable) {
             logger.warn("$className: constructor params $unmappedCtorParams have no matching columns; falling back to LirpTableDef")
@@ -650,6 +654,14 @@ class TableDefProcessor(
 
     private fun buildRowAccess(col: ColumnMeta): String {
         val rawAccess = "row[table.columns.first { it.name == \"${col.name}\" }]"
+        // Short / Byte are stored as INT; narrow on read via Kotlin's truncating conversion.
+        // A raw `as Short` would fail at runtime because the JDBC value is boxed as Int.
+        if (col.typeFqn == "kotlin.Short") {
+            return if (col.nullable) "($rawAccess as? Int)?.toShort()" else "($rawAccess as Int).toShort()"
+        }
+        if (col.typeFqn == "kotlin.Byte") {
+            return if (col.nullable) "($rawAccess as? Int)?.toByte()" else "($rawAccess as Int).toByte()"
+        }
         return when {
             col.typeFqn == UUID_FQN && col.nullable -> "($rawAccess as? kotlin.uuid.Uuid)?.toJavaUuid()"
             col.typeFqn == UUID_FQN -> "($rawAccess as kotlin.uuid.Uuid).toJavaUuid()"
@@ -686,6 +698,13 @@ class TableDefProcessor(
 
     private fun buildEntityAccess(col: ColumnMeta): String {
         val prop = "entity.${col.propertyName}"
+        // Short / Byte are stored as INT — widen on write so the bound parameter matches the column.
+        if (col.typeFqn == "kotlin.Short") {
+            return if (col.nullable) "$prop?.toInt()" else "$prop.toInt()"
+        }
+        if (col.typeFqn == "kotlin.Byte") {
+            return if (col.nullable) "$prop?.toInt()" else "$prop.toInt()"
+        }
         return when {
             col.typeFqn == UUID_FQN && col.nullable -> "$prop?.toKotlinUuid()"
             col.typeFqn == UUID_FQN -> "$prop.toKotlinUuid()"
@@ -775,16 +794,22 @@ class TableDefProcessor(
         // when the implementing class declares a concrete override.
         val hasDeclaredId = classDecl.getDeclaredProperties().any { it.simpleName.asString() == "id" && !it.isAbstract() }
         val versionedName = versionedProperty?.simpleName?.asString()
+        val ctorParamNames =
+            classDecl.primaryConstructor?.parameters
+                ?.mapNotNull { it.name?.asString() }
+                ?.toSet()
+                ?: emptySet()
         return classDecl.getAllProperties()
             .filterNot { it.isExcluded() || it.simpleName.asString() in excludedBackingFields }
-            .mapNotNull { buildColumnMeta(it, hasDeclaredId, versionedName) }
+            .mapNotNull { buildColumnMeta(it, hasDeclaredId, versionedName, ctorParamNames) }
             .toList()
     }
 
     private fun buildColumnMeta(
         prop: KSPropertyDeclaration,
         hasDeclaredId: Boolean,
-        versionedName: String?
+        versionedName: String?,
+        ctorParamNames: Set<String>
     ): ColumnMeta? {
         val propName = prop.simpleName.asString()
         val persistenceAnnotation =
@@ -807,6 +832,7 @@ class TableDefProcessor(
             isPrimaryKey = propName == "id" && hasDeclaredId && !prop.isAbstract(),
             isEnum = isEnum,
             isMutable = prop.isMutable && hasPublicSetter(prop),
+            isCtorParam = propName in ctorParamNames,
             isVersion = versionedName != null && propName == versionedName
         )
     }
@@ -824,6 +850,10 @@ class TableDefProcessor(
         } ?: true
 
     private fun KSPropertyDeclaration.isExcluded(): Boolean {
+        // Private backing fields are encapsulated implementation state — no public surface for
+        // persistence to bind through. Mirrors the exclusion applied by `RawInitializerProcessor`
+        // so the two processors agree on the persisted column set for a given entity shape.
+        if (Modifier.PRIVATE in modifiers) return true
         val annotationFqns =
             annotations
                 .map { it.annotationType.resolve().declaration.qualifiedName?.asString() }
@@ -854,8 +884,15 @@ class TableDefProcessor(
             return mapTypeHintToExpression(typeHint, length, precision, scale, prop.simpleName.asString())
         }
 
+        // Short and Byte map to IntType (no dedicated ColumnType variant). SQLite stores all
+        // integer affinities as INTEGER regardless of declared width, so introducing SMALLINT /
+        // TINYINT variants would force dialect-specific SQL generation for marginal benefit.
+        // The Kotlin side narrows on read (`Int.toShort()` / `Int.toByte()`) and widens on write
+        // (`Short.toInt()` / `Byte.toInt()`) — see buildRowAccess and buildEntityAccess below.
         return when (fqn) {
             "kotlin.Int" -> COLUMN_TYPE_INT_EXPR
+            "kotlin.Short" -> COLUMN_TYPE_INT_EXPR
+            "kotlin.Byte" -> COLUMN_TYPE_INT_EXPR
             KOTLIN_LONG_FQN -> "ColumnType.LongType"
             "kotlin.String" -> if (length > 0) "ColumnType.VarcharType($length)" else "ColumnType.TextType"
             "kotlin.Boolean" -> "ColumnType.BooleanType"
@@ -1295,6 +1332,7 @@ private data class ColumnMeta(
     val isPrimaryKey: Boolean,
     val isEnum: Boolean = false,
     val isMutable: Boolean = false,
+    val isCtorParam: Boolean = false,
     val isVersion: Boolean = false
 )
 

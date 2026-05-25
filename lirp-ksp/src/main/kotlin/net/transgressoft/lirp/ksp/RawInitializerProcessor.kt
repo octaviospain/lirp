@@ -26,6 +26,7 @@ import com.google.devtools.ksp.processing.SymbolProcessor
 import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
+import com.google.devtools.ksp.symbol.Modifier
 import com.google.devtools.ksp.validate
 
 private const val PERSISTENCE_IGNORE_FQN = "net.transgressoft.lirp.persistence.PersistenceIgnore"
@@ -130,7 +131,12 @@ class RawInitializerProcessor(
             // (such as `lastDateModified`) need a raw-init entry to be hydrated.
             // Collection-typed backing fields are excluded — junction-row materialization
             // is handled separately by `SqlTableDef.applyJunctionRows`.
-            if (prop.isMutable && propName !in ctorParams && !prop.isDelegated() && !prop.isCollectionTyped()) {
+            if (prop.isMutable &&
+                prop.hasPublicSetter() &&
+                propName !in ctorParams &&
+                !prop.isDelegated() &&
+                !prop.isCollectionTyped()
+            ) {
                 entries.add(RawInitPropMeta(propName, isReactive = false, castType = renderTypeRef(prop)))
             }
         }
@@ -144,7 +150,31 @@ class RawInitializerProcessor(
         return fqn in COLLECTION_FQNS
     }
 
+    // A `var x; private set` declaration is mutable from the type's own perspective but cannot be
+    // reassigned from the sibling-package generated initializer. Emitting an entry for such a
+    // property would produce `entity.x = value as T` that fails Kotlin compile. `protected` and
+    // `internal` setters fail the same way from external module boundaries; conservative
+    // public-only gating keeps the contract simple.
+    private fun KSPropertyDeclaration.hasPublicSetter(): Boolean =
+        setter?.modifiers?.none {
+            it == Modifier.PRIVATE || it == Modifier.PROTECTED || it == Modifier.INTERNAL
+        } ?: true
+
+    /**
+     * Returns `true` if [this] property must not receive a `RawInitEntry` in the generated
+     * `_LirpRawInitializer` file.
+     *
+     * Private properties are excluded because the generated initializer lives in a sibling
+     * top-level class and has no public setter to bind through; emitting an entry for a
+     * `private var` would produce code that fails Kotlin compile with
+     * `Cannot access 'var x': it is private`. Bulk-load callers that need to restore private
+     * state must promote the property to `internal`/`public`, or accept that the constructor
+     * default applies on load — consistent with the existing `@PersistenceIgnore` semantics.
+     *
+     * `@PersistenceIgnore` and `kotlin.jvm.Transient` are honored as explicit opt-outs.
+     */
     private fun KSPropertyDeclaration.isExcluded(): Boolean {
+        if (Modifier.PRIVATE in modifiers) return true
         val annotationFqns =
             annotations
                 .map { it.annotationType.resolve().declaration.qualifiedName?.asString() }
