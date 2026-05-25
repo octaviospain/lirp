@@ -399,4 +399,227 @@ class ConverterCodegenTest : StringSpec({
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
     }
+
+    "TableDefProcessor accepts entity when no converter annotation is declared" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "NoSupertypeConverterEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.ColumnType
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+                    import net.transgressoft.lirp.persistence.PersistenceProperty
+
+                    // Control object that does not implement ColumnConverter.
+                    // No converter=... annotation is used in this fixture.
+                    object NotAConverter
+
+                    @PersistenceMapping
+                    data class NoSupertypeConverterEntity(
+                        override val id: Int,
+                        val tag: String
+                    ) : ReactiveEntityBase<Int, NoSupertypeConverterEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = NoSupertypeConverterEntity(id, tag)
+                    }
+                    """
+                )
+            )
+
+        // No converter annotation => no converter validation path is triggered.
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+    }
+
+    "TableDefProcessor accepts converter with supported S type kotlin.Byte" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "ByteEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.ColumnConverter
+                    import net.transgressoft.lirp.persistence.ColumnType
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+                    import net.transgressoft.lirp.persistence.PersistenceProperty
+
+                    data class ByteWrapper(val value: Byte)
+
+                    object ByteConverter : ColumnConverter<ByteWrapper, Byte> {
+                        override val sqlType = ColumnType.IntType
+                        override fun toSql(value: ByteWrapper): Byte = value.value
+                        override fun fromSql(raw: Byte): ByteWrapper = ByteWrapper(raw)
+                    }
+
+                    @PersistenceMapping
+                    data class ByteEntity(
+                        override val id: Int,
+                        @PersistenceProperty(converter = ByteConverter::class) val flags: ByteWrapper
+                    ) : ReactiveEntityBase<Int, ByteEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = ByteEntity(id, flags)
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+    }
+
+    "TableDefProcessor accepts converter with supported S type kotlin.Boolean" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "BoolConverterEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.ColumnConverter
+                    import net.transgressoft.lirp.persistence.ColumnType
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+                    import net.transgressoft.lirp.persistence.PersistenceProperty
+
+                    data class TriState(val value: Boolean?)
+
+                    object TriStateConverter : ColumnConverter<TriState, Boolean> {
+                        override val sqlType = ColumnType.BooleanType
+                        override fun toSql(value: TriState): Boolean = value.value ?: false
+                        override fun fromSql(raw: Boolean): TriState = TriState(raw)
+                    }
+
+                    @PersistenceMapping
+                    data class BoolConverterEntity(
+                        override val id: Int,
+                        @PersistenceProperty(converter = TriStateConverter::class) val state: TriState
+                    ) : ReactiveEntityBase<Int, BoolConverterEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = BoolConverterEntity(id, state)
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val generated =
+            result.sourcesGeneratedBySymbolProcessor
+                .firstOrNull { it.name == "BoolConverterEntity_LirpTableDef.kt" }
+                ?.readText()
+                ?: error("BoolConverterEntity_LirpTableDef.kt not generated")
+        // The converter's sqlType reference (not the literal ColumnType.BooleanType) is used when
+        // no length/precision/scale hint is present — the base expression delegates to the converter.
+        generated shouldContain "test.TriStateConverter.sqlType"
+        generated shouldContain "test.TriStateConverter.fromSql("
+        generated shouldContain "test.TriStateConverter.toSql("
+    }
+
+    "TableDefProcessor accepts converter with supported S type kotlin.Double" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "DoubleConverterEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.ColumnConverter
+                    import net.transgressoft.lirp.persistence.ColumnType
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+                    import net.transgressoft.lirp.persistence.PersistenceProperty
+
+                    data class Ratio(val value: Double)
+
+                    object RatioConverter : ColumnConverter<Ratio, Double> {
+                        override val sqlType = ColumnType.DoubleType
+                        override fun toSql(value: Ratio): Double = value.value
+                        override fun fromSql(raw: Double): Ratio = Ratio(raw)
+                    }
+
+                    @PersistenceMapping
+                    data class DoubleConverterEntity(
+                        override val id: Int,
+                        @PersistenceProperty(converter = RatioConverter::class) val ratio: Ratio
+                    ) : ReactiveEntityBase<Int, DoubleConverterEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = DoubleConverterEntity(id, ratio)
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+    }
+
+    "TableDefProcessor accepts converter with supported S type kotlin.Float" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "FloatConverterEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.ColumnConverter
+                    import net.transgressoft.lirp.persistence.ColumnType
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+                    import net.transgressoft.lirp.persistence.PersistenceProperty
+
+                    data class Score(val value: Float)
+
+                    object ScoreConverter : ColumnConverter<Score, Float> {
+                        override val sqlType = ColumnType.FloatType
+                        override fun toSql(value: Score): Float = value.value
+                        override fun fromSql(raw: Float): Score = Score(raw)
+                    }
+
+                    @PersistenceMapping
+                    data class FloatConverterEntity(
+                        override val id: Int,
+                        @PersistenceProperty(converter = ScoreConverter::class) val score: Score
+                    ) : ReactiveEntityBase<Int, FloatConverterEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = FloatConverterEntity(id, score)
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+    }
+
+    "TableDefProcessor accepts converter with supported S type java.math.BigDecimal" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "BigDecimalConverterEntity.kt",
+                    """
+                    package test
+                    import java.math.BigDecimal
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.ColumnConverter
+                    import net.transgressoft.lirp.persistence.ColumnType
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+                    import net.transgressoft.lirp.persistence.PersistenceProperty
+
+                    data class Price(val cents: BigDecimal)
+
+                    object PriceConverter : ColumnConverter<Price, BigDecimal> {
+                        override val sqlType = ColumnType.DecimalType(19, 4)
+                        override fun toSql(value: Price): BigDecimal = value.cents
+                        override fun fromSql(raw: BigDecimal): Price = Price(raw)
+                    }
+
+                    @PersistenceMapping
+                    data class BigDecimalConverterEntity(
+                        override val id: Int,
+                        @PersistenceProperty(converter = PriceConverter::class) val price: Price
+                    ) : ReactiveEntityBase<Int, BigDecimalConverterEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = BigDecimalConverterEntity(id, price)
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+    }
 })

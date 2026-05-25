@@ -383,6 +383,38 @@ class EmbeddableDiagnosticsTest : StringSpec({
         result.messages shouldContain "test.SiblingCollisionEntity.right.name"
     }
 
+    "rejects @Embeddable data class with zero-parameter primary constructor" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "ZeroParamEmbeddable.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.Embeddable
+                    import net.transgressoft.lirp.persistence.Embedded
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                    @Embeddable
+                    data class ZeroParamEmbeddable()
+
+                    @PersistenceMapping
+                    data class ZeroParamEmbeddableEntity(
+                        override val id: Int,
+                        @Embedded val payload: ZeroParamEmbeddable
+                    ) : ReactiveEntityBase<Int, ZeroParamEmbeddableEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = ZeroParamEmbeddableEntity(id, payload)
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
+        result.messages shouldContain "@Embeddable must be a concrete data class"
+        result.messages shouldContain "test.ZeroParamEmbeddable"
+    }
+
     "rejects column collision arising from grandchild through intermediate prefix shortening" {
         val result =
             compileWithProcessor(
