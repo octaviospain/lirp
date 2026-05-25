@@ -45,10 +45,63 @@ private const val SQL_TABLE_DEF_FQN = "net.transgressoft.lirp.persistence.sql.Sq
 private const val UUID_FQN = "java.util.UUID"
 private const val LOCAL_DATE_FQN = "java.time.LocalDate"
 private const val LOCAL_DATE_TIME_FQN = "java.time.LocalDateTime"
+private const val KOTLIN_STRING_FQN = "kotlin.String"
+private const val KOTLIN_INT_FQN = "kotlin.Int"
 private const val KOTLIN_LONG_FQN = "kotlin.Long"
+private const val KOTLIN_SHORT_FQN = "kotlin.Short"
+private const val KOTLIN_BYTE_FQN = "kotlin.Byte"
+private const val KOTLIN_BOOLEAN_FQN = "kotlin.Boolean"
+private const val KOTLIN_DOUBLE_FQN = "kotlin.Double"
+private const val KOTLIN_FLOAT_FQN = "kotlin.Float"
 private const val KOTLIN_UUID_FQN = "kotlin.UUID"
+private const val BIG_DECIMAL_FQN = "java.math.BigDecimal"
 private const val COLUMN_TYPE_INT_EXPR = "ColumnType.IntType"
+private const val COLUMN_TYPE_TEXT_EXPR = "ColumnType.TextType"
+private const val COLUMN_TYPE_LONG_EXPR = "ColumnType.LongType"
+private const val COLUMN_TYPE_BOOLEAN_EXPR = "ColumnType.BooleanType"
+private const val COLUMN_TYPE_DOUBLE_EXPR = "ColumnType.DoubleType"
+private const val COLUMN_TYPE_FLOAT_EXPR = "ColumnType.FloatType"
+private const val COLUMN_TYPE_UUID_EXPR = "ColumnType.UuidType"
+private const val COLUMN_TYPE_DATE_EXPR = "ColumnType.DateType"
+private const val COLUMN_TYPE_DATETIME_EXPR = "ColumnType.DateTimeType"
 private const val LIST_ITEM_SEPARATOR = ",\n        "
+private const val COLUMN_CONVERTER_FQN = "net.transgressoft.lirp.persistence.ColumnConverter"
+
+// Allow-list of supported S type FQNs for ColumnConverter<D, S>, mapped to the canonical
+// ColumnType expression. Keys gate D-08 validation; values seed the codegen path that
+// emits the column type from the converter's base scalar.
+private val SUPPORTED_CONVERTER_S_TYPES: Map<String, String> =
+    mapOf(
+        KOTLIN_STRING_FQN to COLUMN_TYPE_TEXT_EXPR,
+        KOTLIN_INT_FQN to COLUMN_TYPE_INT_EXPR,
+        KOTLIN_LONG_FQN to COLUMN_TYPE_LONG_EXPR,
+        KOTLIN_SHORT_FQN to COLUMN_TYPE_INT_EXPR,
+        KOTLIN_BYTE_FQN to COLUMN_TYPE_INT_EXPR,
+        KOTLIN_BOOLEAN_FQN to COLUMN_TYPE_BOOLEAN_EXPR,
+        KOTLIN_DOUBLE_FQN to COLUMN_TYPE_DOUBLE_EXPR,
+        KOTLIN_FLOAT_FQN to COLUMN_TYPE_FLOAT_EXPR,
+        BIG_DECIMAL_FQN to "ColumnType.DecimalType",
+        UUID_FQN to COLUMN_TYPE_UUID_EXPR,
+        LOCAL_DATE_FQN to COLUMN_TYPE_DATE_EXPR,
+        LOCAL_DATE_TIME_FQN to COLUMN_TYPE_DATETIME_EXPR
+    )
+
+internal data class ConverterInfo(
+    val converterFqn: String,
+    val sqlTypeFqn: String
+)
+
+/**
+ * Bundle of `@PersistenceProperty` hint values consumed by the codegen path that derives
+ * a column's `typeExpression`. Carrying them as a single value keeps refinement-helper
+ * signatures focused — see [TableDefProcessor.refineConverterSqlType].
+ */
+internal data class PersistencePropertyHints(
+    val length: Int,
+    val precision: Int,
+    val scale: Int,
+    val typeHint: String
+)
 
 /**
  * KSP processor that generates `_LirpTableDef` descriptor objects for entity classes annotated with
@@ -105,13 +158,19 @@ class TableDefProcessor(
             // 'kotlin.collections.List'" errors.
             val excludedBackingFields =
                 aggregates.mapNotNullTo(mutableSetOf()) { if (it.isCollection) it.backingCollectionName else null }
+            // D-06 inputs: backing scalar names for single-entity aggregates (FK columns). These are
+            // excluded from converter routing because the FK column type is dictated by the
+            // referenced entity's primary key type, not by a domain-to-scalar converter.
+            val aggregateBackingScalarNames =
+                aggregates.filter { !it.isCollection }.mapNotNull { it.backingScalarName }.toSet()
             generateTableDef(
                 classDecl,
                 sqlTableDefAvailable,
                 versionedByClass[classDecl],
                 foreignKeys,
                 junctionRefs,
-                excludedBackingFields
+                excludedBackingFields,
+                aggregateBackingScalarNames
             )
 
             if (sqlTableDefAvailable) {
@@ -402,14 +461,15 @@ class TableDefProcessor(
         versionedProperty: KSPropertyDeclaration?,
         foreignKeys: List<ForeignKeyMeta> = emptyList(),
         junctionRefs: List<JunctionRefInfo> = emptyList(),
-        excludedBackingFields: Set<String> = emptySet()
+        excludedBackingFields: Set<String> = emptySet(),
+        aggregateBackingScalarNames: Set<String> = emptySet()
     ) {
         val packageName = classDecl.packageName.asString()
         val className = classDecl.simpleName.asString()
         val tableDefName = "${className}_LirpTableDef"
 
         val tableName = resolveTableName(classDecl, className)
-        val columns = collectColumns(classDecl, versionedProperty, excludedBackingFields)
+        val columns = collectColumns(classDecl, versionedProperty, excludedBackingFields, aggregateBackingScalarNames)
         // Ordered constructor parameter names — preserves declaration order for correct fromRow() generation.
         val constructorParamNames =
             classDecl.primaryConstructor?.parameters
@@ -654,15 +714,47 @@ class TableDefProcessor(
 
     private fun buildRowAccess(col: ColumnMeta): String {
         val rawAccess = "row[table.columns.first { it.name == \"${col.name}\" }]"
-        // Short / Byte are stored as INT; narrow on read via Kotlin's truncating conversion.
-        // A raw `as Short` would fail at runtime because the JDBC value is boxed as Int.
-        if (col.typeFqn == "kotlin.Short") {
-            return if (col.nullable) "($rawAccess as? Int)?.toShort()" else "($rawAccess as Int).toShort()"
+        return buildConverterRowAccess(col, rawAccess)
+            ?: buildNarrowingIntRowAccess(col, rawAccess)
+            ?: buildBuiltInRowAccess(col, rawAccess)
+    }
+
+    // Converter-routed columns short-circuit the FQN-driven cast table: read the raw scalar,
+    // cast to the converter's S type, then route through the consumer's fromSql. Short/Byte
+    // converters need the same INT → narrow-typed conversion that non-converter columns get
+    // (the JDBC layer boxes the column value as Int regardless of declared width), or the cast
+    // would throw ClassCastException at row time.
+    private fun buildConverterRowAccess(col: ColumnMeta, rawAccess: String): String? {
+        if (col.converterFqn == null || col.converterSqlFqn == null) return null
+        val converterInput =
+            when (col.converterSqlFqn) {
+                KOTLIN_SHORT_FQN ->
+                    if (col.nullable) "($rawAccess as? Int)?.toShort()" else "($rawAccess as Int).toShort()"
+                KOTLIN_BYTE_FQN ->
+                    if (col.nullable) "($rawAccess as? Int)?.toByte()" else "($rawAccess as Int).toByte()"
+                else ->
+                    if (col.nullable) "($rawAccess as? ${col.converterSqlFqn})" else "($rawAccess as ${col.converterSqlFqn})"
+            }
+        return if (col.nullable) {
+            "$converterInput?.let { ${col.converterFqn}.fromSql(it) }"
+        } else {
+            "${col.converterFqn}.fromSql($converterInput)"
         }
-        if (col.typeFqn == "kotlin.Byte") {
-            return if (col.nullable) "($rawAccess as? Int)?.toByte()" else "($rawAccess as Int).toByte()"
+    }
+
+    // Short / Byte are stored as INT; narrow on read via Kotlin's truncating conversion.
+    // A raw `as Short` would fail at runtime because the JDBC value is boxed as Int.
+    private fun buildNarrowingIntRowAccess(col: ColumnMeta, rawAccess: String): String? =
+        when (col.typeFqn) {
+            KOTLIN_SHORT_FQN ->
+                if (col.nullable) "($rawAccess as? Int)?.toShort()" else "($rawAccess as Int).toShort()"
+            KOTLIN_BYTE_FQN ->
+                if (col.nullable) "($rawAccess as? Int)?.toByte()" else "($rawAccess as Int).toByte()"
+            else -> null
         }
-        return when {
+
+    private fun buildBuiltInRowAccess(col: ColumnMeta, rawAccess: String): String =
+        when {
             col.typeFqn == UUID_FQN && col.nullable -> "($rawAccess as? kotlin.uuid.Uuid)?.toJavaUuid()"
             col.typeFqn == UUID_FQN -> "($rawAccess as kotlin.uuid.Uuid).toJavaUuid()"
             col.typeFqn == LOCAL_DATE_FQN && col.nullable -> "($rawAccess as? kotlinx.datetime.LocalDate)?.toJavaLocalDate()"
@@ -680,7 +772,6 @@ class TableDefProcessor(
             col.nullable -> "$rawAccess as? ${col.typeFqn.substringAfterLast(".")}"
             else -> "$rawAccess as ${col.typeFqn.substringAfterLast(".")}"
         }
-    }
 
     private fun StringBuilder.appendToParams(className: String, columns: List<ColumnMeta>) {
         appendLine("    override fun toParams(entity: $className, table: Table): Map<Column<*>, Any?> {")
@@ -698,11 +789,24 @@ class TableDefProcessor(
 
     private fun buildEntityAccess(col: ColumnMeta): String {
         val prop = "entity.${col.propertyName}"
+        // Converter-routed columns short-circuit the FQN-driven write table: route the domain
+        // value through toSql before binding. Short/Byte converters then widen to Int to match
+        // the IntType column the JDBC layer expects (symmetric to buildConverterRowAccess).
+        if (col.converterFqn != null) {
+            val sqlValue =
+                if (col.nullable) "$prop?.let { ${col.converterFqn}.toSql(it) }"
+                else "${col.converterFqn}.toSql($prop)"
+            return when (col.converterSqlFqn) {
+                KOTLIN_SHORT_FQN, KOTLIN_BYTE_FQN ->
+                    if (col.nullable) "$sqlValue?.toInt()" else "$sqlValue.toInt()"
+                else -> sqlValue
+            }
+        }
         // Short / Byte are stored as INT — widen on write so the bound parameter matches the column.
-        if (col.typeFqn == "kotlin.Short") {
+        if (col.typeFqn == KOTLIN_SHORT_FQN) {
             return if (col.nullable) "$prop?.toInt()" else "$prop.toInt()"
         }
-        if (col.typeFqn == "kotlin.Byte") {
+        if (col.typeFqn == KOTLIN_BYTE_FQN) {
             return if (col.nullable) "$prop?.toInt()" else "$prop.toInt()"
         }
         return when {
@@ -787,7 +891,8 @@ class TableDefProcessor(
     private fun collectColumns(
         classDecl: KSClassDeclaration,
         versionedProperty: KSPropertyDeclaration?,
-        excludedBackingFields: Set<String> = emptySet()
+        excludedBackingFields: Set<String> = emptySet(),
+        aggregateBackingScalarNames: Set<String> = emptySet()
     ): List<ColumnMeta> {
         // Detect PK: look for a concrete (non-abstract) 'id' property declared directly on the class.
         // Using getDeclaredProperties() avoids the hasBackingField pitfall on abstract interface properties
@@ -801,7 +906,7 @@ class TableDefProcessor(
                 ?: emptySet()
         return classDecl.getAllProperties()
             .filterNot { it.isExcluded() || it.simpleName.asString() in excludedBackingFields }
-            .mapNotNull { buildColumnMeta(it, hasDeclaredId, versionedName, ctorParamNames) }
+            .mapNotNull { buildColumnMeta(it, hasDeclaredId, versionedName, ctorParamNames, aggregateBackingScalarNames) }
             .toList()
     }
 
@@ -809,19 +914,86 @@ class TableDefProcessor(
         prop: KSPropertyDeclaration,
         hasDeclaredId: Boolean,
         versionedName: String?,
-        ctorParamNames: Set<String>
+        ctorParamNames: Set<String>,
+        aggregateBackingScalarNames: Set<String> = emptySet()
     ): ColumnMeta? {
         val propName = prop.simpleName.asString()
         val persistenceAnnotation =
             prop.annotations.firstOrNull {
                 it.annotationType.resolve().declaration.qualifiedName?.asString() == PERSISTENCE_PROPERTY_FQN
             }
-        val typeExpression = mapToColumnTypeExpression(prop, persistenceAnnotation) ?: return null
-
         val resolvedType = prop.type.resolve()
         val notNullableType = resolvedType.makeNotNullable()
         val typeFqn = notNullableType.declaration.qualifiedName?.asString() ?: "kotlin.Any"
         val isEnum = (notNullableType.declaration as? KSClassDeclaration)?.classKind == ClassKind.ENUM_CLASS
+
+        val propertyFqn = "${prop.parentDeclaration?.qualifiedName?.asString() ?: ""}.$propName".trimStart('.')
+
+        val isPrimaryKey = propName == "id" && hasDeclaredId && !prop.isAbstract()
+        val isVersion = versionedName != null && propName == versionedName
+        val isAggregateBackingScalar = propName in aggregateBackingScalarNames
+
+        // D-06: reject converter arguments on PK / @Version / @Aggregate single-ref FK columns
+        // BEFORE invoking resolveConverter (which carries D-07 / D-08). This preserves the
+        // one-diagnostic-per-site invariant: a misplaced converter on a rejected target emits
+        // the target rejection, not the kind/S diagnostics.
+        val converterInfo =
+            if (hasNonSentinelConverterArgument(persistenceAnnotation)) {
+                when {
+                    isPrimaryKey -> {
+                        logger.error(
+                            "@PersistenceProperty(converter = …) is not allowed on primary key column '$propertyFqn'. " +
+                                "Converters apply only to non-PK scalar columns; domain-typed identifiers are deferred to a future phase."
+                        )
+                        null
+                    }
+                    isVersion -> {
+                        logger.error(
+                            "@PersistenceProperty(converter = …) is not allowed on @Version column '$propertyFqn'. " +
+                                "@Version columns require a numeric (Long) scalar type; converter routing on optimistic-locking columns is out of scope."
+                        )
+                        null
+                    }
+                    isAggregateBackingScalar -> {
+                        logger.error(
+                            "@PersistenceProperty(converter = …) is not allowed on @Aggregate single-ref FK scalar column '$propertyFqn'. " +
+                                "Converter routing on aggregate FK columns is out of scope; the FK column type is dictated by the referenced entity's primary key type."
+                        )
+                        null
+                    }
+                    else -> resolveConverter(persistenceAnnotation, propertyFqn)
+                }
+            } else {
+                null
+            }
+
+        // When a converter is bound, derive the column type from the converter's declared sqlType
+        // (and refine it via compatible @PersistenceProperty hints). Otherwise fall back to the
+        // FQN-driven base expression. A null refinement result means a hint/converter mismatch was
+        // diagnosed via logger.error — drop the column so codegen does not emit a malformed file.
+        // The non-converter branch invokes mapToColumnTypeExpression lazily so a converter-bound
+        // column with a non-scalar Kotlin type (e.g. a value class) bypasses the
+        // "unsupported column type" diagnostic that path would otherwise emit.
+        val hasExplicitConverter = hasNonSentinelConverterArgument(persistenceAnnotation)
+        val typeExpression =
+            if (converterInfo != null) {
+                val hints =
+                    PersistencePropertyHints(
+                        length = persistenceAnnotation?.arguments?.firstOrNull { it.name?.asString() == "length" }?.value as? Int ?: -1,
+                        precision = persistenceAnnotation?.arguments?.firstOrNull { it.name?.asString() == "precision" }?.value as? Int ?: -1,
+                        scale = persistenceAnnotation?.arguments?.firstOrNull { it.name?.asString() == "scale" }?.value as? Int ?: -1,
+                        typeHint = persistenceAnnotation?.arguments?.firstOrNull { it.name?.asString() == "type" }?.value as? String ?: ""
+                    )
+                refineConverterSqlType(
+                    converterInfo = converterInfo, hints = hints, propertyFqn = propertyFqn, propName = propName
+                ) ?: return null
+            } else if (hasExplicitConverter) {
+                // Converter declared but unresolved/invalid this round; avoid non-converter fallback.
+                // Invalid converters already emitted diagnostics in resolveConverter.
+                return null
+            } else {
+                mapToColumnTypeExpression(prop, persistenceAnnotation) ?: return null
+            }
 
         return ColumnMeta(
             name = columnNameFor(persistenceAnnotation, propName),
@@ -829,12 +1001,164 @@ class TableDefProcessor(
             typeExpression = typeExpression,
             typeFqn = typeFqn,
             nullable = resolvedType.isMarkedNullable,
-            isPrimaryKey = propName == "id" && hasDeclaredId && !prop.isAbstract(),
+            isPrimaryKey = isPrimaryKey,
             isEnum = isEnum,
             isMutable = prop.isMutable && hasPublicSetter(prop),
             isCtorParam = propName in ctorParamNames,
-            isVersion = versionedName != null && propName == versionedName
+            isVersion = isVersion,
+            converterFqn = converterInfo?.converterFqn,
+            converterSqlFqn = converterInfo?.sqlTypeFqn
         )
+    }
+
+    /**
+     * Resolves the generated `typeExpression` for a converter-bearing column.
+     *
+     * The converter's declared `sqlType` (resolved at KSP time via `converterSqlFqn`) is the base.
+     * `@PersistenceProperty` hints layer on top:
+     *  - non-empty `type=...` always wins (explicit consumer intent — delegates to the shared
+     *    [mapTypeHintToExpression] helper used by non-converter columns);
+     *  - `length` on a `TextType` base refines to `VarcharType(length)`;
+     *  - `precision`/`scale` on a numeric base (Int/Short/Byte/Long/Double/Float/BigDecimal) refines
+     *    to `DecimalType(precision, scale)` — overrides the converter's declared precision/scale
+     *    when both are present;
+     *  - any other base + any hint set is rejected with a KSP error naming the property, the
+     *    converter, and the resolved sqlType.
+     *
+     * Returns null when an incompatible hint was diagnosed; in that case the caller drops the
+     * column so codegen does not emit a malformed file.
+     */
+    private fun refineConverterSqlType(
+        converterInfo: ConverterInfo,
+        hints: PersistencePropertyHints,
+        propertyFqn: String,
+        propName: String
+    ): String? {
+        val converterFqn = converterInfo.converterFqn
+        val converterSqlFqn = converterInfo.sqlTypeFqn
+        val length = hints.length
+        val precision = hints.precision
+        val scale = hints.scale
+        // Non-empty `type = "..."` is explicit consumer intent — delegate to the existing hint
+        // mapper so converter columns honor the same vocabulary (TEXT/VARCHAR/INT/...) as
+        // non-converter columns.
+        if (hints.typeHint.isNotEmpty()) {
+            return mapTypeHintToExpression(hints.typeHint, length, precision, scale, propName)
+        }
+
+        val baseExpression = "$converterFqn.sqlType"
+        val hasLength = length > 0
+        val hasPrecisionOrScale = precision > 0 || scale >= 0
+        if (!hasLength && !hasPrecisionOrScale) return baseExpression
+
+        val resolvedBase = SUPPORTED_CONVERTER_S_TYPES[converterSqlFqn]
+        return when (converterSqlFqn) {
+            KOTLIN_STRING_FQN -> {
+                if (hasPrecisionOrScale) {
+                    logger.error(
+                        "@PersistenceProperty hint precision/scale on property '$propertyFqn' is " +
+                            "incompatible with converter '$converterFqn' whose sqlType resolves to " +
+                            "$resolvedBase. Remove the hint or pick a converter with a numeric sqlType."
+                    )
+                    return null
+                }
+                "ColumnType.VarcharType($length)"
+            }
+            KOTLIN_INT_FQN, KOTLIN_SHORT_FQN, KOTLIN_BYTE_FQN, KOTLIN_LONG_FQN,
+            KOTLIN_DOUBLE_FQN, KOTLIN_FLOAT_FQN, BIG_DECIMAL_FQN -> {
+                if (hasLength) {
+                    logger.error(
+                        "@PersistenceProperty hint length on property '$propertyFqn' is " +
+                            "incompatible with converter '$converterFqn' whose sqlType resolves to " +
+                            "$resolvedBase. Remove the hint or pick a converter with a textual sqlType."
+                    )
+                    return null
+                }
+                val p = if (precision > 0) precision else 19
+                val s = if (scale >= 0) scale else 2
+                "ColumnType.DecimalType($p, $s)"
+            }
+            else -> {
+                logger.error(
+                    "@PersistenceProperty hints (length/precision/scale) on property '$propertyFqn' are " +
+                        "incompatible with converter '$converterFqn' whose sqlType resolves to " +
+                        "$resolvedBase. Remove the hint or pick a converter with a compatible sqlType."
+                )
+                null
+            }
+        }
+    }
+
+    /**
+     * Tests whether the `converter` argument of `@PersistenceProperty` resolves to a non-sentinel
+     * class declaration. The sentinel [ColumnConverter][net.transgressoft.lirp.persistence.ColumnConverter]
+     * interface FQN means "no converter declared"; any other class triggers D-06 / D-07 / D-08
+     * validation downstream.
+     */
+    private fun hasNonSentinelConverterArgument(annotation: KSAnnotation?): Boolean {
+        if (annotation == null) return false
+        val converterArg = annotation.arguments.firstOrNull { it.name?.asString() == "converter" }?.value as? KSType ?: return false
+        val converterFqn = converterArg.declaration.qualifiedName?.asString() ?: return false
+        return converterFqn != COLUMN_CONVERTER_FQN
+    }
+
+    /**
+     * Reads the `converter` argument from a `@PersistenceProperty` annotation and validates
+     * the referenced [ColumnConverter][net.transgressoft.lirp.persistence.ColumnConverter]
+     * singleton against the structural contract (D-07 object kind, D-08 supported S type).
+     *
+     * Returns null when no converter is declared (sentinel), when the converter cannot yet
+     * be resolved in this round (validate() guard so cross-round resolution does not produce
+     * spurious diagnostics), or when validation fails after a diagnostic has been logged.
+     */
+    private fun resolveConverter(annotation: KSAnnotation?, propertyFqn: String): ConverterInfo? {
+        if (annotation == null) return null
+        val converterArg = annotation.arguments.firstOrNull { it.name?.asString() == "converter" }?.value as? KSType ?: return null
+        val converterDecl = converterArg.declaration as? KSClassDeclaration ?: return null
+        val converterFqn = converterDecl.qualifiedName?.asString() ?: return null
+
+        // Sentinel: the interface itself means "no converter declared" — silent skip.
+        if (converterFqn == COLUMN_CONVERTER_FQN) return null
+
+        // Defer to a later KSP round when the converter type cannot yet be fully resolved.
+        if (!converterDecl.validate()) return null
+
+        if (converterDecl.classKind != ClassKind.OBJECT) {
+            logger.error(
+                "Converter '$converterFqn' for property '$propertyFqn' must be a Kotlin `object` " +
+                    "(singleton) so KSP-generated code can reference it without instantiation."
+            )
+            return null
+        }
+
+        val columnConverterSuperType =
+            converterDecl.superTypes
+                .map { it.resolve() }
+                .firstOrNull { it.declaration.qualifiedName?.asString() == COLUMN_CONVERTER_FQN }
+
+        // S is the SECOND type argument of ColumnConverter<D, S> (index 1, not 0).
+        val sTypeArg = columnConverterSuperType?.arguments?.getOrNull(1)?.type?.resolve()
+        val sFqn = sTypeArg?.declaration?.qualifiedName?.asString()
+
+        if (columnConverterSuperType == null || sFqn == null) {
+            logger.error(
+                "Converter '$converterFqn' does not declare ColumnConverter<D, S> as a supertype " +
+                    "with both type arguments resolved."
+            )
+            return null
+        }
+
+        if (sFqn !in SUPPORTED_CONVERTER_S_TYPES) {
+            logger.error(
+                "Converter '$converterFqn' declares S=$sFqn which is not supported. Supported types: " +
+                    "kotlin.String, kotlin.Int, kotlin.Long, kotlin.Short, kotlin.Byte, kotlin.Boolean, " +
+                    "kotlin.Double, kotlin.Float, java.math.BigDecimal, java.util.UUID, " +
+                    "java.time.LocalDate, java.time.LocalDateTime."
+            )
+            return null
+        }
+
+        return ConverterInfo(converterFqn = converterFqn, sqlTypeFqn = sFqn)
     }
 
     private fun columnNameFor(persistenceAnnotation: KSAnnotation?, propName: String): String {
@@ -890,18 +1214,18 @@ class TableDefProcessor(
         // The Kotlin side narrows on read (`Int.toShort()` / `Int.toByte()`) and widens on write
         // (`Short.toInt()` / `Byte.toInt()`) — see buildRowAccess and buildEntityAccess below.
         return when (fqn) {
-            "kotlin.Int" -> COLUMN_TYPE_INT_EXPR
-            "kotlin.Short" -> COLUMN_TYPE_INT_EXPR
-            "kotlin.Byte" -> COLUMN_TYPE_INT_EXPR
-            KOTLIN_LONG_FQN -> "ColumnType.LongType"
-            "kotlin.String" -> if (length > 0) "ColumnType.VarcharType($length)" else "ColumnType.TextType"
-            "kotlin.Boolean" -> "ColumnType.BooleanType"
-            "kotlin.Double" -> "ColumnType.DoubleType"
-            "kotlin.Float" -> "ColumnType.FloatType"
-            UUID_FQN -> "ColumnType.UuidType"
-            LOCAL_DATE_TIME_FQN -> "ColumnType.DateTimeType"
-            LOCAL_DATE_FQN -> "ColumnType.DateType"
-            "java.math.BigDecimal" -> {
+            KOTLIN_INT_FQN -> COLUMN_TYPE_INT_EXPR
+            KOTLIN_SHORT_FQN -> COLUMN_TYPE_INT_EXPR
+            KOTLIN_BYTE_FQN -> COLUMN_TYPE_INT_EXPR
+            KOTLIN_LONG_FQN -> COLUMN_TYPE_LONG_EXPR
+            KOTLIN_STRING_FQN -> if (length > 0) "ColumnType.VarcharType($length)" else COLUMN_TYPE_TEXT_EXPR
+            KOTLIN_BOOLEAN_FQN -> COLUMN_TYPE_BOOLEAN_EXPR
+            KOTLIN_DOUBLE_FQN -> COLUMN_TYPE_DOUBLE_EXPR
+            KOTLIN_FLOAT_FQN -> COLUMN_TYPE_FLOAT_EXPR
+            UUID_FQN -> COLUMN_TYPE_UUID_EXPR
+            LOCAL_DATE_TIME_FQN -> COLUMN_TYPE_DATETIME_EXPR
+            LOCAL_DATE_FQN -> COLUMN_TYPE_DATE_EXPR
+            BIG_DECIMAL_FQN -> {
                 val p = if (precision > 0) precision else 19
                 val s = if (scale >= 0) scale else 2
                 "ColumnType.DecimalType($p, $s)"
@@ -926,7 +1250,7 @@ class TableDefProcessor(
         propName: String
     ): String? =
         when (hint.uppercase()) {
-            "TEXT" -> "ColumnType.TextType"
+            "TEXT" -> COLUMN_TYPE_TEXT_EXPR
             "VARCHAR" -> {
                 if (length <= 0) {
                     logger.error("@PersistenceProperty(type=\"VARCHAR\") requires length > 0 on property '$propName'")
@@ -935,13 +1259,13 @@ class TableDefProcessor(
                 "ColumnType.VarcharType($length)"
             }
             "INT" -> COLUMN_TYPE_INT_EXPR
-            "BIGINT" -> "ColumnType.LongType"
-            "BOOLEAN" -> "ColumnType.BooleanType"
-            "DOUBLE" -> "ColumnType.DoubleType"
-            "FLOAT" -> "ColumnType.FloatType"
-            "UUID" -> "ColumnType.UuidType"
-            "DATE" -> "ColumnType.DateType"
-            "DATETIME" -> "ColumnType.DateTimeType"
+            "BIGINT" -> COLUMN_TYPE_LONG_EXPR
+            "BOOLEAN" -> COLUMN_TYPE_BOOLEAN_EXPR
+            "DOUBLE" -> COLUMN_TYPE_DOUBLE_EXPR
+            "FLOAT" -> COLUMN_TYPE_FLOAT_EXPR
+            "UUID" -> COLUMN_TYPE_UUID_EXPR
+            "DATE" -> COLUMN_TYPE_DATE_EXPR
+            "DATETIME" -> COLUMN_TYPE_DATETIME_EXPR
             "DECIMAL" -> {
                 val p = if (precision > 0) precision else 19
                 val s = if (scale >= 0) scale else 2
@@ -1216,9 +1540,9 @@ class TableDefProcessor(
 
     private fun elementFqnToSimpleName(elementFqn: String?): String =
         when (elementFqn) {
-            "kotlin.Int" -> "Int"
+            KOTLIN_INT_FQN -> "Int"
             KOTLIN_LONG_FQN -> "Long"
-            "kotlin.String" -> "String"
+            KOTLIN_STRING_FQN -> "String"
             KOTLIN_UUID_FQN, UUID_FQN -> "java.util.UUID"
             null -> "Any"
             else -> elementFqn.substringAfterLast(".")
@@ -1333,7 +1657,9 @@ private data class ColumnMeta(
     val isEnum: Boolean = false,
     val isMutable: Boolean = false,
     val isCtorParam: Boolean = false,
-    val isVersion: Boolean = false
+    val isVersion: Boolean = false,
+    val converterFqn: String? = null,
+    val converterSqlFqn: String? = null
 )
 
 private data class AggregatePropertyMeta(
