@@ -31,7 +31,9 @@ import com.google.devtools.ksp.symbol.KSAnnotation
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.google.devtools.ksp.symbol.KSType
+import com.google.devtools.ksp.symbol.KSValueParameter
 import com.google.devtools.ksp.symbol.Modifier
+import com.google.devtools.ksp.symbol.Origin
 import com.google.devtools.ksp.validate
 import java.io.File
 
@@ -66,6 +68,8 @@ private const val COLUMN_TYPE_DATE_EXPR = "ColumnType.DateType"
 private const val COLUMN_TYPE_DATETIME_EXPR = "ColumnType.DateTimeType"
 private const val LIST_ITEM_SEPARATOR = ",\n        "
 private const val COLUMN_CONVERTER_FQN = "net.transgressoft.lirp.persistence.ColumnConverter"
+private const val EMBEDDABLE_FQN = "net.transgressoft.lirp.persistence.Embeddable"
+private const val EMBEDDED_FQN = "net.transgressoft.lirp.persistence.Embedded"
 
 // Allow-list of supported S type FQNs for ColumnConverter<D, S>, mapped to the canonical
 // ColumnType expression. Keys gate D-08 validation; values seed the codegen path that
@@ -469,7 +473,19 @@ class TableDefProcessor(
         val tableDefName = "${className}_LirpTableDef"
 
         val tableName = resolveTableName(classDecl, className)
-        val columns = collectColumns(classDecl, versionedProperty, excludedBackingFields, aggregateBackingScalarNames)
+        val collected =
+            collectColumnsAndSlots(classDecl, versionedProperty, excludedBackingFields, aggregateBackingScalarNames)
+        val columns = collected.columns
+        val ctorSlots = collected.ctorSlots
+
+        // D-02 / D-03: column-name collision detection runs ONCE at the entity level on the fully
+        // flattened column list, after all recursive @Embedded descents. Detection at this level
+        // (rather than per-@Embeddable) catches grandchild collisions that an intermediate prefix
+        // might otherwise mask. Codegen is suppressed for the entity when collisions are reported.
+        if (detectColumnCollisions(classDecl, columns)) {
+            logger.info("Skipping _LirpTableDef generation for $className due to column-name collisions")
+            return
+        }
         // Ordered constructor parameter names — preserves declaration order for correct fromRow() generation.
         val constructorParamNames =
             classDecl.primaryConstructor?.parameters
@@ -510,6 +526,7 @@ class TableDefProcessor(
                         canGenerateSqlMapping = canGenerateSqlMapping,
                         columns = columns,
                         constructorParamNames = constructorParamNames,
+                        ctorSlots = ctorSlots,
                         foreignKeys = foreignKeys,
                         junctionRefs = if (emitJunctions) junctionRefs else emptyList()
                     )
@@ -585,6 +602,7 @@ class TableDefProcessor(
         val canGenerateSqlMapping: Boolean,
         val columns: List<ColumnMeta>,
         val constructorParamNames: List<String> = emptyList(),
+        val ctorSlots: List<CtorSlot> = emptyList(),
         val foreignKeys: List<ForeignKeyMeta> = emptyList(),
         val junctionRefs: List<JunctionRefInfo> = emptyList()
     )
@@ -619,7 +637,7 @@ class TableDefProcessor(
         appendLine("    )")
         if (canGenerateSqlMapping) {
             appendLine()
-            appendFromRow(className, columns, constructorParamNames)
+            appendFromRow(className, columns, constructorParamNames, params.ctorSlots)
             appendLine()
             appendToParams(className, columns)
             appendLine()
@@ -693,16 +711,27 @@ class TableDefProcessor(
     private fun StringBuilder.appendFromRow(
         className: String,
         columns: List<ColumnMeta>,
-        constructorParamNames: List<String>
+        constructorParamNames: List<String>,
+        ctorSlots: List<CtorSlot> = emptyList()
     ) {
         val columnsByName = columns.associateBy { it.propertyName }
         // Preserve constructor parameter declaration order for correct positional arguments
         val orderedCtorCols = constructorParamNames.mapNotNull { columnsByName[it] }
         val ctorParamNameSet = constructorParamNames.toSet()
-        val setterCols = columns.filter { it.propertyName !in ctorParamNameSet }
+        // Setter cols exclude both ctor params and embedded-derived columns (the latter share their
+        // top-level entity ctor-param name and are reconstructed inside the ctor invocation).
+        val setterCols = columns.filter { it.propertyName !in ctorParamNameSet && !it.isInsideEmbedded }
 
         appendLine("    override fun fromRow(row: ResultRow, table: Table): $className {")
-        val ctorArgs = orderedCtorCols.joinToString(", ") { buildRowAccess(it) }
+        // When CtorSlot information is available (entities with @Embedded ctor params), use the
+        // structured tree to emit nested constructor expressions; otherwise fall back to the flat
+        // column-by-name lookup for the common no-embedded case.
+        val ctorArgs =
+            if (ctorSlots.isNotEmpty()) {
+                ctorSlots.joinToString(", ") { buildCtorArgExpression(it) }
+            } else {
+                orderedCtorCols.joinToString(", ") { buildRowAccess(it) }
+            }
         appendLine("        val entity = $className($ctorArgs)")
         for (col in setterCols) {
             val rowAccess = buildRowAccess(col)
@@ -711,6 +740,23 @@ class TableDefProcessor(
         appendLine("        return entity")
         appendLine("    }")
     }
+
+    /**
+     * Recursively emits a Kotlin expression that reconstructs the value bound to [slot] from the
+     * current `ResultRow`. Scalar slots delegate to [buildRowAccess]; embedded slots emit a nested
+     * constructor invocation whose arguments are themselves recursive expressions.
+     */
+    private fun buildCtorArgExpression(slot: CtorSlot): String =
+        when (slot) {
+            is ScalarCtorSlot -> buildRowAccess(slot.column)
+            is EmbeddedCtorSlot -> {
+                val inner =
+                    slot.children.joinToString(", ") { child ->
+                        "${child.ctorParamName} = ${buildCtorArgExpression(child)}"
+                    }
+                "${slot.embeddableTypeFqn}($inner)"
+            }
+        }
 
     private fun buildRowAccess(col: ColumnMeta): String {
         val rawAccess = "row[table.columns.first { it.name == \"${col.name}\" }]"
@@ -788,7 +834,10 @@ class TableDefProcessor(
     }
 
     private fun buildEntityAccess(col: ColumnMeta): String {
-        val prop = "entity.${col.propertyName}"
+        // Use embeddedPath so @Embedded-derived columns dereference the nested access path
+        // (e.g. "entity.album.performer.name") rather than the top-level entity ctor-param name.
+        // For non-embedded columns embeddedPath defaults to propertyName so behaviour is unchanged.
+        val prop = "entity.${col.embeddedPath}"
         // Converter-routed columns short-circuit the FQN-driven write table: route the domain
         // value through toSql before binding. Short/Byte converters then widen to Int to match
         // the IntType column the JDBC layer expects (symmetric to buildConverterRowAccess).
@@ -824,9 +873,11 @@ class TableDefProcessor(
 
     private fun StringBuilder.appendApplyRow(className: String, columns: List<ColumnMeta>) {
         // applyRow overwrites the state of an existing entity — skip primary-key columns
-        // (they are immutable post-construction) and any non-mutable property. Reuse the same
-        // `buildRowAccess` helper as fromRow so UUID/LocalDate/Enum conversions stay consistent.
-        val mutableNonPk = columns.filter { !it.isPrimaryKey && it.isMutable }
+        // (they are immutable post-construction), any non-mutable property, and any column
+        // produced by flattening an @Embedded value object (embeddables are reconstructed
+        // wholesale via the primary constructor in fromRow; the parent entity has no
+        // addressable scalar setter for them).
+        val mutableNonPk = columns.filter { !it.isPrimaryKey && it.isMutable && !it.isInsideEmbedded }
         appendLine("    override fun applyRow(entity: $className, row: ResultRow, table: Table) {")
         if (mutableNonPk.isEmpty()) {
             appendLine("        // No mutable non-PK columns — applyRow is a no-op.")
@@ -839,12 +890,15 @@ class TableDefProcessor(
         appendLine("    }")
     }
 
-    private fun StringBuilder.appendApplyScalarRow(className: String, columns: List<ColumnMeta>) {
+    private fun StringBuilder.appendApplyScalarRow(className: String, columnsIn: List<ColumnMeta>) {
         // Override the default applyScalarRow on SqlTableDef. The default body throws — the override
         // walks the supplied LirpRawInitializer entries, resolves each entry's Kotlin property name
         // to its column on the table, reads the row value with the same conversion semantics as
         // fromRow / applyRow (UUID, LocalDate, LocalDateTime, Enum), and dispatches to the entry's
         // silentSetter so reactive backing fields are written without firing events.
+        // Skip @Embedded-derived columns: they share their top-level entity ctor-param name, which
+        // would emit duplicate `when` branches; rawInit never carries entries for embedded scalars.
+        val columns = columnsIn.filterNot { it.isInsideEmbedded }
         appendLine("    override fun applyScalarRow(")
         appendLine("        entity: $className,")
         appendLine("        row: org.jetbrains.exposed.v1.core.ResultRow,")
@@ -888,26 +942,389 @@ class TableDefProcessor(
         return if (!customName.isNullOrEmpty()) customName else className.toSnakeCase()
     }
 
-    private fun collectColumns(
+    /**
+     * Output of [collectColumnsAndSlots] — the flat column list (what `columns`, `applyRow`,
+     * `applyScalarRow`, `toParams` consume) plus the structured ctor-slot tree (what `fromRow`
+     * consumes to emit nested constructor expressions for `@Embedded` parameters).
+     */
+    private data class CollectedShape(
+        val columns: List<ColumnMeta>,
+        val ctorSlots: List<CtorSlot>
+    )
+
+    /**
+     * Walks the entity's primary constructor in declaration order, routing each parameter to one
+     * of three paths: an `@Embedded` parameter triggers recursive descent into the referenced
+     * `@Embeddable` (flattening its scalars and recording an [EmbeddedCtorSlot]); a regular
+     * parameter goes through [buildColumnMeta] and yields a [ScalarCtorSlot]; non-ctor properties
+     * (setter cols) are scanned afterwards. The result preserves ctor-arg order so the generated
+     * `fromRow` can emit positional constructor calls.
+     */
+    private fun collectColumnsAndSlots(
         classDecl: KSClassDeclaration,
         versionedProperty: KSPropertyDeclaration?,
         excludedBackingFields: Set<String> = emptySet(),
         aggregateBackingScalarNames: Set<String> = emptySet()
-    ): List<ColumnMeta> {
-        // Detect PK: look for a concrete (non-abstract) 'id' property declared directly on the class.
-        // Using getDeclaredProperties() avoids the hasBackingField pitfall on abstract interface properties
-        // when the implementing class declares a concrete override.
+    ): CollectedShape {
         val hasDeclaredId = classDecl.getDeclaredProperties().any { it.simpleName.asString() == "id" && !it.isAbstract() }
         val versionedName = versionedProperty?.simpleName?.asString()
-        val ctorParamNames =
-            classDecl.primaryConstructor?.parameters
-                ?.mapNotNull { it.name?.asString() }
-                ?.toSet()
-                ?: emptySet()
-        return classDecl.getAllProperties()
-            .filterNot { it.isExcluded() || it.simpleName.asString() in excludedBackingFields }
-            .mapNotNull { buildColumnMeta(it, hasDeclaredId, versionedName, ctorParamNames, aggregateBackingScalarNames) }
-            .toList()
+        val ctorParams = classDecl.primaryConstructor?.parameters.orEmpty()
+        val ctorParamNames = ctorParams.mapNotNull { it.name?.asString() }.toSet()
+        val propertiesByName = classDecl.getAllProperties().associateBy { it.simpleName.asString() }
+
+        val columns = mutableListOf<ColumnMeta>()
+        val ctorSlots = mutableListOf<CtorSlot>()
+
+        // D-06 (body-declared): @Embedded is constructor-only. Any non-ctor property carrying
+        // @Embedded is rejected with a single diagnostic per occurrence; the property is then
+        // ignored by the rest of the pipeline (the non-ctor scan below filters it out via
+        // `isExcluded()` checks already in place, but @Embedded body-declared props would
+        // otherwise silently fall through buildColumnMeta as unsupported types).
+        for (prop in classDecl.getAllProperties()) {
+            val propName = prop.simpleName.asString()
+            if (propName in ctorParamNames) continue
+            val hasEmbedded =
+                prop.annotations.any {
+                    it.annotationType.resolve().declaration.qualifiedName?.asString() == EMBEDDED_FQN
+                }
+            if (!hasEmbedded) continue
+            logger.error(
+                "@Embedded must be on a primary-constructor parameter (found body-declared property): " +
+                    "${classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString()}.$propName",
+                prop
+            )
+        }
+
+        for (param in ctorParams) {
+            val paramName = param.name?.asString() ?: continue
+            if (paramName in excludedBackingFields) continue
+            val prop = propertiesByName[paramName] ?: continue
+            if (prop.isExcluded()) continue
+
+            val embeddedAnnotation =
+                prop.annotations.firstOrNull {
+                    it.annotationType.resolve().declaration.qualifiedName?.asString() == EMBEDDED_FQN
+                }
+            if (embeddedAnnotation != null) {
+                if (!validateEmbeddedTargetStrictness(classDecl, param, prop)) continue
+                val slot =
+                    buildEmbeddedSlot(
+                        prop = prop,
+                        ctorParamName = paramName,
+                        embeddedAnnotation = embeddedAnnotation,
+                        columnsAccumulator = columns,
+                        parentPrefix = autoDerivedPrefix(paramName),
+                        parentPath = paramName,
+                        topLevelPropertyName = paramName
+                    )
+                if (slot != null) ctorSlots += slot
+            } else {
+                val col = buildColumnMeta(prop, hasDeclaredId, versionedName, ctorParamNames, aggregateBackingScalarNames) ?: continue
+                columns += col
+                ctorSlots += ScalarCtorSlot(paramName, col)
+            }
+        }
+
+        // Non-ctor scalar properties (setter cols). @Embedded is ctor-only by design (D-06 will
+        // diagnose body-level placement in plan 57-03); treat them as regular columns here.
+        for (prop in classDecl.getAllProperties()) {
+            val propName = prop.simpleName.asString()
+            if (propName in ctorParamNames) continue
+            if (prop.isExcluded() || propName in excludedBackingFields) continue
+            val col = buildColumnMeta(prop, hasDeclaredId, versionedName, ctorParamNames, aggregateBackingScalarNames) ?: continue
+            columns += col
+        }
+        return CollectedShape(columns, ctorSlots)
+    }
+
+    private fun autoDerivedPrefix(propertyName: String): String = "${propertyName.toSnakeCase()}_"
+
+    /**
+     * D-02 / D-03: after the recursive @Embedded flatten, the fully accumulated `ColumnMeta`
+     * list is grouped by SQL column name. Any duplicate-name group emits a single
+     * `logger.error()` naming every colliding property's entity-rooted access path so the
+     * diagnostic surfaces every angle of the collision (e.g. `album.performer.name` vs
+     * `label.name`). Paths are sorted before printing so the message is deterministic and test
+     * assertions remain stable.
+     *
+     * Returns `true` when at least one collision was reported (the caller must suppress codegen
+     * for the entity so consumers do not see partially-formed `_LirpTableDef` source).
+     */
+    private fun detectColumnCollisions(
+        classDecl: KSClassDeclaration,
+        columns: List<ColumnMeta>
+    ): Boolean {
+        val byColumnName = columns.groupBy { it.name }
+        val classFqn = classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString()
+        var collided = false
+        for ((columnName, group) in byColumnName) {
+            if (group.size <= 1) continue
+            val paths = group.map { "$classFqn.${it.embeddedPath}" }.sorted()
+            logger.error(
+                "Column name collision: '$columnName' is produced by multiple properties: " +
+                    paths.joinToString(", "),
+                classDecl
+            )
+            collided = true
+        }
+        return collided
+    }
+
+    /**
+     * Applies D-06 target strictness to a ctor-param `@Embedded` site. Rejects `var` constructor
+     * parameters and properties with custom getters. Body-declared placement is caught earlier in
+     * [collectColumnsAndSlots]. Returns `true` when the site is valid; emits one `logger.error()`
+     * per violation and returns `false` otherwise so the recursive descent skips the malformed slot.
+     */
+    private fun validateEmbeddedTargetStrictness(
+        ownerClass: KSClassDeclaration,
+        param: KSValueParameter,
+        prop: KSPropertyDeclaration
+    ): Boolean {
+        val propertyFqn =
+            "${ownerClass.qualifiedName?.asString() ?: ownerClass.simpleName.asString()}.${prop.simpleName.asString()}"
+        var ok = true
+        if (param.isVar) {
+            logger.error(
+                "@Embedded must be on a val constructor parameter (found var): $propertyFqn",
+                prop
+            )
+            ok = false
+        }
+        // KSP synthesizes a getter for every property (including data-class ctor `val`s); a
+        // user-authored custom getter is distinguished by its declaration origin being one of the
+        // source-language origins rather than SYNTHETIC. Filter on Origin so we only reject
+        // explicitly-declared getters.
+        val getter = prop.getter
+        if (getter != null && getter.origin != Origin.SYNTHETIC) {
+            logger.error(
+                "@Embedded property must not have a custom getter: $propertyFqn",
+                prop
+            )
+            ok = false
+        }
+        return ok
+    }
+
+    /**
+     * Applies the D-07 trio of `@Embeddable` kind diagnostics to an `@Embedded` consuming property.
+     * Returns the referenced [KSClassDeclaration] when all checks pass, `null` (after emitting a
+     * single `logger.error()`) otherwise. Validation order matches §specifics: kind checks fire
+     * before the recursive descent visits child parameters.
+     */
+    private fun validateEmbeddableTarget(prop: KSPropertyDeclaration): KSClassDeclaration? {
+        val propertyFqn =
+            "${prop.parentDeclaration?.qualifiedName?.asString() ?: ""}.${prop.simpleName.asString()}".trimStart('.')
+        val resolved = prop.type.resolve()
+        val declaration = resolved.declaration
+
+        // D-07.2: target must be a class declaration (not interface/type-alias/type-parameter).
+        val classDecl = declaration as? KSClassDeclaration
+        if (classDecl == null) {
+            val symbolName = declaration.qualifiedName?.asString() ?: declaration.simpleName.asString()
+            logger.error(
+                "@Embedded property must reference a class type: $propertyFqn references $symbolName",
+                prop
+            )
+            return null
+        }
+
+        // D-07.1: the referenced class must carry @Embeddable.
+        val hasEmbeddable =
+            classDecl.annotations.any {
+                it.annotationType.resolve().declaration.qualifiedName?.asString() == EMBEDDABLE_FQN
+            }
+        if (!hasEmbeddable) {
+            val referencedFqn = classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString()
+            logger.error(
+                "@Embedded property must reference an @Embeddable type: $propertyFqn references $referencedFqn",
+                prop
+            )
+            return null
+        }
+
+        // D-07.3: @Embeddable must be a concrete data class with a non-empty primary constructor.
+        // Single unified diagnostic covering non-class kinds, abstract/sealed, non-data, and
+        // no-primary-ctor variants.
+        val isConcreteDataClass =
+            classDecl.classKind == ClassKind.CLASS &&
+                Modifier.DATA in classDecl.modifiers &&
+                Modifier.ABSTRACT !in classDecl.modifiers &&
+                Modifier.SEALED !in classDecl.modifiers &&
+                (classDecl.primaryConstructor?.parameters?.isNotEmpty() == true)
+        if (!isConcreteDataClass) {
+            val classFqn = classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString()
+            logger.error(
+                "@Embeddable must be a concrete data class: $classFqn",
+                classDecl
+            )
+            return null
+        }
+        return classDecl
+    }
+
+    /**
+     * Recursively expands an `@Embedded` parameter into one [ColumnMeta] per scalar leaf (appended
+     * to [columnsAccumulator]) plus a parallel [EmbeddedCtorSlot] that the generated `fromRow` uses
+     * to emit a nested constructor expression. Prefixes concatenate top-down: parent prefix is
+     * prepended, child prefix is appended (`album_performer_name`). Composition with
+     * `@PersistenceProperty(converter = …)` at scalar leaves works because each leaf goes through
+     * the standard [buildColumnMeta] pipeline (Phase 56 D-05/D-08 hint refinement applies).
+     *
+     * Returns `null` when the referenced type is not a class or lacks a qualified name. Stricter
+     * validation (non-`@Embeddable` target, non-data-class declarations, `var` on the consuming
+     * property) is deferred to plan 57-03; well-formed input is assumed here.
+     */
+    private fun buildEmbeddedSlot(
+        prop: KSPropertyDeclaration,
+        ctorParamName: String,
+        embeddedAnnotation: KSAnnotation,
+        columnsAccumulator: MutableList<ColumnMeta>,
+        parentPrefix: String,
+        parentPath: String,
+        topLevelPropertyName: String
+    ): EmbeddedCtorSlot? {
+        // D-07 kind checks run BEFORE descent so the recursion sees only well-formed embeddables.
+        val typeDecl = validateEmbeddableTarget(prop) ?: return null
+        val typeFqn = typeDecl.qualifiedName?.asString() ?: return null
+
+        val explicitPrefix = embeddedAnnotation.arguments.firstOrNull { it.name?.asString() == "prefix" }?.value as? String
+        // D-05: empty prefix reverts to auto-derive. D-04: explicit non-empty prefix is opaque
+        // (appended verbatim, no shape validation).
+        val effectivePrefix = if (explicitPrefix.isNullOrEmpty()) parentPrefix else explicitPrefix
+
+        // D-06 body-declared check inside @Embeddable: any non-ctor property carrying @Embedded
+        // on the embeddable itself is rejected here.
+        val childCtorNames =
+            typeDecl.primaryConstructor?.parameters.orEmpty().mapNotNull { it.name?.asString() }.toSet()
+        for (childProp in typeDecl.getAllProperties()) {
+            val childName = childProp.simpleName.asString()
+            if (childName in childCtorNames) continue
+            val hasEmbedded =
+                childProp.annotations.any {
+                    it.annotationType.resolve().declaration.qualifiedName?.asString() == EMBEDDED_FQN
+                }
+            if (!hasEmbedded) continue
+            logger.error(
+                "@Embedded must be on a primary-constructor parameter (found body-declared property): " +
+                    "$typeFqn.$childName",
+                childProp
+            )
+        }
+
+        val childSlots = mutableListOf<CtorSlot>()
+        for (childParam in typeDecl.primaryConstructor?.parameters.orEmpty()) {
+            val childParamName = childParam.name?.asString() ?: continue
+            val childProp =
+                typeDecl.getDeclaredProperties().firstOrNull { it.simpleName.asString() == childParamName } ?: continue
+
+            val childEmbedded =
+                childProp.annotations.firstOrNull {
+                    it.annotationType.resolve().declaration.qualifiedName?.asString() == EMBEDDED_FQN
+                }
+            if (childEmbedded != null) {
+                if (!validateEmbeddedTargetStrictness(typeDecl, childParam, childProp)) continue
+                val nestedAutoDerived = "${effectivePrefix}${autoDerivedPrefix(childParamName)}"
+                val nested =
+                    buildEmbeddedSlot(
+                        prop = childProp,
+                        ctorParamName = childParamName,
+                        embeddedAnnotation = childEmbedded,
+                        columnsAccumulator = columnsAccumulator,
+                        parentPrefix = nestedAutoDerived,
+                        parentPath = "$parentPath.$childParamName",
+                        topLevelPropertyName = topLevelPropertyName
+                    ) ?: continue
+                childSlots += nested
+            } else {
+                val leafCol =
+                    buildEmbeddedLeafColumn(
+                        childProp = childProp,
+                        childParamName = childParamName,
+                        prefix = effectivePrefix,
+                        parentPath = parentPath,
+                        topLevelPropertyName = topLevelPropertyName
+                    ) ?: continue
+                columnsAccumulator += leafCol
+                childSlots += ScalarCtorSlot(childParamName, leafCol)
+            }
+        }
+        return EmbeddedCtorSlot(ctorParamName, typeFqn, childSlots)
+    }
+
+    /**
+     * Resolves the [ColumnMeta] for a single scalar leaf inside an `@Embeddable`. Routes through
+     * the same type/converter resolution path as [buildColumnMeta] — converter routing reuses
+     * Phase 56's [refineConverterSqlType] and [mapToColumnTypeExpression] — but stamps the column
+     * with the concatenated `${prefix}${snake(leaf)}` name, the embedded access path, and marks it
+     * `isInsideEmbedded = true` so downstream emitters (`applyRow`, `applyScalarRow`) skip it.
+     */
+    private fun buildEmbeddedLeafColumn(
+        childProp: KSPropertyDeclaration,
+        childParamName: String,
+        prefix: String,
+        parentPath: String,
+        topLevelPropertyName: String
+    ): ColumnMeta? {
+        val persistenceAnnotation =
+            childProp.annotations.firstOrNull {
+                it.annotationType.resolve().declaration.qualifiedName?.asString() == PERSISTENCE_PROPERTY_FQN
+            }
+        val propertyFqn = "${childProp.parentDeclaration?.qualifiedName?.asString() ?: ""}.$childParamName".trimStart('.')
+
+        val resolvedType = childProp.type.resolve()
+        val notNullable = resolvedType.makeNotNullable()
+        val childTypeFqn = notNullable.declaration.qualifiedName?.asString() ?: "kotlin.Any"
+        val isEnum = (notNullable.declaration as? KSClassDeclaration)?.classKind == ClassKind.ENUM_CLASS
+
+        // Reuse the Phase 56 converter resolution + hint-refinement pipeline so an
+        // `@PersistenceProperty(converter = X::class)` at a scalar leaf inside an `@Embeddable`
+        // produces the same column-type expression and fromRow/toParams casts it would at the
+        // top level (D-08).
+        val converterInfo =
+            if (hasNonSentinelConverterArgument(persistenceAnnotation)) {
+                resolveConverter(persistenceAnnotation, propertyFqn)
+            } else {
+                null
+            }
+
+        val hasExplicitConverter = hasNonSentinelConverterArgument(persistenceAnnotation)
+        val typeExpression =
+            if (converterInfo != null) {
+                val hints =
+                    PersistencePropertyHints(
+                        length = persistenceAnnotation?.arguments?.firstOrNull { it.name?.asString() == "length" }?.value as? Int ?: -1,
+                        precision = persistenceAnnotation?.arguments?.firstOrNull { it.name?.asString() == "precision" }?.value as? Int ?: -1,
+                        scale = persistenceAnnotation?.arguments?.firstOrNull { it.name?.asString() == "scale" }?.value as? Int ?: -1,
+                        typeHint = persistenceAnnotation?.arguments?.firstOrNull { it.name?.asString() == "type" }?.value as? String ?: ""
+                    )
+                refineConverterSqlType(converterInfo, hints, propertyFqn, childParamName) ?: return null
+            } else if (hasExplicitConverter) {
+                return null
+            } else {
+                mapToColumnTypeExpression(childProp, persistenceAnnotation) ?: return null
+            }
+
+        val columnName = "$prefix${childParamName.toSnakeCase()}"
+        return ColumnMeta(
+            name = columnName,
+            // propertyName carries the top-level entity ctor-param so the mutability gate (which
+            // exempts ctor-param val fields) recognises this column as ctor-driven. The actual
+            // entity-access path lives in embeddedPath.
+            propertyName = topLevelPropertyName,
+            typeExpression = typeExpression,
+            typeFqn = childTypeFqn,
+            nullable = resolvedType.isMarkedNullable,
+            isPrimaryKey = false,
+            isEnum = isEnum,
+            isMutable = false,
+            isCtorParam = true,
+            isVersion = false,
+            converterFqn = converterInfo?.converterFqn,
+            converterSqlFqn = converterInfo?.sqlTypeFqn,
+            embeddedPath = "$parentPath.$childParamName",
+            isInsideEmbedded = true
+        )
     }
 
     private fun buildColumnMeta(
@@ -1647,7 +2064,7 @@ private fun String.toSnakeCase(): String =
         .replace(Regex("([A-Z]+)([A-Z][a-z])"), "$1_$2")
         .lowercase()
 
-private data class ColumnMeta(
+internal data class ColumnMeta(
     val name: String,
     val propertyName: String,
     val typeExpression: String,
@@ -1659,7 +2076,21 @@ private data class ColumnMeta(
     val isCtorParam: Boolean = false,
     val isVersion: Boolean = false,
     val converterFqn: String? = null,
-    val converterSqlFqn: String? = null
+    val converterSqlFqn: String? = null,
+    /**
+     * Dot-separated entity-access path from the entity root down to the underlying scalar.
+     * For top-level scalars this equals [propertyName]; for fields produced by flattening an
+     * `@Embedded` value object this is the nested path (e.g. `album.performer.name`). Used by
+     * `toParams` to dereference the value when binding the column.
+     */
+    val embeddedPath: String = propertyName,
+    /**
+     * `true` when this column was produced by flattening an `@Embedded` value object. Embedded-
+     *  derived columns are excluded from the entity-level mutability gate and from `applyRow`
+     *  because embeddables are reconstructed wholesale via the primary constructor on each
+     *  `fromRow` call.
+     */
+    val isInsideEmbedded: Boolean = false
 )
 
 private data class AggregatePropertyMeta(

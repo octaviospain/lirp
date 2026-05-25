@@ -225,6 +225,31 @@ logger.debug { "Connecting to: ${ConnectionUrlSanitizer.sanitize(jdbcUrl)}" }
 
 See the [SQL Persistence wiki page](https://github.com/octaviospain/lirp/wiki/SQL-Persistence#credential-handling) for the long-form guidance.
 
+### `@Embeddable` + `@Embedded` — flatten value objects into prefixed columns
+
+Persist value-object types by flattening their scalar fields into prefixed columns of the parent entity's table — no extra table, no join.
+
+```kotlin
+@Embeddable
+data class Artist(val name: String, val country: String)
+
+@PersistenceMapping(name = "albums")
+data class Album(
+    override val id: Int,
+    var title: String,
+    @Embedded val performer: Artist,                  // default prefix → "performer_"
+    @Embedded(prefix = "PROD_") val producer: Artist, // explicit prefix
+) : ReactiveEntityBase<Int, Album>() { /* ... */ }
+```
+
+- **Placement:** `@Embeddable` on a concrete `data class`; `@Embedded` on constructor-`val` parameters only.
+- **Default prefix:** derived from the property name as `snake_case + "_"` (e.g. `performer` → `performer_`).
+- **Recursive nesting:** `@Embeddable` types may themselves declare `@Embedded` fields; prefixes concatenate parent-to-child.
+- **Composition with converters:** scalar fields inside an `@Embeddable` may carry `@PersistenceProperty(converter = MyConverter::class)` to route non-scalar domain types through a custom `ColumnConverter`.
+- **Compile-time validation:** KSP fails the build on column-name collisions across flattened fields.
+
+See [SQL Persistence](https://github.com/octaviospain/lirp/wiki/SQL-Persistence) on the wiki for the full documentation.
+
 ## Query DSL
 
 LIRP provides a type-safe, Kotlin-native query DSL for filtering, ordering, and paginating entities directly from any `Repository`. Predicates compose with infix operators; the planner automatically routes indexed equality checks through secondary indexes and falls back to in-memory scans for range and composite predicates.
