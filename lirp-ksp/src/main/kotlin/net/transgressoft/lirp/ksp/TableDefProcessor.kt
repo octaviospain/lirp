@@ -443,9 +443,16 @@ class TableDefProcessor(
             logger.warn("$className: constructor params $unmappedCtorParams have no matching columns; falling back to LirpTableDef")
         }
 
+        // Include all files that shape this descriptor in Dependencies so KSP re-generates it
+        // whenever any involved source changes: the entity itself and any nested @Embeddable types
+        // visited during recursive descent.
+        val involvedFiles =
+            (listOfNotNull(classDecl.containingFile) + collected.embeddableFiles)
+                .distinct()
+                .toTypedArray()
         val file =
             codeGenerator.createNewFile(
-                dependencies = Dependencies(false, classDecl.containingFile!!),
+                dependencies = Dependencies(false, *involvedFiles),
                 packageName = packageName,
                 fileName = tableDefName
             )
@@ -472,14 +479,5 @@ class TableDefProcessor(
         file.close()
 
         logger.info("Generated $packageName.$tableDefName for $className (sqlTableDef=$canGenerateSqlMapping)")
-    }
-
-    private fun resolveTableName(classDecl: KSClassDeclaration, className: String): String {
-        val mappingAnnotation =
-            classDecl.annotations.firstOrNull {
-                it.annotationType.resolve().declaration.qualifiedName?.asString() == PERSISTENCE_MAPPING_FQN
-            }
-        val customName = mappingAnnotation?.arguments?.firstOrNull { it.name?.asString() == "name" }?.value as? String
-        return if (!customName.isNullOrEmpty()) customName else className.toSnakeCase()
     }
 }

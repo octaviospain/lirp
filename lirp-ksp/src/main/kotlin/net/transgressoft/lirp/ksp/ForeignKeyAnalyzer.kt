@@ -201,9 +201,13 @@ internal class ForeignKeyAnalyzer(
         val parentPkType = pkColumnTypeExpression(parentClass) ?: COLUMN_TYPE_INT_EXPR
         val itemPkType = pkColumnTypeExpression(agg.referencedClass) ?: COLUMN_TYPE_INT_EXPR
 
+        val involvedFiles =
+            listOfNotNull(parentClass.containingFile, agg.referencedClass.containingFile)
+                .distinct()
+                .toTypedArray()
         val file =
             codeGenerator.createNewFile(
-                dependencies = Dependencies(false, parentClass.containingFile!!),
+                dependencies = Dependencies(false, *involvedFiles),
                 packageName = packageName,
                 fileName = descriptorName
             )
@@ -297,7 +301,7 @@ internal class ForeignKeyAnalyzer(
             junctionObjectName = descriptorName,
             isOrdered = agg.isOrdered,
             itemKeyTypeSimpleName = itemSimpleName,
-            isMutableList = isMutableCollection
+            isMutableCollection = isMutableCollection
         )
     }
 
@@ -402,15 +406,10 @@ internal class ForeignKeyAnalyzer(
 
     private fun pkColumnTypeExpression(classDecl: KSClassDeclaration): String? {
         val idProp = classDecl.getAllProperties().firstOrNull { it.simpleName.asString() == "id" } ?: return null
-        return columnMetaBuilder.mapToColumnTypeExpression(idProp, persistenceAnnotation = null)
-    }
-
-    private fun resolveTableName(classDecl: KSClassDeclaration, className: String): String {
-        val mappingAnnotation =
-            classDecl.annotations.firstOrNull {
-                it.annotationType.resolve().declaration.qualifiedName?.asString() == PERSISTENCE_MAPPING_FQN
+        val persistenceAnnotation =
+            idProp.annotations.firstOrNull {
+                it.annotationType.resolve().declaration.qualifiedName?.asString() == PERSISTENCE_PROPERTY_FQN
             }
-        val customName = mappingAnnotation?.arguments?.firstOrNull { it.name?.asString() == "name" }?.value as? String
-        return if (!customName.isNullOrEmpty()) customName else className.toSnakeCase()
+        return columnMetaBuilder.mapToColumnTypeExpression(idProp, persistenceAnnotation)
     }
 }

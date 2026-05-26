@@ -415,7 +415,74 @@ class EmbeddableDiagnosticsTest : StringSpec({
         result.messages shouldContain "test.ZeroParamEmbeddable"
     }
 
-    "rejects column collision arising from grandchild through intermediate prefix shortening" {
+    "rejects nullable @Embedded property with clear diagnostic" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "NullableEmbeddedEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.Embeddable
+                    import net.transgressoft.lirp.persistence.Embedded
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                    @Embeddable
+                    data class AddressEmbeddable(val street: String, val city: String)
+
+                    @PersistenceMapping
+                    data class NullableEmbeddedEntity(
+                        override val id: Int,
+                        @Embedded val address: AddressEmbeddable?
+                    ) : ReactiveEntityBase<Int, NullableEmbeddedEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = NullableEmbeddedEntity(id, address)
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
+        result.messages shouldContain "`@Embedded` nullable properties are not supported yet"
+        result.messages shouldContain "test.NullableEmbeddedEntity.address"
+    }
+
+    "rejects @Embeddable with unsupported scalar leaf type causing whole entity to fail" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "InvalidLeafEmbeddableEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.Embeddable
+                    import net.transgressoft.lirp.persistence.Embedded
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                    data class UnsupportedType(val x: Int)
+
+                    @Embeddable
+                    data class BrokenEmbeddable(val label: String, val payload: UnsupportedType)
+
+                    @PersistenceMapping
+                    data class InvalidLeafEntity(
+                        override val id: Int,
+                        @Embedded val data: BrokenEmbeddable
+                    ) : ReactiveEntityBase<Int, InvalidLeafEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = InvalidLeafEntity(id, data)
+                    }
+                    """
+                )
+            )
+
+        // The unsupported leaf type causes buildEmbeddedSlot to return null, which causes the
+        // whole entity to be treated as unmapped rather than emitting partial codegen.
+        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
+        result.messages shouldContain "Unsupported column type"
+    }
+
+    "rejects column collision between @Embedded grandchild and a sibling scalar with matching name" {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -440,7 +507,7 @@ class EmbeddableDiagnosticsTest : StringSpec({
                     data class GrandchildCollisionEntity(
                         override val id: Int,
                         @Embedded val inner: IntermediateEmbeddable,
-                        @PersistenceProperty(name = "deep_value") val sibling: String
+                        @PersistenceProperty(name = "inner_deep_value") val sibling: String
                     ) : ReactiveEntityBase<Int, GrandchildCollisionEntity>() {
                         override val uniqueId: String get() = "${'$'}id"
                         override fun clone() = GrandchildCollisionEntity(id, inner, sibling)
@@ -451,7 +518,7 @@ class EmbeddableDiagnosticsTest : StringSpec({
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
         result.messages shouldContain "Column name collision"
-        result.messages shouldContain "deep_value"
+        result.messages shouldContain "inner_deep_value"
         // Both the entity-rooted path through the grandchild AND the sibling scalar path are
         // named, proving D-03's full transitive walk surfaces every contributor.
         result.messages shouldContain "test.GrandchildCollisionEntity.inner.grandchild.value"

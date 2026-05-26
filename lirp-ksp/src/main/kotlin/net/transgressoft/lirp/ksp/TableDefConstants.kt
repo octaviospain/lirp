@@ -17,6 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
+import com.google.devtools.ksp.symbol.KSClassDeclaration
+
 internal const val PERSISTENCE_MAPPING_FQN = "net.transgressoft.lirp.persistence.PersistenceMapping"
 internal const val PERSISTENCE_PROPERTY_FQN = "net.transgressoft.lirp.persistence.PersistenceProperty"
 internal const val VERSION_FQN = "net.transgressoft.lirp.persistence.Version"
@@ -55,6 +57,20 @@ internal fun String.toSnakeCase(): String =
     replace(Regex("([a-z\\d])([A-Z])"), "$1_$2")
         .replace(Regex("([A-Z]+)([A-Z][a-z])"), "$1_$2")
         .lowercase()
+
+/**
+ * Resolves the SQL table name for a class, honoring an explicit `name` argument on
+ * `@PersistenceMapping` when present and falling back to snake_case of the simple class name.
+ * Extracted here to avoid duplication between [TableDefProcessor] and [ForeignKeyAnalyzer].
+ */
+internal fun resolveTableName(classDecl: KSClassDeclaration, className: String): String {
+    val mappingAnnotation =
+        classDecl.annotations.firstOrNull {
+            it.annotationType.resolve().declaration.qualifiedName?.asString() == PERSISTENCE_MAPPING_FQN
+        }
+    val customName = mappingAnnotation?.arguments?.firstOrNull { it.name?.asString() == "name" }?.value as? String
+    return if (!customName.isNullOrEmpty()) customName else className.toSnakeCase()
+}
 
 internal val SUPPORTED_CONVERTER_S_TYPES: Map<String, String> =
     mapOf(

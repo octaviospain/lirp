@@ -82,7 +82,7 @@ internal data class JunctionRefInfo(
     val junctionObjectName: String,
     val isOrdered: Boolean,
     val itemKeyTypeSimpleName: String,
-    val isMutableList: Boolean
+    val isMutableCollection: Boolean
 )
 
 /**

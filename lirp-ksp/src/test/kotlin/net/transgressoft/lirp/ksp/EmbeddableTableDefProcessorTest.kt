@@ -319,4 +319,88 @@ class EmbeddableTableDefProcessorTest : StringSpec({
         // vary, but the constructor call FQN + the embeddable's parameter names must appear.
         fromRowBlock shouldContain "test.ArtistEmbeddable("
     }
+
+    "nested explicit prefix preserves ancestor prefix segment" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "NestedExplicitPrefixEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.Embeddable
+                    import net.transgressoft.lirp.persistence.Embedded
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                    @Embeddable
+                    data class GeoCoord(val lat: Double, val lng: Double)
+
+                    @Embeddable
+                    data class AddressEmbeddable(
+                        val street: String,
+                        @Embedded(prefix = "geo_") val geo: GeoCoord
+                    )
+
+                    @PersistenceMapping
+                    data class NestedExplicitPrefixEntity(
+                        override val id: Int,
+                        @Embedded val address: AddressEmbeddable
+                    ) : ReactiveEntityBase<Int, NestedExplicitPrefixEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = NestedExplicitPrefixEntity(id, address)
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("NestedExplicitPrefixEntity_LirpTableDef.kt")
+        content shouldContain "name = \"address_street\""
+        // The explicit "geo_" prefix on the nested @Embedded overrides only the current
+        // segment's auto-derived portion ("geo_"), while the ancestor prefix "address_" is
+        // preserved — producing "address_geo_lat", not "geo_lat".
+        content shouldContain "name = \"address_geo_lat\""
+        content shouldContain "name = \"address_geo_lng\""
+    }
+
+    "top-level explicit prefix does not bleed into nested auto-derived prefix" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "TopLevelExplicitPrefixEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.Embeddable
+                    import net.transgressoft.lirp.persistence.Embedded
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                    @Embeddable
+                    data class InnerEmbeddable(val value: String)
+
+                    @Embeddable
+                    data class OuterEmbeddable(
+                        val label: String,
+                        @Embedded val inner: InnerEmbeddable
+                    )
+
+                    @PersistenceMapping
+                    data class TopLevelExplicitPrefixEntity(
+                        override val id: Int,
+                        @Embedded(prefix = "custom_") val outer: OuterEmbeddable
+                    ) : ReactiveEntityBase<Int, TopLevelExplicitPrefixEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = TopLevelExplicitPrefixEntity(id, outer)
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("TopLevelExplicitPrefixEntity_LirpTableDef.kt")
+        // The top-level explicit "custom_" prefix replaces the auto-derived "outer_" prefix;
+        // the nested auto-derived prefix for "inner" appends onto "custom_", not "outer_".
+        content shouldContain "name = \"custom_label\""
+        content shouldContain "name = \"custom_inner_value\""
+    }
 })
