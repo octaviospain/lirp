@@ -94,6 +94,11 @@ internal object TableDefSourceEmitter {
         columns.filter { it.isEnum }.map { it.typeFqn }.distinct().forEach { fqn ->
             appendLine("import $fqn")
         }
+        if (columns.any { it.isElementCollection }) {
+            appendLine("import kotlinx.serialization.json.Json")
+            appendLine("import kotlinx.serialization.encodeToString")
+            appendLine("import kotlinx.serialization.decodeFromString")
+        }
     }
 
     fun StringBuilder.appendObjectBody(
@@ -118,8 +123,10 @@ internal object TableDefSourceEmitter {
         if (columns.isNotEmpty()) {
             val columnsCode =
                 columns.joinToString(LIST_ITEM_SEPARATOR) { col ->
-                    "ColumnDef(name = \"${col.name}\", type = ${col.typeExpression}, " +
-                        "nullable = ${col.nullable}, primaryKey = ${col.isPrimaryKey}, isVersion = ${col.isVersion})"
+                    val base =
+                        "ColumnDef(name = \"${col.name}\", type = ${col.typeExpression}, " +
+                            "nullable = ${col.nullable}, primaryKey = ${col.isPrimaryKey}, isVersion = ${col.isVersion})"
+                    if (col.defaultExpression != null) "${base.dropLast(1)}, defaultExpression = \"${col.defaultExpression}\")" else base
                 }
             appendLine("        $columnsCode")
         }
@@ -325,9 +332,31 @@ internal object TableDefSourceEmitter {
 
     fun buildRowAccess(col: ColumnMeta): String {
         val rawAccess = "row[table.columns.first { it.name == \"${col.name}\" }]"
-        return buildConverterRowAccess(col, rawAccess)
+        return buildElementCollectionRowAccess(col, rawAccess)
+            ?: buildConverterRowAccess(col, rawAccess)
             ?: buildNarrowingIntRowAccess(col, rawAccess)
             ?: buildBuiltInRowAccess(col, rawAccess)
+    }
+
+    /**
+     * Emits the read-side access expression for an `@ElementCollection` column. The column is a
+     * NOT NULL TEXT holding a JSON array. The expression decodes the array via the
+     * `kotlinx.serialization` Default [Json] instance (accessed by FQN so no import is required
+     * at the call site), maps each decoded element-S value through the element converter's
+     * `fromSql`, and — for `Set<E>` properties — appends a terminal `.toSet()`. The `S` FQN is
+     * the converter's resolved SQL type stored in [ColumnMeta.converterSqlFqn]; the terminal call
+     * is conditional on [ColumnMeta.collectionKind].
+     *
+     * Returns `null` when [col] is not an element-collection column, allowing the caller's `?:`
+     * chain to fall through to [buildConverterRowAccess] and the built-in paths.
+     */
+    fun buildElementCollectionRowAccess(col: ColumnMeta, rawAccess: String): String? {
+        if (!col.isElementCollection) return null
+        val converter = col.elementConverterFqn!!
+        val sFqn = col.converterSqlFqn!!
+        val terminal = if (col.collectionKind == "Set") ".toSet()" else ""
+        return "kotlinx.serialization.json.Json.decodeFromString<kotlin.collections.List<$sFqn>>(" +
+            "$rawAccess as kotlin.String).map { $converter.fromSql(it) }$terminal"
     }
 
     // Converter-routed columns short-circuit the FQN-driven cast table: read the raw scalar,
@@ -389,7 +418,27 @@ internal object TableDefSourceEmitter {
         // (e.g. "entity.album.performer.name") rather than the top-level entity ctor-param name.
         // For non-embedded columns embeddedPath defaults to propertyName so behaviour is unchanged.
         val prop = "entity.${col.embeddedPath}"
-        return converterEntityAccess(col, prop) ?: builtInEntityAccess(col, prop)
+        return elementCollectionEntityAccess(col, prop)
+            ?: converterEntityAccess(col, prop)
+            ?: builtInEntityAccess(col, prop)
+    }
+
+    /**
+     * Emits the write-side access expression for an `@ElementCollection` column. Maps each domain
+     * element through the element converter's `toSql` and encodes the resulting `List<S>` to a JSON
+     * array string via the `kotlinx.serialization` Default [Json] instance (accessed by FQN). The
+     * resolved element-S FQN ([ColumnMeta.converterSqlFqn]) drives the reified type parameter so
+     * numeric element types (e.g. `kotlin.Int`) encode as JSON numbers rather than strings.
+     *
+     * Returns `null` when [col] is not an element-collection column, allowing the caller's `?:`
+     * chain to fall through to [converterEntityAccess] and [builtInEntityAccess].
+     */
+    fun elementCollectionEntityAccess(col: ColumnMeta, prop: String): String? {
+        if (!col.isElementCollection) return null
+        val converter = col.elementConverterFqn!!
+        val sFqn = col.converterSqlFqn!!
+        return "kotlinx.serialization.json.Json.encodeToString<kotlin.collections.List<$sFqn>>(" +
+            "$prop.map { $converter.toSql(it) })"
     }
 
     /**

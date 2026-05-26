@@ -176,8 +176,12 @@ private class LirpDynamicTable(
                 is ColumnType.DecimalType -> decimal(col.name, type.precision, type.scale)
                 is ColumnType.EnumType -> varchar(col.name, 255)
             }
-        // Safe: raw was just created by this method from the declared ColumnType. Exposed's nullable()
-        // extension requires Column<Any> as receiver but buildColumn produces Column<*>.
+
+        // defaultExpression is not applied as a DDL DEFAULT clause. MySQL rejects DEFAULT on TEXT/BLOB
+        // columns unconditionally, and the generated toParams always supplies explicit values for
+        // element-collection columns — the DDL DEFAULT is therefore unreachable at runtime. Skipping
+        // it keeps DDL portable across all supported dialects without per-dialect branching.
+        // Safe: Exposed's nullable() extension requires Column<Any>; buildColumn produces Column<*>.
         @Suppress("UNCHECKED_CAST")
         return if (col.nullable) (raw as Column<Any>).nullable() else raw
     }

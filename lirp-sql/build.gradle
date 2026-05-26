@@ -48,6 +48,7 @@ dependencies {
     api platform(libs.exposed.bom)
     api libs.exposed.core
     api libs.exposed.kotlin.datetime
+    api libs.serialization.json
     implementation libs.exposed.jdbc
     implementation libs.hikari
     implementation libs.kotlin.logging
@@ -61,12 +62,10 @@ dependencies {
     testImplementation libs.coroutines.test
     testImplementation libs.h2
     testImplementation libs.junit.jupiter
-    testImplementation libs.serialization.json
     testRuntimeOnly libs.junit.platform.launcher
 
     integrationTestImplementation platform(libs.junit.bom)
     integrationTestImplementation libs.bundles.kotest
-    integrationTestImplementation libs.serialization.json
     integrationTestImplementation libs.kotest.extensions.testcontainers
     integrationTestImplementation libs.testcontainers.postgresql
     integrationTestImplementation libs.testcontainers.mysql
@@ -95,7 +94,6 @@ dependencies {
     integrationTestImplementation files(rootProject.project(':lirp-core').sourceSets.test.output)
     testFixturesImplementation platform(libs.exposed.bom)
     testFixturesImplementation libs.bundles.exposed
-    testFixturesImplementation libs.serialization.json
     testFixturesImplementation libs.hikari
     testFixturesImplementation libs.testcontainers.postgresql
     testFixturesImplementation libs.testcontainers.mysql

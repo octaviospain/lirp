@@ -250,6 +250,35 @@ data class Album(
 
 See [SQL Persistence](https://github.com/octaviospain/lirp/wiki/SQL-Persistence) on the wiki for the full documentation.
 
+### `@ElementCollection` — value-element collections as JSON-array columns
+
+Persist a `List<E>` or `Set<E>` of value elements as a single JSON-array `TEXT` column on the entity's own table — distinct from `@Aggregate` references, which warrant junction tables and FK semantics.
+
+```kotlin
+@JvmInline
+value class Genre(val name: String)
+
+object GenreConverter : ColumnConverter<Genre, String> {
+    override val sqlType = ColumnType.TextType
+    override fun toSql(value: Genre) = value.name
+    override fun fromSql(raw: String) = Genre(raw)
+}
+
+@PersistenceMapping
+data class AudioItem(
+    override val id: Int,
+    @ElementCollection(elementConverter = GenreConverter::class)
+    val genres: Set<Genre> = emptySet(),
+) : ReactiveEntityBase<Int, AudioItem>() { /* ... */ }
+```
+
+- **Single column:** generates `genres TEXT NOT NULL`; the empty collection round-trips as `[]`, never `NULL`.
+- **Native element encoding:** the JSON mirrors the converter's scalar type — `["rock","jazz"]` for a `String`-backed converter, `[1,2,3]` for an `Int`-backed one.
+- **Placement:** constructor parameters (`val`/`var`) and body-declared `var x by reactiveProperty(...)` reactive properties both work; `Set<E>` and `List<E>` are both supported (`List` preserves order).
+- **Element types:** the converter's persistence-facing `S` must be one of the eight Kotlin primitives; wrap richer types (`UUID`, `LocalDate`, …) in a String-shaped converter.
+
+See [SQL Persistence](https://github.com/octaviospain/lirp/wiki/SQL-Persistence) on the wiki for the full documentation.
+
 ## Query DSL
 
 LIRP provides a type-safe, Kotlin-native query DSL for filtering, ordering, and paginating entities directly from any `Repository`. Predicates compose with infix operators; the planner automatically routes indexed equality checks through secondary indexes and falls back to in-memory scans for range and composite predicates.

@@ -52,7 +52,31 @@ internal data class ColumnMeta(
      *  because embeddables are reconstructed wholesale via the primary constructor on each
      *  `fromRow` call.
      */
-    val isInsideEmbedded: Boolean = false
+    val isInsideEmbedded: Boolean = false,
+    /**
+     * `true` when this column was produced from an `@ElementCollection`-annotated property.
+     * The column holds a JSON array (NOT NULL DEFAULT '[]'); `fromRow` decodes via
+     * `Json.decodeFromString` and `toParams` encodes via `Json.encodeToString`.
+     */
+    val isElementCollection: Boolean = false,
+    /**
+     * FQN of the element converter object used to convert each element to/from its SQL scalar
+     * representation. Non-null when [isElementCollection] is `true`.
+     */
+    val elementConverterFqn: String? = null,
+    /**
+     * The kind of collection backing the element-collection property: `"List"` or `"Set"`.
+     * Non-null when [isElementCollection] is `true`. Drives terminal `.toSet()` emission in
+     * `fromRow` for `Set`-typed properties.
+     */
+    val collectionKind: String? = null,
+    /**
+     * SQL DEFAULT expression for this column. When non-null the value is emitted as the
+     * `defaultExpression` argument of the generated `ColumnDef(...)` literal, which the
+     * runtime `ExposedTableInterpreter` translates into a `.default(...)` call on the column.
+     * For element-collection columns this is `"[]"` (empty JSON array).
+     */
+    val defaultExpression: String? = null
 )
 
 /**
