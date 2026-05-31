@@ -21,15 +21,14 @@ import net.transgressoft.lirp.entity.IdentifiableEntity
 
 /**
  * Pure-function normaliser that folds same-ref `Via*` pairs joined by the boolean
- * operator that preserves their semantics. Three rules apply (D-11, D-12,
- * orchestrator-confirmed third):
+ * operator that preserves their semantics. Three rules apply:
  *
  * 1. `Or(ViaAnyMatch(r, p1), ViaAnyMatch(r, p2))` → `ViaAnyMatch(r, Or(p1, p2))`
  * 2. `And(ViaNoneMatch(r, p1), ViaNoneMatch(r, p2))` → `ViaNoneMatch(r, Or(p1, p2))`
  * 3. `And(ViaAllMatch(r, p1), ViaAllMatch(r, p2))` → `ViaAllMatch(r, And(p1, p2))`
  *
  * Mixed quantifiers (e.g. `Or(ViaAnyMatch, ViaAllMatch)`) and pairs with a different
- * `parentProp` or a different `childRegistry` are never folded (D-12, D-13): each
+ * `parentProp` or a different `childRegistry` are never folded: each
  * quantifier carries different semantics, and structural equality of the ref is the
  * only condition under which the fold preserves meaning.
  *

@@ -193,7 +193,7 @@ internal class SqlRepositoryOptimisticLockingIntegrationTest : FunSpec({
 
                 eventually(15.seconds) { conflicts.size shouldBe 1 }
                 val conflict = conflicts.single()
-                conflict.expectedVersion shouldBe 0L // FIRST observed version per D-08
+                conflict.expectedVersion shouldBe 0L // FIRST observed version
                 conflict.actualVersion shouldBe 1L // third writer's canonical version
 
                 // Auto-reload converged to the third writer's canonical state.

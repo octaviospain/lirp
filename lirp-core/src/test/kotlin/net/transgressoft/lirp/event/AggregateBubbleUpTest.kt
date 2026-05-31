@@ -40,7 +40,7 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Tests for DDD-03: bubble-up event propagation from referenced child entities to parent entity subscribers.
+ * Tests for bubble-up event propagation from referenced child entities to parent entity subscribers.
  *
  * Verifies that [AggregateMutationEvent] is delivered to parent subscribers when bubble-up is enabled,
  * silenced when disabled, and that propagation is single-level only (no transitive forwarding).

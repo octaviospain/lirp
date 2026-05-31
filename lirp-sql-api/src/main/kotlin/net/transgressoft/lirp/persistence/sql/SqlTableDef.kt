@@ -99,7 +99,7 @@ interface SqlTableDef<E> : LirpTableDef<E> {
     /**
      * Sets the `@Version` property of [entity] to [newVersion]. Symmetric to [applyRow] but scoped
      * to the single version column — used by [net.transgressoft.lirp.persistence.sql.SqlRepository]
-     * to auto-bump the in-memory version counter after a successful versioned UPDATE (D-05).
+     * to auto-bump the in-memory version counter after a successful versioned UPDATE.
      *
      * The default implementation is a no-op: entities without a `@Version` column simply ignore
      * the call, which preserves source compatibility for every hand-written [SqlTableDef] whose

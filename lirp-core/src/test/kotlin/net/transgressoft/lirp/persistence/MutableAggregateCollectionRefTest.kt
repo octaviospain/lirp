@@ -37,10 +37,10 @@ import kotlinx.coroutines.test.runTest
 
 /**
  * Tests for [MutableAggregateList] and [MutableAggregateSet], validating
- * all proxy behaviors: lazy resolution per-access (D-01/D-02), indexed mutations (D-03),
- * replace at index (D-03), indexed removal (D-03), live sub-list and list-iterator views (D-07),
- * iterator().remove on set proxy (D-02), NoSuchElementException on unresolvable ID (D-05),
- * resolve-per-call freshness (D-04), referenceIds accessible via AggregateCollectionRef cast (D-08),
+ * all proxy behaviors: lazy resolution per-access, indexed mutations,
+ * replace at index, indexed removal, live sub-list and list-iterator views,
+ * iterator().remove on set proxy, NoSuchElementException on unresolvable ID,
+ * resolve-per-call freshness, referenceIds accessible via AggregateCollectionRef cast,
  * thread safety (CORE-04), and mutation event emission (EVT-01).
  */
 @DisplayName("MutableAggregateCollectionRefDelegate")

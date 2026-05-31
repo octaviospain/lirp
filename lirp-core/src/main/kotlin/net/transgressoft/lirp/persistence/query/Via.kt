@@ -243,7 +243,7 @@ infix fun <TParent : IdentifiableEntity<*>, K : Comparable<K>, TChild : Identifi
 /**
  * Builds a [ViaAnyMatch] predicate from this step: "at least one child satisfies the block".
  *
- * Empty parent collection produces `false` (D-05).
+ * Empty parent collection produces `false`.
  *
  * @param block builder for the child predicate
  * @return a [Predicate] over the parent
@@ -256,7 +256,7 @@ infix fun <TParent : IdentifiableEntity<*>, K : Comparable<K>, TChild : Identifi
 /**
  * Builds a [ViaAllMatch] predicate from this step: "every child satisfies the block".
  *
- * Empty parent collection produces `true` (D-05, vacuously, matching Kotlin stdlib semantics).
+ * Empty parent collection produces `true` (vacuously, matching Kotlin stdlib semantics).
  *
  * @param block builder for the child predicate
  * @return a [Predicate] over the parent
@@ -269,7 +269,7 @@ infix fun <TParent : IdentifiableEntity<*>, K : Comparable<K>, TChild : Identifi
 /**
  * Builds a [ViaNoneMatch] predicate from this step: "no child satisfies the block".
  *
- * Empty parent collection produces `true` (D-05, vacuously).
+ * Empty parent collection produces `true` (vacuously).
  *
  * @param block builder for the child predicate
  * @return a [Predicate] over the parent
@@ -282,7 +282,7 @@ infix fun <TParent : IdentifiableEntity<*>, K : Comparable<K>, TChild : Identifi
 /**
  * Builds a [ViaWhere] predicate from this step: "the referenced child satisfies the block".
  *
- * Null parent reference produces `false` (D-04).
+ * Null parent reference produces `false`.
  *
  * @param block builder for the child predicate
  * @return a [Predicate] over the parent

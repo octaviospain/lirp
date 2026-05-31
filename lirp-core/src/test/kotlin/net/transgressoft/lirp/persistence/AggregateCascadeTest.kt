@@ -37,7 +37,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 /**
- * Tests for DDD-04: cascade behavior when the referencing entity is removed from its repository.
+ * Tests for cascade behavior when the referencing entity is removed from its repository.
  *
  * Verifies that [CascadeOrder] (CASCADE) removes the referenced [Customer], [DetachOrder] (DETACH)
  * only cancels subscription, and [NoneOrder] (NONE) does nothing on delete.

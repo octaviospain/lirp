@@ -29,8 +29,8 @@ import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 
 /**
  * KSP compilation tests locking the misuse diagnostics for `@Embedded` / `@Embeddable` in
- * [TableDefProcessor]: D-06 target strictness on the consuming property, D-07 kind constraints
- * on the referenced `@Embeddable`, and D-02 / D-03 column-name collision detection across the
+ * [TableDefProcessor]: target strictness on the consuming property, kind constraints
+ * on the referenced `@Embeddable`, and column-name collision detection across the
  * full transitive flatten.
  *
  * Each test compiles a deliberately-broken fixture and asserts the build fails with a specific
@@ -114,7 +114,7 @@ class EmbeddableDiagnosticsTest : StringSpec({
         result.messages shouldContain "test.BodyEmbeddedEntity.addr"
     }
 
-    // The D-06 "custom getter" diagnostic in [TableDefProcessor.validateEmbeddedTargetStrictness]
+    // The "custom getter" diagnostic in [TableDefProcessor.validateEmbeddedTargetStrictness]
     // is only reachable for primary-constructor parameters — but a Kotlin primary-constructor
     // parameter cannot syntactically carry a custom getter, and any body-declared property with
     // `@Embedded` (with or without `get()`) is caught earlier by the body-declared diagnostic.
@@ -211,7 +211,7 @@ class EmbeddableDiagnosticsTest : StringSpec({
 
         // A typealias may resolve to its underlying class declaration in KSP. The processor
         // treats it as a non-@Embeddable target (since the underlying class lacks @Embeddable);
-        // either D-07.2 ("must reference a class type") or D-07.1 ("must reference an
+        // either ("must reference a class type") or ("must reference an
         // @Embeddable type") is acceptable — the structural error condition (typealias is not
         // a permissible @Embedded target) is what we lock in.
         result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
@@ -520,7 +520,7 @@ class EmbeddableDiagnosticsTest : StringSpec({
         result.messages shouldContain "Column name collision"
         result.messages shouldContain "inner_deep_value"
         // Both the entity-rooted path through the grandchild AND the sibling scalar path are
-        // named, proving D-03's full transitive walk surfaces every contributor.
+        // named, proving the full transitive walk surfaces every contributor.
         result.messages shouldContain "test.GrandchildCollisionEntity.inner.grandchild.value"
         result.messages shouldContain "test.GrandchildCollisionEntity.sibling"
     }

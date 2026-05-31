@@ -24,7 +24,7 @@ import io.kotest.matchers.longs.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 
 /**
- * Spike-010 parity gate for XAGG-03. Builds a 50,000-parent × 20-child-ref fixture with a
+ * Spike-010 parity gate for Builds a 50,000-parent × 20-child-ref fixture with a
  * highly selective child predicate (~10 matching children) and asserts:
  *  - the cardinality-driven planner picks [ViaStrategy.HASH_JOIN] for this shape,
  *  - the result count matches the analytically expected number of parents,

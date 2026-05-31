@@ -231,7 +231,7 @@ internal class SqlRepositoryForeignKeyIntegrationTest : FunSpec({
                 parentRepo.installJunctionForeignKeys()
 
                 // Insert a parent referencing a child that does NOT exist. With CascadeAction.NONE
-                // (D-08: "no FK clause"), the database accepts the orphan reference.
+                // ("no FK clause"), the database accepts the orphan reference.
                 parentRepo.add(
                     FkParent(4).apply {
                         name = "P4"

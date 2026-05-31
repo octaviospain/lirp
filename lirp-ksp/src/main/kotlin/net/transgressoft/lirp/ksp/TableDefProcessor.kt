@@ -97,7 +97,7 @@ class TableDefProcessor(
             // 'kotlin.collections.List'" errors.
             val excludedBackingFields =
                 aggregates.mapNotNullTo(mutableSetOf()) { if (it.isCollection) it.backingCollectionName else null }
-            // D-06 inputs: backing scalar names for single-entity aggregates (FK columns). These are
+            // inputs: backing scalar names for single-entity aggregates (FK columns). These are
             // excluded from converter routing because the FK column type is dictated by the
             // referenced entity's primary key type, not by a domain-to-scalar converter.
             val aggregateBackingScalarNames =
@@ -300,7 +300,7 @@ class TableDefProcessor(
         }
     }
 
-    // Scan for @Version-annotated properties and validate them per D-15. Invalid @Version
+    // Scan for @Version-annotated properties and validate them. Invalid @Version
     // declarations emit a KSP compile error and are not added to the returned map. Classes using
     // only @Version (no @PersistenceMapping / @PersistenceProperty) are also added to [classes].
     private fun collectVersionedProperties(
@@ -337,7 +337,7 @@ class TableDefProcessor(
     }
 
     /**
-     * Validates a @Version property per D-15 — type must be non-nullable `kotlin.Long`, must be
+     * Validates a @Version property — type must be non-nullable `kotlin.Long`, must be
      * declared with `var`, must be delegated (reactiveProperty or equivalent), and at most one
      * @Version per class. Emits [KSPLogger.error] on violation and returns `false`.
      */
@@ -349,7 +349,7 @@ class TableDefProcessor(
         val className = parent.simpleName.asString()
         val propName = prop.simpleName.asString()
 
-        // D-15: at most one @Version per class.
+        // at most one @Version per class.
         if (parent in alreadyFound) {
             logger.error(
                 "Class '$className' has multiple @Version properties " +
@@ -359,7 +359,7 @@ class TableDefProcessor(
             return false
         }
 
-        // D-15: type must be exactly kotlin.Long (non-nullable).
+        // type must be exactly kotlin.Long (non-nullable).
         val resolved = prop.type.resolve()
         val typeFqn = resolved.makeNotNullable().declaration.qualifiedName?.asString()
         if (typeFqn != KOTLIN_LONG_FQN || resolved.isMarkedNullable) {
@@ -372,7 +372,7 @@ class TableDefProcessor(
             return false
         }
 
-        // D-15: must be var.
+        // must be var.
         if (!prop.isMutable) {
             logger.error(
                 "@Version property '$className.$propName' must be declared with 'var' (not 'val').",
@@ -381,7 +381,7 @@ class TableDefProcessor(
             return false
         }
 
-        // D-15: must use the reactiveProperty delegate (enforcement via isDelegated as a
+        // must use the reactiveProperty delegate (enforcement via isDelegated as a
         // necessary-but-not-sufficient check per RESEARCH.md Example 2).
         if (!prop.isDelegated()) {
             logger.error(
@@ -414,7 +414,7 @@ class TableDefProcessor(
         val columns = collected.columns
         val ctorSlots = collected.ctorSlots
 
-        // D-02 / D-03: column-name collision detection runs ONCE at the entity level on the fully
+        // column-name collision detection runs ONCE at the entity level on the fully
         // flattened column list, after all recursive @Embedded descents. Detection at this level
         // (rather than per-@Embeddable) catches grandchild collisions that an intermediate prefix
         // might otherwise mask. Codegen is suppressed for the entity when collisions are reported.

@@ -35,7 +35,7 @@ import javax.sql.DataSource
 // not yet consumed by SqlRepository.init, so the integration tests pre-create the parent / child
 // tables with an inline ON DELETE clause (idempotent against SchemaUtils.create). This exercises
 // the database-side semantics that LIRP will eventually emit and verifies the cascade-action
-// mapping (D-08) end-to-end.
+// mapping end-to-end.
 
 /**
  * Child entity referenced by [FkParent.singleChildId] (scalar FK) and by [FkParent.childIds]
@@ -248,7 +248,7 @@ object FkScalarFkInstaller {
     /** CASCADE: deleting the child also removes the parent row. */
     fun setupCascade(dataSource: DataSource) = createSchema(dataSource, scalarOnDelete = "CASCADE")
 
-    /** DETACH: maps to `SET NULL` per D-08. Deleting the child nulls the scalar on the parent row. */
+    /** DETACH: maps to `SET NULL`. Deleting the child nulls the scalar on the parent row. */
     fun setupDetach(dataSource: DataSource) = createSchema(dataSource, scalarOnDelete = "SET NULL")
 
     /** NONE: leave the scalar column as a plain nullable scalar without any FK constraint. */
@@ -256,7 +256,7 @@ object FkScalarFkInstaller {
 
     /**
      * Creates the three tables with explicit `FOREIGN KEY` clauses. When [scalarOnDelete] is null
-     * the scalar FK is omitted entirely (D-08: NONE → no FK clause at all). The junction parent
+     * the scalar FK is omitted entirely (NONE → no FK clause at all). The junction parent
      * FK is always `CASCADE`, the junction item FK is always `RESTRICT` — matching
      * [FkParentChildrenJunctionDef].
      */

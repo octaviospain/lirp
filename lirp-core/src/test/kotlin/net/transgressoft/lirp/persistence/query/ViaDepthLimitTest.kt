@@ -76,7 +76,7 @@ internal class RepoD : VolatileRepository<Int, DepthD>(LirpContext.default, "Dep
 internal class RepoE : VolatileRepository<Int, DepthE>(LirpContext.default, "DepthE")
 
 /**
- * Verifies the depth-3 limit enforced at `Via*` construction (XAGG-05, D-06, D-07).
+ * Verifies the depth-3 limit enforced at `Via*` construction.
  */
 @DisplayName("Via depth limit")
 internal class ViaDepthLimitTest : FunSpec({

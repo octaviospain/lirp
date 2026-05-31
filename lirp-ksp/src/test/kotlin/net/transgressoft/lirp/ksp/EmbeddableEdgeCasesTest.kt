@@ -32,7 +32,7 @@ import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 /**
  * KSP compilation tests covering edge cases and validation paths in [EmbeddableAnalyzer] and
  * [ColumnMetaBuilder] that are not exercised by the main happy-path or diagnostics suites.
- * Targets: D-06 body-declared @Embedded inside a nested @Embeddable, D-07 validation on nested
+ * Targets: body-declared @Embedded inside a nested @Embeddable, validation on nested
  * @Embedded var parameters inside an @Embeddable, nullable embedded leaf columns, non-ctor
  * setter columns alongside @Embedded ctor params, and @PersistenceProperty name override on
  * embedded leaves.
@@ -386,7 +386,7 @@ class EmbeddableEdgeCasesTest : StringSpec({
                 )
             )
 
-        // @Embeddable on a non-data class is rejected — D-07.3 enforces concrete data class
+        // @Embeddable on a non-data class is rejected — enforces concrete data class
         result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
         result.messages shouldContain "@Embeddable must be a concrete data class"
         result.messages shouldContain "test.NoCtorEmbeddable"

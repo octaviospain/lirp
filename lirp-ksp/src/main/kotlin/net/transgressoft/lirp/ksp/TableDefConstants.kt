@@ -57,7 +57,7 @@ internal const val KOTLIN_MUTABLE_SET_FQN = "kotlin.collections.MutableSet"
 internal const val KOTLIN_MAP_FQN = "kotlin.collections.Map"
 
 // Allow-list of supported S type FQNs for ColumnConverter<D, S>, mapped to the canonical
-// ColumnType expression. Keys gate D-08 validation; values seed the codegen path that
+// ColumnType expression. Keys gate validation; values seed the codegen path that
 // emits the column type from the converter's base scalar.
 internal fun String.toSnakeCase(): String =
     replace(Regex("([a-z\\d])([A-Z])"), "$1_$2")

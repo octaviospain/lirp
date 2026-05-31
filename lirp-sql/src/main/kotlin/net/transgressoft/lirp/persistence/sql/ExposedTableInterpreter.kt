@@ -117,17 +117,17 @@ class ExposedTableInterpreter {
             "At most one @Version column is allowed per entity; found ${versionDefs.size} on ${def.tableName}"
         }
         val versionDef = versionDefs.singleOrNull()
-        // Manually-authored SqlTableDefs bypass KSP's D-15 validation. Enforce the Long type
+        // Manually-authored SqlTableDefs bypass KSP's validation. Enforce the Long type
         // requirement here at runtime so a misconfigured isVersion flag fails loudly at
         // interpret() time rather than silently breaking optimistic-lock predicates later.
         require(versionDef == null || versionDef.type is ColumnType.LongType) {
             "@Version column '${versionDef?.name}' on ${def.tableName} must use ColumnType.LongType " +
-                "(got ${versionDef?.type}). Manual SqlTableDef authors must match the KSP D-15 contract."
+                "(got ${versionDef?.type}). Manual SqlTableDef authors must match the KSP version-column contract."
         }
 
         val table = LirpDynamicTable(def.tableName, def.columns, columnsByName, pkDef)
 
-        // Safe: KSP validation (D-15) enforces @Version columns map to ColumnType.LongType, which
+        // Safe: KSP validation enforces @Version columns map to ColumnType.LongType, which
         // buildColumn always produces via long(col.name) — yielding Column<Long>.
         @Suppress("UNCHECKED_CAST")
         val versionCol: Column<Long>? = versionDef?.let { columnsByName[it.name] as? Column<Long> }

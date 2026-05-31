@@ -169,6 +169,6 @@ internal class ReflectionFreeQueryDslTest : FunSpec({
      *   - findByIndex(String, Object)
      *
      * No string-keyed facade is provided. Implementation of KSP-generated accessors is deferred
-     * to a future phase per locked decision D-01.
+     * to a future phase.
      */
 })

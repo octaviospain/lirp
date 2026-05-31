@@ -63,7 +63,7 @@ class LirpSqlPlugin : Plugin<Project> {
                 if (lirpSqlDep != null) {
                     // Add lirp-sql to the ksp configuration so the KSP resolver can find
                     // SqlTableDef via resolver.getClassDeclarationByName(). This is the
-                    // mechanism that replaced the removed options["lirp.sql"] KSP arg (D-04).
+                    // mechanism that replaced the removed options["lirp.sql"] KSP arg.
                     project.dependencies.add("ksp", lirpSqlDep)
                 }
             }

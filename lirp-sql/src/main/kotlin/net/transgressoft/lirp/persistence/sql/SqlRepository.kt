@@ -583,7 +583,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      * Deletes use `deleteWhere` per id to stay dialect-portable. Updates are applied individually
      * per entity. When [hadClear] is `true`, every row in the table is wiped first; the inserts,
      * updates and deletes that arrived after the clear in the debounce window are then applied in
-     * that order — guaranteeing D-01 single-aggregate atomicity for the whole window.
+     * that order — guaranteeing single-aggregate atomicity for the whole window.
      *
      * For versioned tables (tableDef carries a `@Version` column), UPDATE and DELETE augment
      * their WHERE clause with `AND version = ?`. A zero-row-affected result is treated as an
@@ -592,7 +592,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      * still commit. After the transaction commits, every accumulated conflict is recovered
      * (auto-reload + [StandardCrudEvent.Conflict] emission) in its own short-lived transaction.
      *
-     * Rationale: wrapping the whole flush in one SQL transaction is required for D-01
+     * Rationale: wrapping the whole flush in one SQL transaction is required for
      * single-aggregate atomicity, but letting a single conflict throw mid-transaction would
      * roll back every earlier insert/update/delete and the base class would drop the drained
      * snapshot — silently losing work. Accumulating instead preserves non-conflicting writes.
@@ -918,7 +918,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                 )
             )
         } else {
-            // Case 2b: our DELETE was defeated (D-11). The entity is no longer in in-memory state
+            // Case 2b: our DELETE was defeated. The entity is no longer in in-memory state
             // but the canonical row exists — reconstruct and re-insert without enqueueing an
             // insert PendingOp (the row is already persisted).
             val reconstructed = tableDef.fromRow(canonicalRow, table)

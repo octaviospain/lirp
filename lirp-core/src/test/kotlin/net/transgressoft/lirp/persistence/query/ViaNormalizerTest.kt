@@ -72,8 +72,8 @@ internal class CrateRepo : VolatileRepository<Int, Crate>(LirpContext.default, "
 
 /**
  * Unit tests for the OR/AND-union AST normaliser. Verifies the three fold rules
- * (D-11, D-12, plus the orchestrator-confirmed AllMatch fold), the anti-rules for
- * mismatched quantifiers / boolean ops / refs (D-12, D-13), recursion into nested
+ * (plus the orchestrator-confirmed AllMatch fold), the anti-rules for
+ * mismatched quantifiers / boolean ops / refs, recursion into nested
  * compositions, and idempotency.
  */
 @DisplayName("ViaNormalizer")

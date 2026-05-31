@@ -43,7 +43,7 @@ import kotlinx.serialization.builtins.serializer
 /**
  * Tests for [JsonFileRepository] foreign-key reconciliation behavior driven by [JsonFkPolicy].
  *
- * Verifies the silent-reconciliation contract (D-06/D-07): when a parent's `@Aggregate`
+ * Verifies the silent-reconciliation contract: when a parent's `@Aggregate`
  * reference points to an entity that is missing from its registry at load time,
  * [JsonFkPolicy.LOG_AND_RECONCILE] (the default) drops dangling collection IDs and nulls
  * dangling nullable scalar refs without emitting `CrudEvent.UPDATE` and without bumping
