@@ -31,7 +31,7 @@ import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 
 /**
  * KSP compilation tests for the converter-resolution machinery in [TableDefProcessor],
- * exercising D-07 (object-only converters), D-08 (supported S allow-list), and the
+ * exercising (object-only converters), (supported S allow-list), and the
  * sentinel `ColumnConverter::class` default that means "no converter declared".
  */
 @OptIn(ExperimentalCompilerApi::class)
@@ -81,7 +81,7 @@ class ConverterCodegenTest : StringSpec({
         generated shouldNotContain ".toSql("
     }
 
-    "TableDefProcessor rejects non-object converter with D-07 diagnostic naming the converter" {
+    "TableDefProcessor rejects non-object converter with a diagnostic naming the converter" {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -118,7 +118,7 @@ class ConverterCodegenTest : StringSpec({
         result.messages shouldContain "object"
     }
 
-    "TableDefProcessor rejects converter with unsupported S type via D-08 diagnostic" {
+    "TableDefProcessor rejects converter with unsupported S type via a diagnostic" {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(

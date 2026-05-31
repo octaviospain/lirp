@@ -580,7 +580,7 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("generates SqlTableDef via resolver detection without KSP options") {
         // Verifies that SqlTableDef generation works through resolver.getClassDeclarationByName()
-        // alone, which is the sole detection mechanism after D-04 removed options["lirp.sql"].
+        // alone, which is the sole detection mechanism after removed options["lirp.sql"].
         // In monorepo tests, inheritClassPath = true means the resolver finds SqlTableDef.
         // For external consumers, the net.transgressoft.lirp.sql Gradle plugin adds lirp-sql
         // to the ksp configuration so the resolver finds it as well.

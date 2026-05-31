@@ -74,7 +74,7 @@ internal class OwnerRepo : VolatileRepository<Int, Owner>(LirpContext.default, "
 /**
  * Unit tests for the `via … anyMatch / allMatch / noneMatch / where` operator surface.
  *
- * Covers D-04 (null single-entity), D-05 (empty-collection semantics), and composition
+ * Covers (null single-entity), (empty-collection semantics), and composition
  * with Phase 52 operators. Live-`referenceIds` invariant verified at unit level.
  */
 @DisplayName("Via* operators")

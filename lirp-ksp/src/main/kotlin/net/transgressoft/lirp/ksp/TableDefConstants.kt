@@ -49,9 +49,15 @@ internal const val LIST_ITEM_SEPARATOR = ",\n        "
 internal const val COLUMN_CONVERTER_FQN = "net.transgressoft.lirp.persistence.ColumnConverter"
 internal const val EMBEDDABLE_FQN = "net.transgressoft.lirp.persistence.Embeddable"
 internal const val EMBEDDED_FQN = "net.transgressoft.lirp.persistence.Embedded"
+internal const val ELEMENT_COLLECTION_FQN = "net.transgressoft.lirp.persistence.ElementCollection"
+internal const val KOTLIN_LIST_FQN = "kotlin.collections.List"
+internal const val KOTLIN_SET_FQN = "kotlin.collections.Set"
+internal const val KOTLIN_MUTABLE_LIST_FQN = "kotlin.collections.MutableList"
+internal const val KOTLIN_MUTABLE_SET_FQN = "kotlin.collections.MutableSet"
+internal const val KOTLIN_MAP_FQN = "kotlin.collections.Map"
 
 // Allow-list of supported S type FQNs for ColumnConverter<D, S>, mapped to the canonical
-// ColumnType expression. Keys gate D-08 validation; values seed the codegen path that
+// ColumnType expression. Keys gate validation; values seed the codegen path that
 // emits the column type from the converter's base scalar.
 internal fun String.toSnakeCase(): String =
     replace(Regex("([a-z\\d])([A-Z])"), "$1_$2")
@@ -86,4 +92,13 @@ internal val SUPPORTED_CONVERTER_S_TYPES: Map<String, String> =
         UUID_FQN to COLUMN_TYPE_UUID_EXPR,
         LOCAL_DATE_FQN to COLUMN_TYPE_DATE_EXPR,
         LOCAL_DATE_TIME_FQN to COLUMN_TYPE_DATETIME_EXPR
+    )
+
+// The 8 Kotlin primitives encodable natively by kotlinx.serialization without contextual
+// serializer wiring. JDK-bridge types (BigDecimal, UUID, LocalDate, LocalDateTime) require
+// custom KSerializer instances and are therefore rejected for @ElementCollection element converters.
+internal val ELEMENT_COLLECTION_S_TYPES: Set<String> =
+    setOf(
+        KOTLIN_STRING_FQN, KOTLIN_INT_FQN, KOTLIN_LONG_FQN, KOTLIN_SHORT_FQN,
+        KOTLIN_BYTE_FQN, KOTLIN_BOOLEAN_FQN, KOTLIN_DOUBLE_FQN, KOTLIN_FLOAT_FQN
     )

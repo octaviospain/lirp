@@ -24,7 +24,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 
 /**
- * Tests for DDD-01: aggregate reference declaration compiles and delegate returns correct values.
+ * Tests for aggregate reference declaration compiles and delegate returns correct values.
  *
  * These tests verify that [aggregate] delegates work in isolation — no repository binding required.
  */

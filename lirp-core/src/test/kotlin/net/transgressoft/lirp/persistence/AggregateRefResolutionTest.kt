@@ -25,7 +25,7 @@ import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 
 /**
- * Tests for DDD-02: aggregate reference resolve() returns entities from bound repositories.
+ * Tests for aggregate reference resolve() returns entities from bound repositories.
  *
  * Each test creates a fresh [LirpContext] for isolation. Adding an [Order] to a [VolatileRepository]
  * triggers reference discovery and binding via [RegistryBase]. The [customer] reference is then

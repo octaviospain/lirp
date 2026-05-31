@@ -321,7 +321,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
             }
         }
 
-        // D-04: optimistic-lock failures follow the Conflict + auto-reload path and DO NOT
+        // optimistic-lock failures follow the Conflict + auto-reload path and DO NOT
         // re-enqueue. The subclass recovery hook performs the auto-reload and emits the
         // StandardCrudEvent.Conflict event. Cells that arrived during the failed write are kept
         // in the map (they were never drained here) so the next flush cycle handles them

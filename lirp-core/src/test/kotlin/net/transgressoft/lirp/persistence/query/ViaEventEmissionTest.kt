@@ -26,7 +26,7 @@ import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 
 /**
- * Verifies the silent-by-default event contract for cross-aggregate queries (D-18):
+ * Verifies the silent-by-default event contract for cross-aggregate queries:
  * the child registry never emits READ events when its entities are visited via the
  * planner's hash-join / per-parent loop paths, regardless of its own `enableEvents`
  * setting. The parent registry continues to honour Phase 52's silent-by-default

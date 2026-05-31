@@ -28,7 +28,7 @@ import io.kotest.matchers.string.shouldContain
 import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 
 /**
- * KSP compilation tests for D-06 enforcement in [TableDefProcessor]: converters are rejected
+ * KSP compilation tests for enforcement in [TableDefProcessor]: converters are rejected
  * on primary key columns, `@Version` columns, and `@Aggregate` single-ref FK scalar columns.
  * Each rejection emits a distinct diagnostic naming the property FQN and the kind of column.
  */
@@ -46,7 +46,7 @@ class ConverterRejectedTargetTest : StringSpec({
         return compilation.compile()
     }
 
-    "TableDefProcessor rejects converter on primary key column with D-06 diagnostic naming the property FQN" {
+    "TableDefProcessor rejects converter on primary key column with a diagnostic naming the property FQN" {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -81,7 +81,7 @@ class ConverterRejectedTargetTest : StringSpec({
         result.messages shouldContain "test.PkConverterEntity.id"
     }
 
-    "TableDefProcessor rejects converter on @Version column with D-06 diagnostic naming the property FQN" {
+    "TableDefProcessor rejects converter on @Version column with a diagnostic naming the property FQN" {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -118,7 +118,7 @@ class ConverterRejectedTargetTest : StringSpec({
         result.messages shouldContain "test.VersionConverterEntity.version"
     }
 
-    "TableDefProcessor rejects converter on @Aggregate single-ref FK scalar column with D-06 diagnostic naming the property FQN" {
+    "TableDefProcessor rejects converter on @Aggregate single-ref FK scalar column with a diagnostic naming the property FQN" {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(

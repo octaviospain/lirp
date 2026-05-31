@@ -33,7 +33,7 @@ import com.google.devtools.ksp.symbol.Origin
  * Analyzes `@Embedded` / `@Embeddable` sites on entity primary-constructor parameters.
  *
  * Responsibilities:
- * - Validates the structural contracts (D-06 body-declared placement, D-07 kind checks on the
+ * - Validates the structural contracts (constructor-only placement, kind checks on the
  *   referenced `@Embeddable` type).
  * - Recursively walks nested `@Embeddable` hierarchies, flattening each scalar leaf into a
  *   [ColumnMeta] appended to the caller-supplied accumulator.
@@ -104,9 +104,9 @@ internal class EmbeddableAnalyzer(
     }
 
     /**
-     * D-06 (body-declared): @Embedded is constructor-only. Any non-ctor property carrying
-     * @Embedded is rejected with a single diagnostic per occurrence so it does not silently
-     * fall through [ColumnMetaBuilder.buildColumnMeta] as an unsupported type.
+     * `@Embedded` is constructor-only. Any non-ctor property carrying `@Embedded` is rejected with
+     * a single diagnostic per occurrence so it does not silently fall through
+     * [ColumnMetaBuilder.buildColumnMeta] as an unsupported type.
      */
     private fun reportBodyDeclaredEmbedded(classDecl: KSClassDeclaration, ctorParamNames: Set<String>) {
         for (prop in classDecl.getAllProperties()) {
@@ -149,11 +149,28 @@ internal class EmbeddableAnalyzer(
         val prop = propertiesByName[paramName] ?: return
         if (columnMetaBuilder.isExcluded(prop)) return
 
+        // Dispatch order: @ElementCollection BEFORE @Embedded BEFORE plain scalar.
+        // An @ElementCollection annotation preempts the plain-scalar branch so a List/Set property
+        // with the annotation is never silently passed through buildColumnMeta as an unsupported type.
+        val elementCollectionAnnotation =
+            prop.annotations.firstOrNull {
+                it.annotationType.resolve().declaration.qualifiedName?.asString() == ELEMENT_COLLECTION_FQN
+            }
         val embeddedAnnotation =
             prop.annotations.firstOrNull {
                 it.annotationType.resolve().declaration.qualifiedName?.asString() == EMBEDDED_FQN
             }
-        if (embeddedAnnotation != null) {
+
+        if (elementCollectionAnnotation != null) {
+            val col =
+                columnMetaBuilder.buildElementCollectionColumn(
+                    prop,
+                    classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString(),
+                    isCtorParam = true
+                ) ?: return
+            columns += col
+            ctorSlots += ScalarCtorSlot(paramName, col)
+        } else if (embeddedAnnotation != null) {
             if (!validateEmbeddedTargetStrictness(classDecl, param, prop)) return
             val slot =
                 buildEmbeddedSlot(
@@ -187,17 +204,39 @@ internal class EmbeddableAnalyzer(
         aggregateBackingScalarNames: Set<String>,
         columns: MutableList<ColumnMeta>
     ) {
+        val classFqn = classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString()
         for (prop in classDecl.getAllProperties()) {
             val propName = prop.simpleName.asString()
             if (propName in ctorParamNames) continue
             if (columnMetaBuilder.isExcluded(prop) || propName in excludedBackingFields) continue
-            val col = columnMetaBuilder.buildColumnMeta(prop, hasDeclaredId, versionedName, ctorParamNames, aggregateBackingScalarNames) ?: continue
+            val hasElementCollection =
+                prop.annotations.any {
+                    it.annotationType.resolve().declaration.qualifiedName?.asString() == ELEMENT_COLLECTION_FQN
+                }
+            // A body-declared @ElementCollection must be reassignable so the generated fromRow can
+            // populate it after construction. A read-only `val` would yield non-compiling generated
+            // code, so reject it here with a clear message instead.
+            if (hasElementCollection && !prop.isMutable) {
+                logger.error(
+                    "@ElementCollection on a body-declared property requires a mutable `var` " +
+                        "(typically `var x by reactiveProperty(...)`); found a read-only `val` on " +
+                        "'$classFqn.$propName'. Use a constructor `val` parameter or a reactive `var`.",
+                    prop
+                )
+                continue
+            }
+            val col =
+                if (hasElementCollection) {
+                    columnMetaBuilder.buildElementCollectionColumn(prop, classFqn, isCtorParam = false) ?: continue
+                } else {
+                    columnMetaBuilder.buildColumnMeta(prop, hasDeclaredId, versionedName, ctorParamNames, aggregateBackingScalarNames) ?: continue
+                }
             columns += col
         }
     }
 
     /**
-     * D-02 / D-03: after the recursive @Embedded flatten, the fully accumulated `ColumnMeta`
+     * After the recursive `@Embedded` flatten, the fully accumulated `ColumnMeta`
      * list is grouped by SQL column name. Any duplicate-name group emits a single
      * `logger.error()` naming every colliding property's entity-rooted access path so the
      * diagnostic surfaces every angle of the collision (e.g. `album.performer.name` vs
@@ -230,7 +269,7 @@ internal class EmbeddableAnalyzer(
     private fun autoDerivedPrefix(propertyName: String): String = "${propertyName.toSnakeCase()}_"
 
     /**
-     * Applies D-06 target strictness to a ctor-param `@Embedded` site. Rejects `var` constructor
+     * Applies target strictness to a ctor-param `@Embedded` site. Rejects `var` constructor
      * parameters and properties with custom getters. Body-declared placement is caught earlier in
      * [collectColumnsAndSlots]. Returns `true` when the site is valid; emits one `logger.error()`
      * per violation and returns `false` otherwise so the recursive descent skips the malformed slot.
@@ -266,10 +305,10 @@ internal class EmbeddableAnalyzer(
     }
 
     /**
-     * Applies the D-07 trio of `@Embeddable` kind diagnostics to an `@Embedded` consuming property.
+     * Applies the trio of `@Embeddable` kind diagnostics to an `@Embedded` consuming property.
      * Returns the referenced [KSClassDeclaration] when all checks pass, `null` (after emitting a
-     * single `logger.error()`) otherwise. Validation order matches §specifics: kind checks fire
-     * before the recursive descent visits child parameters.
+     * single `logger.error()`) otherwise. Kind checks fire before the recursive descent visits
+     * child parameters.
      */
     private fun validateEmbeddableTarget(prop: KSPropertyDeclaration): KSClassDeclaration? {
         val propertyFqn =
@@ -277,7 +316,7 @@ internal class EmbeddableAnalyzer(
         val resolved = prop.type.resolve()
         val declaration = resolved.declaration
 
-        // D-07.2: target must be a class declaration (not interface/type-alias/type-parameter).
+        // The target must be a class declaration (not interface/type-alias/type-parameter).
         val classDecl = declaration as? KSClassDeclaration
         if (classDecl == null) {
             val symbolName = declaration.qualifiedName?.asString() ?: declaration.simpleName.asString()
@@ -288,7 +327,7 @@ internal class EmbeddableAnalyzer(
             return null
         }
 
-        // D-07.1: the referenced class must carry @Embeddable.
+        // The referenced class must carry @Embeddable.
         val hasEmbeddable =
             classDecl.annotations.any {
                 it.annotationType.resolve().declaration.qualifiedName?.asString() == EMBEDDABLE_FQN
@@ -302,7 +341,7 @@ internal class EmbeddableAnalyzer(
             return null
         }
 
-        // D-07.3: @Embeddable must be a concrete data class with a non-empty primary constructor.
+        // @Embeddable must be a concrete data class with a non-empty primary constructor.
         // Single unified diagnostic covering non-class kinds, abstract/sealed, non-data, and
         // no-primary-ctor variants.
         val isConcreteDataClass =
@@ -340,6 +379,7 @@ internal class EmbeddableAnalyzer(
      *
      * Returns `null` when the referenced type is not a class or lacks a qualified name.
      */
+    @Suppress("kotlin:S107")
     private fun buildEmbeddedSlot(
         prop: KSPropertyDeclaration,
         ctorParamName: String,
@@ -350,31 +390,53 @@ internal class EmbeddableAnalyzer(
         topLevelPropertyName: String,
         embeddableFiles: MutableSet<KSFile> = mutableSetOf()
     ): EmbeddedCtorSlot? {
-        // D-07 kind checks run BEFORE descent so the recursion sees only well-formed embeddables.
+        // Kind checks run before descent so the recursion only ever visits well-formed embeddables.
         val typeDecl = validateEmbeddableTarget(prop) ?: return null
         val typeFqn = typeDecl.qualifiedName?.asString() ?: return null
         typeDecl.containingFile?.let { embeddableFiles += it }
 
-        val explicitPrefix = embeddedAnnotation.arguments.firstOrNull { it.name?.asString() == "prefix" }?.value as? String
-        // D-05: empty prefix reverts to auto-derive. D-04: explicit non-empty prefix overrides
-        // only the current segment's auto-derived portion, preserving any ancestor prefix so that
-        // nested explicit prefixes such as `@Embedded(prefix="geo_")` inside a parent whose
-        // auto-derived prefix is `address_` still produce `address_geo_lat`, not `geo_lat`.
-        val effectivePrefix =
-            if (explicitPrefix.isNullOrEmpty()) {
-                parentPrefix
-            } else {
-                val ancestorPrefix = parentPrefix.removeSuffix(autoDerivedPrefix(ctorParamName))
-                "$ancestorPrefix$explicitPrefix"
-            }
+        val effectivePrefix = effectivePrefix(embeddedAnnotation, ctorParamName, parentPrefix)
+        reportBodyDeclaredEmbeddedInEmbeddable(typeDecl, typeFqn)
 
-        // D-06 body-declared check inside @Embeddable: any non-ctor property carrying @Embedded
-        // on the embeddable itself is rejected here.
+        val childSlots = mutableListOf<CtorSlot>()
+        var anyChildFailed = false
+        for (childParam in typeDecl.primaryConstructor?.parameters.orEmpty()) {
+            val slot =
+                buildEmbeddableChildSlot(
+                    typeDecl, typeFqn, childParam, effectivePrefix,
+                    parentPath, topLevelPropertyName, columnsAccumulator, embeddableFiles
+                )
+            if (slot == null) anyChildFailed = true else childSlots += slot
+        }
+        // When any child fails, abort the whole slot so the outer entity is reported as unmapped
+        // rather than silently emitting partial codegen with an incomplete constructor tree.
+        if (anyChildFailed) return null
+        return EmbeddedCtorSlot(ctorParamName, typeFqn, childSlots)
+    }
+
+    /**
+     * Resolves the prefix applied to this embeddable's flattened columns. An empty or absent
+     * `prefix` argument reverts to the auto-derived segment; an explicit non-empty prefix overrides
+     * only the current segment while preserving any ancestor prefix, so a nested `prefix = "geo_"`
+     * under a parent whose auto-derived prefix is `address_` still produces `address_geo_lat`.
+     */
+    private fun effectivePrefix(embeddedAnnotation: KSAnnotation, ctorParamName: String, parentPrefix: String): String {
+        val explicitPrefix = embeddedAnnotation.arguments.firstOrNull { it.name?.asString() == "prefix" }?.value as? String
+        if (explicitPrefix.isNullOrEmpty()) return parentPrefix
+        val ancestorPrefix = parentPrefix.removeSuffix(autoDerivedPrefix(ctorParamName))
+        return "$ancestorPrefix$explicitPrefix"
+    }
+
+    /**
+     * Rejects `@Embedded` on any non-constructor property of an embeddable. `@Embedded` is
+     * constructor-only; a body-declared placement has no addressable slot in the reconstructing
+     * constructor call.
+     */
+    private fun reportBodyDeclaredEmbeddedInEmbeddable(typeDecl: KSClassDeclaration, typeFqn: String) {
         val childCtorNames =
             typeDecl.primaryConstructor?.parameters.orEmpty().mapNotNull { it.name?.asString() }.toSet()
         for (childProp in typeDecl.getAllProperties()) {
-            val childName = childProp.simpleName.asString()
-            if (childName in childCtorNames) continue
+            if (childProp.simpleName.asString() in childCtorNames) continue
             val hasEmbedded =
                 childProp.annotations.any {
                     it.annotationType.resolve().declaration.qualifiedName?.asString() == EMBEDDED_FQN
@@ -382,72 +444,74 @@ internal class EmbeddableAnalyzer(
             if (!hasEmbedded) continue
             logger.error(
                 "@Embedded must be on a primary-constructor parameter (found body-declared property): " +
-                    "$typeFqn.$childName",
+                    "$typeFqn.${childProp.simpleName.asString()}",
                 childProp
             )
         }
+    }
 
-        val childSlots = mutableListOf<CtorSlot>()
-        var anyChildFailed = false
-        for (childParam in typeDecl.primaryConstructor?.parameters.orEmpty()) {
-            val childParamName =
-                childParam.name?.asString() ?: run {
-                    anyChildFailed = true
-                    continue
-                }
-            val childProp =
-                typeDecl.getDeclaredProperties().firstOrNull { it.simpleName.asString() == childParamName }
-                    ?: run {
-                        anyChildFailed = true
-                        continue
-                    }
+    /**
+     * Resolves a single embeddable constructor parameter into its [CtorSlot] — either a nested
+     * [EmbeddedCtorSlot] for a child `@Embedded`, or a [ScalarCtorSlot] for a flattened leaf.
+     * Returns `null` (after logging where applicable) when the parameter is unresolvable, carries an
+     * unsupported `@ElementCollection`, or fails leaf-column construction.
+     */
+    @Suppress("kotlin:S107")
+    private fun buildEmbeddableChildSlot(
+        typeDecl: KSClassDeclaration,
+        typeFqn: String,
+        childParam: KSValueParameter,
+        effectivePrefix: String,
+        parentPath: String,
+        topLevelPropertyName: String,
+        columnsAccumulator: MutableList<ColumnMeta>,
+        embeddableFiles: MutableSet<KSFile>
+    ): CtorSlot? {
+        val childParamName = childParam.name?.asString() ?: return null
+        val childProp =
+            typeDecl.getDeclaredProperties().firstOrNull { it.simpleName.asString() == childParamName } ?: return null
 
-            val childEmbedded =
-                childProp.annotations.firstOrNull {
-                    it.annotationType.resolve().declaration.qualifiedName?.asString() == EMBEDDED_FQN
-                }
-            if (childEmbedded != null) {
-                if (!validateEmbeddedTargetStrictness(typeDecl, childParam, childProp)) {
-                    anyChildFailed = true
-                    continue
-                }
-                val nestedAutoDerived = "${effectivePrefix}${autoDerivedPrefix(childParamName)}"
-                val nested =
-                    buildEmbeddedSlot(
-                        prop = childProp,
-                        ctorParamName = childParamName,
-                        embeddedAnnotation = childEmbedded,
-                        columnsAccumulator = columnsAccumulator,
-                        parentPrefix = nestedAutoDerived,
-                        parentPath = "$parentPath.$childParamName",
-                        topLevelPropertyName = topLevelPropertyName,
-                        embeddableFiles = embeddableFiles
-                    )
-                if (nested == null) {
-                    anyChildFailed = true
-                    continue
-                }
-                childSlots += nested
-            } else {
-                val leafCol =
-                    columnMetaBuilder.buildEmbeddedLeafColumn(
-                        childProp = childProp,
-                        childParamName = childParamName,
-                        prefix = effectivePrefix,
-                        parentPath = parentPath,
-                        topLevelPropertyName = topLevelPropertyName
-                    )
-                if (leafCol == null) {
-                    anyChildFailed = true
-                    continue
-                }
-                columnsAccumulator += leafCol
-                childSlots += ScalarCtorSlot(childParamName, leafCol)
+        val childHasElementCollection =
+            childProp.annotations.any {
+                it.annotationType.resolve().declaration.qualifiedName?.asString() == ELEMENT_COLLECTION_FQN
             }
+        if (childHasElementCollection) {
+            logger.error(
+                "@ElementCollection is not supported inside an @Embeddable. " +
+                    "Move the property to the parent entity, or declare a dedicated @Aggregate child entity. " +
+                    "Offending property: $typeFqn.$childParamName.",
+                childProp
+            )
+            return null
         }
-        // When any child fails, abort the whole slot so the outer entity is reported as unmapped
-        // rather than silently emitting partial codegen with an incomplete constructor tree.
-        if (anyChildFailed) return null
-        return EmbeddedCtorSlot(ctorParamName, typeFqn, childSlots)
+
+        val childEmbedded =
+            childProp.annotations.firstOrNull {
+                it.annotationType.resolve().declaration.qualifiedName?.asString() == EMBEDDED_FQN
+            }
+        if (childEmbedded != null) {
+            if (!validateEmbeddedTargetStrictness(typeDecl, childParam, childProp)) return null
+            return buildEmbeddedSlot(
+                prop = childProp,
+                ctorParamName = childParamName,
+                embeddedAnnotation = childEmbedded,
+                columnsAccumulator = columnsAccumulator,
+                parentPrefix = "${effectivePrefix}${autoDerivedPrefix(childParamName)}",
+                parentPath = "$parentPath.$childParamName",
+                topLevelPropertyName = topLevelPropertyName,
+                embeddableFiles = embeddableFiles
+            )
+        }
+
+        val leafCol =
+            columnMetaBuilder.buildEmbeddedLeafColumn(
+                childProp = childProp,
+                childParamName = childParamName,
+                prefix = effectivePrefix,
+                parentPath = parentPath,
+                topLevelPropertyName = topLevelPropertyName
+            ) ?: return null
+        columnsAccumulator += leafCol
+        return ScalarCtorSlot(childParamName, leafCol)
     }
 }

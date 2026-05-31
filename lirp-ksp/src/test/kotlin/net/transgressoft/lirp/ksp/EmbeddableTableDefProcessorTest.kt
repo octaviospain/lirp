@@ -30,9 +30,9 @@ import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 
 /**
  * KSP compilation tests for the happy-path flattening of `@Embedded` value objects in
- * [TableDefProcessor]. Locks the column-naming rules (D-04 verbatim prefix, D-05 empty-string
+ * [TableDefProcessor]. Locks the column-naming rules (verbatim prefix, empty-string
  * reverts to auto-derive, D-Annot-1 recursive prefix concatenation), the 3-level recursion
- * surface, and composition with `@PersistenceProperty(converter = …)` at scalar leaves (D-08).
+ * surface, and composition with `@PersistenceProperty(converter = …)` at scalar leaves.
  */
 @OptIn(ExperimentalCompilerApi::class)
 class EmbeddableTableDefProcessorTest : StringSpec({
@@ -236,7 +236,7 @@ class EmbeddableTableDefProcessorTest : StringSpec({
     }
 
     "flattens @Embedded scalar leaf with @PersistenceProperty converter" {
-        // W-1 fix-up: lirp-ksp does NOT depend on lirp-sql, so the Phase 56 PathConverter
+        // fix-up: lirp-ksp does NOT depend on lirp-sql, so the Phase 56 PathConverter
         // testFixture is unreachable. Inline a minimal String→String converter as a stand-in;
         // the codegen path is identical regardless of the S/T types involved.
         val result =

@@ -117,17 +117,17 @@ class ExposedTableInterpreter {
             "At most one @Version column is allowed per entity; found ${versionDefs.size} on ${def.tableName}"
         }
         val versionDef = versionDefs.singleOrNull()
-        // Manually-authored SqlTableDefs bypass KSP's D-15 validation. Enforce the Long type
+        // Manually-authored SqlTableDefs bypass KSP's validation. Enforce the Long type
         // requirement here at runtime so a misconfigured isVersion flag fails loudly at
         // interpret() time rather than silently breaking optimistic-lock predicates later.
         require(versionDef == null || versionDef.type is ColumnType.LongType) {
             "@Version column '${versionDef?.name}' on ${def.tableName} must use ColumnType.LongType " +
-                "(got ${versionDef?.type}). Manual SqlTableDef authors must match the KSP D-15 contract."
+                "(got ${versionDef?.type}). Manual SqlTableDef authors must match the KSP version-column contract."
         }
 
         val table = LirpDynamicTable(def.tableName, def.columns, columnsByName, pkDef)
 
-        // Safe: KSP validation (D-15) enforces @Version columns map to ColumnType.LongType, which
+        // Safe: KSP validation enforces @Version columns map to ColumnType.LongType, which
         // buildColumn always produces via long(col.name) — yielding Column<Long>.
         @Suppress("UNCHECKED_CAST")
         val versionCol: Column<Long>? = versionDef?.let { columnsByName[it.name] as? Column<Long> }
@@ -176,8 +176,12 @@ private class LirpDynamicTable(
                 is ColumnType.DecimalType -> decimal(col.name, type.precision, type.scale)
                 is ColumnType.EnumType -> varchar(col.name, 255)
             }
-        // Safe: raw was just created by this method from the declared ColumnType. Exposed's nullable()
-        // extension requires Column<Any> as receiver but buildColumn produces Column<*>.
+
+        // defaultExpression is not applied as a DDL DEFAULT clause. MySQL rejects DEFAULT on TEXT/BLOB
+        // columns unconditionally, and the generated toParams always supplies explicit values for
+        // element-collection columns — the DDL DEFAULT is therefore unreachable at runtime. Skipping
+        // it keeps DDL portable across all supported dialects without per-dialect branching.
+        // Safe: Exposed's nullable() extension requires Column<Any>; buildColumn produces Column<*>.
         @Suppress("UNCHECKED_CAST")
         return if (col.nullable) (raw as Column<Any>).nullable() else raw
     }

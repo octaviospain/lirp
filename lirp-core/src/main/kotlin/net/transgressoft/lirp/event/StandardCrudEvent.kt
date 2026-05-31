@@ -109,7 +109,7 @@ sealed class StandardCrudEvent {
                 "Conflict event must carry exactly one entity (old + new) with matching id. " +
                     "Got entities=${entities.keys}, oldEntities=${oldEntities.keys}."
             }
-            // D-11: `actualVersion == -1L` is a sentinel meaning "the row was deleted by a third
+            // `actualVersion == -1L` is a sentinel meaning "the row was deleted by a third
             // writer" — used by the SQL auto-reload path to report a third-party deletion as a
             // Conflict. All other values must observe a newer DB version than the caller's view.
             require(actualVersion == -1L || actualVersion > expectedVersion) {

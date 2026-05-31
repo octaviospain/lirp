@@ -67,8 +67,8 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
         val isVersion = versionedName != null && propName == versionedName
         val isAggregateBackingScalar = propName in aggregateBackingScalarNames
 
-        // D-06: reject converter arguments on PK / @Version / @Aggregate single-ref FK columns
-        // BEFORE invoking resolveConverter (which carries D-07 / D-08). This preserves the
+        // reject converter arguments on PK / @Version / @Aggregate single-ref FK columns
+        // BEFORE invoking resolveConverter (which carries /). This preserves the
         // one-diagnostic-per-site invariant: a misplaced converter on a rejected target emits
         // the target rejection, not the kind/S diagnostics.
         val converterInfo =
@@ -172,7 +172,7 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
         // Reuse the converter resolution + hint-refinement pipeline so an
         // `@PersistenceProperty(converter = X::class)` at a scalar leaf inside an `@Embeddable`
         // produces the same column-type expression and fromRow/toParams casts it would at the
-        // top level (D-08).
+        // top level.
         val converterInfo =
             if (hasNonSentinelConverterArgument(persistenceAnnotation)) {
                 resolveConverter(persistenceAnnotation, propertyFqn)
@@ -217,6 +217,202 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
             embeddedPath = "$parentPath.$childParamName",
             isInsideEmbedded = true
         )
+    }
+
+    /**
+     * Resolves the [ColumnMeta] for an `@ElementCollection`-annotated property. Validates the
+     * structural constraints in order, emitting a single targeted `logger.error()` at the first
+     * violation and returning `null`. A property that passes every check yields a fully-populated
+     * [ColumnMeta] with [ColumnMeta.isElementCollection] `true` and [ColumnMeta.defaultExpression]
+     * `"[]"`.
+     *
+     * Both primary-constructor parameters (`val` / `var`) and body-declared properties (typically
+     * `var x by reactiveProperty(initial)`) are accepted. [isCtorParam] tells the codegen in
+     * `TableDefSourceEmitter` whether to populate the field via the primary-constructor call or via
+     * the property setter after construction.
+     */
+    fun buildElementCollectionColumn(
+        prop: KSPropertyDeclaration,
+        classFqn: String,
+        isCtorParam: Boolean
+    ): ColumnMeta? {
+        val propertyFqn = "$classFqn.${prop.simpleName.asString()}"
+        val resolvedType = prop.type.resolve()
+
+        val collectionKind = resolveElementCollectionKind(resolvedType, propertyFqn, prop) ?: return null
+        if (!elementTypeIsNonNullable(resolvedType, propertyFqn, prop)) return null
+        if (rejectsPersistencePropertyComposition(prop, propertyFqn)) return null
+        val sFqn = resolveElementConverterSqlType(prop, propertyFqn) ?: return null
+        val elementConverterFqn = elementConverterFqn(prop)
+
+        return ColumnMeta(
+            name = prop.simpleName.asString().toSnakeCase(),
+            propertyName = prop.simpleName.asString(),
+            typeExpression = COLUMN_TYPE_TEXT_EXPR,
+            typeFqn = resolvedType.makeNotNullable().declaration.qualifiedName!!.asString(),
+            nullable = false,
+            isPrimaryKey = false,
+            isEnum = false,
+            isMutable = !isCtorParam || prop.isMutable,
+            isCtorParam = isCtorParam,
+            isVersion = false,
+            converterFqn = null,
+            converterSqlFqn = sFqn,
+            isElementCollection = true,
+            elementConverterFqn = elementConverterFqn,
+            collectionKind = collectionKind,
+            defaultExpression = "[]"
+        )
+    }
+
+    /**
+     * Validates that the property is a non-nullable `List<E>` or `Set<E>`, returning the kind
+     * (`"List"` / `"Set"`). Rejects nullable collection types, `Map`, and the mutable interfaces.
+     */
+    private fun resolveElementCollectionKind(
+        resolvedType: KSType,
+        propertyFqn: String,
+        prop: KSPropertyDeclaration
+    ): String? {
+        if (resolvedType.isMarkedNullable) {
+            val shortKind = if (resolvedType.makeNotNullable().declaration.qualifiedName?.asString()?.contains("Set") == true) "Set" else "List"
+            logger.error(
+                "@ElementCollection property type must be non-nullable; found `$shortKind<E>?` on '$propertyFqn'. " +
+                    "The column carries an empty array '[]' for the empty case.",
+                prop
+            )
+            return null
+        }
+        return when (val collectionFqn = resolvedType.makeNotNullable().declaration.qualifiedName?.asString()) {
+            KOTLIN_LIST_FQN -> "List"
+            KOTLIN_SET_FQN -> "Set"
+            KOTLIN_MUTABLE_LIST_FQN, KOTLIN_MUTABLE_SET_FQN -> {
+                val found = if (collectionFqn == KOTLIN_MUTABLE_LIST_FQN) "MutableList" else "MutableSet"
+                logger.error(
+                    "@ElementCollection requires the immutable interface `List<E>` or `Set<E>`; found `$found<…>` on '$propertyFqn'.",
+                    prop
+                )
+                null
+            }
+            else -> {
+                val found = if (collectionFqn == KOTLIN_MAP_FQN) "Map<…>" else "`${collectionFqn ?: "unknown"}`"
+                logger.error(
+                    "@ElementCollection requires `List<E>` or `Set<E>`; found $found on '$propertyFqn'. " +
+                        "Use `@PersistenceProperty(converter = …)` with a custom Map-flattening converter if you need map-shaped storage.",
+                    prop
+                )
+                null
+            }
+        }
+    }
+
+    /** Rejects a nullable or unresolvable element type `E`; returns `true` when `E` is valid. */
+    private fun elementTypeIsNonNullable(
+        resolvedType: KSType,
+        propertyFqn: String,
+        prop: KSPropertyDeclaration
+    ): Boolean {
+        val elementTypeArg = resolvedType.makeNotNullable().arguments.firstOrNull()?.type?.resolve()
+        if (elementTypeArg == null) {
+            logger.error(
+                "@ElementCollection on '$propertyFqn' has a malformed element type — the first generic argument could not be resolved.",
+                prop
+            )
+            return false
+        }
+        if (elementTypeArg.isMarkedNullable) {
+            logger.error(
+                "@ElementCollection element type must be non-nullable; found `<E>?` on '$propertyFqn'. " +
+                    "Nullable elements cannot round-trip through JSON without ambiguity.",
+                prop
+            )
+            return false
+        }
+        return true
+    }
+
+    /** Returns `true` (after logging) when the property also carries `@PersistenceProperty`. */
+    private fun rejectsPersistencePropertyComposition(prop: KSPropertyDeclaration, propertyFqn: String): Boolean {
+        val hasPersistenceProperty =
+            prop.annotations.any {
+                it.annotationType.resolve().declaration.qualifiedName?.asString() == PERSISTENCE_PROPERTY_FQN
+            }
+        if (hasPersistenceProperty) {
+            logger.error(
+                "@ElementCollection and @PersistenceProperty cannot be combined on '$propertyFqn'. " +
+                    "@ElementCollection fully owns the persistence shape of the collection's TEXT column.",
+                prop
+            )
+        }
+        return hasPersistenceProperty
+    }
+
+    /** Reads the `elementConverter` argument FQN from the `@ElementCollection` annotation. */
+    private fun elementConverterFqn(prop: KSPropertyDeclaration): String? =
+        (elementConverterArg(prop)?.declaration?.qualifiedName?.asString())
+
+    private fun elementConverterArg(prop: KSPropertyDeclaration): KSType? =
+        prop.annotations
+            .firstOrNull { it.annotationType.resolve().declaration.qualifiedName?.asString() == ELEMENT_COLLECTION_FQN }
+            ?.arguments
+            ?.firstOrNull { it.name?.asString() == "elementConverter" }
+            ?.value as? KSType
+
+    /**
+     * Validates the element converter and returns its persistence-facing scalar type FQN. Requires
+     * an explicit `object` converter whose `S` type is one of the eight Kotlin primitives —
+     * `String`, `Int`, `Long`, `Short`, `Byte`, `Boolean`, `Double`, `Float`. JDK-bridge types
+     * (`UUID`, `BigDecimal`, `LocalDate`, `LocalDateTime`) must be wrapped in a String-shaped
+     * converter, since they have no built-in `kotlinx.serialization` JSON-array support.
+     */
+    private fun resolveElementConverterSqlType(prop: KSPropertyDeclaration, propertyFqn: String): String? {
+        val elementConverterArg = elementConverterArg(prop)
+        val elementConverterFqn = elementConverterArg?.declaration?.qualifiedName?.asString()
+        if (elementConverterFqn == null || elementConverterFqn == COLUMN_CONVERTER_FQN) {
+            logger.error(
+                "@ElementCollection on '$propertyFqn' requires an explicit `elementConverter`. " +
+                    "Provide an `object` implementing `ColumnConverter<E, S>` where `E` is the element type.",
+                prop
+            )
+            return null
+        }
+
+        val converterDecl = elementConverterArg.declaration as? KSClassDeclaration ?: return null
+        if (!converterDecl.validate()) return null
+        if (converterDecl.classKind != ClassKind.OBJECT) {
+            logger.error(
+                "Converter '$elementConverterFqn' for property '$propertyFqn' must be a Kotlin `object` " +
+                    "(singleton) so KSP-generated code can reference it without instantiation.",
+                prop
+            )
+            return null
+        }
+
+        val sFqn =
+            converterDecl.superTypes
+                .map { it.resolve() }
+                .firstOrNull { it.declaration.qualifiedName?.asString() == COLUMN_CONVERTER_FQN }
+                ?.arguments?.getOrNull(1)?.type?.resolve()
+                ?.declaration?.qualifiedName?.asString()
+        if (sFqn == null) {
+            logger.error(
+                "Converter '$elementConverterFqn' does not declare ColumnConverter<D, S> as a supertype " +
+                    "with both type arguments resolved.",
+                prop
+            )
+            return null
+        }
+
+        if (sFqn !in ELEMENT_COLLECTION_S_TYPES) {
+            logger.error(
+                "@ElementCollection element converter's S type must be one of {String, Int, Long, Short, Byte, Boolean, Double, Float}; " +
+                    "found `$sFqn` on '$propertyFqn'. " +
+                    "Wrap `<E>` in a String-shaped converter (e.g., `UUID.toString()` / `UUID.fromString()`) to persist it inside @ElementCollection.",
+                prop
+            )
+            return null
+        }
+        return sFqn
     }
 
     /** Returns `true` when [prop] should be excluded from the persisted column set. */
@@ -376,7 +572,7 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
     /**
      * Tests whether the `converter` argument of `@PersistenceProperty` resolves to a non-sentinel
      * class declaration. The sentinel [ColumnConverter][net.transgressoft.lirp.persistence.ColumnConverter]
-     * interface FQN means "no converter declared"; any other class triggers D-06 / D-07 / D-08
+     * interface FQN means "no converter declared"; any other class triggers /
      * validation downstream.
      */
     fun hasNonSentinelConverterArgument(annotation: KSAnnotation?): Boolean {
@@ -389,7 +585,7 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
     /**
      * Reads the `converter` argument from a `@PersistenceProperty` annotation and validates
      * the referenced [ColumnConverter][net.transgressoft.lirp.persistence.ColumnConverter]
-     * singleton against the structural contract (D-07 object kind, D-08 supported S type).
+     * singleton against the structural contract (object kind, supported S type).
      *
      * Returns null when no converter is declared (sentinel), when the converter cannot yet
      * be resolved in this round (validate() guard so cross-round resolution does not produce

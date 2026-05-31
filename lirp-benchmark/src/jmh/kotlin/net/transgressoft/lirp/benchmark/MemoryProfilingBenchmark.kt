@@ -42,10 +42,10 @@ open class MemoryProfilingBenchmark {
     @Param("100", "1000", "10000", "50000")
     var entityCount: Int = 0
 
-    // Pre-created entity for subscriber-count measurements (D-08)
+    // Pre-created entity for subscriber-count measurements
     lateinit var subscriberEntity: BenchmarkEntity
 
-    // Repository for index-overhead measurements (D-09)
+    // Repository for index-overhead measurements
     lateinit var indexRepo: VolatileRepository<Int, BenchmarkEntity>
 
     @Setup(Level.Trial)
@@ -66,7 +66,7 @@ open class MemoryProfilingBenchmark {
     /**
      * Measures the heap size of a single [BenchmarkEntity] with [subscriberCount] MUTATION subscribers.
      *
-     * Per D-08: reports the full object graph size including the subscriber list,
+     * Reports the full object graph size including the subscriber list,
      * publisher, and all reachable state.
      */
     @Benchmark
@@ -78,7 +78,7 @@ open class MemoryProfilingBenchmark {
 
     /**
      * Measures the incremental heap cost of registering an entity into a [VolatileRepository]
-     * that carries secondary-index metadata (per D-09).
+     * that carries secondary-index metadata.
      *
      * Compares the entity's standalone object graph size against the full repository graph size
      * after registration. Note that [repoBytes] includes the repository's own baseline overhead
@@ -99,7 +99,7 @@ open class MemoryProfilingBenchmark {
     /**
      * Measures peak heap delta during bulk initialization of a [VolatileRepository] with [entityCount] entities.
      *
-     * Per D-10: uses [Runtime.getRuntime] before and after initialization (coarse but appropriate
+     * Uses [Runtime.getRuntime] before and after initialization (coarse but appropriate
      * for bulk-load measurement where JOL graph walk over the full collection is impractical).
      * Forces GC before the baseline measurement to reduce GC noise.
      */

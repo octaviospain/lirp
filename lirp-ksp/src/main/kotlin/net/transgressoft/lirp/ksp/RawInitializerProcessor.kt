@@ -27,7 +27,6 @@ import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.google.devtools.ksp.symbol.Modifier
-import com.google.devtools.ksp.validate
 
 private const val PERSISTENCE_IGNORE_FQN = "net.transgressoft.lirp.persistence.PersistenceIgnore"
 private const val TRANSIENT_FQN = "kotlin.jvm.Transient"
@@ -75,11 +74,19 @@ class RawInitializerProcessor(
     private val generatedAccessors = mutableSetOf<String>()
 
     override fun process(resolver: Resolver): List<KSAnnotated> {
+        // validate() is intentionally omitted here. This processor only inspects property
+        // declarations and reactive delegate patterns — it never reads annotation argument types
+        // (e.g. @ElementCollection converter KClass arguments). Requiring validate() would cause
+        // entities whose annotations reference types defined in the same compilation unit to be
+        // silently dropped in KSP2 AA mode, where validate() returns false until all types in the
+        // unit are resolved. Since getNewFiles() is only populated in round 1 and deferred source
+        // entities cannot be recovered via getClassDeclarationByName in round 2, omitting
+        // validate() is the correct policy for this processor.
         resolver.getNewFiles()
             .flatMap { it.declarations }
             .filterIsInstance<KSClassDeclaration>()
             .flatMap { allClassDeclarations(it) }
-            .filter { it.validate() && isLirpEntity(it) && !isAnonymousOrLocal(it) }
+            .filter { isLirpEntity(it) && !isAnonymousOrLocal(it) }
             .forEach { classDecl ->
                 val fqn = classDecl.qualifiedName?.asString() ?: return@forEach
                 if (shouldSkip(classDecl, fqn)) return@forEach

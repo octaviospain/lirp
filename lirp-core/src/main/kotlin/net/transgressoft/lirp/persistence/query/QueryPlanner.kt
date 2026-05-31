@@ -29,8 +29,8 @@ private val log = KotlinLogging.logger {}
  * Execution strategy for cross-aggregate `via … anyMatch/allMatch/noneMatch/where` predicates.
  *
  * Selected per-query by [QueryPlanner.chooseStrategy] based on the cardinality estimate
- * `|children matching predicate| < |parents| × avg-refs-per-parent` (D-08). Never cached
- * across queries; re-estimated on every execution (D-10).
+ * `|children matching predicate| < |parents| × avg-refs-per-parent`. Never cached
+ * across queries; re-estimated on every execution.
  */
 enum class ViaStrategy {
     /**
@@ -181,7 +181,7 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
         }
         if (containsVia(pred)) {
             // Cross-aggregate path: split hybrid predicate, choose Via strategy, apply
-            // any NonVia arm as a lazy post-filter (W-2). Strategy reported to callers is
+            // any NonVia arm as a lazy post-filter. Strategy reported to callers is
             // still SCAN_ONLY at the parent level (no index acceleration on Via* nodes).
             return Strategy.SCAN_ONLY to executeViaPlan(pred, registry)
         }
@@ -580,7 +580,7 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
     }
 
     /**
-     * Test seam (W-4) exposing the planner's chosen-strategy lazy sequence directly,
+     * Test seam exposing the planner's chosen-strategy lazy sequence directly,
      * bypassing the [Registry.query] entry point. The returned sequence yields parents
      * at the per-parent boundary so a test may mutate a parent's `parentProp` between
      * two `.next()` calls and observe the live read on the very next yield.
@@ -612,7 +612,7 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
 
     /**
      * Core Via execution: splits hybrid `And(NonVia, Via*)`, selects a strategy for the
-     * Via* arm, and applies the NonVia arm as a lazy post-filter (W-2). Multi-Via*
+     * Via* arm, and applies the NonVia arm as a lazy post-filter. Multi-Via*
      * compounds that cannot be isolated to a single top-level Via* arm fall back to a
      * per-parent `predicate.matches(p)` loop — each `Via*.matches` handles its own live
      * access correctness. The returned sequence is fully lazy.
@@ -644,7 +644,7 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
     /**
      * Lazy per-parent loop execution. Each parent is yielded one at a time; live reads of
      * `parentProp` happen inside the Via* node's `matches` implementation, never cached
-     * here. Suitable as the test seam (W-4) entry point.
+     * here. Suitable as the test seam entry point.
      */
     private fun perParentLoop(via: Predicate<T>, parentRegistry: Registry<*, T>): Sequence<T> =
         sequence {

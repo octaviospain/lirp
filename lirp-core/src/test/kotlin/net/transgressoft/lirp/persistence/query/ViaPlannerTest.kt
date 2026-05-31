@@ -25,7 +25,7 @@ import io.kotest.matchers.shouldBe
 
 /**
  * Tests for the cross-aggregate planner: Via* detection, normalizer ordering, cardinality-driven
- * strategy switching, hybrid-predicate `And(NonVia, Via*)` handling (W-2), and lazy `Sequence`
+ * strategy switching, hybrid-predicate `And(NonVia, Via*)` handling, and lazy `Sequence`
  * preservation. Strategy decisions are asserted through the internal `strategyFor` test seam.
  */
 @DisplayName("Via planner")
