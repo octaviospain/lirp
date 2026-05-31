@@ -46,8 +46,11 @@ internal class ElementCollectionDialectsIT : FunSpec({
         withTests(databases) { db ->
             DatabaseTestSupport.withDatabaseTest(db, ElementCollectionFixtureEntity_LirpTableDef) { ds ->
                 val repo = SqlRepository(ds, ElementCollectionFixtureEntity_LirpTableDef)
-                repo.add(ElementCollectionFixtureEntity(id = 1))
-                repo.close()
+                try {
+                    repo.add(ElementCollectionFixtureEntity(id = 1))
+                } finally {
+                    repo.close()
+                }
 
                 val reloaded = SqlRepository(ds, ElementCollectionFixtureEntity_LirpTableDef)
                 try {
@@ -67,8 +70,11 @@ internal class ElementCollectionDialectsIT : FunSpec({
             DatabaseTestSupport.withDatabaseTest(db, ElementCollectionFixtureEntity_LirpTableDef) { ds ->
                 val ratings = setOf(Rating(1), Rating(5), Rating(3))
                 val repo = SqlRepository(ds, ElementCollectionFixtureEntity_LirpTableDef)
-                repo.add(ElementCollectionFixtureEntity(id = 2, ratings = ratings))
-                repo.close()
+                try {
+                    repo.add(ElementCollectionFixtureEntity(id = 2, ratings = ratings))
+                } finally {
+                    repo.close()
+                }
 
                 val reloaded = SqlRepository(ds, ElementCollectionFixtureEntity_LirpTableDef)
                 try {
@@ -87,8 +93,11 @@ internal class ElementCollectionDialectsIT : FunSpec({
             DatabaseTestSupport.withDatabaseTest(db, ElementCollectionFixtureEntity_LirpTableDef) { ds ->
                 val tags = listOf(Tag("rock"), Tag("jazz"), Tag("blues"))
                 val repo = SqlRepository(ds, ElementCollectionFixtureEntity_LirpTableDef)
-                repo.add(ElementCollectionFixtureEntity(id = 3, tags = tags))
-                repo.close()
+                try {
+                    repo.add(ElementCollectionFixtureEntity(id = 3, tags = tags))
+                } finally {
+                    repo.close()
+                }
 
                 val reloaded = SqlRepository(ds, ElementCollectionFixtureEntity_LirpTableDef)
                 try {

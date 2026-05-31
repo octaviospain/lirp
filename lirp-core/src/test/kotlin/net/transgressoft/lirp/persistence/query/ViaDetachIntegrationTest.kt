@@ -31,16 +31,15 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 
 /**
- * Integration coverage of the live-read invariant under `@Aggregate(onDelete = DETACH)` lifecycle
- *. Verifies that the Phase 53 FK-nulling semantics propagate through the Wave 1 `Via*`
- * AST nodes and the Wave 3 planner without any caching or stale snapshot.
+ * Integration coverage of the live-read invariant under `@Aggregate(onDelete = DETACH)` lifecycle.
+ * Verifies that FK-nulling semantics propagate through the `Via*` AST nodes and the planner
+ * without any caching or stale snapshot.
  *
  * Cases 3 and 4 exercise the acceptance: truly mid-iteration mutation of a parent's
  * `referenceIds` between two iterator yields of the planner's lazy sequence is reflected
- * in the result. They use [QueryPlanner.executeViaSequence] — the internal seam exposed by
- * Plan 03 — rather than two separate `Registry.query` calls. The two-call fallback is
- * REJECTED here because it does not observe the predicate at the in-loop read boundary;
- * only an in-flight iterator does.
+ * in the result. They use [QueryPlanner.executeViaSequence] — the internal seam — rather than two
+ * separate `Registry.query` calls. The two-call fallback is REJECTED here because it does not
+ * observe the predicate at the in-loop read boundary; only an in-flight iterator does.
  *
  * **Simulating DETACH at the in-memory layer.** In-memory cascade for collection refs is a
  * no-op (Phase 53's SQL DETACH nulls FKs at the persistence layer, observed on reload).
