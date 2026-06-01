@@ -99,7 +99,7 @@ class EmbeddableEdgeCasesTest : StringSpec({
         result.messages shouldContain "test.MiddleEmbeddable.nested"
     }
 
-    "rejects @Embedded on var constructor parameter inside nested @Embeddable" {
+    "accepts @Embedded on var constructor parameter inside nested @Embeddable" {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -129,9 +129,7 @@ class EmbeddableEdgeCasesTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "@Embedded must be on a val constructor parameter"
-        result.messages shouldContain "test.OuterEmbeddable.inner"
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
     }
 
     "rejects @Embedded referencing non-@Embeddable type at nested level" {

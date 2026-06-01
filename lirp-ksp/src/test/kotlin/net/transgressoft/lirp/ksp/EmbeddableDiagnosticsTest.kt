@@ -51,7 +51,7 @@ class EmbeddableDiagnosticsTest : StringSpec({
         return compilation.compile()
     }
 
-    "rejects @Embedded on var constructor parameter" {
+    "accepts @Embedded on var constructor parameter" {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -78,16 +78,14 @@ class EmbeddableDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "@Embedded must be on a val constructor parameter"
-        result.messages shouldContain "test.VarEmbeddedEntity.addr"
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
     }
 
-    "rejects @Embedded on body-declared property" {
+    "rejects @Embedded on body-declared read-only val" {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
-                    "BodyEmbeddedEntity.kt",
+                    "BodyValEmbeddedEntity.kt",
                     """
                     package test
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
@@ -99,34 +97,26 @@ class EmbeddableDiagnosticsTest : StringSpec({
                     data class AddrEmbeddable(val street: String, val city: String)
 
                     @PersistenceMapping
-                    class BodyEmbeddedEntity(override val id: Int) : ReactiveEntityBase<Int, BodyEmbeddedEntity>() {
+                    class BodyValEmbeddedEntity(override val id: Int) : ReactiveEntityBase<Int, BodyValEmbeddedEntity>() {
                         @Embedded
                         val addr: AddrEmbeddable = AddrEmbeddable("", "")
                         override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = BodyEmbeddedEntity(id)
+                        override fun clone() = BodyValEmbeddedEntity(id)
                     }
                     """
                 )
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "primary-constructor parameter"
-        result.messages shouldContain "test.BodyEmbeddedEntity.addr"
+        result.messages shouldContain "requires a mutable `var`"
+        result.messages shouldContain "test.BodyValEmbeddedEntity.addr"
     }
 
-    // The "custom getter" diagnostic in [TableDefProcessor.validateEmbeddedTargetStrictness]
-    // is only reachable for primary-constructor parameters — but a Kotlin primary-constructor
-    // parameter cannot syntactically carry a custom getter, and any body-declared property with
-    // `@Embedded` (with or without `get()`) is caught earlier by the body-declared diagnostic.
-    // We assert the body-declared-with-custom-getter site is rejected (with the body-declared
-    // wording) so the structural intent — "@Embedded with a non-default value source is rejected
-    // at compile time" — is locked in even though the specific message substring "custom getter"
-    // is subsumed by the prior check.
-    "rejects @Embedded on body-declared property with custom getter" {
+    "rejects @Embedded on body-declared var with custom getter" {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
-                    "CustomGetterEmbeddedEntity.kt",
+                    "BodyVarCustomGetterEmbeddedEntity.kt",
                     """
                     package test
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
@@ -138,19 +128,21 @@ class EmbeddableDiagnosticsTest : StringSpec({
                     data class AddrEmbeddable(val street: String, val city: String)
 
                     @PersistenceMapping
-                    class CustomGetterEmbeddedEntity(override val id: Int) : ReactiveEntityBase<Int, CustomGetterEmbeddedEntity>() {
+                    class BodyVarCustomGetterEmbeddedEntity(override val id: Int) : ReactiveEntityBase<Int, BodyVarCustomGetterEmbeddedEntity>() {
                         @Embedded
-                        val addr: AddrEmbeddable get() = AddrEmbeddable("a", "b")
+                        var addr: AddrEmbeddable
+                            get() = AddrEmbeddable("a", "b")
+                            set(value) { field = value }
                         override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = CustomGetterEmbeddedEntity(id)
+                        override fun clone() = BodyVarCustomGetterEmbeddedEntity(id)
                     }
                     """
                 )
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "primary-constructor parameter"
-        result.messages shouldContain "test.CustomGetterEmbeddedEntity.addr"
+        result.messages shouldContain "must not have a custom getter"
+        result.messages shouldContain "test.BodyVarCustomGetterEmbeddedEntity.addr"
     }
 
     "rejects @Embedded referencing a non-@Embeddable type" {
