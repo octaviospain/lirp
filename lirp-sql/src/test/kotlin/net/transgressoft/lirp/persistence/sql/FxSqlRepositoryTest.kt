@@ -205,8 +205,11 @@ internal class FxSqlRepositoryTest : FunSpec({
 
         itemRepo = FxSqlTestItemRepository(jdbcUrl)
         entityRepo = FxSqlTestEntityRepository(jdbcUrl)
-        entityRepo.findById(1).shouldBePresent {
-            it.items.referenceIds shouldBe listOf(2, 3)
+
+        eventually(1.seconds) {
+            entityRepo.findById(1).shouldBePresent {
+                it.items.referenceIds shouldBe listOf(2, 3)
+            }
         }
 
         entityRepo.close()

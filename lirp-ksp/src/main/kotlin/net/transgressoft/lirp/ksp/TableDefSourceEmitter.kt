@@ -28,6 +28,7 @@ internal data class ObjectBodyParams(
     val columns: List<ColumnMeta>,
     val constructorParamNames: List<String> = emptyList(),
     val ctorSlots: List<CtorSlot> = emptyList(),
+    val setterSlots: List<EmbeddedSetterSlot> = emptyList(),
     val foreignKeys: List<ForeignKeyMeta> = emptyList(),
     val junctionRefs: List<JunctionRefInfo> = emptyList()
 )
@@ -139,7 +140,7 @@ internal object TableDefSourceEmitter {
             appendLine()
             appendApplyRow(className, columns)
             appendLine()
-            appendApplyScalarRow(className, columns)
+            appendApplyScalarRow(className, columns, params.setterSlots)
             appendBumpVersion(className, columns)
             appendForeignKeys(foreignKeys)
             appendJunctionOverrides(className, junctionRefs)
@@ -270,7 +271,11 @@ internal object TableDefSourceEmitter {
         appendLine("    }")
     }
 
-    fun StringBuilder.appendApplyScalarRow(className: String, columnsIn: List<ColumnMeta>) {
+    fun StringBuilder.appendApplyScalarRow(
+        className: String,
+        columnsIn: List<ColumnMeta>,
+        embeddedSetterSlots: List<EmbeddedSetterSlot> = emptyList()
+    ) {
         // Override the default applyScalarRow on SqlTableDef. The default body throws — the override
         // walks the supplied LirpRawInitializer entries, resolves each entry's Kotlin property name
         // to its column on the table, reads the row value with the same conversion semantics as
@@ -285,7 +290,7 @@ internal object TableDefSourceEmitter {
         appendLine("        table: org.jetbrains.exposed.v1.core.Table,")
         appendLine("        rawInit: net.transgressoft.lirp.persistence.LirpRawInitializer<$className>")
         appendLine("    ) {")
-        if (columns.isEmpty()) {
+        if (columns.isEmpty() && embeddedSetterSlots.isEmpty()) {
             appendLine("        // No mapped columns — applyScalarRow is a no-op.")
         } else {
             appendLine("        for (entry in rawInit.entries) {")
@@ -293,6 +298,13 @@ internal object TableDefSourceEmitter {
             for (col in columns) {
                 val rowAccess = buildRowAccess(col)
                 appendLine("                \"${col.propertyName}\" -> $rowAccess")
+            }
+            // One branch per body-declared @Embedded setter slot. The key is the top-level
+            // property name (the RawInitializer entry name); the value is the full nested
+            // constructor expression reconstructed via buildCtorArgExpression.
+            for (slot in embeddedSetterSlots) {
+                val reconstruction = buildCtorArgExpression(EmbeddedCtorSlot(slot.ctorParamName, slot.embeddableTypeFqn, slot.children))
+                appendLine("                \"${slot.ctorParamName}\" -> $reconstruction")
             }
             appendLine("                else -> continue")
             appendLine("            }")
@@ -328,6 +340,9 @@ internal object TableDefSourceEmitter {
                     }
                 "${slot.embeddableTypeFqn}($inner)"
             }
+            // EmbeddedSetterSlot is consumed directly by appendApplyScalarRow via a synthetic
+            // EmbeddedCtorSlot wrapper; it must never reach this dispatch path.
+            is EmbeddedSetterSlot -> error("EmbeddedSetterSlot must not be passed to buildCtorArgExpression directly")
         }
 
     fun buildRowAccess(col: ColumnMeta): String {

@@ -413,6 +413,7 @@ class TableDefProcessor(
             embeddableAnalyzer.collectColumnsAndSlots(classDecl, versionedProperty, excludedBackingFields, aggregateBackingScalarNames)
         val columns = collected.columns
         val ctorSlots = collected.ctorSlots
+        val setterSlots = collected.setterSlots
 
         // column-name collision detection runs ONCE at the entity level on the fully
         // flattened column list, after all recursive @Embedded descents. Detection at this level
@@ -470,6 +471,7 @@ class TableDefProcessor(
                         columns = columns,
                         constructorParamNames = constructorParamNames,
                         ctorSlots = ctorSlots,
+                        setterSlots = setterSlots,
                         foreignKeys = foreignKeys,
                         junctionRefs = if (emitJunctions) junctionRefs else emptyList()
                     )

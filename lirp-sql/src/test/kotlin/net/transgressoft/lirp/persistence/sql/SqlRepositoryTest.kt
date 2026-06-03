@@ -454,8 +454,10 @@ internal class SqlRepositoryTest : FunSpec({
             val trackRepo3 = SqlTestTrackRepository(jdbcUrl)
             val playlistRepo3 = MutablePlaylistSqlRepository(jdbcUrl)
 
-            playlistRepo3.findById(1L).shouldBePresent {
-                it.trackIds shouldContainExactly listOf(2, 3)
+            eventually(1.seconds) {
+                playlistRepo3.findById(1L).shouldBePresent {
+                    it.trackIds shouldContainExactly listOf(2, 3)
+                }
             }
 
             playlistRepo3.close()

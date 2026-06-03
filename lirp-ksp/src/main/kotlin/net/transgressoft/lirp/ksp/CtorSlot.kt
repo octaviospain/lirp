@@ -57,3 +57,15 @@ internal data class EmbeddedCtorSlot(
     val embeddableTypeFqn: String,
     val children: List<CtorSlot>
 ) : CtorSlot
+
+/**
+ * A body-declared reactive `var` property whose value is an `@Embeddable` instance reconstructed
+ * from flattened leaf columns and dispatched via
+ * [net.transgressoft.lirp.persistence.LirpRawInitializer] `silentSetter` on load.
+ * Consumed by `appendApplyScalarRow`; invisible to `appendFromRow`.
+ */
+internal data class EmbeddedSetterSlot(
+    override val ctorParamName: String,
+    val embeddableTypeFqn: String,
+    val children: List<CtorSlot>
+) : CtorSlot

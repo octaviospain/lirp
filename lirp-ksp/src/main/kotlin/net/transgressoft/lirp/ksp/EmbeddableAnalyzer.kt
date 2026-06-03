@@ -58,6 +58,7 @@ internal class EmbeddableAnalyzer(
     data class CollectedShape(
         val columns: List<ColumnMeta>,
         val ctorSlots: List<CtorSlot>,
+        val setterSlots: List<EmbeddedSetterSlot> = emptyList(),
         val embeddableFiles: Set<KSFile> = emptySet()
     )
 
@@ -83,6 +84,7 @@ internal class EmbeddableAnalyzer(
 
         val columns = mutableListOf<ColumnMeta>()
         val ctorSlots = mutableListOf<CtorSlot>()
+        val setterSlots = mutableListOf<EmbeddedSetterSlot>()
         val embeddableFiles = mutableSetOf<KSFile>()
 
         reportBodyDeclaredEmbedded(classDecl, ctorParamNames)
@@ -97,10 +99,10 @@ internal class EmbeddableAnalyzer(
 
         collectNonCtorScalarColumns(
             classDecl, ctorParamNames, excludedBackingFields,
-            hasDeclaredId, versionedName, aggregateBackingScalarNames, columns
+            hasDeclaredId, versionedName, aggregateBackingScalarNames, columns, setterSlots, embeddableFiles
         )
 
-        return CollectedShape(columns, ctorSlots, embeddableFiles)
+        return CollectedShape(columns, ctorSlots, setterSlots, embeddableFiles)
     }
 
     /**
@@ -117,9 +119,15 @@ internal class EmbeddableAnalyzer(
                     it.annotationType.resolve().declaration.qualifiedName?.asString() == EMBEDDED_FQN
                 }
             if (!hasEmbedded) continue
+            // Body-declared mutable var is accepted — routed through collectNonCtorScalarColumns.
+            if (prop.isMutable) continue
+            // Body-declared read-only val has no setter to populate from a row; reject with a
+            // targeted diagnostic.
             logger.error(
-                "@Embedded must be on a primary-constructor parameter (found body-declared property): " +
-                    "${classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString()}.$propName",
+                "@Embedded on a body-declared property requires a mutable `var` (typically " +
+                    "`var x by reactiveProperty(...)`); found a read-only `val` on " +
+                    "'${classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString()}.$propName'. " +
+                    "Use a constructor parameter or a reactive `var`.",
                 prop
             )
         }
@@ -171,7 +179,7 @@ internal class EmbeddableAnalyzer(
             columns += col
             ctorSlots += ScalarCtorSlot(paramName, col)
         } else if (embeddedAnnotation != null) {
-            if (!validateEmbeddedTargetStrictness(classDecl, param, prop)) return
+            if (!validateEmbeddedTargetStrictness(classDecl, prop)) return
             val slot =
                 buildEmbeddedSlot(
                     prop = prop,
@@ -192,8 +200,10 @@ internal class EmbeddableAnalyzer(
     }
 
     /**
-     * Scans non-constructor properties for setter columns (body-declared `var` fields). `@Embedded`
-     * is ctor-only by design; any placement there is already diagnosed in [reportBodyDeclaredEmbedded].
+     * Scans non-constructor properties for setter columns (body-declared `var` fields). Dispatches
+     * each property to [processNonCtorProperty] which routes to one of three paths: `@Embedded var`,
+     * `@ElementCollection`, or scalar column. Body-declared `val` with `@Embedded` is already
+     * diagnosed in [reportBodyDeclaredEmbedded]; only mutable `var` reaches this point.
      */
     private fun collectNonCtorScalarColumns(
         classDecl: KSClassDeclaration,
@@ -202,37 +212,135 @@ internal class EmbeddableAnalyzer(
         hasDeclaredId: Boolean,
         versionedName: String?,
         aggregateBackingScalarNames: Set<String>,
-        columns: MutableList<ColumnMeta>
+        columns: MutableList<ColumnMeta>,
+        setterSlots: MutableList<EmbeddedSetterSlot>,
+        embeddableFiles: MutableSet<KSFile>
     ) {
         val classFqn = classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString()
         for (prop in classDecl.getAllProperties()) {
             val propName = prop.simpleName.asString()
             if (propName in ctorParamNames) continue
             if (columnMetaBuilder.isExcluded(prop) || propName in excludedBackingFields) continue
-            val hasElementCollection =
-                prop.annotations.any {
-                    it.annotationType.resolve().declaration.qualifiedName?.asString() == ELEMENT_COLLECTION_FQN
-                }
-            // A body-declared @ElementCollection must be reassignable so the generated fromRow can
-            // populate it after construction. A read-only `val` would yield non-compiling generated
-            // code, so reject it here with a clear message instead.
-            if (hasElementCollection && !prop.isMutable) {
-                logger.error(
-                    "@ElementCollection on a body-declared property requires a mutable `var` " +
-                        "(typically `var x by reactiveProperty(...)`); found a read-only `val` on " +
-                        "'$classFqn.$propName'. Use a constructor `val` parameter or a reactive `var`.",
-                    prop
-                )
-                continue
-            }
-            val col =
-                if (hasElementCollection) {
-                    columnMetaBuilder.buildElementCollectionColumn(prop, classFqn, isCtorParam = false) ?: continue
-                } else {
-                    columnMetaBuilder.buildColumnMeta(prop, hasDeclaredId, versionedName, ctorParamNames, aggregateBackingScalarNames) ?: continue
-                }
-            columns += col
+            processNonCtorProperty(
+                prop, propName, classFqn, hasDeclaredId, versionedName, ctorParamNames, aggregateBackingScalarNames,
+                columns, setterSlots, embeddableFiles
+            )
         }
+    }
+
+    /**
+     * Routes a single non-constructor property to its handling path: `@Embedded var` is passed to
+     * [processBodyDeclaredEmbedded]; `@ElementCollection` and scalars to [buildNonCtorScalarColumn].
+     * Dispatcher logic is isolated from loop mechanics for readability.
+     */
+    @Suppress("kotlin:S107")
+    private fun processNonCtorProperty(
+        prop: KSPropertyDeclaration,
+        propName: String,
+        classFqn: String,
+        hasDeclaredId: Boolean,
+        versionedName: String?,
+        ctorParamNames: Set<String>,
+        aggregateBackingScalarNames: Set<String>,
+        columns: MutableList<ColumnMeta>,
+        setterSlots: MutableList<EmbeddedSetterSlot>,
+        embeddableFiles: MutableSet<KSFile>
+    ) {
+        val hasEmbedded =
+            prop.annotations.any {
+                it.annotationType.resolve().declaration.qualifiedName?.asString() == EMBEDDED_FQN
+            }
+        if (hasEmbedded) {
+            processBodyDeclaredEmbedded(prop, propName, classFqn, columns, setterSlots, embeddableFiles)
+            return
+        }
+        buildNonCtorScalarColumn(prop, propName, classFqn, hasDeclaredId, versionedName, ctorParamNames, aggregateBackingScalarNames, columns)
+    }
+
+    /**
+     * Handles body-declared `@Embedded var` properties. Validates the custom-getter constraint,
+     * builds the embedded slot tree, and appends an [EmbeddedSetterSlot]. Returns early on custom
+     * getter (already diagnosed) so the outer loop skips further processing.
+     */
+    private fun processBodyDeclaredEmbedded(
+        prop: KSPropertyDeclaration,
+        propName: String,
+        classFqn: String,
+        columns: MutableList<ColumnMeta>,
+        setterSlots: MutableList<EmbeddedSetterSlot>,
+        embeddableFiles: MutableSet<KSFile>
+    ) {
+        if (!prop.isMutable) return
+        val getter = prop.getter
+        if (getter != null && getter.origin != Origin.SYNTHETIC) {
+            logger.error(
+                "@Embedded property must not have a custom getter: $classFqn.$propName",
+                prop
+            )
+            return
+        }
+        if (!prop.isDelegated()) {
+            logger.error(
+                "@Embedded on a body-declared property must use a delegated reactive backing field: $classFqn.$propName",
+                prop
+            )
+            return
+        }
+        val embeddedAnnotation =
+            prop.annotations.first {
+                it.annotationType.resolve().declaration.qualifiedName?.asString() == EMBEDDED_FQN
+            }
+        val slot =
+            buildEmbeddedSlot(
+                prop = prop,
+                ctorParamName = propName,
+                embeddedAnnotation = embeddedAnnotation,
+                columnsAccumulator = columns,
+                parentPrefix = autoDerivedPrefix(propName),
+                parentPath = propName,
+                topLevelPropertyName = propName,
+                embeddableFiles = embeddableFiles
+            )
+        if (slot != null) setterSlots += EmbeddedSetterSlot(slot.ctorParamName, slot.embeddableTypeFqn, slot.children)
+    }
+
+    /**
+     * Handles body-declared `@ElementCollection` and scalar properties. Validates that
+     * `@ElementCollection` properties are mutable (so `fromRow` can populate them post-construction),
+     * then dispatches to the appropriate column builder. Emits a diagnostic and skips on immutable
+     * `@ElementCollection val` (would produce non-compiling generated code).
+     */
+    @Suppress("kotlin:S107")
+    private fun buildNonCtorScalarColumn(
+        prop: KSPropertyDeclaration,
+        propName: String,
+        classFqn: String,
+        hasDeclaredId: Boolean,
+        versionedName: String?,
+        ctorParamNames: Set<String>,
+        aggregateBackingScalarNames: Set<String>,
+        columns: MutableList<ColumnMeta>
+    ) {
+        val hasElementCollection =
+            prop.annotations.any {
+                it.annotationType.resolve().declaration.qualifiedName?.asString() == ELEMENT_COLLECTION_FQN
+            }
+        if (hasElementCollection && !prop.isMutable) {
+            logger.error(
+                "@ElementCollection on a body-declared property requires a mutable `var` " +
+                    "(typically `var x by reactiveProperty(...)`); found a read-only `val` on " +
+                    "'$classFqn.$propName'. Use a constructor `val` parameter or a reactive `var`.",
+                prop
+            )
+            return
+        }
+        val col =
+            if (hasElementCollection) {
+                columnMetaBuilder.buildElementCollectionColumn(prop, classFqn, isCtorParam = false) ?: return
+            } else {
+                columnMetaBuilder.buildColumnMeta(prop, hasDeclaredId, versionedName, ctorParamNames, aggregateBackingScalarNames) ?: return
+            }
+        columns += col
     }
 
     /**
@@ -269,26 +377,19 @@ internal class EmbeddableAnalyzer(
     private fun autoDerivedPrefix(propertyName: String): String = "${propertyName.toSnakeCase()}_"
 
     /**
-     * Applies target strictness to a ctor-param `@Embedded` site. Rejects `var` constructor
-     * parameters and properties with custom getters. Body-declared placement is caught earlier in
-     * [collectColumnsAndSlots]. Returns `true` when the site is valid; emits one `logger.error()`
-     * per violation and returns `false` otherwise so the recursive descent skips the malformed slot.
+     * Applies target strictness to a ctor-param `@Embedded` site. Rejects properties with custom
+     * getters. Both `val` and `var` constructor parameters are accepted. Body-declared placement
+     * is handled separately in [collectNonCtorScalarColumns]. Returns `true` when the site is
+     * valid; emits one `logger.error()` per violation and returns `false` otherwise so the
+     * recursive descent skips the malformed slot.
      */
     private fun validateEmbeddedTargetStrictness(
         ownerClass: KSClassDeclaration,
-        param: KSValueParameter,
         prop: KSPropertyDeclaration
     ): Boolean {
         val propertyFqn =
             "${ownerClass.qualifiedName?.asString() ?: ownerClass.simpleName.asString()}.${prop.simpleName.asString()}"
         var ok = true
-        if (param.isVar) {
-            logger.error(
-                "@Embedded must be on a val constructor parameter (found var): $propertyFqn",
-                prop
-            )
-            ok = false
-        }
         // KSP synthesizes a getter for every property (including data-class ctor `val`s); a
         // user-authored custom getter is distinguished by its declaration origin being one of the
         // source-language origins rather than SYNTHETIC. Filter on Origin so we only reject
@@ -490,7 +591,7 @@ internal class EmbeddableAnalyzer(
                 it.annotationType.resolve().declaration.qualifiedName?.asString() == EMBEDDED_FQN
             }
         if (childEmbedded != null) {
-            if (!validateEmbeddedTargetStrictness(typeDecl, childParam, childProp)) return null
+            if (!validateEmbeddedTargetStrictness(typeDecl, childProp)) return null
             return buildEmbeddedSlot(
                 prop = childProp,
                 ctorParamName = childParamName,
