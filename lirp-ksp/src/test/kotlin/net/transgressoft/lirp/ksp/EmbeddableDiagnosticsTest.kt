@@ -130,7 +130,7 @@ class EmbeddableDiagnosticsTest : StringSpec({
                     @PersistenceMapping
                     class BodyVarCustomGetterEmbeddedEntity(override val id: Int) : ReactiveEntityBase<Int, BodyVarCustomGetterEmbeddedEntity>() {
                         @Embedded
-                        var addr: AddrEmbeddable
+                        var addr: AddrEmbeddable = AddrEmbeddable("a", "b")
                             get() = AddrEmbeddable("a", "b")
                             set(value) { field = value }
                         override val uniqueId: String get() = "${'$'}id"

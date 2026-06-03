@@ -77,19 +77,18 @@ internal class ReactiveEmbeddedSqlTest : StringSpec({
             seedRepo.close()
         }
 
-        // Fresh repo triggers full SQL load into the in-memory map. Entity-level subscribers
-        // attached immediately after findById must not see any mutation events fired during
-        // the silentSetter reconstruction that hydrated the location field.
+        // Fresh repo triggers full SQL load into the in-memory map. Verify that entity-level
+        // subscribers see exactly one mutation event when a post-load mutation is applied,
+        // proving hydration was silent (any hydration events would appear in the count).
         val mutationEvents = CopyOnWriteArrayList<String>()
         val reloaded = SqlRepository(jdbcUrl, ReactiveEmbeddedFixtureEntity_LirpTableDef)
         try {
             val loadedEntity = reloaded.findById(2).orElseThrow()
             loadedEntity.subscribe { ev -> mutationEvents += ev.toString() }
 
-            // A genuine mutation after subscription must fire exactly once to confirm the
-            // subscriber is wired — this distinguishes a silent load from a broken subscription.
+            // Deliberate mutation to verify subscription is wired and fires exactly once.
+            // If hydration had fired events, the count would exceed 1.
             loadedEntity.location = LocationValue("0.0", "0.0")
-            Thread.sleep(100)
 
             mutationEvents.size shouldBe 1
         } finally {

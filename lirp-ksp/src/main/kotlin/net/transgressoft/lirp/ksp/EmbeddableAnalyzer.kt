@@ -270,10 +270,18 @@ internal class EmbeddableAnalyzer(
         setterSlots: MutableList<EmbeddedSetterSlot>,
         embeddableFiles: MutableSet<KSFile>
     ) {
+        if (!prop.isMutable) return
         val getter = prop.getter
         if (getter != null && getter.origin != Origin.SYNTHETIC) {
             logger.error(
                 "@Embedded property must not have a custom getter: $classFqn.$propName",
+                prop
+            )
+            return
+        }
+        if (!prop.isDelegated()) {
+            logger.error(
+                "@Embedded on a body-declared property must use a delegated reactive backing field: $classFqn.$propName",
                 prop
             )
             return
