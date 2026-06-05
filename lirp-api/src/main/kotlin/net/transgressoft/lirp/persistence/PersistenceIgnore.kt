@@ -47,6 +47,6 @@ package net.transgressoft.lirp.persistence
  * ) : ReactiveEntityBase<Int, Customer>()
  * ```
  */
-@Target(AnnotationTarget.PROPERTY)
+@Target(AnnotationTarget.PROPERTY, AnnotationTarget.VALUE_PARAMETER, AnnotationTarget.FIELD)
 @Retention(AnnotationRetention.BINARY)
 annotation class PersistenceIgnore

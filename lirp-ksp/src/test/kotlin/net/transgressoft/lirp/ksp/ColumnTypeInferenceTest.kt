@@ -147,8 +147,8 @@ class ColumnTypeInferenceTest : StringSpec({
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         val content = result.generatedContent("NullableShortEntity_LirpTableDef.kt")
         content shouldContain "ColumnType.IntType"
-        // Nullable narrowing: (rawAccess as? Int)?.toShort()
-        content shouldContain "as? Int"
+        // Nullable narrowing: (rawAccess as? Number)?.toShort()
+        content shouldContain "as? Number"
         content shouldContain ".toShort()"
         // Nullable widening: entity.rank?.toInt()
         content shouldContain "?.toInt()"

@@ -97,7 +97,7 @@ import kotlin.reflect.KClass
  *   interface is a compile-time error. The converter's `S` type determines the JSON element type
  *   (e.g. `String` elements produce `["a","b"]`; `Int` elements produce `[1,2,3]`).
  */
-@Target(AnnotationTarget.PROPERTY, AnnotationTarget.VALUE_PARAMETER)
+@Target(AnnotationTarget.PROPERTY, AnnotationTarget.VALUE_PARAMETER, AnnotationTarget.FIELD)
 @Retention(AnnotationRetention.BINARY)
 annotation class ElementCollection(
     val elementConverter: KClass<out ColumnConverter<*, *>>

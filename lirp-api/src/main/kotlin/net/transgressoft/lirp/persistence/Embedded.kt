@@ -70,6 +70,6 @@ package net.transgressoft.lirp.persistence
  *   shape validation. In recursive `@Embedded` chains, prefixes from outer to inner concatenate
  *   in declaration order to produce each leaf column's final name.
  */
-@Target(AnnotationTarget.PROPERTY, AnnotationTarget.VALUE_PARAMETER)
+@Target(AnnotationTarget.PROPERTY, AnnotationTarget.VALUE_PARAMETER, AnnotationTarget.FIELD)
 @Retention(AnnotationRetention.BINARY)
 annotation class Embedded(val prefix: String = "")

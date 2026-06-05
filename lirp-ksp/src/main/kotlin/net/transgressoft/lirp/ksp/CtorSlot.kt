@@ -59,6 +59,16 @@ internal data class EmbeddedCtorSlot(
 ) : CtorSlot
 
 /**
+ * A primary-constructor parameter annotated with `@PersistenceIgnore` inside an `@Embeddable`
+ * class. Not mapped to any column; the generated `fromRow` emits `null` for this parameter
+ * position. Only nullable parameters are safe today — the named-argument omission for parameters
+ * with defaults is handled separately.
+ */
+internal data class IgnoredCtorSlot(
+    override val ctorParamName: String
+) : CtorSlot
+
+/**
  * A body-declared reactive `var` property whose value is an `@Embeddable` instance reconstructed
  * from flattened leaf columns and dispatched via
  * [net.transgressoft.lirp.persistence.LirpRawInitializer] `silentSetter` on load.

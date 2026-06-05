@@ -50,11 +50,25 @@ internal const val COLUMN_CONVERTER_FQN = "net.transgressoft.lirp.persistence.Co
 internal const val EMBEDDABLE_FQN = "net.transgressoft.lirp.persistence.Embeddable"
 internal const val EMBEDDED_FQN = "net.transgressoft.lirp.persistence.Embedded"
 internal const val ELEMENT_COLLECTION_FQN = "net.transgressoft.lirp.persistence.ElementCollection"
+internal const val PERSISTENCE_IGNORE_FQN = "net.transgressoft.lirp.persistence.PersistenceIgnore"
 internal const val KOTLIN_LIST_FQN = "kotlin.collections.List"
 internal const val KOTLIN_SET_FQN = "kotlin.collections.Set"
 internal const val KOTLIN_MUTABLE_LIST_FQN = "kotlin.collections.MutableList"
 internal const val KOTLIN_MUTABLE_SET_FQN = "kotlin.collections.MutableSet"
 internal const val KOTLIN_MAP_FQN = "kotlin.collections.Map"
+internal const val TRANSIENT_FQN = "kotlin.jvm.Transient"
+
+internal val LIRP_COLLECTION_FQNS: Set<String> =
+    setOf(
+        "kotlin.collections.List",
+        "kotlin.collections.MutableList",
+        "kotlin.collections.Set",
+        "kotlin.collections.MutableSet",
+        "kotlin.collections.Collection",
+        "kotlin.collections.MutableCollection",
+        "kotlin.collections.Map",
+        "kotlin.collections.MutableMap"
+    )
 
 // Allow-list of supported S type FQNs for ColumnConverter<D, S>, mapped to the canonical
 // ColumnType expression. Keys gate validation; values seed the codegen path that

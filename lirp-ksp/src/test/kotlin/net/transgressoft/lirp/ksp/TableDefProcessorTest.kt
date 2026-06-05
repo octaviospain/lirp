@@ -1551,7 +1551,7 @@ internal class TableDefProcessorTest : FunSpec({
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         val content = result.generatedFileContent("ShortEntity_LirpTableDef.kt")
         content shouldContain "name = \"year\", type = ColumnType.IntType"
-        content shouldContain "as Int).toShort()"
+        content shouldContain "as Number).toShort()"
         content shouldContain "entity.year.toInt()"
     }
 
@@ -1578,7 +1578,7 @@ internal class TableDefProcessorTest : FunSpec({
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         val content = result.generatedFileContent("ByteEntity_LirpTableDef.kt")
         content shouldContain "name = \"flag\", type = ColumnType.IntType"
-        content shouldContain "as Int).toByte()"
+        content shouldContain "as Number).toByte()"
         content shouldContain "entity.flag.toInt()"
     }
 
@@ -1605,7 +1605,7 @@ internal class TableDefProcessorTest : FunSpec({
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         val content = result.generatedFileContent("NullableShortEntity_LirpTableDef.kt")
         content shouldContain "name = \"year\", type = ColumnType.IntType, nullable = true"
-        content shouldContain "as? Int)?.toShort()"
+        content shouldContain "as? Number)?.toShort()"
         content shouldContain "entity.year?.toInt()"
     }
 
@@ -1632,7 +1632,7 @@ internal class TableDefProcessorTest : FunSpec({
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         val content = result.generatedFileContent("NullableByteEntity_LirpTableDef.kt")
         content shouldContain "name = \"flag\", type = ColumnType.IntType, nullable = true"
-        content shouldContain "as? Int)?.toByte()"
+        content shouldContain "as? Number)?.toByte()"
         content shouldContain "entity.flag?.toInt()"
     }
 
@@ -1670,8 +1670,8 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "entity.a = row[table.columns.first { it.name == \"a\" }] as Int"
         content shouldContain "cols[\"a\"]!! to entity.a"
         // Short/Byte still get the narrowing/widening treatment.
-        content shouldContain "as Int).toShort()"
-        content shouldContain "as Int).toByte()"
+        content shouldContain "as Number).toShort()"
+        content shouldContain "as Number).toByte()"
         content shouldContain "entity.b.toInt()"
         content shouldContain "entity.c.toInt()"
     }

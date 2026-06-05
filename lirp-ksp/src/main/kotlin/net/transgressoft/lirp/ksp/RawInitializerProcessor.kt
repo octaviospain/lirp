@@ -28,21 +28,6 @@ import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.google.devtools.ksp.symbol.Modifier
 
-private const val PERSISTENCE_IGNORE_FQN = "net.transgressoft.lirp.persistence.PersistenceIgnore"
-private const val TRANSIENT_FQN = "kotlin.jvm.Transient"
-
-private val COLLECTION_FQNS =
-    setOf(
-        "kotlin.collections.List",
-        "kotlin.collections.MutableList",
-        "kotlin.collections.Set",
-        "kotlin.collections.MutableSet",
-        "kotlin.collections.Collection",
-        "kotlin.collections.MutableCollection",
-        "kotlin.collections.Map",
-        "kotlin.collections.MutableMap"
-    )
-
 /**
  * KSP processor that generates [LirpRawInitializer][net.transgressoft.lirp.persistence.LirpRawInitializer]
  * implementations for entity classes, used by `SqlRepository.loadFromStore` and
@@ -154,7 +139,7 @@ class RawInitializerProcessor(
 
     private fun KSPropertyDeclaration.isCollectionTyped(): Boolean {
         val fqn = type.resolve().makeNotNullable().declaration.qualifiedName?.asString() ?: return false
-        return fqn in COLLECTION_FQNS
+        return fqn in LIRP_COLLECTION_FQNS
     }
 
     // A `var x; private set` declaration is mutable from the type's own perspective but cannot be
@@ -182,11 +167,16 @@ class RawInitializerProcessor(
      */
     private fun KSPropertyDeclaration.isExcluded(): Boolean {
         if (Modifier.PRIVATE in modifiers) return true
+        // Route @PersistenceIgnore through the centralized resolver so cross-module
+        // @PersistenceIgnore on a VALUE_PARAMETER (KOTLIN_LIB origin) is visible.
+        val matchedCtorParam =
+            (parentDeclaration as? KSClassDeclaration)?.primaryConstructor
+                ?.parameters?.firstOrNull { it.name?.asString() == simpleName.asString() }
+        if (resolvePersistenceAnnotations(this, matchedCtorParam).has(PERSISTENCE_IGNORE_FQN)) return true
         val annotationFqns =
             annotations
                 .map { it.annotationType.resolve().declaration.qualifiedName?.asString() }
                 .toSet()
-        if (PERSISTENCE_IGNORE_FQN in annotationFqns) return true
         if (TRANSIENT_FQN in annotationFqns) return true
         return false
     }
