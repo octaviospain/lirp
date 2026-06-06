@@ -24,12 +24,11 @@ import com.google.devtools.ksp.symbol.KSAnnotation
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.google.devtools.ksp.symbol.KSType
+import com.google.devtools.ksp.symbol.KSValueParameter
 import com.google.devtools.ksp.symbol.Modifier
 import com.google.devtools.ksp.validate
 
 private const val AGGREGATE_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.Aggregate"
-private const val PERSISTENCE_IGNORE_FQN = "net.transgressoft.lirp.persistence.PersistenceIgnore"
-private const val TRANSIENT_FQN = "kotlin.jvm.Transient"
 
 /**
  * Builds [ColumnMeta] instances from KSP property declarations. Handles converter resolution,
@@ -52,10 +51,7 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
         aggregateBackingScalarNames: Set<String> = emptySet()
     ): ColumnMeta? {
         val propName = prop.simpleName.asString()
-        val persistenceAnnotation =
-            prop.annotations.firstOrNull {
-                it.annotationType.resolve().declaration.qualifiedName?.asString() == PERSISTENCE_PROPERTY_FQN
-            }
+        val persistenceAnnotation = resolvePersistenceAnnotations(prop).firstWithFqn(PERSISTENCE_PROPERTY_FQN)
         val resolvedType = prop.type.resolve()
         val notNullableType = resolvedType.makeNotNullable()
         val typeFqn = notNullableType.declaration.qualifiedName?.asString() ?: "kotlin.Any"
@@ -111,15 +107,8 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
         val hasExplicitConverter = hasNonSentinelConverterArgument(persistenceAnnotation)
         val typeExpression =
             if (converterInfo != null) {
-                val hints =
-                    PersistencePropertyHints(
-                        length = persistenceAnnotation?.arguments?.firstOrNull { it.name?.asString() == "length" }?.value as? Int ?: -1,
-                        precision = persistenceAnnotation?.arguments?.firstOrNull { it.name?.asString() == "precision" }?.value as? Int ?: -1,
-                        scale = persistenceAnnotation?.arguments?.firstOrNull { it.name?.asString() == "scale" }?.value as? Int ?: -1,
-                        typeHint = persistenceAnnotation?.arguments?.firstOrNull { it.name?.asString() == "type" }?.value as? String ?: ""
-                    )
                 refineConverterSqlType(
-                    converterInfo = converterInfo, hints = hints, propertyFqn = propertyFqn, propName = propName
+                    converterInfo = converterInfo, hints = extractHints(persistenceAnnotation), propertyFqn = propertyFqn, propName = propName
                 ) ?: return null
             } else if (hasExplicitConverter) {
                 // Converter declared but unresolved/invalid this round; avoid non-converter fallback.
@@ -156,12 +145,10 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
         childParamName: String,
         prefix: String,
         parentPath: String,
-        topLevelPropertyName: String
+        topLevelPropertyName: String,
+        ctorParam: KSValueParameter? = null
     ): ColumnMeta? {
-        val persistenceAnnotation =
-            childProp.annotations.firstOrNull {
-                it.annotationType.resolve().declaration.qualifiedName?.asString() == PERSISTENCE_PROPERTY_FQN
-            }
+        val persistenceAnnotation = resolvePersistenceAnnotations(childProp, ctorParam).firstWithFqn(PERSISTENCE_PROPERTY_FQN)
         val propertyFqn = "${childProp.parentDeclaration?.qualifiedName?.asString() ?: ""}.$childParamName".trimStart('.')
 
         val resolvedType = childProp.type.resolve()
@@ -183,14 +170,7 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
         val hasExplicitConverter = hasNonSentinelConverterArgument(persistenceAnnotation)
         val typeExpression =
             if (converterInfo != null) {
-                val hints =
-                    PersistencePropertyHints(
-                        length = persistenceAnnotation?.arguments?.firstOrNull { it.name?.asString() == "length" }?.value as? Int ?: -1,
-                        precision = persistenceAnnotation?.arguments?.firstOrNull { it.name?.asString() == "precision" }?.value as? Int ?: -1,
-                        scale = persistenceAnnotation?.arguments?.firstOrNull { it.name?.asString() == "scale" }?.value as? Int ?: -1,
-                        typeHint = persistenceAnnotation?.arguments?.firstOrNull { it.name?.asString() == "type" }?.value as? String ?: ""
-                    )
-                refineConverterSqlType(converterInfo, hints, propertyFqn, childParamName) ?: return null
+                refineConverterSqlType(converterInfo, extractHints(persistenceAnnotation), propertyFqn, childParamName) ?: return null
             } else if (hasExplicitConverter) {
                 return null
             } else {
@@ -234,16 +214,17 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
     fun buildElementCollectionColumn(
         prop: KSPropertyDeclaration,
         classFqn: String,
-        isCtorParam: Boolean
+        isCtorParam: Boolean,
+        ctorParam: KSValueParameter? = null
     ): ColumnMeta? {
         val propertyFqn = "$classFqn.${prop.simpleName.asString()}"
         val resolvedType = prop.type.resolve()
 
         val collectionKind = resolveElementCollectionKind(resolvedType, propertyFqn, prop) ?: return null
         if (!elementTypeIsNonNullable(resolvedType, propertyFqn, prop)) return null
-        if (rejectsPersistencePropertyComposition(prop, propertyFqn)) return null
-        val sFqn = resolveElementConverterSqlType(prop, propertyFqn) ?: return null
-        val elementConverterFqn = elementConverterFqn(prop)
+        if (rejectsPersistencePropertyComposition(prop, propertyFqn, ctorParam)) return null
+        val sFqn = resolveElementConverterSqlType(prop, propertyFqn, ctorParam) ?: return null
+        val elementConverterFqn = elementConverterFqn(prop, ctorParam)
 
         return ColumnMeta(
             name = prop.simpleName.asString().toSnakeCase(),
@@ -253,6 +234,10 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
             nullable = false,
             isPrimaryKey = false,
             isEnum = false,
+            // isMutable gates applyRow write-back. Body-declared element collections (isCtorParam=false)
+            // are always var (val is rejected before this point), so they must be mutable for
+            // post-construction population. Ctor-param collections are mutable only when declared
+            // var; val ctor params are populated via the constructor call and need no setter.
             isMutable = !isCtorParam || prop.isMutable,
             isCtorParam = isCtorParam,
             isVersion = false,
@@ -275,13 +260,24 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
         prop: KSPropertyDeclaration
     ): String? {
         if (resolvedType.isMarkedNullable) {
-            val shortKind = if (resolvedType.makeNotNullable().declaration.qualifiedName?.asString()?.contains("Set") == true) "Set" else "List"
-            logger.error(
-                "@ElementCollection property type must be non-nullable; found `$shortKind<E>?` on '$propertyFqn'. " +
-                    "The column carries an empty array '[]' for the empty case.",
-                prop
-            )
-            return null
+            val nonNullFqn = resolvedType.makeNotNullable().declaration.qualifiedName?.asString()
+            // Use exact FQN matching to derive the kind label so types whose name merely contains
+            // "Set" are not mislabelled. Non-collection nullable types (e.g. Map?) fall through
+            // to the non-null when-block's else branch for a targeted "requires List/Set" diagnostic.
+            when (nonNullFqn) {
+                KOTLIN_SET_FQN, KOTLIN_LIST_FQN -> {
+                    val shortKind = if (nonNullFqn == KOTLIN_SET_FQN) "Set" else "List"
+                    logger.error(
+                        "@ElementCollection property type must be non-nullable; found `$shortKind<E>?` on '$propertyFqn'. " +
+                            "The column carries an empty array '[]' for the empty case.",
+                        prop
+                    )
+                    return null
+                }
+                else -> {
+                    // Delegate to the non-null branch for a precise diagnostic about the unsupported type.
+                }
+            }
         }
         return when (val collectionFqn = resolvedType.makeNotNullable().declaration.qualifiedName?.asString()) {
             KOTLIN_LIST_FQN -> "List"
@@ -332,11 +328,12 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
     }
 
     /** Returns `true` (after logging) when the property also carries `@PersistenceProperty`. */
-    private fun rejectsPersistencePropertyComposition(prop: KSPropertyDeclaration, propertyFqn: String): Boolean {
-        val hasPersistenceProperty =
-            prop.annotations.any {
-                it.annotationType.resolve().declaration.qualifiedName?.asString() == PERSISTENCE_PROPERTY_FQN
-            }
+    private fun rejectsPersistencePropertyComposition(
+        prop: KSPropertyDeclaration,
+        propertyFqn: String,
+        ctorParam: KSValueParameter? = null
+    ): Boolean {
+        val hasPersistenceProperty = resolvePersistenceAnnotations(prop, ctorParam).has(PERSISTENCE_PROPERTY_FQN)
         if (hasPersistenceProperty) {
             logger.error(
                 "@ElementCollection and @PersistenceProperty cannot be combined on '$propertyFqn'. " +
@@ -348,12 +345,12 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
     }
 
     /** Reads the `elementConverter` argument FQN from the `@ElementCollection` annotation. */
-    private fun elementConverterFqn(prop: KSPropertyDeclaration): String? =
-        (elementConverterArg(prop)?.declaration?.qualifiedName?.asString())
+    private fun elementConverterFqn(prop: KSPropertyDeclaration, ctorParam: KSValueParameter? = null): String? =
+        (elementConverterArg(prop, ctorParam)?.declaration?.qualifiedName?.asString())
 
-    private fun elementConverterArg(prop: KSPropertyDeclaration): KSType? =
-        prop.annotations
-            .firstOrNull { it.annotationType.resolve().declaration.qualifiedName?.asString() == ELEMENT_COLLECTION_FQN }
+    private fun elementConverterArg(prop: KSPropertyDeclaration, ctorParam: KSValueParameter? = null): KSType? =
+        resolvePersistenceAnnotations(prop, ctorParam)
+            .firstWithFqn(ELEMENT_COLLECTION_FQN)
             ?.arguments
             ?.firstOrNull { it.name?.asString() == "elementConverter" }
             ?.value as? KSType
@@ -365,8 +362,12 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
      * (`UUID`, `BigDecimal`, `LocalDate`, `LocalDateTime`) must be wrapped in a String-shaped
      * converter, since they have no built-in `kotlinx.serialization` JSON-array support.
      */
-    private fun resolveElementConverterSqlType(prop: KSPropertyDeclaration, propertyFqn: String): String? {
-        val elementConverterArg = elementConverterArg(prop)
+    private fun resolveElementConverterSqlType(
+        prop: KSPropertyDeclaration,
+        propertyFqn: String,
+        ctorParam: KSValueParameter? = null
+    ): String? {
+        val elementConverterArg = elementConverterArg(prop, ctorParam)
         val elementConverterFqn = elementConverterArg?.declaration?.qualifiedName?.asString()
         if (elementConverterFqn == null || elementConverterFqn == COLUMN_CONVERTER_FQN) {
             logger.error(
@@ -415,17 +416,29 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
         return sFqn
     }
 
-    /** Returns `true` when [prop] should be excluded from the persisted column set. */
-    fun isExcluded(prop: KSPropertyDeclaration): Boolean {
+    /**
+     * Returns `true` when [prop] should be excluded from the persisted column set.
+     *
+     * The optional [ctorParam] enables cross-module `@PersistenceIgnore` detection: for properties
+     * compiled into a dependency jar, annotations live on the `VALUE_PARAMETER` rather than the
+     * synthesized property declaration. Callers with access to the matched constructor parameter
+     * should always supply it so the [PERSISTENCE_IGNORE_FQN] check is cross-module safe.
+     *
+     * This is the single seam through which column eligibility is decided, so later predicates
+     * (e.g. `@Transient` or error-type handling) can extend exclusion logic in one place.
+     */
+    fun isExcluded(prop: KSPropertyDeclaration, ctorParam: KSValueParameter? = null): Boolean {
         // Private backing fields are encapsulated implementation state — no public surface for
         // persistence to bind through. Mirrors the exclusion applied by `RawInitializerProcessor`
         // so the two processors agree on the persisted column set for a given entity shape.
         if (Modifier.PRIVATE in prop.modifiers) return true
+        // PERSISTENCE_IGNORE_FQN routed through resolver so cross-module @PersistenceIgnore
+        // on VALUE_PARAMETER is visible — the single eligibility seam for exclusion checks.
+        if (resolvePersistenceAnnotations(prop, ctorParam).has(PERSISTENCE_IGNORE_FQN)) return true
         val annotationFqns =
             prop.annotations
                 .map { it.annotationType.resolve().declaration.qualifiedName?.asString() }
                 .toSet()
-        if (PERSISTENCE_IGNORE_FQN in annotationFqns) return true
         if (AGGREGATE_ANNOTATION_FQN in annotationFqns) return true
         if (TRANSIENT_FQN in annotationFqns) return true
         // Exclude computed properties (no backing field, not delegated), but include delegate-backed properties
@@ -447,10 +460,11 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
         val notNullableType = resolvedType.makeNotNullable()
         val fqn = notNullableType.declaration.qualifiedName?.asString()
 
-        val length = persistenceAnnotation?.arguments?.firstOrNull { it.name?.asString() == "length" }?.value as? Int ?: -1
-        val precision = persistenceAnnotation?.arguments?.firstOrNull { it.name?.asString() == "precision" }?.value as? Int ?: -1
-        val scale = persistenceAnnotation?.arguments?.firstOrNull { it.name?.asString() == "scale" }?.value as? Int ?: -1
-        val typeHint = persistenceAnnotation?.arguments?.firstOrNull { it.name?.asString() == "type" }?.value as? String ?: ""
+        val hints = extractHints(persistenceAnnotation)
+        val length = hints.length
+        val precision = hints.precision
+        val scale = hints.scale
+        val typeHint = hints.typeHint
 
         // Explicit type hint takes precedence over FQN-based inference
         if (typeHint.isNotEmpty()) {
@@ -646,6 +660,14 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
         prop.setter?.modifiers?.none {
             it == Modifier.PROTECTED || it == Modifier.PRIVATE || it == Modifier.INTERNAL
         } ?: true
+
+    private fun extractHints(annotation: KSAnnotation?): PersistencePropertyHints =
+        PersistencePropertyHints(
+            length = annotation?.arguments?.firstOrNull { it.name?.asString() == "length" }?.value as? Int ?: -1,
+            precision = annotation?.arguments?.firstOrNull { it.name?.asString() == "precision" }?.value as? Int ?: -1,
+            scale = annotation?.arguments?.firstOrNull { it.name?.asString() == "scale" }?.value as? Int ?: -1,
+            typeHint = annotation?.arguments?.firstOrNull { it.name?.asString() == "type" }?.value as? String ?: ""
+        )
 
     private fun mapTypeHintToExpression(
         hint: String,

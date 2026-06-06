@@ -27,7 +27,6 @@ import com.google.devtools.ksp.symbol.KSFile
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.google.devtools.ksp.symbol.KSValueParameter
 import com.google.devtools.ksp.symbol.Modifier
-import com.google.devtools.ksp.symbol.Origin
 
 /**
  * Analyzes `@Embedded` / `@Embeddable` sites on entity primary-constructor parameters.
@@ -114,10 +113,7 @@ internal class EmbeddableAnalyzer(
         for (prop in classDecl.getAllProperties()) {
             val propName = prop.simpleName.asString()
             if (propName in ctorParamNames) continue
-            val hasEmbedded =
-                prop.annotations.any {
-                    it.annotationType.resolve().declaration.qualifiedName?.asString() == EMBEDDED_FQN
-                }
+            val hasEmbedded = resolvePersistenceAnnotations(prop).has(EMBEDDED_FQN)
             if (!hasEmbedded) continue
             // Body-declared mutable var is accepted — routed through collectNonCtorScalarColumns.
             if (prop.isMutable) continue
@@ -155,19 +151,13 @@ internal class EmbeddableAnalyzer(
         val paramName = param.name?.asString() ?: return
         if (paramName in excludedBackingFields) return
         val prop = propertiesByName[paramName] ?: return
-        if (columnMetaBuilder.isExcluded(prop)) return
+        if (columnMetaBuilder.isExcluded(prop, param)) return
 
         // Dispatch order: @ElementCollection BEFORE @Embedded BEFORE plain scalar.
         // An @ElementCollection annotation preempts the plain-scalar branch so a List/Set property
         // with the annotation is never silently passed through buildColumnMeta as an unsupported type.
-        val elementCollectionAnnotation =
-            prop.annotations.firstOrNull {
-                it.annotationType.resolve().declaration.qualifiedName?.asString() == ELEMENT_COLLECTION_FQN
-            }
-        val embeddedAnnotation =
-            prop.annotations.firstOrNull {
-                it.annotationType.resolve().declaration.qualifiedName?.asString() == EMBEDDED_FQN
-            }
+        val elementCollectionAnnotation = resolvePersistenceAnnotations(prop, param).firstWithFqn(ELEMENT_COLLECTION_FQN)
+        val embeddedAnnotation = resolvePersistenceAnnotations(prop, param).firstWithFqn(EMBEDDED_FQN)
 
         if (elementCollectionAnnotation != null) {
             val col =
@@ -205,6 +195,7 @@ internal class EmbeddableAnalyzer(
      * `@ElementCollection`, or scalar column. Body-declared `val` with `@Embedded` is already
      * diagnosed in [reportBodyDeclaredEmbedded]; only mutable `var` reaches this point.
      */
+    @Suppress("kotlin:S107")
     private fun collectNonCtorScalarColumns(
         classDecl: KSClassDeclaration,
         ctorParamNames: Set<String>,
@@ -246,10 +237,7 @@ internal class EmbeddableAnalyzer(
         setterSlots: MutableList<EmbeddedSetterSlot>,
         embeddableFiles: MutableSet<KSFile>
     ) {
-        val hasEmbedded =
-            prop.annotations.any {
-                it.annotationType.resolve().declaration.qualifiedName?.asString() == EMBEDDED_FQN
-            }
+        val hasEmbedded = resolvePersistenceAnnotations(prop).has(EMBEDDED_FQN)
         if (hasEmbedded) {
             processBodyDeclaredEmbedded(prop, propName, classFqn, columns, setterSlots, embeddableFiles)
             return
@@ -271,8 +259,7 @@ internal class EmbeddableAnalyzer(
         embeddableFiles: MutableSet<KSFile>
     ) {
         if (!prop.isMutable) return
-        val getter = prop.getter
-        if (getter != null && getter.origin != Origin.SYNTHETIC) {
+        if (isSourceDeclaredCustomGetter(prop)) {
             logger.error(
                 "@Embedded property must not have a custom getter: $classFqn.$propName",
                 prop
@@ -287,9 +274,8 @@ internal class EmbeddableAnalyzer(
             return
         }
         val embeddedAnnotation =
-            prop.annotations.first {
-                it.annotationType.resolve().declaration.qualifiedName?.asString() == EMBEDDED_FQN
-            }
+            resolvePersistenceAnnotations(prop).firstWithFqn(EMBEDDED_FQN)
+                ?: return
         val slot =
             buildEmbeddedSlot(
                 prop = prop,
@@ -321,10 +307,7 @@ internal class EmbeddableAnalyzer(
         aggregateBackingScalarNames: Set<String>,
         columns: MutableList<ColumnMeta>
     ) {
-        val hasElementCollection =
-            prop.annotations.any {
-                it.annotationType.resolve().declaration.qualifiedName?.asString() == ELEMENT_COLLECTION_FQN
-            }
+        val hasElementCollection = resolvePersistenceAnnotations(prop).has(ELEMENT_COLLECTION_FQN)
         if (hasElementCollection && !prop.isMutable) {
             logger.error(
                 "@ElementCollection on a body-declared property requires a mutable `var` " +
@@ -390,12 +373,10 @@ internal class EmbeddableAnalyzer(
         val propertyFqn =
             "${ownerClass.qualifiedName?.asString() ?: ownerClass.simpleName.asString()}.${prop.simpleName.asString()}"
         var ok = true
-        // KSP synthesizes a getter for every property (including data-class ctor `val`s); a
-        // user-authored custom getter is distinguished by its declaration origin being one of the
-        // source-language origins rather than SYNTHETIC. Filter on Origin so we only reject
-        // explicitly-declared getters.
-        val getter = prop.getter
-        if (getter != null && getter.origin != Origin.SYNTHETIC) {
+        // isSourceDeclaredCustomGetter detects only getters written in source (Origin.KOTLIN).
+        // Synthesized data-class getters (SYNTHETIC) and cross-module compiled accessors
+        // (KOTLIN_LIB) are both accepted — see isSourceDeclaredCustomGetter KDoc for ceiling note.
+        if (isSourceDeclaredCustomGetter(prop)) {
             logger.error(
                 "@Embedded property must not have a custom getter: $propertyFqn",
                 prop
@@ -537,11 +518,10 @@ internal class EmbeddableAnalyzer(
         val childCtorNames =
             typeDecl.primaryConstructor?.parameters.orEmpty().mapNotNull { it.name?.asString() }.toSet()
         for (childProp in typeDecl.getAllProperties()) {
-            if (childProp.simpleName.asString() in childCtorNames) continue
-            val hasEmbedded =
-                childProp.annotations.any {
-                    it.annotationType.resolve().declaration.qualifiedName?.asString() == EMBEDDED_FQN
-                }
+            val childPropName = childProp.simpleName.asString()
+            if (childPropName in childCtorNames) continue
+            val childParam = typeDecl.primaryConstructor?.parameters?.firstOrNull { it.name?.asString() == childPropName }
+            val hasEmbedded = resolvePersistenceAnnotations(childProp, childParam).has(EMBEDDED_FQN)
             if (!hasEmbedded) continue
             logger.error(
                 "@Embedded must be on a primary-constructor parameter (found body-declared property): " +
@@ -572,10 +552,29 @@ internal class EmbeddableAnalyzer(
         val childProp =
             typeDecl.getDeclaredProperties().firstOrNull { it.simpleName.asString() == childParamName } ?: return null
 
-        val childHasElementCollection =
-            childProp.annotations.any {
-                it.annotationType.resolve().declaration.qualifiedName?.asString() == ELEMENT_COLLECTION_FQN
+        // Check exclusion via the centralized resolver so cross-module @PersistenceIgnore on
+        // VALUE_PARAMETER is visible.
+        if (columnMetaBuilder.isExcluded(childProp, childParam)) {
+            // IgnoredCtorSlot emits `null` for the param in generated fromRow. That is only safe
+            // when the param is nullable or has a default value — a non-nullable no-default param
+            // with null would produce code that either fails to compile or throws NullPointerException
+            // at instantiation time. Reject the embeddable early with a clear diagnostic so the
+            // developer is informed rather than getting cryptic downstream failures.
+            val isNullable = childParam.type.resolve().isMarkedNullable
+            if (!isNullable && !childParam.hasDefault) {
+                logger.error(
+                    "@PersistenceIgnore on '$typeFqn.$childParamName' cannot be applied: the parameter " +
+                        "is non-nullable and has no default value. Emitting null for it in `fromRow` would " +
+                        "produce non-compiling or crashing generated code. Make the parameter nullable, " +
+                        "provide a default value, or remove @PersistenceIgnore.",
+                    childProp
+                )
+                return null
             }
+            return IgnoredCtorSlot(childParamName)
+        }
+
+        val childHasElementCollection = resolvePersistenceAnnotations(childProp, childParam).has(ELEMENT_COLLECTION_FQN)
         if (childHasElementCollection) {
             logger.error(
                 "@ElementCollection is not supported inside an @Embeddable. " +
@@ -586,10 +585,7 @@ internal class EmbeddableAnalyzer(
             return null
         }
 
-        val childEmbedded =
-            childProp.annotations.firstOrNull {
-                it.annotationType.resolve().declaration.qualifiedName?.asString() == EMBEDDED_FQN
-            }
+        val childEmbedded = resolvePersistenceAnnotations(childProp, childParam).firstWithFqn(EMBEDDED_FQN)
         if (childEmbedded != null) {
             if (!validateEmbeddedTargetStrictness(typeDecl, childProp)) return null
             return buildEmbeddedSlot(
@@ -608,6 +604,7 @@ internal class EmbeddableAnalyzer(
             columnMetaBuilder.buildEmbeddedLeafColumn(
                 childProp = childProp,
                 childParamName = childParamName,
+                ctorParam = childParam,
                 prefix = effectivePrefix,
                 parentPath = parentPath,
                 topLevelPropertyName = topLevelPropertyName

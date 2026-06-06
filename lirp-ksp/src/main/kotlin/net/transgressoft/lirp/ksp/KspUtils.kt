@@ -20,11 +20,14 @@ package net.transgressoft.lirp.ksp
 import com.google.devtools.ksp.getDeclaredProperties
 import com.google.devtools.ksp.getVisibility
 import com.google.devtools.ksp.symbol.ClassKind
+import com.google.devtools.ksp.symbol.KSAnnotation
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.symbol.KSTypeAlias
 import com.google.devtools.ksp.symbol.KSTypeArgument
+import com.google.devtools.ksp.symbol.KSValueParameter
+import com.google.devtools.ksp.symbol.Origin
 import com.google.devtools.ksp.symbol.Variance
 import com.google.devtools.ksp.symbol.Visibility
 
@@ -32,17 +35,46 @@ internal const val REACTIVE_ENTITY_BASE_FQN = "net.transgressoft.lirp.entity.Rea
 internal const val IDENTIFIABLE_ENTITY_FQN = "net.transgressoft.lirp.entity.IdentifiableEntity"
 internal const val FX_SCALAR_DELEGATE_FQN = "net.transgressoft.lirp.persistence.FxScalarPropertyDelegate"
 
-private val KOTLIN_COLLECTION_FQNS =
-    setOf(
-        "kotlin.collections.List",
-        "kotlin.collections.MutableList",
-        "kotlin.collections.Set",
-        "kotlin.collections.MutableSet",
-        "kotlin.collections.Collection",
-        "kotlin.collections.MutableCollection",
-        "kotlin.collections.Map",
-        "kotlin.collections.MutableMap"
-    )
+/**
+ * Merges annotations from [prop]'s declaration site and, when [ctorParam] is supplied, its
+ * value-parameter site. For properties compiled into a dependency jar (`Origin.KOTLIN_LIB`),
+ * Kotlin metadata surfaces data-class constructor annotations on the `VALUE_PARAMETER` rather
+ * than the synthesized property declaration. Providing the matched [ctorParam] ensures those
+ * annotations are visible to every persistence-annotation read.
+ *
+ * Same-module callers may pass `ctorParam = null`; the result is then identical to
+ * `prop.annotations`.
+ */
+internal fun resolvePersistenceAnnotations(
+    prop: KSPropertyDeclaration,
+    ctorParam: KSValueParameter? = null
+): Sequence<KSAnnotation> =
+    prop.annotations + (ctorParam?.annotations ?: emptySequence())
+
+/** Returns `true` if any annotation in this sequence has the given fully-qualified name. */
+internal fun Sequence<KSAnnotation>.has(fqn: String): Boolean =
+    any { it.annotationType.resolve().declaration.qualifiedName?.asString() == fqn }
+
+/** Returns the first annotation with the given fully-qualified name, or `null`. */
+internal fun Sequence<KSAnnotation>.firstWithFqn(fqn: String): KSAnnotation? =
+    firstOrNull { it.annotationType.resolve().declaration.qualifiedName?.asString() == fqn }
+
+/**
+ * Returns `true` when [prop] has a custom getter written in source.
+ *
+ * KSP assigns [Origin.KOTLIN] to a getter declared in the current compilation unit's source.
+ * Synthesized data-class accessors (same-module) report [Origin.SYNTHETIC]; compiled
+ * accessors from a dependency jar report [Origin.KOTLIN_LIB]. The old `!= SYNTHETIC` check
+ * misfired on cross-module compiled types, falsely rejecting every nested `@Embedded` imported
+ * from another module. Using `== KOTLIN` accepts both synthesized ([Origin.SYNTHETIC]) and
+ * cross-module compiled ([Origin.KOTLIN_LIB]) getters as non-custom.
+ *
+ * Limitation: a hand-written custom getter on a value type compiled in another module also
+ * reports [Origin.KOTLIN_LIB] and is therefore indistinguishable from a synthesized accessor.
+ * This is a Kotlin metadata ceiling — do not tighten this predicate back to `!= SYNTHETIC`.
+ */
+internal fun isSourceDeclaredCustomGetter(prop: KSPropertyDeclaration): Boolean =
+    prop.getter?.origin == Origin.KOTLIN
 
 /**
  * Returns true if [decl] extends `ReactiveEntityBase` or implements `IdentifiableEntity` anywhere
@@ -186,7 +218,7 @@ internal fun isReactivePropertyDelegate(prop: KSPropertyDeclaration): Boolean {
     // have a null qualifiedName because `V` has no FQN. They are still reactive — concrete
     // subclasses inherit them as reactive-backed fields and need accessor/raw-init entries.
     val typeFqn = resolvedType.declaration.qualifiedName?.asString()
-    if (typeFqn != null && typeFqn in KOTLIN_COLLECTION_FQNS) return false
+    if (typeFqn != null && typeFqn in LIRP_COLLECTION_FQNS) return false
     return true
 }
 

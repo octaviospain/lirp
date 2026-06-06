@@ -340,6 +340,9 @@ internal object TableDefSourceEmitter {
                     }
                 "${slot.embeddableTypeFqn}($inner)"
             }
+            // @PersistenceIgnore on a nested @Embeddable constructor param: emit null so the
+            // ignored param is excluded from SQL column mapping while the constructor still compiles.
+            is IgnoredCtorSlot -> "null"
             // EmbeddedSetterSlot is consumed directly by appendApplyScalarRow via a synthetic
             // EmbeddedCtorSlot wrapper; it must never reach this dispatch path.
             is EmbeddedSetterSlot -> error("EmbeddedSetterSlot must not be passed to buildCtorArgExpression directly")
@@ -376,17 +379,17 @@ internal object TableDefSourceEmitter {
 
     // Converter-routed columns short-circuit the FQN-driven cast table: read the raw scalar,
     // cast to the converter's S type, then route through the consumer's fromSql. Short/Byte
-    // converters need the same INT → narrow-typed conversion that non-converter columns get
-    // (the JDBC layer boxes the column value as Int regardless of declared width), or the cast
-    // would throw ClassCastException at row time.
+    // converters need the same narrowing conversion that non-converter columns get. Casting
+    // to Number rather than Int tolerates JDBC drivers that box integral values as Long or
+    // Short instead of Int, avoiding ClassCastException at row time.
     fun buildConverterRowAccess(col: ColumnMeta, rawAccess: String): String? {
         if (col.converterFqn == null || col.converterSqlFqn == null) return null
         val converterInput =
             when (col.converterSqlFqn) {
                 KOTLIN_SHORT_FQN ->
-                    if (col.nullable) "($rawAccess as? Int)?.toShort()" else "($rawAccess as Int).toShort()"
+                    if (col.nullable) "($rawAccess as? Number)?.toShort()" else "($rawAccess as Number).toShort()"
                 KOTLIN_BYTE_FQN ->
-                    if (col.nullable) "($rawAccess as? Int)?.toByte()" else "($rawAccess as Int).toByte()"
+                    if (col.nullable) "($rawAccess as? Number)?.toByte()" else "($rawAccess as Number).toByte()"
                 else ->
                     if (col.nullable) "($rawAccess as? ${col.converterSqlFqn})" else "($rawAccess as ${col.converterSqlFqn})"
             }
@@ -397,14 +400,15 @@ internal object TableDefSourceEmitter {
         }
     }
 
-    // Short / Byte are stored as INT; narrow on read via Kotlin's truncating conversion.
-    // A raw `as Short` would fail at runtime because the JDBC value is boxed as Int.
+    // Short / Byte are stored as INT; narrow on read via Kotlin's truncating conversion. Casting
+    // to Number rather than Int tolerates JDBC drivers that box integral values as Long or Short
+    // instead of Int, so .toShort()/.toByte() works regardless of the boxed numeric type returned.
     fun buildNarrowingIntRowAccess(col: ColumnMeta, rawAccess: String): String? =
         when (col.typeFqn) {
             KOTLIN_SHORT_FQN ->
-                if (col.nullable) "($rawAccess as? Int)?.toShort()" else "($rawAccess as Int).toShort()"
+                if (col.nullable) "($rawAccess as? Number)?.toShort()" else "($rawAccess as Number).toShort()"
             KOTLIN_BYTE_FQN ->
-                if (col.nullable) "($rawAccess as? Int)?.toByte()" else "($rawAccess as Int).toByte()"
+                if (col.nullable) "($rawAccess as? Number)?.toByte()" else "($rawAccess as Number).toByte()"
             else -> null
         }
 

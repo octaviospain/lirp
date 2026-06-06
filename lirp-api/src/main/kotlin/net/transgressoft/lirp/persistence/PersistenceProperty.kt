@@ -71,7 +71,7 @@ import kotlin.reflect.KClass
  *   to honor explicit consumer intent. Hints incompatible with the converter's base type
  *   (for example, `length` on an integer converter) are reported as KSP errors at compile time.
  */
-@Target(AnnotationTarget.PROPERTY)
+@Target(AnnotationTarget.PROPERTY, AnnotationTarget.VALUE_PARAMETER, AnnotationTarget.FIELD)
 @Retention(AnnotationRetention.BINARY)
 annotation class PersistenceProperty(
     val name: String = "",
