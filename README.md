@@ -242,7 +242,8 @@ data class Album(
 ) : ReactiveEntityBase<Int, Album>() { /* ... */ }
 ```
 
-- **Placement:** `@Embeddable` on a concrete `data class`; `@Embedded` on constructor-`val` parameters only.
+- **Placement:** `@Embeddable` on a concrete `data class`; `@Embedded` on constructor-`val`/`var` parameters or body-declared reactive `var` properties.
+- **Cross-module:** `@Embeddable` types may be defined in a separate module or library. KSP resolves their annotations at the embedding site without any extra configuration.
 - **Default prefix:** derived from the property name as `snake_case + "_"` (e.g. `performer` → `performer_`).
 - **Recursive nesting:** `@Embeddable` types may themselves declare `@Embedded` fields; prefixes concatenate parent-to-child.
 - **Composition with converters:** scalar fields inside an `@Embeddable` may carry `@PersistenceProperty(converter = MyConverter::class)` to route non-scalar domain types through a custom `ColumnConverter`.
