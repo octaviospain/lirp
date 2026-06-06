@@ -31,6 +31,35 @@ import com.google.devtools.ksp.validate
 private const val AGGREGATE_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.Aggregate"
 
 /**
+ * Represents the outcome of a column-eligibility check for a KSP property declaration.
+ *
+ * The three variants are mutually exclusive and encode the complete decision:
+ * - [Column] — the property maps to a persistable SQL column; carries the resolved [ColumnMeta].
+ * - [Excluded] — the property is intentionally excluded from persistence (e.g. `@Transient`,
+ *   `@PersistenceIgnore`, `@Aggregate`, private backing field, or a pure computed property).
+ * - [Deferred] — the property type or one of its annotations could not be resolved in the current
+ *   KSP round. The enclosing entity [symbol] should be returned in `unableToProcess` so KSP
+ *   re-presents it in a later round once the missing type is available.
+ */
+internal sealed interface Eligibility {
+
+    /** The property resolves to a persistable SQL column described by [meta]. */
+    data class Column(val meta: ColumnMeta) : Eligibility
+
+    /** The property is intentionally excluded from persistence and must not become a SQL column. */
+    data object Excluded : Eligibility
+
+    /**
+     * The property's type or annotation FQN could not be resolved in this KSP round.
+     * [symbol] is the enclosing entity class declaration that should be re-queued via
+     * `unableToProcess` so the processor retries this entity in the next round.
+     * [unresolvedAnnotation] distinguishes an unresolvable annotation FQN (`true`) from an
+     * unresolvable property *type* (`false`) so the terminal diagnostic can name the real cause.
+     */
+    data class Deferred(val symbol: KSClassDeclaration, val unresolvedAnnotation: Boolean = false) : Eligibility
+}
+
+/**
  * Builds [ColumnMeta] instances from KSP property declarations. Handles converter resolution,
  * type-expression derivation, and the exclusion rules that determine which properties become
  * SQL columns. Used by [EmbeddableAnalyzer] for both top-level entity scalars and nested
@@ -39,20 +68,30 @@ private const val AGGREGATE_ANNOTATION_FQN = "net.transgressoft.lirp.persistence
 internal class ColumnMetaBuilder(private val logger: KSPLogger) {
 
     /**
-     * Resolves the [ColumnMeta] for a property on an entity class. Returns `null` when the
-     * property is not a valid column (unsupported type, invalid converter, or diagnostic
-     * already emitted).
+     * Resolves the [Eligibility] for a property on an entity class. Returns [Eligibility.Column]
+     * carrying the resolved [ColumnMeta] when the property maps to a persistable SQL column,
+     * [Eligibility.Excluded] when the property is intentionally excluded from persistence, or
+     * [Eligibility.Deferred] when the property type or annotation FQN cannot yet be resolved in
+     * this KSP round and the enclosing entity should be re-queued for the next round.
      */
     fun buildColumnMeta(
         prop: KSPropertyDeclaration,
         hasDeclaredId: Boolean,
         versionedName: String?,
         ctorParamNames: Set<String>,
+        enclosingClass: KSClassDeclaration,
         aggregateBackingScalarNames: Set<String> = emptySet()
-    ): ColumnMeta? {
+    ): Eligibility {
+        when (val eligibility = checkEligibility(prop, enclosingClass = enclosingClass)) {
+            is Eligibility.Excluded, is Eligibility.Deferred -> return eligibility
+            is Eligibility.Column -> { /* property is eligible — proceed to build ColumnMeta */ }
+        }
+
         val propName = prop.simpleName.asString()
         val persistenceAnnotation = resolvePersistenceAnnotations(prop).firstWithFqn(PERSISTENCE_PROPERTY_FQN)
         val resolvedType = prop.type.resolve()
+        if (resolvedType.isError) return Eligibility.Deferred(enclosingClass)
+
         val notNullableType = resolvedType.makeNotNullable()
         val typeFqn = notNullableType.declaration.qualifiedName?.asString() ?: "kotlin.Any"
         val isEnum = (notNullableType.declaration as? KSClassDeclaration)?.classKind == ClassKind.ENUM_CLASS
@@ -109,36 +148,41 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
             if (converterInfo != null) {
                 refineConverterSqlType(
                     converterInfo = converterInfo, hints = extractHints(persistenceAnnotation), propertyFqn = propertyFqn, propName = propName
-                ) ?: return null
+                ) ?: return Eligibility.Excluded
             } else if (hasExplicitConverter) {
                 // Converter declared but unresolved/invalid this round; avoid non-converter fallback.
                 // Invalid converters already emitted diagnostics in resolveConverter.
-                return null
+                return Eligibility.Excluded
             } else {
-                mapToColumnTypeExpression(prop, persistenceAnnotation) ?: return null
+                mapToColumnTypeExpression(prop, persistenceAnnotation) ?: return Eligibility.Excluded
             }
 
-        return ColumnMeta(
-            name = columnNameFor(persistenceAnnotation, propName),
-            propertyName = propName,
-            typeExpression = typeExpression,
-            typeFqn = typeFqn,
-            nullable = resolvedType.isMarkedNullable,
-            isPrimaryKey = isPrimaryKey,
-            isEnum = isEnum,
-            isMutable = prop.isMutable && hasPublicSetter(prop),
-            isCtorParam = propName in ctorParamNames,
-            isVersion = isVersion,
-            converterFqn = converterInfo?.converterFqn,
-            converterSqlFqn = converterInfo?.sqlTypeFqn
+        return Eligibility.Column(
+            ColumnMeta(
+                name = columnNameFor(persistenceAnnotation, propName),
+                propertyName = propName,
+                typeExpression = typeExpression,
+                typeFqn = typeFqn,
+                nullable = resolvedType.isMarkedNullable,
+                isPrimaryKey = isPrimaryKey,
+                isEnum = isEnum,
+                isMutable = prop.isMutable && hasPublicSetter(prop),
+                isCtorParam = propName in ctorParamNames,
+                isVersion = isVersion,
+                converterFqn = converterInfo?.converterFqn,
+                converterSqlFqn = converterInfo?.sqlTypeFqn
+            )
         )
     }
 
     /**
-     * Resolves the [ColumnMeta] for a single scalar leaf inside an `@Embeddable`. Routes through
+     * Resolves the [Eligibility] for a single scalar leaf inside an `@Embeddable`. Routes through
      * the same type/converter resolution path as [buildColumnMeta] but stamps the column with the
      * concatenated `${prefix}${snake(leaf)}` name, the embedded access path, and marks it
      * `isInsideEmbedded = true` so downstream emitters (`applyRow`, `applyScalarRow`) skip it.
+     *
+     * Returns [Eligibility.Deferred] when the leaf type cannot be resolved in this KSP round,
+     * signalling that the enclosing entity should be re-queued for processing in the next round.
      */
     fun buildEmbeddedLeafColumn(
         childProp: KSPropertyDeclaration,
@@ -146,12 +190,15 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
         prefix: String,
         parentPath: String,
         topLevelPropertyName: String,
+        enclosingClass: KSClassDeclaration,
         ctorParam: KSValueParameter? = null
-    ): ColumnMeta? {
+    ): Eligibility {
         val persistenceAnnotation = resolvePersistenceAnnotations(childProp, ctorParam).firstWithFqn(PERSISTENCE_PROPERTY_FQN)
         val propertyFqn = "${childProp.parentDeclaration?.qualifiedName?.asString() ?: ""}.$childParamName".trimStart('.')
 
         val resolvedType = childProp.type.resolve()
+        if (resolvedType.isError) return Eligibility.Deferred(enclosingClass)
+
         val notNullable = resolvedType.makeNotNullable()
         val childTypeFqn = notNullable.declaration.qualifiedName?.asString() ?: "kotlin.Any"
         val isEnum = (notNullable.declaration as? KSClassDeclaration)?.classKind == ClassKind.ENUM_CLASS
@@ -170,32 +217,34 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
         val hasExplicitConverter = hasNonSentinelConverterArgument(persistenceAnnotation)
         val typeExpression =
             if (converterInfo != null) {
-                refineConverterSqlType(converterInfo, extractHints(persistenceAnnotation), propertyFqn, childParamName) ?: return null
+                refineConverterSqlType(converterInfo, extractHints(persistenceAnnotation), propertyFqn, childParamName) ?: return Eligibility.Excluded
             } else if (hasExplicitConverter) {
-                return null
+                return Eligibility.Excluded
             } else {
-                mapToColumnTypeExpression(childProp, persistenceAnnotation) ?: return null
+                mapToColumnTypeExpression(childProp, persistenceAnnotation) ?: return Eligibility.Excluded
             }
 
         val columnName = "$prefix${childParamName.toSnakeCase()}"
-        return ColumnMeta(
-            name = columnName,
-            // propertyName carries the top-level entity ctor-param so the mutability gate (which
-            // exempts ctor-param val fields) recognises this column as ctor-driven. The actual
-            // entity-access path lives in embeddedPath.
-            propertyName = topLevelPropertyName,
-            typeExpression = typeExpression,
-            typeFqn = childTypeFqn,
-            nullable = resolvedType.isMarkedNullable,
-            isPrimaryKey = false,
-            isEnum = isEnum,
-            isMutable = false,
-            isCtorParam = true,
-            isVersion = false,
-            converterFqn = converterInfo?.converterFqn,
-            converterSqlFqn = converterInfo?.sqlTypeFqn,
-            embeddedPath = "$parentPath.$childParamName",
-            isInsideEmbedded = true
+        return Eligibility.Column(
+            ColumnMeta(
+                name = columnName,
+                // propertyName carries the top-level entity ctor-param so the mutability gate (which
+                // exempts ctor-param val fields) recognises this column as ctor-driven. The actual
+                // entity-access path lives in embeddedPath.
+                propertyName = topLevelPropertyName,
+                typeExpression = typeExpression,
+                typeFqn = childTypeFqn,
+                nullable = resolvedType.isMarkedNullable,
+                isPrimaryKey = false,
+                isEnum = isEnum,
+                isMutable = false,
+                isCtorParam = true,
+                isVersion = false,
+                converterFqn = converterInfo?.converterFqn,
+                converterSqlFqn = converterInfo?.sqlTypeFqn,
+                embeddedPath = "$parentPath.$childParamName",
+                isInsideEmbedded = true
+            )
         )
     }
 
@@ -417,33 +466,62 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
     }
 
     /**
-     * Returns `true` when [prop] should be excluded from the persisted column set.
+     * Determines the [Eligibility] of [prop] as a persistable SQL column.
      *
      * The optional [ctorParam] enables cross-module `@PersistenceIgnore` detection: for properties
      * compiled into a dependency jar, annotations live on the `VALUE_PARAMETER` rather than the
      * synthesized property declaration. Callers with access to the matched constructor parameter
      * should always supply it so the [PERSISTENCE_IGNORE_FQN] check is cross-module safe.
      *
-     * This is the single seam through which column eligibility is decided, so later predicates
-     * (e.g. `@Transient` or error-type handling) can extend exclusion logic in one place.
+     * [enclosingClass] is the entity class declaration owning this property; it is carried by
+     * [Eligibility.Deferred] so the caller can re-queue the correct symbol via `unableToProcess`.
+     *
+     * This is the single authoritative eligibility seam composing visibility, annotation exclusions,
+     * delegate kind, and unresolvable-annotation deferral in one place.
      */
-    fun isExcluded(prop: KSPropertyDeclaration, ctorParam: KSValueParameter? = null): Boolean {
+    fun checkEligibility(
+        prop: KSPropertyDeclaration,
+        ctorParam: KSValueParameter? = null,
+        enclosingClass: KSClassDeclaration
+    ): Eligibility {
         // Private backing fields are encapsulated implementation state — no public surface for
         // persistence to bind through. Mirrors the exclusion applied by `RawInitializerProcessor`
         // so the two processors agree on the persisted column set for a given entity shape.
-        if (Modifier.PRIVATE in prop.modifiers) return true
+        if (Modifier.PRIVATE in prop.modifiers) return Eligibility.Excluded
         // PERSISTENCE_IGNORE_FQN routed through resolver so cross-module @PersistenceIgnore
-        // on VALUE_PARAMETER is visible — the single eligibility seam for exclusion checks.
-        if (resolvePersistenceAnnotations(prop, ctorParam).has(PERSISTENCE_IGNORE_FQN)) return true
-        val annotationFqns =
-            prop.annotations
-                .map { it.annotationType.resolve().declaration.qualifiedName?.asString() }
-                .toSet()
-        if (AGGREGATE_ANNOTATION_FQN in annotationFqns) return true
-        if (TRANSIENT_FQN in annotationFqns) return true
-        // Exclude computed properties (no backing field, not delegated), but include delegate-backed properties
-        if (!prop.hasBackingField && !prop.isDelegated()) return true
-        return false
+        // on VALUE_PARAMETER is visible.
+        if (resolvePersistenceAnnotations(prop, ctorParam).has(PERSISTENCE_IGNORE_FQN)) return Eligibility.Excluded
+        // Check annotation FQNs. When an annotation's FQN cannot be resolved this round, defer the
+        // entity rather than silently missing the annotation (prevents false-positive column emission
+        // for unresolved exclusion annotations).
+        for (annotation in prop.annotations) {
+            val fqn =
+                annotation.annotationType.resolve().declaration.qualifiedName?.asString()
+                    ?: return Eligibility.Deferred(enclosingClass, unresolvedAnnotation = true)
+            when (fqn) {
+                AGGREGATE_ANNOTATION_FQN,
+                TRANSIENT_FQN,
+                KOTLINX_SERIALIZATION_TRANSIENT_FQN -> return Eligibility.Excluded
+            }
+        }
+        // Exclude computed properties (no backing field, not delegated), but include delegate-backed
+        // properties — a body-declared `var x by reactiveProperty(...)` is delegated and persistable.
+        if (!prop.hasBackingField && !prop.isDelegated()) return Eligibility.Excluded
+        return ELIGIBLE_SENTINEL
+    }
+
+    private companion object {
+        // Sentinel returned by checkEligibility to signal "property is eligible; proceed to
+        // resolve the actual ColumnMeta". Callers must branch on `is Eligibility.Excluded` and
+        // `is Eligibility.Deferred` and treat the Column case as "proceed" — the sentinel payload
+        // is never forwarded; the real ColumnMeta is built by the calling builder method.
+        val ELIGIBLE_SENTINEL =
+            Eligibility.Column(
+                ColumnMeta(
+                    name = "", propertyName = "", typeExpression = "", typeFqn = "",
+                    nullable = false, isPrimaryKey = false
+                )
+            )
     }
 
     fun columnNameFor(persistenceAnnotation: KSAnnotation?, propName: String): String {

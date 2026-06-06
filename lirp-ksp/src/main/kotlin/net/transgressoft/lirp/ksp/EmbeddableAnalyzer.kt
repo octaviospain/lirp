@@ -58,7 +58,13 @@ internal class EmbeddableAnalyzer(
         val columns: List<ColumnMeta>,
         val ctorSlots: List<CtorSlot>,
         val setterSlots: List<EmbeddedSetterSlot> = emptyList(),
-        val embeddableFiles: Set<KSFile> = emptySet()
+        val embeddableFiles: Set<KSFile> = emptySet(),
+        /** Non-null when any property type could not be resolved in this KSP round. The value is the
+         * enclosing entity class that should be added to `unableToProcess` for re-queuing. */
+        val deferredSymbol: KSClassDeclaration? = null,
+        /** Detail triple `(entityFqn, propertyName, typeFqn)` populated when [deferredSymbol] is
+         * non-null, used by [TableDefProcessor] to emit the terminal diagnostic. */
+        val deferredDetail: Triple<String, String, String>? = null
     )
 
     /**
@@ -89,17 +95,23 @@ internal class EmbeddableAnalyzer(
         reportBodyDeclaredEmbedded(classDecl, ctorParamNames)
 
         for (param in ctorParams) {
-            processCtorParam(
-                param, classDecl, propertiesByName, excludedBackingFields,
-                hasDeclaredId, versionedName, ctorParamNames, aggregateBackingScalarNames,
-                columns, ctorSlots, embeddableFiles
-            )
+            val deferred =
+                processCtorParam(
+                    param, classDecl, propertiesByName, excludedBackingFields,
+                    hasDeclaredId, versionedName, ctorParamNames, aggregateBackingScalarNames,
+                    columns, ctorSlots, embeddableFiles
+                )
+            if (deferred != null) return CollectedShape(emptyList(), emptyList(), deferredSymbol = deferred.first, deferredDetail = deferred.second)
         }
 
-        collectNonCtorScalarColumns(
-            classDecl, ctorParamNames, excludedBackingFields,
-            hasDeclaredId, versionedName, aggregateBackingScalarNames, columns, setterSlots, embeddableFiles
-        )
+        val nonCtorDeferred =
+            collectNonCtorScalarColumns(
+                classDecl, ctorParamNames, excludedBackingFields,
+                hasDeclaredId, versionedName, aggregateBackingScalarNames, columns, setterSlots, embeddableFiles
+            )
+        if (nonCtorDeferred !=
+            null
+        ) return CollectedShape(emptyList(), emptyList(), deferredSymbol = nonCtorDeferred.first, deferredDetail = nonCtorDeferred.second)
 
         return CollectedShape(columns, ctorSlots, setterSlots, embeddableFiles)
     }
@@ -131,8 +143,10 @@ internal class EmbeddableAnalyzer(
 
     /**
      * Dispatches a single primary-constructor parameter to either the embedded or the scalar
-     * path, mutating [columns] and [ctorSlots] in place. Parameters that are excluded,
-     * unresolvable, or structurally invalid are skipped without side effects.
+     * path, mutating [columns] and [ctorSlots] in place. Parameters that are excluded or
+     * structurally invalid are skipped without side effects. Returns a deferral pair
+     * `(entityClass, (entityFqn, propertyName, typeFqn))` when the property type is unresolvable
+     * in this KSP round, so the caller can short-circuit and return an unprocessed [CollectedShape].
      */
     @Suppress("kotlin:S107")
     private fun processCtorParam(
@@ -147,11 +161,15 @@ internal class EmbeddableAnalyzer(
         columns: MutableList<ColumnMeta>,
         ctorSlots: MutableList<CtorSlot>,
         embeddableFiles: MutableSet<KSFile>
-    ) {
-        val paramName = param.name?.asString() ?: return
-        if (paramName in excludedBackingFields) return
-        val prop = propertiesByName[paramName] ?: return
-        if (columnMetaBuilder.isExcluded(prop, param)) return
+    ): Pair<KSClassDeclaration, Triple<String, String, String>>? {
+        val paramName = param.name?.asString() ?: return null
+        if (paramName in excludedBackingFields) return null
+        val prop = propertiesByName[paramName] ?: return null
+        when (val eligibility = columnMetaBuilder.checkEligibility(prop, param, classDecl)) {
+            is Eligibility.Deferred -> return eligibility.symbol to deferralDetail(classDecl, paramName, prop, eligibility.unresolvedAnnotation)
+            is Eligibility.Excluded -> return null
+            is Eligibility.Column -> { /* proceed */ }
+        }
 
         // Dispatch order: @ElementCollection BEFORE @Embedded BEFORE plain scalar.
         // An @ElementCollection annotation preempts the plain-scalar branch so a List/Set property
@@ -165,28 +183,39 @@ internal class EmbeddableAnalyzer(
                     prop,
                     classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString(),
                     isCtorParam = true
-                ) ?: return
+                ) ?: return null
             columns += col
             ctorSlots += ScalarCtorSlot(paramName, col)
         } else if (embeddedAnnotation != null) {
-            if (!validateEmbeddedTargetStrictness(classDecl, prop)) return
+            if (!validateEmbeddedTargetStrictness(classDecl, prop)) return null
+            val deferralHolder = arrayOfNulls<Pair<KSClassDeclaration, Triple<String, String, String>>>(1)
             val slot =
                 buildEmbeddedSlot(
                     prop = prop,
                     ctorParamName = paramName,
                     embeddedAnnotation = embeddedAnnotation,
+                    rootClass = classDecl,
                     columnsAccumulator = columns,
                     parentPrefix = autoDerivedPrefix(paramName),
                     parentPath = paramName,
                     topLevelPropertyName = paramName,
-                    embeddableFiles = embeddableFiles
+                    embeddableFiles = embeddableFiles,
+                    deferralHolder = deferralHolder
                 )
+            deferralHolder[0]?.let { return it }
             if (slot != null) ctorSlots += slot
         } else {
-            val col = columnMetaBuilder.buildColumnMeta(prop, hasDeclaredId, versionedName, ctorParamNames, aggregateBackingScalarNames) ?: return
-            columns += col
-            ctorSlots += ScalarCtorSlot(paramName, col)
+            val eligibility = columnMetaBuilder.buildColumnMeta(prop, hasDeclaredId, versionedName, ctorParamNames, classDecl, aggregateBackingScalarNames)
+            when (eligibility) {
+                is Eligibility.Deferred -> return eligibility.symbol to deferralDetail(classDecl, paramName, prop, eligibility.unresolvedAnnotation)
+                is Eligibility.Excluded -> return null
+                is Eligibility.Column -> {
+                    columns += eligibility.meta
+                    ctorSlots += ScalarCtorSlot(paramName, eligibility.meta)
+                }
+            }
         }
+        return null
     }
 
     /**
@@ -194,6 +223,9 @@ internal class EmbeddableAnalyzer(
      * each property to [processNonCtorProperty] which routes to one of three paths: `@Embedded var`,
      * `@ElementCollection`, or scalar column. Body-declared `val` with `@Embedded` is already
      * diagnosed in [reportBodyDeclaredEmbedded]; only mutable `var` reaches this point.
+     *
+     * Returns a deferral pair when any property type cannot be resolved in this KSP round, so the
+     * caller can short-circuit and re-queue the enclosing entity.
      */
     @Suppress("kotlin:S107")
     private fun collectNonCtorScalarColumns(
@@ -206,29 +238,40 @@ internal class EmbeddableAnalyzer(
         columns: MutableList<ColumnMeta>,
         setterSlots: MutableList<EmbeddedSetterSlot>,
         embeddableFiles: MutableSet<KSFile>
-    ) {
+    ): Pair<KSClassDeclaration, Triple<String, String, String>>? {
         val classFqn = classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString()
         for (prop in classDecl.getAllProperties()) {
             val propName = prop.simpleName.asString()
             if (propName in ctorParamNames) continue
-            if (columnMetaBuilder.isExcluded(prop) || propName in excludedBackingFields) continue
-            processNonCtorProperty(
-                prop, propName, classFqn, hasDeclaredId, versionedName, ctorParamNames, aggregateBackingScalarNames,
-                columns, setterSlots, embeddableFiles
-            )
+            when (val eligibility = columnMetaBuilder.checkEligibility(prop, enclosingClass = classDecl)) {
+                is Eligibility.Deferred -> return eligibility.symbol to deferralDetail(classDecl, propName, prop, eligibility.unresolvedAnnotation)
+                is Eligibility.Excluded -> continue
+                is Eligibility.Column -> { /* proceed */ }
+            }
+            if (propName in excludedBackingFields) continue
+            val deferred =
+                processNonCtorProperty(
+                    prop, propName, classFqn, classDecl, hasDeclaredId, versionedName, ctorParamNames, aggregateBackingScalarNames,
+                    columns, setterSlots, embeddableFiles
+                )
+            if (deferred != null) return deferred
         }
+        return null
     }
 
     /**
      * Routes a single non-constructor property to its handling path: `@Embedded var` is passed to
      * [processBodyDeclaredEmbedded]; `@ElementCollection` and scalars to [buildNonCtorScalarColumn].
      * Dispatcher logic is isolated from loop mechanics for readability.
+     *
+     * Returns a deferral pair when the property type is unresolvable in this KSP round.
      */
     @Suppress("kotlin:S107")
     private fun processNonCtorProperty(
         prop: KSPropertyDeclaration,
         propName: String,
         classFqn: String,
+        classDecl: KSClassDeclaration,
         hasDeclaredId: Boolean,
         versionedName: String?,
         ctorParamNames: Set<String>,
@@ -236,58 +279,66 @@ internal class EmbeddableAnalyzer(
         columns: MutableList<ColumnMeta>,
         setterSlots: MutableList<EmbeddedSetterSlot>,
         embeddableFiles: MutableSet<KSFile>
-    ) {
+    ): Pair<KSClassDeclaration, Triple<String, String, String>>? {
         val hasEmbedded = resolvePersistenceAnnotations(prop).has(EMBEDDED_FQN)
         if (hasEmbedded) {
-            processBodyDeclaredEmbedded(prop, propName, classFqn, columns, setterSlots, embeddableFiles)
-            return
+            return processBodyDeclaredEmbedded(prop, propName, classFqn, classDecl, columns, setterSlots, embeddableFiles)
         }
-        buildNonCtorScalarColumn(prop, propName, classFqn, hasDeclaredId, versionedName, ctorParamNames, aggregateBackingScalarNames, columns)
+        return buildNonCtorScalarColumn(prop, propName, classFqn, classDecl, hasDeclaredId, versionedName, ctorParamNames, aggregateBackingScalarNames, columns)
     }
 
     /**
      * Handles body-declared `@Embedded var` properties. Validates the custom-getter constraint,
      * builds the embedded slot tree, and appends an [EmbeddedSetterSlot]. Returns early on custom
      * getter (already diagnosed) so the outer loop skips further processing.
+     *
+     * Returns a deferral pair when a nested leaf type is unresolvable in this KSP round, so the
+     * enclosing entity is re-queued — mirroring the ctor-`@Embedded` path in [processCtorParam].
      */
     private fun processBodyDeclaredEmbedded(
         prop: KSPropertyDeclaration,
         propName: String,
         classFqn: String,
+        classDecl: KSClassDeclaration,
         columns: MutableList<ColumnMeta>,
         setterSlots: MutableList<EmbeddedSetterSlot>,
         embeddableFiles: MutableSet<KSFile>
-    ) {
-        if (!prop.isMutable) return
+    ): Pair<KSClassDeclaration, Triple<String, String, String>>? {
+        if (!prop.isMutable) return null
         if (isSourceDeclaredCustomGetter(prop)) {
             logger.error(
                 "@Embedded property must not have a custom getter: $classFqn.$propName",
                 prop
             )
-            return
+            return null
         }
         if (!prop.isDelegated()) {
             logger.error(
                 "@Embedded on a body-declared property must use a delegated reactive backing field: $classFqn.$propName",
                 prop
             )
-            return
+            return null
         }
         val embeddedAnnotation =
             resolvePersistenceAnnotations(prop).firstWithFqn(EMBEDDED_FQN)
-                ?: return
+                ?: return null
+        val deferralHolder = arrayOfNulls<Pair<KSClassDeclaration, Triple<String, String, String>>>(1)
         val slot =
             buildEmbeddedSlot(
                 prop = prop,
                 ctorParamName = propName,
                 embeddedAnnotation = embeddedAnnotation,
+                rootClass = classDecl,
                 columnsAccumulator = columns,
                 parentPrefix = autoDerivedPrefix(propName),
                 parentPath = propName,
                 topLevelPropertyName = propName,
-                embeddableFiles = embeddableFiles
+                embeddableFiles = embeddableFiles,
+                deferralHolder = deferralHolder
             )
+        deferralHolder[0]?.let { return it }
         if (slot != null) setterSlots += EmbeddedSetterSlot(slot.ctorParamName, slot.embeddableTypeFqn, slot.children)
+        return null
     }
 
     /**
@@ -295,18 +346,21 @@ internal class EmbeddableAnalyzer(
      * `@ElementCollection` properties are mutable (so `fromRow` can populate them post-construction),
      * then dispatches to the appropriate column builder. Emits a diagnostic and skips on immutable
      * `@ElementCollection val` (would produce non-compiling generated code).
+     *
+     * Returns a deferral pair when the property type is unresolvable in this KSP round.
      */
     @Suppress("kotlin:S107")
     private fun buildNonCtorScalarColumn(
         prop: KSPropertyDeclaration,
         propName: String,
         classFqn: String,
+        classDecl: KSClassDeclaration,
         hasDeclaredId: Boolean,
         versionedName: String?,
         ctorParamNames: Set<String>,
         aggregateBackingScalarNames: Set<String>,
         columns: MutableList<ColumnMeta>
-    ) {
+    ): Pair<KSClassDeclaration, Triple<String, String, String>>? {
         val hasElementCollection = resolvePersistenceAnnotations(prop).has(ELEMENT_COLLECTION_FQN)
         if (hasElementCollection && !prop.isMutable) {
             logger.error(
@@ -315,15 +369,21 @@ internal class EmbeddableAnalyzer(
                     "'$classFqn.$propName'. Use a constructor `val` parameter or a reactive `var`.",
                 prop
             )
-            return
+            return null
         }
         val col =
             if (hasElementCollection) {
-                columnMetaBuilder.buildElementCollectionColumn(prop, classFqn, isCtorParam = false) ?: return
+                columnMetaBuilder.buildElementCollectionColumn(prop, classFqn, isCtorParam = false) ?: return null
             } else {
-                columnMetaBuilder.buildColumnMeta(prop, hasDeclaredId, versionedName, ctorParamNames, aggregateBackingScalarNames) ?: return
+                val eligibility = columnMetaBuilder.buildColumnMeta(prop, hasDeclaredId, versionedName, ctorParamNames, classDecl, aggregateBackingScalarNames)
+                when (eligibility) {
+                    is Eligibility.Deferred -> return eligibility.symbol to deferralDetail(classDecl, propName, prop, eligibility.unresolvedAnnotation)
+                    is Eligibility.Excluded -> return null
+                    is Eligibility.Column -> eligibility.meta
+                }
             }
         columns += col
+        return null
     }
 
     /**
@@ -466,11 +526,13 @@ internal class EmbeddableAnalyzer(
         prop: KSPropertyDeclaration,
         ctorParamName: String,
         embeddedAnnotation: KSAnnotation,
+        rootClass: KSClassDeclaration,
         columnsAccumulator: MutableList<ColumnMeta>,
         parentPrefix: String,
         parentPath: String,
         topLevelPropertyName: String,
-        embeddableFiles: MutableSet<KSFile> = mutableSetOf()
+        embeddableFiles: MutableSet<KSFile> = mutableSetOf(),
+        deferralHolder: Array<Pair<KSClassDeclaration, Triple<String, String, String>>?>? = null
     ): EmbeddedCtorSlot? {
         // Kind checks run before descent so the recursion only ever visits well-formed embeddables.
         val typeDecl = validateEmbeddableTarget(prop) ?: return null
@@ -486,7 +548,8 @@ internal class EmbeddableAnalyzer(
             val slot =
                 buildEmbeddableChildSlot(
                     typeDecl, typeFqn, childParam, effectivePrefix,
-                    parentPath, topLevelPropertyName, columnsAccumulator, embeddableFiles
+                    parentPath, topLevelPropertyName, rootClass, columnsAccumulator, embeddableFiles,
+                    deferralHolder
                 )
             if (slot == null) anyChildFailed = true else childSlots += slot
         }
@@ -545,8 +608,10 @@ internal class EmbeddableAnalyzer(
         effectivePrefix: String,
         parentPath: String,
         topLevelPropertyName: String,
+        rootClass: KSClassDeclaration,
         columnsAccumulator: MutableList<ColumnMeta>,
-        embeddableFiles: MutableSet<KSFile>
+        embeddableFiles: MutableSet<KSFile>,
+        deferralHolder: Array<Pair<KSClassDeclaration, Triple<String, String, String>>?>? = null
     ): CtorSlot? {
         val childParamName = childParam.name?.asString() ?: return null
         val childProp =
@@ -554,24 +619,36 @@ internal class EmbeddableAnalyzer(
 
         // Check exclusion via the centralized resolver so cross-module @PersistenceIgnore on
         // VALUE_PARAMETER is visible.
-        if (columnMetaBuilder.isExcluded(childProp, childParam)) {
-            // IgnoredCtorSlot emits `null` for the param in generated fromRow. That is only safe
-            // when the param is nullable or has a default value — a non-nullable no-default param
-            // with null would produce code that either fails to compile or throws NullPointerException
-            // at instantiation time. Reject the embeddable early with a clear diagnostic so the
-            // developer is informed rather than getting cryptic downstream failures.
-            val isNullable = childParam.type.resolve().isMarkedNullable
-            if (!isNullable && !childParam.hasDefault) {
-                logger.error(
-                    "@PersistenceIgnore on '$typeFqn.$childParamName' cannot be applied: the parameter " +
-                        "is non-nullable and has no default value. Emitting null for it in `fromRow` would " +
-                        "produce non-compiling or crashing generated code. Make the parameter nullable, " +
-                        "provide a default value, or remove @PersistenceIgnore.",
-                    childProp
+        when (val childEligibility = columnMetaBuilder.checkEligibility(childProp, childParam, typeDecl)) {
+            is Eligibility.Deferred -> {
+                // Attribute the deferral to the owning @PersistenceMapping entity (rootClass), not
+                // the nested @Embeddable: TableDefProcessor re-queues and prunes by the entity FQN.
+                deferralHolder?.set(
+                    0,
+                    rootClass to deferralDetail(rootClass, childParamName, childProp, childEligibility.unresolvedAnnotation)
                 )
                 return null
             }
-            return IgnoredCtorSlot(childParamName)
+            is Eligibility.Excluded -> {
+                // IgnoredCtorSlot emits `null` for the param in generated fromRow. That is only safe
+                // when the param is nullable or has a default value — a non-nullable no-default param
+                // with null would produce code that either fails to compile or throws NullPointerException
+                // at instantiation time. Reject the embeddable early with a clear diagnostic so the
+                // developer is informed rather than getting cryptic downstream failures.
+                val isNullable = childParam.type.resolve().isMarkedNullable
+                if (!isNullable && !childParam.hasDefault) {
+                    logger.error(
+                        "@PersistenceIgnore on '$typeFqn.$childParamName' cannot be applied: the parameter " +
+                            "is non-nullable and has no default value. Emitting null for it in `fromRow` would " +
+                            "produce non-compiling or crashing generated code. Make the parameter nullable, " +
+                            "provide a default value, or remove @PersistenceIgnore.",
+                        childProp
+                    )
+                    return null
+                }
+                return IgnoredCtorSlot(childParamName)
+            }
+            is Eligibility.Column -> { /* property is eligible — proceed */ }
         }
 
         val childHasElementCollection = resolvePersistenceAnnotations(childProp, childParam).has(ELEMENT_COLLECTION_FQN)
@@ -592,24 +669,60 @@ internal class EmbeddableAnalyzer(
                 prop = childProp,
                 ctorParamName = childParamName,
                 embeddedAnnotation = childEmbedded,
+                rootClass = rootClass,
                 columnsAccumulator = columnsAccumulator,
                 parentPrefix = "${effectivePrefix}${autoDerivedPrefix(childParamName)}",
                 parentPath = "$parentPath.$childParamName",
                 topLevelPropertyName = topLevelPropertyName,
-                embeddableFiles = embeddableFiles
+                embeddableFiles = embeddableFiles,
+                deferralHolder = deferralHolder
             )
         }
 
-        val leafCol =
+        val leafEligibility =
             columnMetaBuilder.buildEmbeddedLeafColumn(
                 childProp = childProp,
                 childParamName = childParamName,
                 ctorParam = childParam,
                 prefix = effectivePrefix,
                 parentPath = parentPath,
-                topLevelPropertyName = topLevelPropertyName
-            ) ?: return null
-        columnsAccumulator += leafCol
-        return ScalarCtorSlot(childParamName, leafCol)
+                topLevelPropertyName = topLevelPropertyName,
+                enclosingClass = typeDecl
+            )
+        return when (leafEligibility) {
+            is Eligibility.Deferred -> {
+                deferralHolder?.set(
+                    0,
+                    rootClass to deferralDetail(rootClass, childParamName, childProp, leafEligibility.unresolvedAnnotation)
+                )
+                null
+            }
+            is Eligibility.Excluded -> null
+            is Eligibility.Column -> {
+                columnsAccumulator += leafEligibility.meta
+                ScalarCtorSlot(childParamName, leafEligibility.meta)
+            }
+        }
+    }
+
+    /**
+     * Builds the `(entityFqn, propertyName, detail)` record for a deferred property. [detail]
+     * describes what could not be resolved — either `type '<fqn>'` or `an annotation` — so the
+     * terminal diagnostic does not misreport an unresolved annotation as an unresolved type.
+     */
+    private fun deferralDetail(
+        classDecl: KSClassDeclaration,
+        propName: String,
+        prop: KSPropertyDeclaration,
+        unresolvedAnnotation: Boolean
+    ): Triple<String, String, String> {
+        val entityFqn = classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString()
+        val detail =
+            if (unresolvedAnnotation) {
+                "an annotation"
+            } else {
+                "type '${prop.type.resolve().declaration.qualifiedName?.asString() ?: prop.type}'"
+            }
+        return Triple(entityFqn, propName, detail)
     }
 }

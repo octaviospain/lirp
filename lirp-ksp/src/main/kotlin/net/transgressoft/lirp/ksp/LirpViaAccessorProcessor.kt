@@ -107,35 +107,7 @@ class LirpViaAccessorProcessor(
         val kotlinClassName = classDecl.kotlinNestedName()
         val accessorName = "${className}_LirpViaAccessor"
 
-        val singleMetas = mutableListOf<ViaPropertyMeta>()
-        val collectionMetas = mutableListOf<ViaPropertyMeta>()
-
-        for (prop in properties) {
-            val resolvedType = prop.type.resolve()
-            if (isCollectionReference(prop, resolvedType)) {
-                val referencedClassFqn =
-                    findReferencedClassFqnFromCollectionType(resolvedType)
-                        ?: run {
-                            logger.warn(
-                                "Cannot determine referenced class for collection property " +
-                                    "'${prop.simpleName.asString()}' in $className — skipping"
-                            )
-                            continue
-                        }
-                collectionMetas.add(ViaPropertyMeta(prop.simpleName.asString(), referencedClassFqn))
-            } else {
-                val referencedClassFqn =
-                    findReferencedClassFqnFromType(resolvedType)
-                        ?: run {
-                            logger.warn(
-                                "Cannot determine referenced class for property " +
-                                    "'${prop.simpleName.asString()}' in $className — skipping"
-                            )
-                            continue
-                        }
-                singleMetas.add(ViaPropertyMeta(prop.simpleName.asString(), referencedClassFqn))
-            }
-        }
+        val (singleMetas, collectionMetas) = collectViaPropertyMetas(properties, className)
 
         val containingFile = classDecl.containingFile
         if (containingFile == null) {
@@ -233,6 +205,40 @@ class LirpViaAccessorProcessor(
         file.close()
 
         logger.info("Generated $packageName.$accessorName for $className")
+    }
+
+    /**
+     * Resolves each `@Aggregate` reference property into a [ViaPropertyMeta], partitioned into
+     * single-reference and collection-reference metas. Properties whose referenced class cannot be
+     * determined are skipped with a warning rather than failing the build.
+     */
+    private fun collectViaPropertyMetas(
+        properties: List<KSPropertyDeclaration>,
+        className: String
+    ): Pair<List<ViaPropertyMeta>, List<ViaPropertyMeta>> {
+        val singleMetas = mutableListOf<ViaPropertyMeta>()
+        val collectionMetas = mutableListOf<ViaPropertyMeta>()
+        for (prop in properties) {
+            val resolvedType = prop.type.resolve()
+            val isCollection = isCollectionReference(prop, resolvedType)
+            val referencedClassFqn =
+                if (isCollection) {
+                    findReferencedClassFqnFromCollectionType(resolvedType)
+                } else {
+                    findReferencedClassFqnFromType(resolvedType)
+                }
+            if (referencedClassFqn == null) {
+                val kind = if (isCollection) "collection property" else "property"
+                logger.warn(
+                    "Cannot determine referenced class for $kind " +
+                        "'${prop.simpleName.asString()}' in $className — skipping"
+                )
+                continue
+            }
+            val meta = ViaPropertyMeta(prop.simpleName.asString(), referencedClassFqn)
+            if (isCollection) collectionMetas.add(meta) else singleMetas.add(meta)
+        }
+        return singleMetas to collectionMetas
     }
 
     private fun isCollectionReference(prop: KSPropertyDeclaration, type: KSType): Boolean {
