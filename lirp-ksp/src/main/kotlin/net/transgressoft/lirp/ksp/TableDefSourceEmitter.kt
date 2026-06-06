@@ -30,7 +30,8 @@ internal data class ObjectBodyParams(
     val ctorSlots: List<CtorSlot> = emptyList(),
     val setterSlots: List<EmbeddedSetterSlot> = emptyList(),
     val foreignKeys: List<ForeignKeyMeta> = emptyList(),
-    val junctionRefs: List<JunctionRefInfo> = emptyList()
+    val junctionRefs: List<JunctionRefInfo> = emptyList(),
+    val isReactiveEntity: Boolean = true
 )
 
 /**
@@ -135,7 +136,7 @@ internal object TableDefSourceEmitter {
         appendLine("    )")
         if (canGenerateSqlMapping) {
             appendLine()
-            appendFromRow(className, columns, constructorParamNames, params.ctorSlots)
+            appendFromRow(className, columns, constructorParamNames, params.ctorSlots, params.isReactiveEntity)
             appendLine()
             appendToParams(className, columns)
             appendLine()
@@ -210,7 +211,8 @@ internal object TableDefSourceEmitter {
         className: String,
         columns: List<ColumnMeta>,
         constructorParamNames: List<String>,
-        ctorSlots: List<CtorSlot> = emptyList()
+        ctorSlots: List<CtorSlot> = emptyList(),
+        isReactiveEntity: Boolean = true
     ) {
         val columnsByName = columns.associateBy { it.propertyName }
         // Preserve constructor parameter declaration order for correct positional arguments
@@ -231,10 +233,19 @@ internal object TableDefSourceEmitter {
                 orderedCtorCols.joinToString(", ") { buildRowAccess(it) }
             }
         appendLine("        val entity = $className($ctorArgs)")
+        // Populate body-declared (non-ctor) columns with events disabled for reactive entities.
+        // These are reactive property setters; emitting during hydration would schedule a stray
+        // write-back of the just-loaded values that races the repository's mutation subscription.
+        // Mirrors the withEventsDisabled guard applied in applyScalarRow / applyJunctionRows.
+        // Non-reactive `@PersistenceMapping` classes lack withEventsDisabled, so set directly.
+        val wrapInEventsDisabled = isReactiveEntity && setterCols.isNotEmpty()
+        val setterIndent = if (wrapInEventsDisabled) "            " else "        "
+        if (wrapInEventsDisabled) appendLine("        entity.withEventsDisabled {")
         for (col in setterCols) {
             val rowAccess = buildRowAccess(col)
-            appendLine("        entity.${col.propertyName} = $rowAccess")
+            appendLine("${setterIndent}entity.${col.propertyName} = $rowAccess")
         }
+        if (wrapInEventsDisabled) appendLine("        }")
         appendLine("        return entity")
         appendLine("    }")
     }

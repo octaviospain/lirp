@@ -548,7 +548,8 @@ class TableDefProcessor(
                         ctorSlots = ctorSlots,
                         setterSlots = setterSlots,
                         foreignKeys = foreignKeys,
-                        junctionRefs = if (emitJunctions) junctionRefs else emptyList()
+                        junctionRefs = if (emitJunctions) junctionRefs else emptyList(),
+                        isReactiveEntity = extendsReactiveEntityBase(classDecl)
                     ),
                     visibility = visibility
                 )

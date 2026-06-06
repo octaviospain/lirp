@@ -89,6 +89,14 @@ internal fun isLirpEntity(decl: KSClassDeclaration): Boolean =
     isTypeByFqn(decl, REACTIVE_ENTITY_BASE_FQN) || isTypeByFqn(decl, IDENTIFIABLE_ENTITY_FQN)
 
 /**
+ * Returns true when [decl] extends `ReactiveEntityBase`, meaning generated hydration code may call
+ * `withEventsDisabled { }` on instances. Plain `@PersistenceMapping` classes that do not extend it
+ * (e.g. minimal test fixtures) lack that method, so generated code must not reference it for them.
+ */
+internal fun extendsReactiveEntityBase(decl: KSClassDeclaration): Boolean =
+    isTypeByFqn(decl, REACTIVE_ENTITY_BASE_FQN)
+
+/**
  * Returns true for anonymous objects and local classes that cannot have meaningful KSP-generated
  * accessors. Anonymous objects expose an empty [simpleName]; local classes lack a [qualifiedName].
  */

@@ -264,6 +264,40 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "entity.name ="
         content shouldContain "entity.active ="
         content shouldContain "return entity"
+        // Non-reactive @PersistenceMapping classes have no withEventsDisabled — must not be wrapped.
+        content shouldNotContain "withEventsDisabled"
+    }
+
+    test("generates fromRow that hydrates a reactive entity inside withEventsDisabled") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "ReactiveFromRowEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class ReactiveFromRowEntity(override val id: Int) : ReactiveEntityBase<Int, ReactiveFromRowEntity>() {
+                    var name: String by reactiveProperty("")
+                    var score: Int by reactiveProperty(0)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = ReactiveFromRowEntity(id).also { it.name = name; it.score = score }
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("ReactiveFromRowEntity_LirpTableDef.kt")
+        // Hydration of a reactive entity must not emit mutation events — emitting during load would
+        // schedule a stray write-back of the just-loaded values that races the repository's mutation
+        // subscription (observed as an intermittently-lost update). The body-declared reactive
+        // setters are therefore wrapped in withEventsDisabled.
+        content shouldContain "entity.withEventsDisabled {"
+        content shouldContain "entity.name ="
+        content shouldContain "entity.score ="
     }
 
     test("generates toParams that returns all column-value pairs including PK") {
