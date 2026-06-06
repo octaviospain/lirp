@@ -136,7 +136,7 @@ internal object TableDefSourceEmitter {
         appendLine("    )")
         if (canGenerateSqlMapping) {
             appendLine()
-            appendFromRow(className, columns, constructorParamNames, params.ctorSlots, params.isReactiveEntity)
+            appendFromRow(className, columns, constructorParamNames, params.ctorSlots, params.setterSlots, params.isReactiveEntity)
             appendLine()
             appendToParams(className, columns)
             appendLine()
@@ -212,6 +212,7 @@ internal object TableDefSourceEmitter {
         columns: List<ColumnMeta>,
         constructorParamNames: List<String>,
         ctorSlots: List<CtorSlot> = emptyList(),
+        embeddedSetterSlots: List<EmbeddedSetterSlot> = emptyList(),
         isReactiveEntity: Boolean = true
     ) {
         val columnsByName = columns.associateBy { it.propertyName }
@@ -238,12 +239,20 @@ internal object TableDefSourceEmitter {
         // write-back of the just-loaded values that races the repository's mutation subscription.
         // Mirrors the withEventsDisabled guard applied in applyScalarRow / applyJunctionRows.
         // Non-reactive `@PersistenceMapping` classes lack withEventsDisabled, so set directly.
-        val wrapInEventsDisabled = isReactiveEntity && setterCols.isNotEmpty()
+        val wrapInEventsDisabled = isReactiveEntity && (setterCols.isNotEmpty() || embeddedSetterSlots.isNotEmpty())
         val setterIndent = if (wrapInEventsDisabled) "            " else "        "
         if (wrapInEventsDisabled) appendLine("        entity.withEventsDisabled {")
         for (col in setterCols) {
             val rowAccess = buildRowAccess(col)
             appendLine("${setterIndent}entity.${col.propertyName} = $rowAccess")
+        }
+        // Body-declared `@Embedded var` properties are excluded from setterCols (their leaves are
+        // isInsideEmbedded); reconstruct each from its nested constructor expression so a standalone
+        // fromRow() (e.g. the conflict-recovery reload) hydrates them instead of leaving the var at
+        // its default. Mirrors the reconstruction already emitted in applyScalarRow.
+        for (slot in embeddedSetterSlots) {
+            val reconstruction = buildCtorArgExpression(EmbeddedCtorSlot(slot.ctorParamName, slot.embeddableTypeFqn, slot.children))
+            appendLine("${setterIndent}entity.${slot.ctorParamName} = $reconstruction")
         }
         if (wrapInEventsDisabled) appendLine("        }")
         appendLine("        return entity")

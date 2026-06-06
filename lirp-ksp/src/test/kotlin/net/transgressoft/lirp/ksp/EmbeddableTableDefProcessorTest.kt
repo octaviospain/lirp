@@ -320,6 +320,41 @@ class EmbeddableTableDefProcessorTest : StringSpec({
         fromRowBlock shouldContain "test.ArtistEmbeddable("
     }
 
+    "reconstructs body-declared @Embedded var in fromRow, not only in applyScalarRow" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "BodyEmbeddedEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.Embeddable
+                    import net.transgressoft.lirp.persistence.Embedded
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                    @Embeddable
+                    data class ArtistEmbeddable(val name: String, val countryCode: String)
+
+                    @PersistenceMapping
+                    class BodyEmbeddedEntity(override val id: Int) : ReactiveEntityBase<Int, BodyEmbeddedEntity>() {
+                        @Embedded var performer: ArtistEmbeddable by reactiveProperty(ArtistEmbeddable("", ""))
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = BodyEmbeddedEntity(id).also { it.performer = performer }
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("BodyEmbeddedEntity_LirpTableDef.kt")
+        // A standalone fromRow() (e.g. the conflict-recovery reload) must hydrate body-declared
+        // @Embedded var properties, not leave them at their default. The reconstruction runs inside
+        // the withEventsDisabled hydration block.
+        val fromRowBlock = content.substringAfter("override fun fromRow").substringBefore("override fun ")
+        fromRowBlock shouldContain "entity.withEventsDisabled {"
+        fromRowBlock shouldContain "entity.performer = test.ArtistEmbeddable("
+    }
+
     "nested explicit prefix preserves ancestor prefix segment" {
         val result =
             compileWithProcessor(

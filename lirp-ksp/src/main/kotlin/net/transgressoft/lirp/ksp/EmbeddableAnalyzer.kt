@@ -534,6 +534,17 @@ internal class EmbeddableAnalyzer(
         embeddableFiles: MutableSet<KSFile> = mutableSetOf(),
         deferralHolder: Array<Pair<KSClassDeclaration, Triple<String, String, String>>?>? = null
     ): EmbeddedCtorSlot? {
+        // An @Embedded container type that is still a KSP error type this round must be deferred
+        // (re-queued for a later round), not run through structural validation — which would treat
+        // it as "must reference a class type" and emit a spurious diagnostic while skipping the
+        // deferral path entirely. Mirrors the scalar/leaf error-type deferral in ColumnMetaBuilder.
+        if (prop.type.resolve().isError) {
+            deferralHolder?.set(
+                0,
+                rootClass to deferralDetail(rootClass, topLevelPropertyName, prop, unresolvedAnnotation = false)
+            )
+            return null
+        }
         // Kind checks run before descent so the recursion only ever visits well-formed embeddables.
         val typeDecl = validateEmbeddableTarget(prop) ?: return null
         val typeFqn = typeDecl.qualifiedName?.asString() ?: return null
