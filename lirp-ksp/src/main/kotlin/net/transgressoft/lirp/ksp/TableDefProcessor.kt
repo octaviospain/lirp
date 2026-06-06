@@ -71,6 +71,22 @@ class TableDefProcessor(
     private val embeddableAnalyzer = EmbeddableAnalyzer(logger, columnMetaBuilder)
     private val foreignKeyAnalyzer = ForeignKeyAnalyzer(logger, codeGenerator, columnMetaBuilder)
 
+    /**
+     * Accumulates deferral records `(entityFqn, propertyName, detail)` across processing rounds.
+     * Entities that successfully generate in a later round are removed from this set so that only
+     * permanently unresolvable types produce a terminal diagnostic.
+     */
+    private val deferredRecords = mutableSetOf<Triple<String, String, String>>()
+
+    /**
+     * Tracks entity FQNs that were unable to be processed because the class-level symbol failed
+     * [KSAnnotated.validate] — meaning one or more of its dependencies (including property types)
+     * were unresolvable. Populated in [collectPersistenceMappingClasses] and
+     * [collectPersistencePropertyClasses] alongside `unableToProcess`. Pruned when the entity
+     * successfully generates in a later round.
+     */
+    private val validationDeferredFqns = mutableSetOf<String>()
+
     override fun process(resolver: Resolver): List<KSAnnotated> {
         val unableToProcess = mutableListOf<KSAnnotated>()
         val classes = mutableSetOf<KSClassDeclaration>()
@@ -102,14 +118,30 @@ class TableDefProcessor(
             // referenced entity's primary key type, not by a domain-to-scalar converter.
             val aggregateBackingScalarNames =
                 aggregates.filter { !it.isCollection }.mapNotNull { it.backingScalarName }.toSet()
+
+            val entityFqn = classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString()
+            // Clear any prior per-entity deferral state before recording this round's outcome. An
+            // entity that deferred on property A in one round and then on property B in a later round
+            // must not retain the stale record for A — otherwise finish()/onError() emits stale or
+            // duplicate terminal diagnostics for already-resolved blockers.
+            deferredRecords.removeIf { it.first == entityFqn }
+            validationDeferredFqns.remove(entityFqn)
+            val collected =
+                embeddableAnalyzer.collectColumnsAndSlots(classDecl, versionedByClass[classDecl], excludedBackingFields, aggregateBackingScalarNames)
+            if (collected.deferredSymbol != null) {
+                // The entity has at least one property whose type is unresolvable in this round.
+                // Re-queue the entity so KSP retries it after pending symbols are contributed.
+                unableToProcess.add(collected.deferredSymbol)
+                collected.deferredDetail?.let { deferredRecords.add(it) }
+                continue
+            }
+
             generateTableDef(
                 classDecl,
                 sqlTableDefAvailable,
-                versionedByClass[classDecl],
                 foreignKeys,
                 junctionRefs,
-                excludedBackingFields,
-                aggregateBackingScalarNames
+                collected
             )
 
             if (sqlTableDefAvailable) {
@@ -120,6 +152,40 @@ class TableDefProcessor(
         }
 
         return unableToProcess
+    }
+
+    /**
+     * Emits a targeted diagnostic for every deferral record that never converged because the
+     * processor is being called as part of error clean-up. Note that [onError] fires whenever
+     * any KSP error is logged — permanently unresolved types may appear here alongside other
+     * compilation errors.
+     */
+    override fun onError() {
+        emitTerminalDeferralDiagnostics()
+    }
+
+    /**
+     * Belt-and-suspenders terminal diagnostic path invoked at the end of all KSP rounds when
+     * processing completes without a prior error. Emits one [KSPLogger.error] per deferral
+     * record that never converged, naming the entity, property, and unresolved type.
+     */
+    override fun finish() {
+        emitTerminalDeferralDiagnostics()
+    }
+
+    private fun emitTerminalDeferralDiagnostics() {
+        for ((entityFqn, propName, detail) in deferredRecords) {
+            logger.error(
+                "Property '$entityFqn.$propName' — $detail is still unresolved after final round. " +
+                    "Ensure the type is on the compilation classpath or remove the @PersistenceProperty annotation."
+            )
+        }
+        for (entityFqn in validationDeferredFqns) {
+            logger.error(
+                "Entity '$entityFqn' — one or more property types are still unresolved after final round. " +
+                    "Ensure all property types are on the compilation classpath."
+            )
+        }
     }
 
     /**
@@ -277,6 +343,7 @@ class TableDefProcessor(
             if (symbol !is KSClassDeclaration) continue
             if (!symbol.validate()) {
                 unableToProcess.add(symbol)
+                validationDeferredFqns.add(symbol.qualifiedName?.asString() ?: symbol.simpleName.asString())
                 continue
             }
             classes.add(symbol)
@@ -294,6 +361,7 @@ class TableDefProcessor(
             val parent = symbol.parentDeclaration as? KSClassDeclaration ?: continue
             if (!parent.validate()) {
                 unableToProcess.add(symbol)
+                validationDeferredFqns.add(parent.qualifiedName?.asString() ?: parent.simpleName.asString())
                 continue
             }
             classes.add(parent)
@@ -398,11 +466,9 @@ class TableDefProcessor(
     private fun generateTableDef(
         classDecl: KSClassDeclaration,
         sqlTableDefAvailable: Boolean,
-        versionedProperty: KSPropertyDeclaration?,
-        foreignKeys: List<ForeignKeyMeta> = emptyList(),
-        junctionRefs: List<JunctionRefInfo> = emptyList(),
-        excludedBackingFields: Set<String> = emptySet(),
-        aggregateBackingScalarNames: Set<String> = emptySet()
+        foreignKeys: List<ForeignKeyMeta>,
+        junctionRefs: List<JunctionRefInfo>,
+        collected: EmbeddableAnalyzer.CollectedShape
     ) {
         val visibility = effectiveVisibilityModifier(classDecl)
         if (visibility == null) {
@@ -419,11 +485,10 @@ class TableDefProcessor(
         val tableDefName = "${className}_LirpTableDef"
 
         val tableName = resolveTableName(classDecl, className)
-        val collected =
-            embeddableAnalyzer.collectColumnsAndSlots(classDecl, versionedProperty, excludedBackingFields, aggregateBackingScalarNames)
-        val columns = collected.columns
-        val ctorSlots = collected.ctorSlots
-        val setterSlots = collected.setterSlots
+        val resolvedShape = collected
+        val columns = resolvedShape.columns
+        val ctorSlots = resolvedShape.ctorSlots
+        val setterSlots = resolvedShape.setterSlots
 
         // column-name collision detection runs ONCE at the entity level on the fully
         // flattened column list, after all recursive @Embedded descents. Detection at this level
@@ -458,7 +523,7 @@ class TableDefProcessor(
         // whenever any involved source changes: the entity itself and any nested @Embeddable types
         // visited during recursive descent.
         val involvedFiles =
-            (listOfNotNull(classDecl.containingFile) + collected.embeddableFiles)
+            (listOfNotNull(classDecl.containingFile) + resolvedShape.embeddableFiles)
                 .distinct()
                 .toTypedArray()
         val file =
@@ -483,7 +548,8 @@ class TableDefProcessor(
                         ctorSlots = ctorSlots,
                         setterSlots = setterSlots,
                         foreignKeys = foreignKeys,
-                        junctionRefs = if (emitJunctions) junctionRefs else emptyList()
+                        junctionRefs = if (emitJunctions) junctionRefs else emptyList(),
+                        isReactiveEntity = extendsReactiveEntityBase(classDecl)
                     ),
                     visibility = visibility
                 )

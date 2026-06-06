@@ -57,6 +57,7 @@ internal const val KOTLIN_MUTABLE_LIST_FQN = "kotlin.collections.MutableList"
 internal const val KOTLIN_MUTABLE_SET_FQN = "kotlin.collections.MutableSet"
 internal const val KOTLIN_MAP_FQN = "kotlin.collections.Map"
 internal const val TRANSIENT_FQN = "kotlin.jvm.Transient"
+internal const val KOTLINX_SERIALIZATION_TRANSIENT_FQN = "kotlinx.serialization.Transient"
 
 internal val LIRP_COLLECTION_FQNS: Set<String> =
     setOf(

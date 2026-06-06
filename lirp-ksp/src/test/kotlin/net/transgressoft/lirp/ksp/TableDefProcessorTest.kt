@@ -264,6 +264,40 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "entity.name ="
         content shouldContain "entity.active ="
         content shouldContain "return entity"
+        // Non-reactive @PersistenceMapping classes have no withEventsDisabled — must not be wrapped.
+        content shouldNotContain "withEventsDisabled"
+    }
+
+    test("generates fromRow that hydrates a reactive entity inside withEventsDisabled") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "ReactiveFromRowEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class ReactiveFromRowEntity(override val id: Int) : ReactiveEntityBase<Int, ReactiveFromRowEntity>() {
+                    var name: String by reactiveProperty("")
+                    var score: Int by reactiveProperty(0)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = ReactiveFromRowEntity(id).also { it.name = name; it.score = score }
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("ReactiveFromRowEntity_LirpTableDef.kt")
+        // Hydration of a reactive entity must not emit mutation events — emitting during load would
+        // schedule a stray write-back of the just-loaded values that races the repository's mutation
+        // subscription (observed as an intermittently-lost update). The body-declared reactive
+        // setters are therefore wrapped in withEventsDisabled.
+        content shouldContain "entity.withEventsDisabled {"
+        content shouldContain "entity.name ="
+        content shouldContain "entity.score ="
     }
 
     test("generates toParams that returns all column-value pairs including PK") {
@@ -1714,6 +1748,44 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "entity.flag?.toInt()"
     }
 
+    test("TableDefProcessor excludes @kotlinx.serialization.Transient mirror and generates delegate-backed column for lirp+kotlinx+reactive-delegate entity") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "AudioItem.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.PersistenceProperty
+                import kotlinx.serialization.Transient as KxTransient
+
+                @PersistenceMapping
+                data class AudioItem(
+                    override val id: Int,
+                    @PersistenceProperty val title: String
+                ) : ReactiveEntityBase<Int, AudioItem>() {
+                    @KxTransient
+                    val titleProperty: Any = Any()
+
+                    var displayName: String by reactiveProperty(title)
+
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = AudioItem(id, title).also { it.displayName = displayName }
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("AudioItem_LirpTableDef.kt")
+        content shouldContain "\"title\""
+        content shouldContain "\"display_name\""
+        content shouldNotContain "titleProperty"
+        content shouldNotContain "title_property"
+        result.messages shouldNotContain "Unsupported column type"
+    }
+
     test("TableDefProcessor preserves existing kotlin.Int code generation when Short and Byte are also present") {
         val result =
             compileWithProcessor(
@@ -1752,5 +1824,51 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "as Number).toByte()"
         content shouldContain "entity.b.toInt()"
         content shouldContain "entity.c.toInt()"
+    }
+
+    // ---- Deferral — terminal diagnostic for permanently-unresolved types (#219) ----
+
+    test("TableDefProcessor emits targeted diagnostic for permanently unresolved property type") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "BrokenEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.PersistenceProperty
+
+                @PersistenceMapping
+                class BrokenEntity(val id: Int) {
+                    @PersistenceProperty
+                    var score: DoesNotExist = error("unreachable")
+                }
+                """
+                )
+            )
+
+        result.messages shouldContain "still unresolved after final round"
+    }
+
+    test("TableDefProcessor emits no terminal diagnostic when types resolve") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "ResolvableEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class ResolvableEntity(val id: Int) {
+                    var name: String = ""
+                    var count: Int = 0
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.messages shouldNotContain "still unresolved after final round"
     }
 })
