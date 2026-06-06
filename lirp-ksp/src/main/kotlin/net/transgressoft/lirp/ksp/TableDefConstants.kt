@@ -19,6 +19,7 @@ package net.transgressoft.lirp.ksp
 
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 
+internal const val REACTIVE_ENTITY_FQN = "net.transgressoft.lirp.entity.ReactiveEntity"
 internal const val PERSISTENCE_MAPPING_FQN = "net.transgressoft.lirp.persistence.PersistenceMapping"
 internal const val PERSISTENCE_PROPERTY_FQN = "net.transgressoft.lirp.persistence.PersistenceProperty"
 internal const val VERSION_FQN = "net.transgressoft.lirp.persistence.Version"
@@ -46,6 +47,13 @@ internal const val COLUMN_TYPE_UUID_EXPR = "ColumnType.UuidType"
 internal const val COLUMN_TYPE_DATE_EXPR = "ColumnType.DateType"
 internal const val COLUMN_TYPE_DATETIME_EXPR = "ColumnType.DateTimeType"
 internal const val LIST_ITEM_SEPARATOR = ",\n        "
+
+// Closing-brace source fragments emitted by [TableDefSourceEmitter]. The indentation is part of
+// the generated layout: [INNER_BLOCK_CLOSE] closes a block nested inside a method body (a `when`
+// branch or `withEventsDisabled { … }` wrapper), [METHOD_CLOSE] closes an override's body.
+internal const val INNER_BLOCK_CLOSE = "        }"
+internal const val METHOD_CLOSE = "    }"
+
 internal const val COLUMN_CONVERTER_FQN = "net.transgressoft.lirp.persistence.ColumnConverter"
 internal const val EMBEDDABLE_FQN = "net.transgressoft.lirp.persistence.Embeddable"
 internal const val EMBEDDED_FQN = "net.transgressoft.lirp.persistence.Embedded"

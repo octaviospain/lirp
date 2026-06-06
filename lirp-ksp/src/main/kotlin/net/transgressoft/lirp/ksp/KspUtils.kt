@@ -26,6 +26,7 @@ import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.symbol.KSTypeAlias
 import com.google.devtools.ksp.symbol.KSTypeArgument
+import com.google.devtools.ksp.symbol.KSTypeParameter
 import com.google.devtools.ksp.symbol.KSValueParameter
 import com.google.devtools.ksp.symbol.Modifier
 import com.google.devtools.ksp.symbol.Origin
@@ -347,3 +348,91 @@ internal fun collectReactivePropertiesIncludingInherited(classDecl: KSClassDecla
     addFrom(classDecl, mutableSetOf())
     return byName.values.toList()
 }
+
+/**
+ * Resolves the reactive self-type `R` from [classDecl]'s `ReactiveEntity<K, R>` or
+ * `ReactiveEntityBase<K, R>` supertype by walking the supertype graph transitively, carrying
+ * type-argument substitutions at each level.
+ *
+ * Returns the fully-qualified name of `R` when it can be resolved to a concrete declaration, or
+ * `null` when the `ReactiveEntity`/`ReactiveEntityBase` supertype is absent or when `R` resolves
+ * to an unsubstituted type parameter. A visited-set guards against cyclic supertype references,
+ * mirroring [isTypeByFqn].
+ *
+ * The substitution map carries each supertype declaration's type-parameter names mapped to the
+ * concrete type-arguments written at the use site. When descending from `ConcreteEntity`
+ * into `IntermediateBase<K, R>` into `ReactiveEntityBase<K, R>`, the `R` argument written on the
+ * outermost extends-clause is preserved through the chain so the final match on
+ * `ReactiveEntityBase` yields the concrete reactive interface rather than the abstract `R`.
+ */
+internal fun resolveReactiveSelfType(classDecl: KSClassDeclaration): String? =
+    resolveReactiveSelfTypeInternal(classDecl, emptyMap(), mutableSetOf())
+
+private fun resolveReactiveSelfTypeInternal(
+    classDecl: KSClassDeclaration,
+    substitutions: Map<String, KSType>,
+    visited: MutableSet<String>
+): String? {
+    val declFqn = classDecl.qualifiedName?.asString() ?: return null
+    if (!visited.add(declFqn)) return null
+
+    for (superRef in classDecl.superTypes) {
+        val resolved = superRef.resolve()
+        val superDecl = resolved.declaration as? KSClassDeclaration ?: continue
+        val superFqn = superDecl.qualifiedName?.asString() ?: continue
+
+        val nextSubstitutions = buildSupertypeSubstitutions(resolved, superDecl, substitutions)
+
+        if (superFqn == REACTIVE_ENTITY_FQN || superFqn == REACTIVE_ENTITY_BASE_FQN) {
+            return resolveSelfTypeArgument(resolved, nextSubstitutions, substitutions)
+        }
+
+        val result = resolveReactiveSelfTypeInternal(superDecl, nextSubstitutions, visited)
+        if (result != null) return result
+    }
+    return null
+}
+
+/**
+ * Maps each of [superDecl]'s type-parameter names to the concrete argument written at the use
+ * site in [resolved], resolving any argument that is itself a type parameter through the inherited
+ * [substitutions] so a `R` threaded across `IntermediateBase<K, R>` keeps its concrete binding.
+ */
+private fun buildSupertypeSubstitutions(
+    resolved: KSType,
+    superDecl: KSClassDeclaration,
+    substitutions: Map<String, KSType>
+): Map<String, KSType> =
+    superDecl.typeParameters.mapIndexedNotNull { i, param ->
+        val argType = resolved.arguments.getOrNull(i)?.type?.resolve() ?: return@mapIndexedNotNull null
+        param.name.asString() to substituteTypeParameter(argType, substitutions)
+    }.toMap()
+
+/**
+ * Reads `R` (type argument at index 1 of `ReactiveEntity<K, R>` / `ReactiveEntityBase<K, R>`) from
+ * [resolved] and resolves it against the substitution context. Returns the fully-qualified name of
+ * the concrete reactive interface, or `null` when `R` remains an unsubstituted type parameter.
+ */
+private fun resolveSelfTypeArgument(
+    resolved: KSType,
+    nextSubstitutions: Map<String, KSType>,
+    substitutions: Map<String, KSType>
+): String? {
+    val rArg = resolved.arguments.getOrNull(1)?.type?.resolve() ?: return null
+    // `nextSubstitutions` (this level's bindings) takes precedence over the inherited context.
+    val rResolved = substituteTypeParameter(rArg, substitutions + nextSubstitutions)
+    if (rResolved.declaration is KSTypeParameter) return null
+    return rResolved.declaration.qualifiedName?.asString()
+}
+
+/**
+ * Resolves [type] through [substitutions] when it is a type parameter (e.g. `R`), returning the
+ * bound concrete type; otherwise returns [type] unchanged. A type parameter with no binding is
+ * returned as-is so callers can detect that it stayed unresolved.
+ */
+private fun substituteTypeParameter(type: KSType, substitutions: Map<String, KSType>): KSType =
+    if (type.declaration is KSTypeParameter) {
+        substitutions[type.declaration.simpleName.asString()] ?: type
+    } else {
+        type
+    }

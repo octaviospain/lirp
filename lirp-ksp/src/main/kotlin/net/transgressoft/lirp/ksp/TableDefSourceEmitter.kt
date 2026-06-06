@@ -24,6 +24,7 @@ package net.transgressoft.lirp.ksp
  */
 internal data class ObjectBodyParams(
     val tableName: String,
+    val selfType: String,
     val canGenerateSqlMapping: Boolean,
     val columns: List<ColumnMeta>,
     val constructorParamNames: List<String> = emptyList(),
@@ -110,6 +111,7 @@ internal object TableDefSourceEmitter {
         visibility: String = "public"
     ) {
         val tableName = params.tableName
+        val selfType = params.selfType
         val canGenerateSqlMapping = params.canGenerateSqlMapping
         val columns = params.columns
         val constructorParamNames = params.constructorParamNames
@@ -119,7 +121,10 @@ internal object TableDefSourceEmitter {
         if (canGenerateSqlMapping && columns.any { it.typeFqn == UUID_FQN }) {
             appendLine("@OptIn(ExperimentalUuidApi::class)")
         }
-        val superType = if (canGenerateSqlMapping) "SqlTableDef<$className>" else "LirpTableDef<$className>"
+        // Type parameter is the reactive self-type R so the descriptor satisfies the repository
+        // bound `R : ReactiveEntity<K, R>`. Method bodies downcast to the concrete class via
+        // `val entity = entityRef as $className` when R differs from the concrete class.
+        val superType = if (canGenerateSqlMapping) "SqlTableDef<$selfType>" else "LirpTableDef<$selfType>"
         appendLine("$visibility object $tableDefName : $superType {")
         appendLine("    override val tableName: String = \"$tableName\"")
         appendLine("    override val columns: List<ColumnDef> = listOf(")
@@ -136,45 +141,49 @@ internal object TableDefSourceEmitter {
         appendLine("    )")
         if (canGenerateSqlMapping) {
             appendLine()
-            appendFromRow(className, columns, constructorParamNames, params.ctorSlots, params.setterSlots, params.isReactiveEntity)
+            appendFromRow(className, selfType, columns, constructorParamNames, params.ctorSlots, params.setterSlots, params.isReactiveEntity)
             appendLine()
-            appendToParams(className, columns)
+            appendToParams(className, selfType, columns)
             appendLine()
-            appendApplyRow(className, columns)
+            appendApplyRow(className, selfType, columns)
             appendLine()
-            appendApplyScalarRow(className, columns, params.setterSlots)
-            appendBumpVersion(className, columns)
+            appendApplyScalarRow(selfType, columns, params.setterSlots)
+            appendBumpVersion(className, selfType, columns)
             appendForeignKeys(foreignKeys)
-            appendJunctionOverrides(className, junctionRefs)
+            appendJunctionOverrides(className, selfType, junctionRefs)
         }
         appendLine("}")
     }
 
     fun StringBuilder.appendJunctionOverrides(
         className: String,
+        selfType: String,
         junctionRefs: List<JunctionRefInfo>
     ) {
         if (junctionRefs.isEmpty()) return
+        val receiver = receiverName(className, selfType)
+        val idsOfAccess = if (className == selfType) "entity" else "(entityRef as $className)"
         appendLine()
         appendLine("    override val junctionTableDefs: List<JunctionTableDef> = listOf(")
         appendLine("        ${junctionRefs.joinToString(LIST_ITEM_SEPARATOR) { it.junctionObjectName }}")
         appendLine("    )")
         appendLine()
-        appendLine("    override val junctionAccessors: List<JunctionAccessor<$className>> = listOf(")
+        appendLine("    override val junctionAccessors: List<JunctionAccessor<$selfType>> = listOf(")
         junctionRefs.forEachIndexed { idx, ref ->
             val trailingComma = if (idx == junctionRefs.lastIndex) "" else ","
-            appendLine("        object : JunctionAccessor<$className> {")
+            appendLine("        object : JunctionAccessor<$selfType> {")
             appendLine("            override val descriptor: JunctionTableDef = ${ref.junctionObjectName}")
-            appendLine("            override fun idsOf(entity: $className): Collection<Any> = entity.${ref.backingFieldName}")
+            appendLine("            override fun idsOf($receiver: $selfType): Collection<Any> = $idsOfAccess.${ref.backingFieldName}")
             appendLine("        }$trailingComma")
         }
         appendLine("    )")
         appendLine()
         appendLine("    override fun applyJunctionRows(")
-        appendLine("        entity: $className,")
+        appendLine("        $receiver: $selfType,")
         appendLine("        descriptor: JunctionTableDef,")
         appendLine("        ids: List<Any>,")
         appendLine("    ) {")
+        if (className != selfType) appendCastToConcrete(className)
         appendLine("        entity.withEventsDisabled {")
         appendLine("            when (descriptor) {")
         for (ref in junctionRefs) {
@@ -188,8 +197,8 @@ internal object TableDefSourceEmitter {
             appendLine("                    entity.${ref.backingFieldName} = $rhs")
         }
         appendLine("            }")
-        appendLine("        }")
-        appendLine("    }")
+        appendLine(INNER_BLOCK_CLOSE)
+        appendLine(METHOD_CLOSE)
     }
 
     fun StringBuilder.appendForeignKeys(foreignKeys: List<ForeignKeyMeta>) {
@@ -207,8 +216,24 @@ internal object TableDefSourceEmitter {
         appendLine("    )")
     }
 
+    /**
+     * Emits a body-opening downcast line when the descriptor is typed on a distinct reactive
+     * self-type R. Aliases the `entityRef: R` parameter to a local `entity` typed on the concrete
+     * class so all downstream body lines remain unchanged whether R equals the class or not.
+     */
+    private fun StringBuilder.appendCastToConcrete(className: String) {
+        appendLine("        val entity = entityRef as $className")
+    }
+
+    /**
+     * Parameter name for self-type-parameterized overrides: `entityRef` when a downcast alias is
+     * emitted (R differs from the concrete class), else `entity` for self-referential entities.
+     */
+    private fun receiverName(className: String, selfType: String): String = if (className != selfType) "entityRef" else "entity"
+
     fun StringBuilder.appendFromRow(
         className: String,
+        selfType: String,
         columns: List<ColumnMeta>,
         constructorParamNames: List<String>,
         ctorSlots: List<CtorSlot> = emptyList(),
@@ -223,7 +248,8 @@ internal object TableDefSourceEmitter {
         // top-level entity ctor-param name and are reconstructed inside the ctor invocation).
         val setterCols = columns.filter { it.propertyName !in ctorParamNameSet && !it.isInsideEmbedded }
 
-        appendLine("    override fun fromRow(row: ResultRow, table: Table): $className {")
+        // Return type is the self-type R; the body constructs the concrete class (a subtype of R).
+        appendLine("    override fun fromRow(row: ResultRow, table: Table): $selfType {")
         // When CtorSlot information is available (entities with @Embedded ctor params), use the
         // structured tree to emit nested constructor expressions; otherwise fall back to the flat
         // column-by-name lookup for the common no-embedded case.
@@ -254,13 +280,14 @@ internal object TableDefSourceEmitter {
             val reconstruction = buildCtorArgExpression(EmbeddedCtorSlot(slot.ctorParamName, slot.embeddableTypeFqn, slot.children))
             appendLine("${setterIndent}entity.${slot.ctorParamName} = $reconstruction")
         }
-        if (wrapInEventsDisabled) appendLine("        }")
+        if (wrapInEventsDisabled) appendLine(INNER_BLOCK_CLOSE)
         appendLine("        return entity")
-        appendLine("    }")
+        appendLine(METHOD_CLOSE)
     }
 
-    fun StringBuilder.appendToParams(className: String, columns: List<ColumnMeta>) {
-        appendLine("    override fun toParams(entity: $className, table: Table): Map<Column<*>, Any?> {")
+    fun StringBuilder.appendToParams(className: String, selfType: String, columns: List<ColumnMeta>) {
+        appendLine("    override fun toParams(${receiverName(className, selfType)}: $selfType, table: Table): Map<Column<*>, Any?> {")
+        if (className != selfType) appendCastToConcrete(className)
         appendLine("        val cols = table.columns.associateBy { it.name }")
         appendLine("        return mapOf(")
         val paramEntries =
@@ -270,30 +297,31 @@ internal object TableDefSourceEmitter {
             }
         appendLine("            $paramEntries")
         appendLine("        )")
-        appendLine("    }")
+        appendLine(METHOD_CLOSE)
     }
 
-    fun StringBuilder.appendApplyRow(className: String, columns: List<ColumnMeta>) {
+    fun StringBuilder.appendApplyRow(className: String, selfType: String, columns: List<ColumnMeta>) {
         // applyRow overwrites the state of an existing entity — skip primary-key columns
         // (they are immutable post-construction), any non-mutable property, and any column
         // produced by flattening an @Embedded value object (embeddables are reconstructed
         // wholesale via the primary constructor in fromRow; the parent entity has no
         // addressable scalar setter for them).
         val mutableNonPk = columns.filter { !it.isPrimaryKey && it.isMutable && !it.isInsideEmbedded }
-        appendLine("    override fun applyRow(entity: $className, row: ResultRow, table: Table) {")
+        appendLine("    override fun applyRow(${receiverName(className, selfType)}: $selfType, row: ResultRow, table: Table) {")
         if (mutableNonPk.isEmpty()) {
             appendLine("        // No mutable non-PK columns — applyRow is a no-op.")
         } else {
+            if (className != selfType) appendCastToConcrete(className)
             for (col in mutableNonPk) {
                 val rowAccess = buildRowAccess(col)
                 appendLine("        entity.${col.propertyName} = $rowAccess")
             }
         }
-        appendLine("    }")
+        appendLine(METHOD_CLOSE)
     }
 
     fun StringBuilder.appendApplyScalarRow(
-        className: String,
+        selfType: String,
         columnsIn: List<ColumnMeta>,
         embeddedSetterSlots: List<EmbeddedSetterSlot> = emptyList()
     ) {
@@ -304,12 +332,14 @@ internal object TableDefSourceEmitter {
         // silentSetter so reactive backing fields are written without firing events.
         // Skip @Embedded-derived columns: they share their top-level entity ctor-param name, which
         // would emit duplicate `when` branches; rawInit never carries entries for embedded scalars.
+        // Typed on the self-type R — no concrete downcast needed: the body only forwards `entity`
+        // to `entry.silentSetter`, which is also typed on R via LirpRawInitializer<R>.
         val columns = columnsIn.filterNot { it.isInsideEmbedded }
         appendLine("    override fun applyScalarRow(")
-        appendLine("        entity: $className,")
+        appendLine("        entity: $selfType,")
         appendLine("        row: org.jetbrains.exposed.v1.core.ResultRow,")
         appendLine("        table: org.jetbrains.exposed.v1.core.Table,")
-        appendLine("        rawInit: net.transgressoft.lirp.persistence.LirpRawInitializer<$className>")
+        appendLine("        rawInit: net.transgressoft.lirp.persistence.LirpRawInitializer<$selfType>")
         appendLine("    ) {")
         if (columns.isEmpty() && embeddedSetterSlots.isEmpty()) {
             appendLine("        // No mapped columns — applyScalarRow is a no-op.")
@@ -330,20 +360,21 @@ internal object TableDefSourceEmitter {
             appendLine("                else -> continue")
             appendLine("            }")
             appendLine("            entry.silentSetter(entity, value)")
-            appendLine("        }")
+            appendLine(INNER_BLOCK_CLOSE)
         }
-        appendLine("    }")
+        appendLine(METHOD_CLOSE)
     }
 
-    fun StringBuilder.appendBumpVersion(className: String, columns: List<ColumnMeta>) {
+    fun StringBuilder.appendBumpVersion(className: String, selfType: String, columns: List<ColumnMeta>) {
         // Emit a non-default bumpVersion override only when the entity declares a @Version
         // column. Unversioned entities inherit the interface no-op default, so no emission keeps
         // the generated file minimal.
         val versionCol = columns.singleOrNull { it.isVersion } ?: return
         appendLine()
-        appendLine("    override fun bumpVersion(entity: $className, newVersion: Long) {")
+        appendLine("    override fun bumpVersion(${receiverName(className, selfType)}: $selfType, newVersion: Long) {")
+        if (className != selfType) appendCastToConcrete(className)
         appendLine("        entity.${versionCol.propertyName} = newVersion")
-        appendLine("    }")
+        appendLine(METHOD_CLOSE)
     }
 
     /**

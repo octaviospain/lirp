@@ -1871,4 +1871,148 @@ internal class TableDefProcessorTest : FunSpec({
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         result.messages shouldNotContain "still unresolved after final round"
     }
+
+    // ---- Reactive self-type R resolution (#220) ----
+
+    test("TableDefProcessor generates descriptor typed on distinct reactive interface for MutableAudioItem/AudioItem split") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "AudioItem.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntity
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                interface AudioItem : ReactiveEntity<Int, AudioItem> {
+                    val title: String
+                }
+
+                @PersistenceMapping
+                class MutableAudioItem(override val id: Int, title: String) : ReactiveEntityBase<Int, AudioItem>(), AudioItem {
+                    override var title: String by reactiveProperty(title)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = MutableAudioItem(id, title)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("MutableAudioItem_LirpTableDef.kt")
+        content shouldContain "object MutableAudioItem_LirpTableDef : SqlTableDef<test.AudioItem>"
+        content shouldContain "override fun fromRow(row: ResultRow, table: Table): test.AudioItem"
+        content shouldContain "entityRef as MutableAudioItem"
+    }
+
+    test("TableDefProcessor resolves R through an intermediate reactive base class") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "MultiLevelEntity.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntity
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                interface MediaItem : ReactiveEntity<Int, MediaItem> {
+                    val name: String
+                }
+
+                abstract class MediaBase<K : Comparable<K>, R : ReactiveEntity<K, R>> : ReactiveEntityBase<K, R>()
+
+                @PersistenceMapping
+                class ConcreteMedia(override val id: Int, name: String) : MediaBase<Int, MediaItem>(), MediaItem {
+                    override var name: String by reactiveProperty(name)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = ConcreteMedia(id, name)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("ConcreteMedia_LirpTableDef.kt")
+        content shouldContain "object ConcreteMedia_LirpTableDef : SqlTableDef<test.MediaItem>"
+        content shouldContain "override fun fromRow(row: ResultRow, table: Table): test.MediaItem"
+        content shouldContain "entityRef as ConcreteMedia"
+    }
+
+    test("TableDefProcessor falls back to concrete class typing when R is not resolvable") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "PlainMapped.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class PlainMapped(val id: Int) {
+                    var label: String = ""
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("PlainMapped_LirpTableDef.kt")
+        content shouldContain "object PlainMapped_LirpTableDef : SqlTableDef<PlainMapped>"
+        content shouldNotContain "entityRef as"
+    }
+
+    test("TableDefProcessor types the descriptor on the class itself for a self-referential reactive entity") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "SelfReactive.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class SelfReactive(override val id: Int, label: String) : ReactiveEntityBase<Int, SelfReactive>() {
+                    var label: String by reactiveProperty(label)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = SelfReactive(id, label)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("SelfReactive_LirpTableDef.kt")
+        content shouldContain "object SelfReactive_LirpTableDef : SqlTableDef<SelfReactive>"
+        content shouldContain "override fun fromRow(row: ResultRow, table: Table): SelfReactive"
+        // R == class: no downcast alias is emitted, preserving the original byte-identical layout.
+        content shouldNotContain "entityRef as"
+    }
+
+    test("TableDefProcessor warns and falls back when R stays an unsubstituted type parameter") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "GenericReactive.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntity
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                class GenericReactive<R : ReactiveEntity<Int, R>>(override val id: Int) : ReactiveEntityBase<Int, R>() {
+                    override val uniqueId: String get() = "${'$'}id"
+                    @Suppress("UNCHECKED_CAST")
+                    override fun clone() = GenericReactive<R>(id) as R
+                }
+                """
+                )
+            )
+
+        // R resolves to the unsubstituted type parameter R, so generation logs the fallback warning.
+        result.messages shouldContain "Could not resolve reactive self-type R"
+    }
 })

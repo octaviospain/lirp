@@ -482,6 +482,26 @@ class TableDefProcessor(
         }
         val packageName = classDecl.packageName.asString()
         val className = classDecl.simpleName.asString()
+
+        // Resolve the reactive self-type R that the generated descriptor is typed on. Three branches:
+        //   null       → R unresolvable; fall back to the concrete class and emit a warning
+        //   R == class → self-referential; use the simple name for byte-identical output
+        //   otherwise  → distinct reactive interface; type the descriptor on its fully qualified name
+        val resolvedSelfTypeFqn = resolveReactiveSelfType(classDecl)
+        val selfType: String =
+            when {
+                resolvedSelfTypeFqn == null -> {
+                    logger.warn(
+                        "Could not resolve reactive self-type R for ${classDecl.qualifiedName?.asString()}; " +
+                            "generated TableDef is typed on the concrete class and may not be assignable " +
+                            "to a Repository bound on R : ReactiveEntity"
+                    )
+                    className
+                }
+                resolvedSelfTypeFqn == classDecl.qualifiedName?.asString() -> className
+                else -> resolvedSelfTypeFqn
+            }
+
         val tableDefName = "${className}_LirpTableDef"
 
         val tableName = resolveTableName(classDecl, className)
@@ -542,6 +562,7 @@ class TableDefProcessor(
                     className,
                     ObjectBodyParams(
                         tableName = tableName,
+                        selfType = selfType,
                         canGenerateSqlMapping = canGenerateSqlMapping,
                         columns = columns,
                         constructorParamNames = constructorParamNames,
