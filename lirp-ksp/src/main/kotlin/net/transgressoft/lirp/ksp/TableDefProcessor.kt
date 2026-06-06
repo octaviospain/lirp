@@ -487,10 +487,20 @@ class TableDefProcessor(
         //   null       → R unresolvable; fall back to the concrete class and emit a warning
         //   R == class → self-referential; use the simple name for byte-identical output
         //   otherwise  → distinct reactive interface; type the descriptor on its fully qualified name
-        val resolvedSelfTypeFqn = resolveReactiveSelfType(classDecl)
+        val resolvedSelfType = resolveReactiveSelfType(classDecl)
+        // A generic entity has no renderable non-raw descriptor type: typing on the bare class name
+        // would emit `SqlTableDef<GenericEntity>`, which Kotlin rejects as a raw generic. Skip
+        // generation rather than emit uncompilable source.
+        if (resolvedSelfType == null && classDecl.typeParameters.isNotEmpty()) {
+            logger.warn(
+                "Skipping _LirpTableDef generation for ${classDecl.qualifiedName?.asString()}: its reactive " +
+                    "self-type R is an unsubstituted type parameter, so no valid SqlTableDef<R> can be generated"
+            )
+            return
+        }
         val selfType: String =
             when {
-                resolvedSelfTypeFqn == null -> {
+                resolvedSelfType == null -> {
                     logger.warn(
                         "Could not resolve reactive self-type R for ${classDecl.qualifiedName?.asString()}; " +
                             "generated TableDef is typed on the concrete class and may not be assignable " +
@@ -498,8 +508,8 @@ class TableDefProcessor(
                     )
                     className
                 }
-                resolvedSelfTypeFqn == classDecl.qualifiedName?.asString() -> className
-                else -> resolvedSelfTypeFqn
+                resolvedSelfType == classDecl.qualifiedName?.asString() -> className
+                else -> resolvedSelfType
             }
 
         val tableDefName = "${className}_LirpTableDef"

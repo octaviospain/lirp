@@ -410,8 +410,10 @@ private fun buildSupertypeSubstitutions(
 
 /**
  * Reads `R` (type argument at index 1 of `ReactiveEntity<K, R>` / `ReactiveEntityBase<K, R>`) from
- * [resolved] and resolves it against the substitution context. Returns the fully-qualified name of
- * the concrete reactive interface, or `null` when `R` remains an unsubstituted type parameter.
+ * [resolved] and renders it against the substitution context. Returns the fully-qualified,
+ * fully-rendered type — including any of `R`'s own type arguments, so a parameterized self-type
+ * like `AudioItem<String>` yields `…AudioItem<kotlin.String>` rather than a raw `…AudioItem` — or
+ * `null` when `R` (or any nested argument) remains an unsubstituted type parameter.
  */
 private fun resolveSelfTypeArgument(
     resolved: KSType,
@@ -420,9 +422,25 @@ private fun resolveSelfTypeArgument(
 ): String? {
     val rArg = resolved.arguments.getOrNull(1)?.type?.resolve() ?: return null
     // `nextSubstitutions` (this level's bindings) takes precedence over the inherited context.
-    val rResolved = substituteTypeParameter(rArg, substitutions + nextSubstitutions)
-    if (rResolved.declaration is KSTypeParameter) return null
-    return rResolved.declaration.qualifiedName?.asString()
+    return renderResolvedType(rArg, substitutions + nextSubstitutions)
+}
+
+/**
+ * Renders [type] to a fully-qualified Kotlin type string after substitution, recursing into its
+ * type arguments. Returns `null` when [type] or any nested argument stays a free type parameter
+ * (which would otherwise produce an uncompilable raw or partially-substituted descriptor type).
+ */
+private fun renderResolvedType(type: KSType, substitutions: Map<String, KSType>): String? {
+    val resolved = substituteTypeParameter(type, substitutions)
+    if (resolved.declaration is KSTypeParameter) return null
+    val fqn = resolved.declaration.qualifiedName?.asString() ?: return null
+    if (resolved.arguments.isEmpty()) return fqn
+    val renderedArgs =
+        resolved.arguments.map { arg ->
+            val argType = arg.type?.resolve() ?: return null
+            renderResolvedType(argType, substitutions) ?: return null
+        }
+    return "$fqn<${renderedArgs.joinToString(", ")}>"
 }
 
 /**

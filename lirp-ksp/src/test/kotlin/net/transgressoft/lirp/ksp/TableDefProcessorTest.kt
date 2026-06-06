@@ -1991,7 +1991,7 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldNotContain "entityRef as"
     }
 
-    test("TableDefProcessor warns and falls back when R stays an unsubstituted type parameter") {
+    test("TableDefProcessor skips generation when R stays an unsubstituted type parameter on a generic entity") {
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -2012,7 +2012,40 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        // R resolves to the unsubstituted type parameter R, so generation logs the fallback warning.
-        result.messages shouldContain "Could not resolve reactive self-type R"
+        // A raw SqlTableDef<GenericReactive> would not compile, so the processor skips generation.
+        result.messages shouldContain "Skipping _LirpTableDef generation for test.GenericReactive"
+        result.sourcesGeneratedBySymbolProcessor.any { it.name == "GenericReactive_LirpTableDef.kt" } shouldBe false
+    }
+
+    test("TableDefProcessor renders type arguments for a concrete parameterized reactive self-type") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "Tagged.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntity
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                interface Tagged<M> : ReactiveEntity<Int, Tagged<M>> {
+                    val tag: String
+                }
+
+                @PersistenceMapping
+                class StringTagged(override val id: Int, tag: String) : ReactiveEntityBase<Int, Tagged<String>>(), Tagged<String> {
+                    override var tag: String by reactiveProperty(tag)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = StringTagged(id, tag)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("StringTagged_LirpTableDef.kt")
+        content shouldContain "object StringTagged_LirpTableDef : SqlTableDef<test.Tagged<kotlin.String>>"
+        content shouldContain "override fun fromRow(row: ResultRow, table: Table): test.Tagged<kotlin.String>"
+        content shouldContain "entityRef as StringTagged"
     }
 })
