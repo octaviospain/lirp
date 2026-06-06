@@ -326,6 +326,7 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
                 )
             )
 
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         // Structural processors silently skip private/protected entities
         val generatedNames = result.sourcesGeneratedBySymbolProcessor.map { it.name }
         generatedNames.contains("PrivateOuterFx\$HiddenFx_LirpFxScalarAccessor.kt") shouldBe false

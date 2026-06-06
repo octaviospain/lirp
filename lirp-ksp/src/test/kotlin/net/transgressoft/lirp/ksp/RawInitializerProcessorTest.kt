@@ -420,6 +420,7 @@ internal class RawInitializerProcessorTest : StringSpec({
                 )
             )
 
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         // Structural processors (RawInitializerProcessor) silently skip private/protected entities
         val generatedNames = result.sourcesGeneratedBySymbolProcessor.map { it.name }
         generatedNames.contains("PrivateOuter\$HiddenEntity_LirpRawInitializer.kt") shouldBe false

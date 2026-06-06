@@ -201,7 +201,7 @@ internal fun effectiveVisibilityModifier(decl: KSClassDeclaration): String? {
             Visibility.PUBLIC, Visibility.JAVA_PACKAGE -> { /* no downgrade */ }
             Visibility.INTERNAL -> mostRestrictive = "internal"
             Visibility.PRIVATE, Visibility.PROTECTED -> return null
-            else -> { /* LOCAL or unknown — treat as non-generatable; caller skips */ }
+            else -> return null // LOCAL or unknown — non-generatable; caller skips or fails
         }
         current = current.parentDeclaration as? KSClassDeclaration
     }
