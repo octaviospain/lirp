@@ -63,10 +63,6 @@ class ReactivePropertyAccessorProcessor(private val codeGenerator: CodeGenerator
                 // Abstract entities cannot be instantiated from persisted rows, so any accessor
                 // generated for them would be unreachable.
                 if (classDecl.typeParameters.isNotEmpty() || classDecl.isAbstract()) return@forEach
-                // Walk the parent declaration chain: a `public` nested entity inside an
-                // `internal`/`private` outer would still produce `public exposes internal type`
-                // compile errors on the generated `public class ... : LirpReactivePropertyAccessor<E>`.
-                if (!isPubliclyVisible(classDecl)) return@forEach
                 val reactiveProps = collectReactivePropertiesIncludingInherited(classDecl)
                 if (reactiveProps.isNotEmpty()) {
                     generateAccessor(classDecl, reactiveProps)
@@ -77,6 +73,9 @@ class ReactivePropertyAccessorProcessor(private val codeGenerator: CodeGenerator
     }
 
     private fun generateAccessor(classDecl: KSClassDeclaration, properties: List<KSPropertyDeclaration>) {
+        // Structural processor (supertype-walking detection, no explicit persistence annotation).
+        // Silent skip for private/protected entities — they may be test fixtures; no hard error.
+        val visibility = effectiveVisibilityModifier(classDecl) ?: return
         val packageName = classDecl.packageName.asString()
         val jvmName = classDecl.jvmBinaryName()
         val kotlinName = classDecl.kotlinNestedName()
@@ -85,11 +84,13 @@ class ReactivePropertyAccessorProcessor(private val codeGenerator: CodeGenerator
         val accessorSourceName = if ('$' in accessorName) "`$accessorName`" else accessorName
 
         val entries =
-            properties.map { prop ->
-                val propName = prop.simpleName.asString()
-                val renderedType = renderKsType(prop.type.resolve())
-                ReactivePropMeta(propName, renderedType)
-            }
+            properties
+                .filterNot { it.isPrivateForGeneratedAccess() }
+                .map { prop ->
+                    val propName = prop.simpleName.asString()
+                    val renderedType = renderKsType(prop.type.resolve())
+                    ReactivePropMeta(propName, renderedType)
+                }
 
         val containingFile =
             classDecl.containingFile ?: run {
@@ -136,7 +137,7 @@ class ReactivePropertyAccessorProcessor(private val codeGenerator: CodeGenerator
                 appendLine(" */")
                 appendLine("@Suppress(\"UNCHECKED_CAST\")")
                 appendLine("@OptIn(kotlin.uuid.ExperimentalUuidApi::class)")
-                appendLine("public class $accessorSourceName : LirpReactivePropertyAccessor<$kotlinName> {")
+                appendLine("$visibility class $accessorSourceName : LirpReactivePropertyAccessor<$kotlinName> {")
                 appendLine("    override val entries: List<ReactivePropertyEntry<$kotlinName>> = listOf(")
                 appendLine("        $entriesCode")
                 appendLine("    )")

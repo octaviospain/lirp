@@ -229,6 +229,9 @@ internal class ForeignKeyAnalyzer(
                 appendLine("import net.transgressoft.lirp.persistence.sql.JunctionTableDef")
                 appendLine()
                 appendLine("/** KSP-generated junction table descriptor for $parentSimpleName.${agg.propertyName} → $itemSimpleName. */")
+                // Safe to stay public: entity names appear only as interpolated string literals (table names),
+                // not as types in any signature. JunctionTableDef's public API exposes only String, Boolean,
+                // CascadeAction, and ColumnType — no entity type is in any public signature here.
                 appendLine("public object $descriptorName : JunctionTableDef {")
                 appendLine("    override val tableName: String = \"$junctionTableName\"")
                 appendLine("    override val parentTableName: String = \"$parentTableName\"")

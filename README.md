@@ -343,7 +343,7 @@ Deep coverage of the write pipeline, collapse algorithm, transactional guarantee
 - **Secondary indexes** — `@Indexed` for O(1) equality lookups
 - **Type-safe Query DSL** — Kotlin-native filtering, ordering, and pagination with automatic index routing
 - **Optimistic locking** — `@Version` triggers versioned UPDATE/DELETE; conflicts surface as `StandardCrudEvent.Conflict` with canonical state
-- **Convention-over-configuration KSP codegen** — `@PersistenceMapping` generates table definitions; annotations only when you need to customize
+- **Convention-over-configuration KSP codegen** — `@PersistenceMapping` generates table definitions; annotations only when you need to customize. Generated companions match the entity's own visibility, so an `internal` entity (e.g. a concrete implementation kept behind a public interface) produces compiling `internal` companions; an explicitly-annotated `private`/`protected` entity fails the build with a targeted diagnostic rather than uncompilable output
 - **Custom column converters** — route non-scalar domain types (`java.nio.file.Path`, `java.time.Duration`, value wrappers) through a consumer-supplied `ColumnConverter<D, S>` `object` referenced via `@PersistenceProperty(converter = MyConverter::class)`. The contract lives in `lirp-api`; currently consumed by the SQL persistence path, while JSON-backed entities continue to rely on `kotlinx.serialization`.
 - **JSON persistence** — debounced file writes via `JsonFileRepository`, zero-reflection `LirpEntitySerializer`
 - **Repository-as-factory** — typed `create()` methods with automatic `@LirpRepository` registration

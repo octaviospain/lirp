@@ -91,10 +91,6 @@ class RawInitializerProcessor(
         // subclasses get their own initializer. Abstract entities cannot be instantiated
         // by `fromRow` either, so any generated initializer would be unreachable.
         if (classDecl.typeParameters.isNotEmpty() || classDecl.isAbstract()) return true
-        // Private/internal entities — and any nested entity whose enclosing class is
-        // non-public — cannot be referenced from a public generated class. Skip to avoid
-        // emitting uncompilable "public exposes internal type argument" code.
-        if (!isPubliclyVisible(classDecl)) return true
         return false
     }
 
@@ -182,6 +178,9 @@ class RawInitializerProcessor(
     }
 
     private fun generateInitializer(classDecl: KSClassDeclaration, properties: List<RawInitPropMeta>) {
+        // Structural processor (supertype-walking detection, no explicit persistence annotation).
+        // Silent skip for private/protected entities — they may be test fixtures; no hard error.
+        val visibility = effectiveVisibilityModifier(classDecl) ?: return
         val packageName = classDecl.packageName.asString()
         val jvmName = classDecl.jvmBinaryName()
         val kotlinName = classDecl.kotlinNestedName()
@@ -234,7 +233,7 @@ class RawInitializerProcessor(
                 appendLine(" * Writes per-row values into entity backing fields without firing reactive events.")
                 appendLine(" */")
                 appendLine("@Suppress(\"UNCHECKED_CAST\", \"ClassName\")")
-                appendLine("public class $initializerSourceName : LirpRawInitializer<$kotlinName> {")
+                appendLine("$visibility class $initializerSourceName : LirpRawInitializer<$kotlinName> {")
                 appendLine("    override val entries: List<RawInitEntry<$kotlinName>> = listOf(")
                 appendLine("        $entriesCode")
                 appendLine("    )")

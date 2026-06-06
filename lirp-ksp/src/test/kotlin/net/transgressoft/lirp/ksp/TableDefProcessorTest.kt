@@ -1528,6 +1528,84 @@ internal class TableDefProcessorTest : FunSpec({
 
     // ---- Short / Byte column-type inference (#207-B2) ----
 
+    test("TableDefProcessor emits internal object declaration for top-level internal entity") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "InternalPersisted.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                internal data class InternalPersisted(override val id: Int) : ReactiveEntityBase<Int, InternalPersisted>() {
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = InternalPersisted(id)
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("InternalPersisted_LirpTableDef.kt")
+        content shouldContain "internal object InternalPersisted_LirpTableDef"
+    }
+
+    test("TableDefProcessor emits internal object declaration for internal entity with multiple properties") {
+        // Verifies that the internal modifier is propagated correctly for an internal entity with several columns
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "InternalMultiProp.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                @PersistenceMapping
+                internal data class InternalMultiProp(override val id: Int, val name: String) : ReactiveEntityBase<Int, InternalMultiProp>() {
+                    var score: Int by reactiveProperty(0)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = InternalMultiProp(id, name).also { it.score = score }
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("InternalMultiProp_LirpTableDef.kt")
+        content shouldContain "internal object InternalMultiProp_LirpTableDef"
+        content shouldContain "name = \"name\""
+        content shouldContain "name = \"score\""
+    }
+
+    test("TableDefProcessor fails compilation for private-nested entity with @PersistenceMapping") {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "PrivateOuterTableDef.kt",
+                    """
+                package test
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                private class PrivateOuterTableDef {
+                    @PersistenceMapping
+                    data class HiddenPersisted(override val id: Int) : ReactiveEntityBase<Int, HiddenPersisted>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = HiddenPersisted(id)
+                    }
+                }
+                """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
+        result.messages shouldContain "must be public or internal"
+        result.messages shouldContain "Private and protected entities cannot have accessible generated code"
+    }
+
     test("TableDefProcessor maps kotlin.Short to ColumnType.IntType and emits .toShort() narrowing in fromRow") {
         val result =
             compileWithProcessor(

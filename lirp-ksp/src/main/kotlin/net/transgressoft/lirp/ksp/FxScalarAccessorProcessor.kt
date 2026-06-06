@@ -91,6 +91,9 @@ class FxScalarAccessorProcessor(
     }
 
     private fun generateAccessor(classDecl: KSClassDeclaration, properties: List<KSPropertyDeclaration>) {
+        // Structural processor (supertype-walking detection, no explicit persistence annotation).
+        // Silent skip for private/protected entities — they may be test fixtures; no hard error.
+        val visibility = effectiveVisibilityModifier(classDecl) ?: return
         val packageName = classDecl.packageName.asString()
         val jvmName = classDecl.jvmBinaryName()
         val kotlinName = classDecl.kotlinNestedName()
@@ -146,7 +149,7 @@ class FxScalarAccessorProcessor(
                 appendLine(" * Provides direct get/set lambdas — no runtime reflection.")
                 appendLine(" */")
                 appendLine("@Suppress(\"UNCHECKED_CAST\")")
-                appendLine("public class $accessorSourceName : LirpFxScalarAccessor<$kotlinName> {")
+                appendLine("$visibility class $accessorSourceName : LirpFxScalarAccessor<$kotlinName> {")
                 appendLine("    override val entries: List<FxScalarEntry<$kotlinName>> = listOf(")
                 appendLine("        $entriesCode")
                 appendLine("    )")

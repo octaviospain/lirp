@@ -252,6 +252,86 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
         generatedFiles.contains("PlainEntity_LirpFxScalarAccessor.kt") shouldBe false
     }
 
+    "FxScalarAccessorProcessor emits internal class declaration for top-level internal entity" {
+        val result =
+            compileWithProcessor(
+                fxPropertyStubs,
+                SourceFile.kotlin(
+                    "InternalFxEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.StubStringProperty
+
+                    internal data class InternalFxEntity(override val id: Int) : ReactiveEntityBase<Int, InternalFxEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                        val label by StubStringProperty()
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("InternalFxEntity_LirpFxScalarAccessor.kt")
+        content shouldContain "internal class InternalFxEntity_LirpFxScalarAccessor"
+    }
+
+    "FxScalarAccessorProcessor emits internal class declaration for entity nested in internal outer" {
+        val result =
+            compileWithProcessor(
+                fxPropertyStubs,
+                SourceFile.kotlin(
+                    "InternalOuterFx.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.StubStringProperty
+
+                    internal class InternalOuterFx {
+                        data class InnerFx(override val id: Int) : ReactiveEntityBase<Int, InnerFx>() {
+                            override val uniqueId: String get() = "${'$'}id"
+                            override fun clone() = copy()
+                            val title by StubStringProperty()
+                        }
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("InternalOuterFx\$InnerFx_LirpFxScalarAccessor.kt")
+        content shouldContain "internal class"
+    }
+
+    "FxScalarAccessorProcessor silently skips private-nested entity without generating a file" {
+        val result =
+            compileWithProcessor(
+                fxPropertyStubs,
+                SourceFile.kotlin(
+                    "PrivateOuterFx.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.StubStringProperty
+
+                    private class PrivateOuterFx {
+                        data class HiddenFx(override val id: Int) : ReactiveEntityBase<Int, HiddenFx>() {
+                            override val uniqueId: String get() = "${'$'}id"
+                            override fun clone() = copy()
+                            val name by StubStringProperty()
+                        }
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        // Structural processors silently skip private/protected entities
+        val generatedNames = result.sourcesGeneratedBySymbolProcessor.map { it.name }
+        generatedNames.contains("PrivateOuterFx\$HiddenFx_LirpFxScalarAccessor.kt") shouldBe false
+    }
+
     "generates accessor with correct JVM binary name for nested entity class" {
         val result =
             compileWithProcessor(

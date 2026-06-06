@@ -161,6 +161,9 @@ class LirpRepositoryProcessor(
                 appendLine(" * KSP-generated registry info for [$className].")
                 appendLine(" * Exposes the entity class for zero-config self-registration.")
                 appendLine(" */")
+                // Safe to stay public: the only entity reference is `entityClass: Class<*> = EntityName::class.java`,
+                // which is type-erased to Class<*> in the signature. No entity type appears in any public signature,
+                // so a public companion cannot expose an internal entity type through this declaration.
                 appendLine("public class `$infoName` : LirpRegistryInfo {")
                 appendLine("    override val entityClass: Class<*> = $entitySimpleName::class.java")
                 appendLine("}")

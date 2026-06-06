@@ -72,6 +72,16 @@ class IndexedProcessor(
     }
 
     private fun generateAccessor(classDecl: KSClassDeclaration, properties: List<KSPropertyDeclaration>) {
+        val visibility = effectiveVisibilityModifier(classDecl)
+        if (visibility == null) {
+            val fqn = classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString()
+            logger.error(
+                "Entity '$fqn' must be public or internal to generate a persistence companion (_LirpIndexAccessor). " +
+                    "Private and protected entities cannot have accessible generated code.",
+                classDecl
+            )
+            return
+        }
         val packageName = classDecl.packageName.asString()
         val className = classDecl.simpleName.asString()
         val accessorName = "${className}_LirpIndexAccessor"
@@ -134,7 +144,7 @@ class IndexedProcessor(
                 appendLine(" * KSP-generated index accessor for [$className].")
                 appendLine(" * Provides direct property getters — no runtime reflection.")
                 appendLine(" */")
-                appendLine("public class $accessorName : LirpIndexAccessor<$className> {")
+                appendLine("$visibility class $accessorName : LirpIndexAccessor<$className> {")
                 appendLine("    override val entries: List<IndexEntry<$className>> = listOf(")
                 appendLine("        $entriesCode")
                 appendLine("    )")

@@ -177,6 +177,84 @@ internal class IndexedProcessorTest : StringSpec({
         result.messages shouldContain "Comparable"
     }
 
+    "IndexedProcessor emits internal class declaration for top-level internal entity" {
+        val result =
+            compileWithIndexedProcessor(
+                SourceFile.kotlin(
+                    "InternalLabelEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.Indexed
+
+                    internal data class InternalLabelEntity(override val id: Int) : ReactiveEntityBase<Int, InternalLabelEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                        @Indexed val label: String = ""
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("InternalLabelEntity_LirpIndexAccessor.kt")
+        content shouldContain "internal class InternalLabelEntity_LirpIndexAccessor"
+    }
+
+    "IndexedProcessor emits internal class declaration for second top-level internal entity with multiple @Indexed properties" {
+        // Verifies that the internal modifier is propagated when an internal entity has multiple @Indexed properties
+        val result =
+            compileWithIndexedProcessor(
+                SourceFile.kotlin(
+                    "InternalMultiIndexed.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.Indexed
+
+                    internal data class InternalMultiIndexed(override val id: Int) : ReactiveEntityBase<Int, InternalMultiIndexed>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                        @Indexed val code: String = ""
+                        @Indexed val rank: Int = 0
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("InternalMultiIndexed_LirpIndexAccessor.kt")
+        content shouldContain "internal class InternalMultiIndexed_LirpIndexAccessor"
+        content shouldContain "code"
+        content shouldContain "rank"
+    }
+
+    "IndexedProcessor fails compilation for private-nested entity with @Indexed property" {
+        val result =
+            compileWithIndexedProcessor(
+                SourceFile.kotlin(
+                    "PrivateOuterIndexed.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.Indexed
+
+                    private class PrivateOuterIndexed {
+                        data class HiddenIndexed(override val id: Int) : ReactiveEntityBase<Int, HiddenIndexed>() {
+                            override val uniqueId: String get() = "${'$'}id"
+                            override fun clone() = copy()
+                            @Indexed val tag: String = ""
+                        }
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
+        result.messages shouldContain "must be public or internal"
+        result.messages shouldContain "Private and protected entities cannot have accessible generated code"
+    }
+
     "IndexedProcessor does not require Comparable for default @Indexed (sorted=false)" {
         val result =
             compileWithIndexedProcessor(

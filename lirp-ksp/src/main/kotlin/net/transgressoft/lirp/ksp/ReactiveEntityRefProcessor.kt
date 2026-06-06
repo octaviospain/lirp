@@ -204,6 +204,16 @@ class ReactiveEntityRefProcessor(
     }
 
     private fun generateAccessor(classDecl: KSClassDeclaration, properties: List<KSPropertyDeclaration>) {
+        val visibility = effectiveVisibilityModifier(classDecl)
+        if (visibility == null) {
+            val fqn = classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString()
+            logger.error(
+                "Entity '$fqn' must be public or internal to generate a persistence companion (_LirpRefAccessor). " +
+                    "Private and protected entities cannot have accessible generated code.",
+                classDecl
+            )
+            return
+        }
         val packageName = classDecl.packageName.asString()
         val className = classDecl.jvmBinaryName()
         // Kotlin-level name for type references: uses dots for nesting (e.g. Outer.RefEntity)
@@ -292,7 +302,7 @@ class ReactiveEntityRefProcessor(
                 appendLine(" * KSP-generated aggregate reference accessor for [$className].")
                 appendLine(" * Provides direct ID getter and delegate getter lambdas — no runtime reflection.")
                 appendLine(" */")
-                appendLine("public class `$accessorName` : LirpRefAccessor<$kotlinClassName> {")
+                appendLine("$visibility class `$accessorName` : LirpRefAccessor<$kotlinClassName> {")
                 if (singleEntries.isEmpty()) {
                     appendLine("    override val entries: List<RefEntry<*, $kotlinClassName>> = emptyList()")
                 } else {
