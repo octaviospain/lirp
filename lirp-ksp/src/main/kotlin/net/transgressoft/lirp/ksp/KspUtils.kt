@@ -27,6 +27,7 @@ import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.symbol.KSTypeAlias
 import com.google.devtools.ksp.symbol.KSTypeArgument
 import com.google.devtools.ksp.symbol.KSValueParameter
+import com.google.devtools.ksp.symbol.Modifier
 import com.google.devtools.ksp.symbol.Origin
 import com.google.devtools.ksp.symbol.Variance
 import com.google.devtools.ksp.symbol.Visibility
@@ -176,23 +177,51 @@ internal fun isFxScalarType(type: KSType, visited: MutableSet<String> = mutableS
 }
 
 /**
- * Returns true when [decl] and every enclosing class declaration is `public` (or Java
- * package-private, treated as public from Kotlin's perspective).
+ * Computes the effective Kotlin visibility modifier string for a generated companion declaration
+ * tied to [decl], walking every enclosing class declaration to apply the most-restrictive rule.
  *
- * Generated accessor types are always `public`. If a nested entity sits under an
- * `internal`/`private` outer class, emitting a `public class <Entity>_LirpReactivePropertyAccessor :
- * LirpReactivePropertyAccessor<Entity>` would surface "public exposes internal type" and fail to
- * compile. Walking the parent chain catches that case before code generation begins.
+ * A sibling-package generated companion cannot widen the entity's visibility — a `public class
+ * Foo_LirpXAccessor : LirpXAccessor<InternalFoo>` would fail compilation with "public exposes
+ * internal type". This helper resolves that by returning `"internal"` whenever any node in the
+ * enclosing-declaration chain is `INTERNAL`, and `"public"` only when every node is
+ * `PUBLIC`/`JAVA_PACKAGE`.
+ *
+ * `PRIVATE` or `PROTECTED` anywhere in the chain means no accessible companion can be generated.
+ * Returns `null` as a do-not-emit sentinel without emitting a diagnostic — callers that want a
+ * hard KSP error for explicitly-annotated entities may call [logger.error] on the returned null.
+ *
+ * @param decl the entity class declaration whose generated companion needs a visibility modifier
+ * @return `"public"` or `"internal"`, or `null` when the entity must not be generated
  */
-internal fun isPubliclyVisible(decl: KSClassDeclaration): Boolean {
+internal fun effectiveVisibilityModifier(decl: KSClassDeclaration): String? {
+    var mostRestrictive = "public"
     var current: KSClassDeclaration? = decl
     while (current != null) {
-        val visibility = current.getVisibility()
-        if (visibility != Visibility.PUBLIC && visibility != Visibility.JAVA_PACKAGE) return false
+        when (current.getVisibility()) {
+            Visibility.PUBLIC, Visibility.JAVA_PACKAGE -> { /* no downgrade */ }
+            Visibility.INTERNAL -> mostRestrictive = "internal"
+            Visibility.PRIVATE, Visibility.PROTECTED -> return null
+            else -> { /* LOCAL or unknown — treat as non-generatable; caller skips */ }
+        }
         current = current.parentDeclaration as? KSClassDeclaration
     }
-    return true
+    return mostRestrictive
 }
+
+/**
+ * Returns `true` when [this] property must be excluded from generated accessor entries because it
+ * is `private`.
+ *
+ * Generated accessor companions live in a sibling top-level file within the same package. A
+ * `private` property is inaccessible from outside the declaring class — emitting an accessor entry
+ * for it would produce code that fails Kotlin compile with `Cannot access 'var x': it is private`.
+ * Callers that need to persist private state must promote the property to `internal` or `public`.
+ *
+ * This predicate is shared by [RawInitializerProcessor] and [ReactivePropertyAccessorProcessor]
+ * so both generators apply the identical exclusion rule from one authoritative site.
+ */
+internal fun KSPropertyDeclaration.isPrivateForGeneratedAccess(): Boolean =
+    Modifier.PRIVATE in modifiers
 
 /**
  * Returns true when [prop] is a `var ... by reactiveProperty(...)` delegate on an entity class.

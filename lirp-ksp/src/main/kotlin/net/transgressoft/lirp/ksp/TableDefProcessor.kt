@@ -404,6 +404,16 @@ class TableDefProcessor(
         excludedBackingFields: Set<String> = emptySet(),
         aggregateBackingScalarNames: Set<String> = emptySet()
     ) {
+        val visibility = effectiveVisibilityModifier(classDecl)
+        if (visibility == null) {
+            val fqn = classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString()
+            logger.error(
+                "Entity '$fqn' must be public or internal to generate a persistence companion (_LirpTableDef). " +
+                    "Private and protected entities cannot have accessible generated code.",
+                classDecl
+            )
+            return
+        }
         val packageName = classDecl.packageName.asString()
         val className = classDecl.simpleName.asString()
         val tableDefName = "${className}_LirpTableDef"
@@ -474,7 +484,8 @@ class TableDefProcessor(
                         setterSlots = setterSlots,
                         foreignKeys = foreignKeys,
                         junctionRefs = if (emitJunctions) junctionRefs else emptyList()
-                    )
+                    ),
+                    visibility = visibility
                 )
             }.toByteArray()
         )

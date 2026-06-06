@@ -327,6 +327,104 @@ internal class RawInitializerProcessorTest : StringSpec({
         content shouldNotContain "entity.flag"
     }
 
+    "RawInitializerProcessor emits internal class declaration for top-level internal entity" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "InternalFoo.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+
+                    internal data class InternalFoo(override val id: Int) : ReactiveEntityBase<Int, InternalFoo>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                        var x: Int by reactiveProperty(0)
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("InternalFoo_LirpRawInitializer.kt")
+        content shouldContain "internal class InternalFoo_LirpRawInitializer"
+    }
+
+    "RawInitializerProcessor emits internal class declaration for internal entity nested in internal outer" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "InternalOuter.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+
+                    internal class InternalOuter {
+                        internal data class InnerEntity(override val id: Int) : ReactiveEntityBase<Int, InnerEntity>() {
+                            override val uniqueId: String get() = "${'$'}id"
+                            override fun clone() = copy()
+                            var name: String by reactiveProperty("")
+                        }
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("InternalOuter\$InnerEntity_LirpRawInitializer.kt")
+        content shouldContain "internal class"
+    }
+
+    "RawInitializerProcessor emits internal class declaration for public entity nested in internal outer" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "InternalOuterPublicInner.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+
+                    internal class InternalOuterPublicInner {
+                        data class InnerPublic(override val id: Int) : ReactiveEntityBase<Int, InnerPublic>() {
+                            override val uniqueId: String get() = "${'$'}id"
+                            override fun clone() = copy()
+                            var label: String by reactiveProperty("")
+                        }
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("InternalOuterPublicInner\$InnerPublic_LirpRawInitializer.kt")
+        content shouldContain "internal class"
+    }
+
+    "RawInitializerProcessor silently skips private-nested entity without generating a file" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "PrivateOuter.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+
+                    private class PrivateOuter {
+                        data class HiddenEntity(override val id: Int) : ReactiveEntityBase<Int, HiddenEntity>() {
+                            override val uniqueId: String get() = "${'$'}id"
+                            override fun clone() = copy()
+                            var value: String by reactiveProperty("")
+                        }
+                    }
+                    """
+                )
+            )
+
+        // Structural processors (RawInitializerProcessor) silently skip private/protected entities
+        val generatedNames = result.sourcesGeneratedBySymbolProcessor.map { it.name }
+        generatedNames.contains("PrivateOuter\$HiddenEntity_LirpRawInitializer.kt") shouldBe false
+    }
+
     "skips collection-ref properties" {
         val result =
             compileWithProcessor(

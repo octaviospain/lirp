@@ -291,6 +291,40 @@ internal class LirpAccessorValidationProcessorTest : StringSpec({
         result.messages shouldContain "Ensure lirp-ksp is applied"
     }
 
+    "LirpAccessorValidationProcessor validates an internal entity without false-positive" {
+        val compilation =
+            KotlinCompilation().apply {
+                sources =
+                    listOf(
+                        SourceFile.kotlin(
+                            "InternalValidated.kt",
+                            """
+                            package test
+                            import net.transgressoft.lirp.entity.ReactiveEntityBase
+                            import net.transgressoft.lirp.persistence.Indexed
+
+                            internal data class InternalValidated(override val id: Int) : ReactiveEntityBase<Int, InternalValidated>() {
+                                override val uniqueId: String get() = "${'$'}id"
+                                override fun clone() = copy()
+                                @Indexed val code: String = "A"
+                            }
+                            """
+                        )
+                    )
+                inheritClassPath = true
+            }
+        compilation.configureKsp { withCompilation = true }
+        // All generators plus the validator registered — internal entity must pass validation
+        compilation.symbolProcessorProviders += IndexedProcessorProvider()
+        compilation.symbolProcessorProviders += RawInitializerProcessorProvider()
+        compilation.symbolProcessorProviders += LirpAccessorValidationProcessorProvider()
+        val result = compilation.compile()
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.messages shouldNotContain "has @Indexed delegates but no generated LirpIndexAccessor"
+        result.messages shouldNotContain "has no generated LirpRawInitializer"
+    }
+
     "fails build when entity is missing LirpRawInitializer" {
         val compilation =
             KotlinCompilation().apply {

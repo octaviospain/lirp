@@ -105,7 +105,8 @@ internal object TableDefSourceEmitter {
     fun StringBuilder.appendObjectBody(
         tableDefName: String,
         className: String,
-        params: ObjectBodyParams
+        params: ObjectBodyParams,
+        visibility: String = "public"
     ) {
         val tableName = params.tableName
         val canGenerateSqlMapping = params.canGenerateSqlMapping
@@ -118,7 +119,7 @@ internal object TableDefSourceEmitter {
             appendLine("@OptIn(ExperimentalUuidApi::class)")
         }
         val superType = if (canGenerateSqlMapping) "SqlTableDef<$className>" else "LirpTableDef<$className>"
-        appendLine("public object $tableDefName : $superType {")
+        appendLine("$visibility object $tableDefName : $superType {")
         appendLine("    override val tableName: String = \"$tableName\"")
         appendLine("    override val columns: List<ColumnDef> = listOf(")
         if (columns.isNotEmpty()) {

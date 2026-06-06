@@ -92,6 +92,16 @@ class LirpViaAccessorProcessor(
     }
 
     private fun generateAccessor(classDecl: KSClassDeclaration, properties: List<KSPropertyDeclaration>) {
+        val visibility = effectiveVisibilityModifier(classDecl)
+        if (visibility == null) {
+            val fqn = classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString()
+            logger.error(
+                "Entity '$fqn' must be public or internal to generate a persistence companion (_LirpViaAccessor). " +
+                    "Private and protected entities cannot have accessible generated code.",
+                classDecl
+            )
+            return
+        }
         val packageName = classDecl.packageName.asString()
         val className = classDecl.jvmBinaryName()
         val kotlinClassName = classDecl.kotlinNestedName()
@@ -193,7 +203,7 @@ class LirpViaAccessorProcessor(
                 appendLine(" * KSP-generated cross-aggregate `via` accessor for [$className].")
                 appendLine(" * Provides typed KProperty1 descriptors consumed by the Query DSL planner — do not edit.")
                 appendLine(" */")
-                appendLine("public class `$accessorName` : LirpViaAccessor<$kotlinClassName> {")
+                appendLine("$visibility class `$accessorName` : LirpViaAccessor<$kotlinClassName> {")
                 if (collectionMetas.isEmpty()) {
                     appendLine(
                         "    override val collectionEntries: List<ViaCollectionAccessorEntry<*, $kotlinClassName>> = emptyList()"

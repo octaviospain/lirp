@@ -26,6 +26,7 @@ import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 import org.junit.jupiter.api.DisplayName
 
@@ -117,6 +118,105 @@ internal class ReactivePropertyAccessorProcessorTest : StringSpec({
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         val generatedNames = result.sourcesGeneratedBySymbolProcessor.map { it.name }
         generatedNames.contains("Plain_LirpReactivePropertyAccessor.kt") shouldBe false
+    }
+
+    "ReactivePropertyAccessorProcessor emits internal class declaration for top-level internal entity" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "InternalBar.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+
+                    internal data class InternalBar(override val id: Int) : ReactiveEntityBase<Int, InternalBar>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                        var label: String by reactiveProperty("")
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("InternalBar_LirpReactivePropertyAccessor.kt")
+        content shouldContain "internal class InternalBar_LirpReactivePropertyAccessor"
+    }
+
+    "ReactivePropertyAccessorProcessor emits internal class declaration for entity nested in internal outer" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "InternalOuterReactive.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+
+                    internal class InternalOuterReactive {
+                        data class InnerReactive(override val id: Int) : ReactiveEntityBase<Int, InnerReactive>() {
+                            override val uniqueId: String get() = "${'$'}id"
+                            override fun clone() = copy()
+                            var name: String by reactiveProperty("")
+                        }
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("InternalOuterReactive\$InnerReactive_LirpReactivePropertyAccessor.kt")
+        content shouldContain "internal class"
+    }
+
+    "ReactivePropertyAccessorProcessor silently skips private-nested entity without generating a file" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "PrivateOuterReactive.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+
+                    private class PrivateOuterReactive {
+                        data class HiddenReactive(override val id: Int) : ReactiveEntityBase<Int, HiddenReactive>() {
+                            override val uniqueId: String get() = "${'$'}id"
+                            override fun clone() = copy()
+                            var x: Int by reactiveProperty(0)
+                        }
+                    }
+                    """
+                )
+            )
+
+        // Structural processors silently skip private/protected entities
+        val generatedNames = result.sourcesGeneratedBySymbolProcessor.map { it.name }
+        generatedNames.contains("PrivateOuterReactive\$HiddenReactive_LirpReactivePropertyAccessor.kt") shouldBe false
+    }
+
+    "ReactivePropertyAccessorProcessor skips private reactive delegates" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "WithPrivateDelegate.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+
+                    data class WithPrivateDelegate(override val id: Int) : ReactiveEntityBase<Int, WithPrivateDelegate>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                        var publicName: String by reactiveProperty("")
+                        private var secret: Int by reactiveProperty(0)
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("WithPrivateDelegate_LirpReactivePropertyAccessor.kt")
+        content shouldContain "name = \"publicName\""
+        content shouldNotContain "name = \"secret\""
+        content shouldNotContain "\"secret\""
     }
 
     "handles entity with multiple reactiveProperty fields" {

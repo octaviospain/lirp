@@ -146,10 +146,9 @@ class LirpAccessorValidationProcessor(
                 // entities never get a generated accessor, so validating their absence would
                 // produce false-positive errors.
                 if (classDecl.typeParameters.isNotEmpty() || classDecl.isAbstract()) return@mapNotNull null
-                // Walk parent declarations too — a nested entity whose enclosing class is
-                // internal/private cannot receive a public generated accessor, mirroring the
-                // skip rules in RawInitializerProcessor and ReactivePropertyAccessorProcessor.
-                if (!isPubliclyVisible(classDecl)) return@mapNotNull null
+                // Mirror the structural-processor skip rule: private/protected entities are silently
+                // skipped by structural processors, so no accessor is generated and validation is a no-op.
+                if (effectiveVisibilityModifier(classDecl) == null) return@mapNotNull null
                 val hasIndexed = fqn in indexedClassFqns
                 val hasFxScalar = classDecl.getAllProperties().any { isFxScalarProperty(it) }
                 val hasReactive = collectReactivePropertiesIncludingInherited(classDecl).isNotEmpty()
