@@ -132,20 +132,46 @@ internal object TableDefSourceEmitter {
         // Type parameter is the reactive self-type R so the descriptor satisfies the repository
         // bound `R : ReactiveEntity<K, R>`. Method bodies downcast to the concrete class via
         // `val entity = entityRef as $className` when R differs from the concrete class.
-        val superType =
-            if (canGenerateSqlMapping) {
-                val extras =
-                    buildList {
-                        if (columns.any { it.isVersion }) add("VersionedTableDef<$selfType>")
-                        if (foreignKeys.isNotEmpty()) add("ForeignKeyAware")
-                        if (junctionRefs.isNotEmpty()) add("JunctionAware<$selfType>")
-                    }
-                if (extras.isEmpty()) "SqlTableDef<$selfType>" else "SqlTableDef<$selfType>, ${extras.joinToString(", ")}"
-            } else {
-                "LirpTableDef<$selfType>"
-            }
+        val superType = resolveSuperType(params)
         appendLine("$visibility object $tableDefName : $superType {")
         appendLine("    override val tableName: String = \"$tableName\"")
+        appendColumnsList(columns)
+        if (canGenerateSqlMapping) {
+            appendLine()
+            appendFromRow(className, params)
+            appendLine()
+            appendToParams(className, selfType, columns)
+            appendLine()
+            appendApplyRow(className, selfType, columns)
+            appendLine()
+            appendApplyScalarRow(selfType, columns, params.setterSlots)
+            appendBumpVersion(className, selfType, columns)
+            appendForeignKeys(foreignKeys)
+            appendJunctionOverrides(className, selfType, junctionRefs)
+        }
+        appendLine("}")
+    }
+
+    /**
+     * Resolves the generated descriptor's supertype clause. SQL-mapping descriptors extend
+     * `SqlTableDef<R>` plus any opt-in capability interfaces the entity needs (VersionedTableDef
+     * for `@Version`, ForeignKeyAware for scalar FK refs, JunctionAware for collection refs);
+     * non-SQL descriptors extend only `LirpTableDef<R>`.
+     */
+    private fun resolveSuperType(params: ObjectBodyParams): String {
+        val selfType = params.selfType
+        if (!params.canGenerateSqlMapping) return "LirpTableDef<$selfType>"
+        val extras =
+            buildList {
+                if (params.columns.any { it.isVersion }) add("VersionedTableDef<$selfType>")
+                if (params.foreignKeys.isNotEmpty()) add("ForeignKeyAware")
+                if (params.junctionRefs.isNotEmpty()) add("JunctionAware<$selfType>")
+            }
+        return if (extras.isEmpty()) "SqlTableDef<$selfType>" else "SqlTableDef<$selfType>, ${extras.joinToString(", ")}"
+    }
+
+    /** Emits the `override val columns: List<ColumnDef> = listOf(...)` block for the descriptor. */
+    private fun StringBuilder.appendColumnsList(columns: List<ColumnMeta>) {
         appendLine("    override val columns: List<ColumnDef> = listOf(")
         if (columns.isNotEmpty()) {
             val columnsCode =
@@ -158,24 +184,6 @@ internal object TableDefSourceEmitter {
             appendLine("        $columnsCode")
         }
         appendLine("    )")
-        if (canGenerateSqlMapping) {
-            appendLine()
-            appendFromRow(
-                className, selfType, columns, constructorParamNames,
-                params.ctorSlots, params.setterSlots, params.isReactiveEntity,
-                params.creatorCallExpression, params.creatorParamNames
-            )
-            appendLine()
-            appendToParams(className, selfType, columns)
-            appendLine()
-            appendApplyRow(className, selfType, columns)
-            appendLine()
-            appendApplyScalarRow(selfType, columns, params.setterSlots)
-            appendBumpVersion(className, selfType, columns)
-            appendForeignKeys(foreignKeys)
-            appendJunctionOverrides(className, selfType, junctionRefs)
-        }
-        appendLine("}")
     }
 
     fun StringBuilder.appendJunctionOverrides(
@@ -254,17 +262,16 @@ internal object TableDefSourceEmitter {
      */
     private fun receiverName(className: String, selfType: String): String = if (className != selfType) "entityRef" else "entity"
 
-    fun StringBuilder.appendFromRow(
-        className: String,
-        selfType: String,
-        columns: List<ColumnMeta>,
-        constructorParamNames: List<String>,
-        ctorSlots: List<CtorSlot> = emptyList(),
-        embeddedSetterSlots: List<EmbeddedSetterSlot> = emptyList(),
-        isReactiveEntity: Boolean = true,
-        creatorCallExpression: String? = null,
-        creatorParamNames: List<String>? = null
-    ) {
+    fun StringBuilder.appendFromRow(className: String, params: ObjectBodyParams) {
+        val selfType = params.selfType
+        val columns = params.columns
+        val constructorParamNames = params.constructorParamNames
+        val ctorSlots = params.ctorSlots
+        val embeddedSetterSlots = params.setterSlots
+        val isReactiveEntity = params.isReactiveEntity
+        val creatorCallExpression = params.creatorCallExpression
+        val creatorParamNames = params.creatorParamNames
+
         val columnsByName = columns.associateBy { it.propertyName }
         // When a creator is present, its param list may be a subset of the primary-ctor params;
         // use it to drive the flat column-lookup order so unlisted params are omitted.

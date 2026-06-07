@@ -53,6 +53,11 @@ internal class SqlEntityLoader<K : Comparable<K>, R : ReactiveEntity<K, R>>(
 ) {
     private val table: Table = exposedTable.table
 
+    // Resolved once: the type argument is erased, so the cast is unchecked by construction but
+    // safe — JunctionAware members are typed on the same self-type R as this loader's tableDef.
+    @Suppress("UNCHECKED_CAST")
+    private val junctionAware: JunctionAware<R>? = tableDef as? JunctionAware<R>
+
     /**
      * Loads all rows from the entity table (and its junction tables when present) into a
      * map keyed by primary key. Must be called outside a transaction; opens its own
@@ -160,7 +165,7 @@ internal class SqlEntityLoader<K : Comparable<K>, R : ReactiveEntity<K, R>>(
             val orderedIds: List<Any> =
                 if (descriptor.isOrdered) pairs.sortedBy { it.second ?: 0 }.map { it.first }
                 else pairs.map { it.first }
-            (tableDef as? JunctionAware<R>)?.applyJunctionRows(entity, descriptor, orderedIds)
+            junctionAware?.applyJunctionRows(entity, descriptor, orderedIds)
         }
     }
 
@@ -198,7 +203,7 @@ internal class SqlEntityLoader<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                     } else {
                         pairs.map { it.first }
                     }
-                (tableDef as? JunctionAware<R>)?.applyJunctionRows(entity, descriptor, orderedIds)
+                junctionAware?.applyJunctionRows(entity, descriptor, orderedIds)
             }
         }
     }

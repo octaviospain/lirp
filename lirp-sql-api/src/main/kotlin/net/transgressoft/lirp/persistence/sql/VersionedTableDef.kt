@@ -32,7 +32,7 @@ package net.transgressoft.lirp.persistence.sql
  *
  * @param E The entity type whose version column is managed.
  */
-interface VersionedTableDef<E> {
+fun interface VersionedTableDef<E> {
 
     /**
      * Sets the `@Version` property of [entity] to [newVersion], bypassing reactive setters

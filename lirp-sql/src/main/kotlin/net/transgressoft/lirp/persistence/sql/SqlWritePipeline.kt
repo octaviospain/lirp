@@ -50,6 +50,15 @@ internal class SqlWritePipeline<K : Comparable<K>, R : ReactiveEntity<K, R>>(
 ) {
     private val table: Table = exposedTable.table
 
+    // Resolved once: the type arguments are erased, so these casts are unchecked by construction
+    // but safe — both capability interfaces are typed on the same self-type R as this pipeline's
+    // tableDef. Centralizing them here also avoids repeating the cast at every call site.
+    @Suppress("UNCHECKED_CAST")
+    private val versionedTableDef: VersionedTableDef<R>? = tableDef as? VersionedTableDef<R>
+
+    @Suppress("UNCHECKED_CAST")
+    private val junctionAware: JunctionAware<R>? = tableDef as? JunctionAware<R>
+
     /**
      * Inserts a single entity row and synchronises its junction rows.
      */
@@ -129,7 +138,7 @@ internal class SqlWritePipeline<K : Comparable<K>, R : ReactiveEntity<K, R>>(
             // row state just written (the UPDATE payload above sets DB version = expected + 1,
             // and this bump keeps in-memory in sync).
             op.entity.withEventsDisabled {
-                (tableDef as? VersionedTableDef<R>)?.bumpVersion(op.entity, expected + 1)
+                versionedTableDef?.bumpVersion(op.entity, expected + 1)
             }
         }
         // Wholesale-replace junction rows after the parent UPDATE succeeds. Skipped on optimistic
@@ -209,7 +218,7 @@ internal class SqlWritePipeline<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      */
     private fun syncJunctionRows(entity: R) {
         if (junctionTables.isEmpty()) return
-        val accessors = (tableDef as? JunctionAware<R>)?.junctionAccessors ?: return
+        val accessors = junctionAware?.junctionAccessors ?: return
 
         for (accessor in accessors) {
             val descriptor = accessor.descriptor

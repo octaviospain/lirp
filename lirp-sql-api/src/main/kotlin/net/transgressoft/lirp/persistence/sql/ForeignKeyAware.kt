@@ -31,7 +31,7 @@ package net.transgressoft.lirp.persistence.sql
  * that need FK constraints must add this interface; the compiler guides them to implement the
  * required member.
  */
-interface ForeignKeyAware {
+fun interface ForeignKeyAware {
 
     /**
      * Returns the SQL foreign-key descriptors for the single-entity `@Aggregate` references
