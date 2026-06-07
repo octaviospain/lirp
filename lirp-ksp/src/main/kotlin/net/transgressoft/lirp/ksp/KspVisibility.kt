@@ -57,15 +57,16 @@ internal fun effectiveVisibilityModifier(decl: KSClassDeclaration): String? {
 
 /**
  * Returns `true` when [this] property must be excluded from generated accessor entries because it
- * is `private`.
+ * is not reachable from generated code: `private` or `protected`.
  *
  * Generated accessor companions live in a sibling top-level file within the same package. A
- * `private` property is inaccessible from outside the declaring class — emitting an accessor entry
- * for it would produce code that fails Kotlin compile with `Cannot access 'var x': it is private`.
- * Callers that need to persist private state must promote the property to `internal` or `public`.
+ * `private` property is inaccessible from outside the declaring class, and a `protected` property
+ * is only visible to subclasses — emitting an accessor entry for either would produce code that
+ * fails Kotlin compile with `Cannot access 'var x': it is private/protected`. Callers that need to
+ * persist such state must promote the property to `internal` or `public`.
  *
  * This predicate is shared by [RawInitializerProcessor] and [ReactivePropertyAccessorProcessor]
  * so both generators apply the identical exclusion rule from one authoritative site.
  */
 internal fun KSPropertyDeclaration.isPrivateForGeneratedAccess(): Boolean =
-    Modifier.PRIVATE in modifiers
+    Modifier.PRIVATE in modifiers || Modifier.PROTECTED in modifiers

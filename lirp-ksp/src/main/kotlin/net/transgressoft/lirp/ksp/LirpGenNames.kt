@@ -27,6 +27,7 @@ package net.transgressoft.lirp.ksp
  */
 internal object LirpGenNames {
     const val INDEX_ACCESSOR_SUFFIX = "_LirpIndexAccessor"
+    const val REACTIVE_PROPERTY_ACCESSOR_SUFFIX = "_LirpReactivePropertyAccessor"
     const val REF_ACCESSOR_SUFFIX = "_LirpRefAccessor"
     const val VIA_ACCESSOR_SUFFIX = "_LirpViaAccessor"
     const val RAW_INITIALIZER_SUFFIX = "_LirpRawInitializer"

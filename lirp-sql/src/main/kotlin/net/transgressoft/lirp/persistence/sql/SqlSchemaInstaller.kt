@@ -196,7 +196,7 @@ internal class SqlSchemaInstaller<K : Comparable<K>, R>(
                 // else (missing referenced table, type mismatch, permissions, etc.) so callers are
                 // not silently left without the FK constraint.
                 if (isDuplicateConstraintException(e)) {
-                    log.debug(e) { "installJunctionForeignKeys: skipping '$sql' — duplicate constraint (SQLState=${e.sqlState})" }
+                    log.debug(e) { "installFk: skipping '$sql' — duplicate constraint (SQLState=${e.sqlState})" }
                 } else {
                     throw e
                 }

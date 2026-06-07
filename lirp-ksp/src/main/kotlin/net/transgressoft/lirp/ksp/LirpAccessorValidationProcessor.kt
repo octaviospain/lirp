@@ -238,7 +238,7 @@ class LirpAccessorValidationProcessor(
                 "Entity '${info.simpleName}' has FxScalar delegates but no generated LirpFxScalarAccessor. " +
                     "Ensure lirp-ksp is applied as a KSP processor in your build.gradle."
             }
-            checkAccessor(info, resolver, info.hasReactive, "_LirpReactivePropertyAccessor") {
+            checkAccessor(info, resolver, info.hasReactive, LirpGenNames.REACTIVE_PROPERTY_ACCESSOR_SUFFIX) {
                 "Entity '${info.simpleName}' has reactive-property delegates but no generated LirpReactivePropertyAccessor — " +
                     "apply the net.transgressoft.lirp.sql Gradle plugin or add lirp-ksp to your build.gradle dependencies block."
             }
