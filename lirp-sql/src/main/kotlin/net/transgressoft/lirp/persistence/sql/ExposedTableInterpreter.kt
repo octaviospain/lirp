@@ -274,7 +274,7 @@ data class ExposedTable(
 
 /**
  * Maps a LIRP [CascadeAction] to the corresponding Exposed [ReferenceOption] used on
- * `REFERENCES … ON DELETE …` foreign-key constraints (Spike 006).
+ * `REFERENCES … ON DELETE …` foreign-key constraints.
  *
  * Returns `null` for [CascadeAction.NONE] — the convention is that NONE means "no FK clause at
  * all", which preserves backwards compatibility with consumer schemas whose existing tables lack

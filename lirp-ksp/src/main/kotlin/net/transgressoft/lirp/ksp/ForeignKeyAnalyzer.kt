@@ -48,7 +48,7 @@ internal class ForeignKeyAnalyzer(
      * Validates each single-entity ref:
      *  - The lambda body of `aggregate { … }` must be a bare identifier naming the backing scalar.
      *  - The backing scalar property must exist on the same class.
-     *  - `@Aggregate(onDelete = DETACH)` requires the backing scalar to be nullable (Spike 006).
+     *  - `@Aggregate(onDelete = DETACH)` requires the backing scalar to be nullable (a null value signals the relationship is unset).
      *
      * Drops entries with `onDelete = NONE` — by convention, NONE means "no FK clause at all".
      */
@@ -94,7 +94,7 @@ internal class ForeignKeyAnalyzer(
                 continue
             }
 
-            // NONE => emit no FK clause at all (preserves backwards compatibility per Spike 006).
+            // NONE => emit no FK clause at all (preserves backwards compatibility with consumer schemas that lack the constraint).
             if (onDelete == "NONE") continue
 
             val referencedTableName = resolveTableName(agg.referencedClass, agg.referencedClass.simpleName.asString())
