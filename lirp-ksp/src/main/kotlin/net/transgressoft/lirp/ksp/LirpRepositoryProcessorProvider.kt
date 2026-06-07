@@ -17,15 +17,15 @@
 
 package net.transgressoft.lirp.ksp
 
+import com.google.devtools.ksp.processing.CodeGenerator
+import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.processing.SymbolProcessor
-import com.google.devtools.ksp.processing.SymbolProcessorEnvironment
-import com.google.devtools.ksp.processing.SymbolProcessorProvider
 
 /**
- * KSP entry point for the LIRP repository discovery processor, registered via `META-INF/services`.
+ * KSP entry point for [LirpRepositoryProcessor], registered via `META-INF/services`.
  */
-class LirpRepositoryProcessorProvider : SymbolProcessorProvider {
+class LirpRepositoryProcessorProvider : LirpProcessorProvider() {
 
-    override fun create(environment: SymbolProcessorEnvironment): SymbolProcessor =
-        LirpRepositoryProcessor(environment.codeGenerator, environment.logger)
+    override fun createProcessor(codeGenerator: CodeGenerator, logger: KSPLogger): SymbolProcessor =
+        LirpRepositoryProcessor(codeGenerator, logger)
 }

@@ -84,7 +84,7 @@ class IndexedProcessor(
         }
         val packageName = classDecl.packageName.asString()
         val className = classDecl.simpleName.asString()
-        val accessorName = "${className}_LirpIndexAccessor"
+        val accessorName = "$className${LirpGenNames.INDEX_ACCESSOR_SUFFIX}"
 
         val entries = mutableListOf<IndexedPropertyMeta>()
         for (prop in properties) {

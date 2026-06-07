@@ -581,7 +581,7 @@ class TableDefProcessor(
         val className = classDecl.simpleName.asString()
 
         val selfType = resolveDescriptorSelfType(classDecl, className) ?: return
-        val tableDefName = "${className}_LirpTableDef"
+        val tableDefName = "$className${LirpGenNames.TABLE_DEF_SUFFIX}"
 
         // Validate creator params against the names that actually produce a slot/column source,
         // so a creator referencing an excluded (e.g. @PersistenceIgnore'd) ctor param is rejected.
@@ -638,9 +638,10 @@ class TableDefProcessor(
             )
 
         val emitJunctions = canGenerateSqlMapping && junctionRefs.isNotEmpty()
+        val emitVersioned = canGenerateSqlMapping && columns.any { it.isVersion }
         file.write(
             buildString {
-                appendPackageAndImports(packageName, canGenerateSqlMapping, columns, foreignKeys.isNotEmpty(), emitJunctions)
+                appendPackageAndImports(packageName, canGenerateSqlMapping, columns, foreignKeys.isNotEmpty(), emitJunctions, emitVersioned)
                 appendObjectBody(
                     tableDefName,
                     className,

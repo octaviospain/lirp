@@ -1,5 +1,5 @@
 /******************************************************************************
- *     Copyright (C) 2025  Octavio Calleya Garcia                             *
+ *     Copyright (C) 2026  Octavio Calleya Garcia                             *
  *                                                                            *
  *     This program is free software: you can redistribute it and/or modify   *
  *     it under the terms of the GNU General Public License as published by   *
@@ -17,16 +17,20 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.google.devtools.ksp.processing.CodeGenerator
-import com.google.devtools.ksp.processing.KSPLogger
-import com.google.devtools.ksp.processing.SymbolProcessor
-
 /**
- * KSP entry point for [ReactivePropertyAccessorProcessor], registered via `META-INF/services`
- * so consumers automatically get the generator when `lirp-ksp` is on the KSP classpath.
+ * Centralizes the generated-name suffixes used by every KSP emitter and consumed by
+ * [net.transgressoft.lirp.persistence.RegistryBase] via [net.transgressoft.lirp.persistence.KspAccessorLoader].
+ *
+ * Both the producer side (KSP processors that write class files) and the consumer side
+ * (runtime lookup via [Class.forName]) reference these constants so that a suffix change
+ * is a single edit and the compiler enforces consistency.
  */
-class ReactivePropertyAccessorProcessorProvider : LirpProcessorProvider() {
-
-    override fun createProcessor(codeGenerator: CodeGenerator, logger: KSPLogger): SymbolProcessor =
-        ReactivePropertyAccessorProcessor(codeGenerator, logger)
+internal object LirpGenNames {
+    const val INDEX_ACCESSOR_SUFFIX = "_LirpIndexAccessor"
+    const val REF_ACCESSOR_SUFFIX = "_LirpRefAccessor"
+    const val VIA_ACCESSOR_SUFFIX = "_LirpViaAccessor"
+    const val RAW_INITIALIZER_SUFFIX = "_LirpRawInitializer"
+    const val REGISTRY_INFO_SUFFIX = "_LirpRegistryInfo"
+    const val TABLE_DEF_SUFFIX = "_LirpTableDef"
+    const val FX_SCALAR_ACCESSOR_SUFFIX = "_LirpFxScalarAccessor"
 }

@@ -17,16 +17,16 @@
 
 package net.transgressoft.lirp.ksp
 
+import com.google.devtools.ksp.processing.CodeGenerator
+import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.processing.SymbolProcessor
-import com.google.devtools.ksp.processing.SymbolProcessorEnvironment
-import com.google.devtools.ksp.processing.SymbolProcessorProvider
 
 /**
- * KSP service entrypoint for [RawInitializerProcessor]. Registered via
- * `META-INF/services/com.google.devtools.ksp.processing.SymbolProcessorProvider` so KSP
+ * KSP entry point for [RawInitializerProcessor], registered via `META-INF/services` so KSP
  * instantiates the processor for any module applying `lirp-ksp`.
  */
-class RawInitializerProcessorProvider : SymbolProcessorProvider {
-    override fun create(environment: SymbolProcessorEnvironment): SymbolProcessor =
-        RawInitializerProcessor(environment.codeGenerator, environment.logger)
+class RawInitializerProcessorProvider : LirpProcessorProvider() {
+
+    override fun createProcessor(codeGenerator: CodeGenerator, logger: KSPLogger): SymbolProcessor =
+        RawInitializerProcessor(codeGenerator, logger)
 }

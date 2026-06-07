@@ -105,7 +105,7 @@ class LirpViaAccessorProcessor(
         val packageName = classDecl.packageName.asString()
         val className = classDecl.jvmBinaryName()
         val kotlinClassName = classDecl.kotlinNestedName()
-        val accessorName = "${className}_LirpViaAccessor"
+        val accessorName = "$className${LirpGenNames.VIA_ACCESSOR_SUFFIX}"
 
         val (singleMetas, collectionMetas) = collectViaPropertyMetas(properties, className)
 

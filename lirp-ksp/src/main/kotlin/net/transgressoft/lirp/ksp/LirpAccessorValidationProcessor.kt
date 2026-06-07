@@ -230,11 +230,11 @@ class LirpAccessorValidationProcessor(
      */
     private fun validateAccessorCompleteness(entities: List<EntityValidationInfo>, resolver: Resolver) {
         for (info in entities) {
-            checkAccessor(info, resolver, info.hasIndexed, "_LirpIndexAccessor") {
+            checkAccessor(info, resolver, info.hasIndexed, LirpGenNames.INDEX_ACCESSOR_SUFFIX) {
                 "Entity '${info.simpleName}' has @Indexed delegates but no generated LirpIndexAccessor. " +
                     "Ensure lirp-ksp is applied as a KSP processor in your build.gradle."
             }
-            checkAccessor(info, resolver, info.hasFxScalar, "_LirpFxScalarAccessor") {
+            checkAccessor(info, resolver, info.hasFxScalar, LirpGenNames.FX_SCALAR_ACCESSOR_SUFFIX) {
                 "Entity '${info.simpleName}' has FxScalar delegates but no generated LirpFxScalarAccessor. " +
                     "Ensure lirp-ksp is applied as a KSP processor in your build.gradle."
             }
@@ -242,7 +242,7 @@ class LirpAccessorValidationProcessor(
                 "Entity '${info.simpleName}' has reactive-property delegates but no generated LirpReactivePropertyAccessor — " +
                     "apply the net.transgressoft.lirp.sql Gradle plugin or add lirp-ksp to your build.gradle dependencies block."
             }
-            checkAccessor(info, resolver, info.hasRawInit, "_LirpRawInitializer") {
+            checkAccessor(info, resolver, info.hasRawInit, LirpGenNames.RAW_INITIALIZER_SUFFIX) {
                 "Entity '${info.simpleName}' has no generated LirpRawInitializer — " +
                     "apply the net.transgressoft.lirp.sql Gradle plugin or add lirp-ksp to your build.gradle dependencies block."
             }
