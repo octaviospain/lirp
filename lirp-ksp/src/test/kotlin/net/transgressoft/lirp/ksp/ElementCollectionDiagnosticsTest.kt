@@ -17,11 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.JvmCompilationResult
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
-import com.tschuchort.compiletesting.configureKsp
-import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -40,21 +37,11 @@ import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 @OptIn(ExperimentalCompilerApi::class)
 class ElementCollectionDiagnosticsTest : StringSpec({
 
-    fun compileWithProcessor(vararg sources: SourceFile): JvmCompilationResult {
-        val compilation =
-            KotlinCompilation().apply {
-                this.sources = sources.toList()
-                inheritClassPath = true
-            }
-        compilation.configureKsp { withCompilation = true }
-        compilation.symbolProcessorProviders += TableDefProcessorProvider()
-        return compilation.compile()
-    }
-
     // Map property type
     "rejects @ElementCollection with Map property type" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "MapTagEntity.kt",
                     """
@@ -91,7 +78,8 @@ class ElementCollectionDiagnosticsTest : StringSpec({
     // MutableList property type
     "rejects @ElementCollection with MutableList property type" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "MutableListTagEntity.kt",
                     """
@@ -128,7 +116,8 @@ class ElementCollectionDiagnosticsTest : StringSpec({
     // MutableSet property type
     "rejects @ElementCollection with MutableSet property type" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "MutableSetTagEntity.kt",
                     """
@@ -165,7 +154,8 @@ class ElementCollectionDiagnosticsTest : StringSpec({
     // nullable element type
     "rejects @ElementCollection with nullable element type" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NullableElementEntity.kt",
                     """
@@ -202,7 +192,8 @@ class ElementCollectionDiagnosticsTest : StringSpec({
     // nullable collection type
     "rejects @ElementCollection with nullable collection type" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NullableCollectionEntity.kt",
                     """
@@ -239,7 +230,8 @@ class ElementCollectionDiagnosticsTest : StringSpec({
     // @ElementCollection declared inside an @Embeddable
     "rejects @ElementCollection declared inside an @Embeddable" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "EmbeddableWithCollectionEntity.kt",
                     """
@@ -284,7 +276,8 @@ class ElementCollectionDiagnosticsTest : StringSpec({
     // missing/sentinel elementConverter
     "rejects @ElementCollection without an explicit elementConverter" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "MissingConverterEntity.kt",
                     """
@@ -314,7 +307,8 @@ class ElementCollectionDiagnosticsTest : StringSpec({
     // co-occurrence with @PersistenceProperty
     "rejects @ElementCollection co-occurring with @PersistenceProperty on the same property" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "CompositionConflictEntity.kt",
                     """
@@ -358,7 +352,8 @@ class ElementCollectionDiagnosticsTest : StringSpec({
     // in ElementCollectionH2RoundTripTest and ElementCollectionDialectsIT.
     "accepts @ElementCollection on a body-declared var reactive property" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BodyDeclaredReactiveCollectionEntity.kt",
                     """
@@ -393,7 +388,8 @@ class ElementCollectionDiagnosticsTest : StringSpec({
     // body-declared read-only `val` has no setter to populate from a row
     "rejects @ElementCollection on a body-declared read-only val" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BodyValCollectionEntity.kt",
                     """
@@ -430,7 +426,8 @@ class ElementCollectionDiagnosticsTest : StringSpec({
     // element-S type outside the 8 Kotlin primitives
     "rejects @ElementCollection with an element-S type outside the eight Kotlin primitives" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "UuidConverterCollectionEntity.kt",
                     """

@@ -17,12 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.JvmCompilationResult
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
-import com.tschuchort.compiletesting.configureKsp
-import com.tschuchort.compiletesting.sourcesGeneratedBySymbolProcessor
-import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -41,30 +37,10 @@ import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 @OptIn(ExperimentalCompilerApi::class)
 class ColumnTypeInferenceTest : StringSpec({
 
-    fun compileWithProcessor(vararg sources: SourceFile): JvmCompilationResult {
-        val compilation =
-            KotlinCompilation().apply {
-                this.sources = sources.toList()
-                inheritClassPath = true
-            }
-        compilation.configureKsp { withCompilation = true }
-        compilation.symbolProcessorProviders += TableDefProcessorProvider()
-        return compilation.compile()
-    }
-
-    fun JvmCompilationResult.generatedContent(name: String): String {
-        val file =
-            sourcesGeneratedBySymbolProcessor.firstOrNull { it.name == name }
-                ?: error(
-                    "Generated file '$name' not found among: " +
-                        sourcesGeneratedBySymbolProcessor.map { it.name }.toList()
-                )
-        return file.readText()
-    }
-
     "TableDefProcessor maps Short property to IntType with narrowing on read and widening on write" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ShortPropEntity.kt",
                     """
@@ -85,7 +61,7 @@ class ColumnTypeInferenceTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedContent("ShortPropEntity_LirpTableDef.kt")
+        val content = result.generatedFileContent("ShortPropEntity_LirpTableDef.kt")
         content shouldContain "ColumnType.IntType"
         // Narrowing on read: (row[...] as Int).toShort()
         content shouldContain ".toShort()"
@@ -95,7 +71,8 @@ class ColumnTypeInferenceTest : StringSpec({
 
     "TableDefProcessor maps Byte property to IntType with narrowing on read and widening on write" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BytePropEntity.kt",
                     """
@@ -116,7 +93,7 @@ class ColumnTypeInferenceTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedContent("BytePropEntity_LirpTableDef.kt")
+        val content = result.generatedFileContent("BytePropEntity_LirpTableDef.kt")
         content shouldContain "ColumnType.IntType"
         content shouldContain ".toByte()"
         content shouldContain ".toInt()"
@@ -124,7 +101,8 @@ class ColumnTypeInferenceTest : StringSpec({
 
     "TableDefProcessor maps nullable Short property with narrowing and safe-cast" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NullableShortEntity.kt",
                     """
@@ -145,7 +123,7 @@ class ColumnTypeInferenceTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedContent("NullableShortEntity_LirpTableDef.kt")
+        val content = result.generatedFileContent("NullableShortEntity_LirpTableDef.kt")
         content shouldContain "ColumnType.IntType"
         // Nullable narrowing: (rawAccess as? Number)?.toShort()
         content shouldContain "as? Number"
@@ -156,7 +134,8 @@ class ColumnTypeInferenceTest : StringSpec({
 
     "TableDefProcessor maps Float property to FloatType" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "FloatPropEntity.kt",
                     """
@@ -177,12 +156,13 @@ class ColumnTypeInferenceTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedContent("FloatPropEntity_LirpTableDef.kt") shouldContain "ColumnType.FloatType"
+        result.generatedFileContent("FloatPropEntity_LirpTableDef.kt") shouldContain "ColumnType.FloatType"
     }
 
     "TableDefProcessor maps Double property to DoubleType" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "DoublePropEntity.kt",
                     """
@@ -203,12 +183,13 @@ class ColumnTypeInferenceTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedContent("DoublePropEntity_LirpTableDef.kt") shouldContain "ColumnType.DoubleType"
+        result.generatedFileContent("DoublePropEntity_LirpTableDef.kt") shouldContain "ColumnType.DoubleType"
     }
 
     "TableDefProcessor maps BigDecimal property to DecimalType with default precision and scale" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BigDecimalDefaultEntity.kt",
                     """
@@ -231,12 +212,13 @@ class ColumnTypeInferenceTest : StringSpec({
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         // Default: precision=19, scale=2
-        result.generatedContent("BigDecimalDefaultEntity_LirpTableDef.kt") shouldContain "ColumnType.DecimalType(19, 2)"
+        result.generatedFileContent("BigDecimalDefaultEntity_LirpTableDef.kt") shouldContain "ColumnType.DecimalType(19, 2)"
     }
 
     "TableDefProcessor maps BigDecimal property with explicit length hint to DecimalType" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BigDecimalPrecisionEntity.kt",
                     """
@@ -259,12 +241,13 @@ class ColumnTypeInferenceTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedContent("BigDecimalPrecisionEntity_LirpTableDef.kt") shouldContain "ColumnType.DecimalType(12, 4)"
+        result.generatedFileContent("BigDecimalPrecisionEntity_LirpTableDef.kt") shouldContain "ColumnType.DecimalType(12, 4)"
     }
 
     "TableDefProcessor rejects unsupported column type with error diagnostic" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "UnsupportedTypeEntity.kt",
                     """
@@ -292,7 +275,8 @@ class ColumnTypeInferenceTest : StringSpec({
 
     "TableDefProcessor maps String property with length annotation to VarcharType" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "VarcharStringEntity.kt",
                     """
@@ -314,12 +298,13 @@ class ColumnTypeInferenceTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedContent("VarcharStringEntity_LirpTableDef.kt") shouldContain "ColumnType.VarcharType(255)"
+        result.generatedFileContent("VarcharStringEntity_LirpTableDef.kt") shouldContain "ColumnType.VarcharType(255)"
     }
 
     "TableDefProcessor emits Short/Byte widening for converter with Short S type" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ShortConverterWideningEntity.kt",
                     """
@@ -351,7 +336,7 @@ class ColumnTypeInferenceTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedContent("ShortConverterWideningEntity_LirpTableDef.kt")
+        val content = result.generatedFileContent("ShortConverterWideningEntity_LirpTableDef.kt")
         // Converter read-side: (row[...] as Int).toShort() routed into fromSql
         content shouldContain "test.LevelConverter.fromSql("
         content shouldContain ".toShort()"
@@ -362,7 +347,8 @@ class ColumnTypeInferenceTest : StringSpec({
 
     "TableDefProcessor emits Byte widening for converter with Byte S type on nullable column" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ByteConverterNullableEntity.kt",
                     """
@@ -394,7 +380,7 @@ class ColumnTypeInferenceTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedContent("ByteConverterNullableEntity_LirpTableDef.kt")
+        val content = result.generatedFileContent("ByteConverterNullableEntity_LirpTableDef.kt")
         // Nullable converter read-side: (raw as? Int)?.toByte() routed into fromSql via ?.let
         content shouldContain ".toByte()"
         content shouldContain "?.let { test.FlagConverter.fromSql(it) }"

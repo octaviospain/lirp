@@ -17,7 +17,6 @@
 
 package net.transgressoft.lirp.persistence.sql
 
-import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import org.testcontainers.mysql.MySQLContainer
 
@@ -36,12 +35,5 @@ object MysqlContainerSupport {
      * Returns a new [HikariDataSource] connected to the shared MySQL container.
      */
     fun buildDataSource(): HikariDataSource =
-        HikariDataSource(
-            HikariConfig().apply {
-                jdbcUrl = container.jdbcUrl
-                username = container.username
-                password = container.password
-                maximumPoolSize = 10
-            }
-        )
+        hikariDataSource(container.jdbcUrl, container.username, container.password)
 }

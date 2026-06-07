@@ -17,12 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.JvmCompilationResult
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
-import com.tschuchort.compiletesting.configureKsp
-import com.tschuchort.compiletesting.sourcesGeneratedBySymbolProcessor
-import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -40,30 +36,10 @@ import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 @OptIn(ExperimentalCompilerApi::class)
 class EmbeddableEdgeCasesTest : StringSpec({
 
-    fun compileWithProcessor(vararg sources: SourceFile): JvmCompilationResult {
-        val compilation =
-            KotlinCompilation().apply {
-                this.sources = sources.toList()
-                inheritClassPath = true
-            }
-        compilation.configureKsp { withCompilation = true }
-        compilation.symbolProcessorProviders += TableDefProcessorProvider()
-        return compilation.compile()
-    }
-
-    fun JvmCompilationResult.generatedFileContent(name: String): String {
-        val file =
-            sourcesGeneratedBySymbolProcessor.firstOrNull { it.name == name }
-                ?: error(
-                    "Generated file '$name' not found among: " +
-                        sourcesGeneratedBySymbolProcessor.map { it.name }.toList()
-                )
-        return file.readText()
-    }
-
     "rejects @Embedded body-declared property inside nested @Embeddable during recursive descent" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BodyEmbeddedInsideEmbeddable.kt",
                     """
@@ -101,7 +77,8 @@ class EmbeddableEdgeCasesTest : StringSpec({
 
     "accepts @Embedded on var constructor parameter inside nested @Embeddable" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "VarEmbeddedInsideEmbeddable.kt",
                     """
@@ -134,7 +111,8 @@ class EmbeddableEdgeCasesTest : StringSpec({
 
     "rejects @Embedded referencing non-@Embeddable type at nested level" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NonEmbeddableNestedTarget.kt",
                     """
@@ -168,7 +146,8 @@ class EmbeddableEdgeCasesTest : StringSpec({
 
     "flattens nullable @Embeddable leaf columns with correct nullability in ColumnDef" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NullableLeafEntity.kt",
                     """
@@ -203,7 +182,8 @@ class EmbeddableEdgeCasesTest : StringSpec({
 
     "flattens @Embedded ctor param alongside non-ctor setter column" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "MixedCtorAndSetterEntity.kt",
                     """
@@ -242,7 +222,8 @@ class EmbeddableEdgeCasesTest : StringSpec({
 
     "ignores `@PersistenceProperty`(name=...) on `@Embeddable` leaf during flattening" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NamedLeafEntity.kt",
                     """
@@ -282,7 +263,8 @@ class EmbeddableEdgeCasesTest : StringSpec({
 
     "compiles when the referenced `@Embeddable` is valid (control case)" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "EmptyCtorEmbeddable.kt",
                     """
@@ -318,7 +300,8 @@ class EmbeddableEdgeCasesTest : StringSpec({
 
     "flattens two @Embedded siblings with distinct auto-derived prefixes" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "TwoSiblingsEntity.kt",
                     """
@@ -357,7 +340,8 @@ class EmbeddableEdgeCasesTest : StringSpec({
 
     "rejects @Embeddable data class with no primary constructor" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NoCtorEmbeddableEntity.kt",
                     """
@@ -392,7 +376,8 @@ class EmbeddableEdgeCasesTest : StringSpec({
 
     "@PersistenceIgnore property is excluded from persisted columns" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "PersistenceIgnoreEntity.kt",
                     """
@@ -421,7 +406,8 @@ class EmbeddableEdgeCasesTest : StringSpec({
 
     "non-mutable non-ctor property with private setter is excluded from applyRow" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "PrivateSetterEntity.kt",
                     """

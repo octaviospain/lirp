@@ -17,12 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.JvmCompilationResult
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
-import com.tschuchort.compiletesting.configureKsp
-import com.tschuchort.compiletesting.sourcesGeneratedBySymbolProcessor
-import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -38,20 +34,13 @@ import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 @OptIn(ExperimentalCompilerApi::class)
 class ElementCollectionCodegenTest : StringSpec({
 
-    fun compileWithProcessor(vararg sources: SourceFile): JvmCompilationResult {
-        val compilation =
-            KotlinCompilation().apply {
-                this.sources = sources.toList()
-                inheritClassPath = true
-            }
-        compilation.configureKsp { withCompilation = false }
-        compilation.symbolProcessorProviders += TableDefProcessorProvider()
-        return compilation.compile()
-    }
+    // Codegen assertions use KSP-only compilation (no full Kotlin compile needed)
+    fun compile(vararg sources: SourceFile) =
+        KspTestSupport.compile(TableDefProcessorProvider(), *sources, withCompilation = false)
 
     "emits .toSet() terminal for Set<E> element-collection in fromRow" {
         val result =
-            compileWithProcessor(
+            compile(
                 SourceFile.kotlin(
                     "SetTagEntity.kt",
                     """
@@ -80,18 +69,14 @@ class ElementCollectionCodegenTest : StringSpec({
                 )
             )
 
-        val generated =
-            result.sourcesGeneratedBySymbolProcessor
-                .firstOrNull { it.name == "SetTagEntity_LirpTableDef.kt" }
-                ?.readText()
-                ?: error("SetTagEntity_LirpTableDef.kt not generated — messages: ${result.messages}")
+        val generated = result.generatedFileContent("SetTagEntity_LirpTableDef.kt")
         generated shouldContain "Json.decodeFromString<kotlin.collections.List<kotlin.String>>"
         generated shouldContain ".map { test.StringTagConverter.fromSql(it) }.toSet()"
     }
 
     "emits no terminal for List<E> element-collection in fromRow" {
         val result =
-            compileWithProcessor(
+            compile(
                 SourceFile.kotlin(
                     "ListTagEntity.kt",
                     """
@@ -120,18 +105,14 @@ class ElementCollectionCodegenTest : StringSpec({
                 )
             )
 
-        val generated =
-            result.sourcesGeneratedBySymbolProcessor
-                .firstOrNull { it.name == "ListTagEntity_LirpTableDef.kt" }
-                ?.readText()
-                ?: error("ListTagEntity_LirpTableDef.kt not generated — messages: ${result.messages}")
+        val generated = result.generatedFileContent("ListTagEntity_LirpTableDef.kt")
         generated shouldContain ".map { test.ListTagConverter.fromSql(it) }"
         generated shouldNotContain ".map { test.ListTagConverter.fromSql(it) }.toSet()"
     }
 
     "emits Json.encodeToString with native-S type parameter for non-String S converter" {
         val result =
-            compileWithProcessor(
+            compile(
                 SourceFile.kotlin(
                     "RatingEntity.kt",
                     """
@@ -162,18 +143,14 @@ class ElementCollectionCodegenTest : StringSpec({
                 )
             )
 
-        val generated =
-            result.sourcesGeneratedBySymbolProcessor
-                .firstOrNull { it.name == "RatingEntity_LirpTableDef.kt" }
-                ?.readText()
-                ?: error("RatingEntity_LirpTableDef.kt not generated — messages: ${result.messages}")
+        val generated = result.generatedFileContent("RatingEntity_LirpTableDef.kt")
         generated shouldContain "Json.encodeToString<kotlin.collections.List<kotlin.Int>>"
         generated shouldNotContain "Json.encodeToString<kotlin.collections.List<kotlin.String>>"
     }
 
     "emits defaultExpression = \"[]\" in the ColumnDef literal for @ElementCollection columns" {
         val result =
-            compileWithProcessor(
+            compile(
                 SourceFile.kotlin(
                     "DefaultExprEntity.kt",
                     """
@@ -202,17 +179,13 @@ class ElementCollectionCodegenTest : StringSpec({
                 )
             )
 
-        val generated =
-            result.sourcesGeneratedBySymbolProcessor
-                .firstOrNull { it.name == "DefaultExprEntity_LirpTableDef.kt" }
-                ?.readText()
-                ?: error("DefaultExprEntity_LirpTableDef.kt not generated — messages: ${result.messages}")
+        val generated = result.generatedFileContent("DefaultExprEntity_LirpTableDef.kt")
         generated shouldContain "defaultExpression = \"[]\""
     }
 
     "emits kotlinx.serialization imports when an entity declares an @ElementCollection column" {
         val result =
-            compileWithProcessor(
+            compile(
                 SourceFile.kotlin(
                     "ImportCheckEntity.kt",
                     """
@@ -241,17 +214,13 @@ class ElementCollectionCodegenTest : StringSpec({
                 )
             )
 
-        val generated =
-            result.sourcesGeneratedBySymbolProcessor
-                .firstOrNull { it.name == "ImportCheckEntity_LirpTableDef.kt" }
-                ?.readText()
-                ?: error("ImportCheckEntity_LirpTableDef.kt not generated — messages: ${result.messages}")
+        val generated = result.generatedFileContent("ImportCheckEntity_LirpTableDef.kt")
         generated shouldContain "import kotlinx.serialization.json.Json"
     }
 
     "does not emit kotlinx.serialization imports when no @ElementCollection column is present" {
         val result =
-            compileWithProcessor(
+            compile(
                 SourceFile.kotlin(
                     "PlainEntity.kt",
                     """
@@ -272,11 +241,7 @@ class ElementCollectionCodegenTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val generated =
-            result.sourcesGeneratedBySymbolProcessor
-                .firstOrNull { it.name == "PlainEntity_LirpTableDef.kt" }
-                ?.readText()
-                ?: error("PlainEntity_LirpTableDef.kt not generated — messages: ${result.messages}")
+        val generated = result.generatedFileContent("PlainEntity_LirpTableDef.kt")
         generated shouldNotContain "import kotlinx.serialization.json.Json"
     }
 })

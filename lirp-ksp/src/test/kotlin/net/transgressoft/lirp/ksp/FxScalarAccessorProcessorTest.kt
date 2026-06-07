@@ -17,12 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.JvmCompilationResult
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
-import com.tschuchort.compiletesting.configureKsp
-import com.tschuchort.compiletesting.sourcesGeneratedBySymbolProcessor
-import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -104,27 +100,10 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
             """
         )
 
-    fun compileWithProcessor(vararg sources: SourceFile): JvmCompilationResult {
-        val compilation =
-            KotlinCompilation().apply {
-                this.sources = sources.toList()
-                inheritClassPath = true
-            }
-        compilation.configureKsp { withCompilation = true }
-        compilation.symbolProcessorProviders += FxScalarAccessorProcessorProvider()
-        return compilation.compile()
-    }
-
-    fun JvmCompilationResult.generatedFileContent(name: String): String {
-        val file =
-            sourcesGeneratedBySymbolProcessor.firstOrNull { it.name == name }
-                ?: error("Generated file '$name' not found among: ${sourcesGeneratedBySymbolProcessor.map { it.name }.toList()}")
-        return file.readText()
-    }
-
     "generates _LirpFxScalarAccessor with correct entry for entity with StringProperty delegate" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                FxScalarAccessorProcessorProvider(),
                 fxPropertyStubs,
                 SourceFile.kotlin(
                     "ProductEntity.kt",
@@ -154,7 +133,8 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
 
     "generates entries with correct serializer types for all six scalar property types" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                FxScalarAccessorProcessorProvider(),
                 fxPropertyStubs,
                 SourceFile.kotlin(
                     "AllScalarsEntity.kt",
@@ -200,7 +180,8 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
 
     "generates entry with typed serializer for entity with ObjectProperty type argument" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                FxScalarAccessorProcessorProvider(),
                 fxPropertyStubs,
                 SourceFile.kotlin(
                     "TaggedEntity.kt",
@@ -232,7 +213,8 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
 
     "does not generate accessor file for entity with no FxScalar delegate properties" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                FxScalarAccessorProcessorProvider(),
                 SourceFile.kotlin(
                     "PlainEntity.kt",
                     """
@@ -248,13 +230,14 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val generatedFiles = result.sourcesGeneratedBySymbolProcessor.map { it.name }
+        val generatedFiles = result.generatedNames()
         generatedFiles.contains("PlainEntity_LirpFxScalarAccessor.kt") shouldBe false
     }
 
     "FxScalarAccessorProcessor emits internal class declaration for top-level internal entity" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                FxScalarAccessorProcessorProvider(),
                 fxPropertyStubs,
                 SourceFile.kotlin(
                     "InternalFxEntity.kt",
@@ -279,7 +262,8 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
 
     "FxScalarAccessorProcessor emits internal class declaration for entity nested in internal outer" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                FxScalarAccessorProcessorProvider(),
                 fxPropertyStubs,
                 SourceFile.kotlin(
                     "InternalOuterFx.kt",
@@ -306,7 +290,8 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
 
     "FxScalarAccessorProcessor silently skips private-nested entity without generating a file" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                FxScalarAccessorProcessorProvider(),
                 fxPropertyStubs,
                 SourceFile.kotlin(
                     "PrivateOuterFx.kt",
@@ -328,13 +313,14 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         // Structural processors silently skip private/protected entities
-        val generatedNames = result.sourcesGeneratedBySymbolProcessor.map { it.name }
+        val generatedNames = result.generatedNames()
         generatedNames.contains("PrivateOuterFx\$HiddenFx_LirpFxScalarAccessor.kt") shouldBe false
     }
 
     "generates accessor with correct JVM binary name for nested entity class" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                FxScalarAccessorProcessorProvider(),
                 fxPropertyStubs,
                 SourceFile.kotlin(
                     "OuterContainer.kt",
@@ -355,7 +341,7 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val generatedFiles = result.sourcesGeneratedBySymbolProcessor.map { it.name }
+        val generatedFiles = result.generatedNames()
         generatedFiles.contains("OuterContainer\$InnerEntity_LirpFxScalarAccessor.kt") shouldBe true
         val content = result.generatedFileContent("OuterContainer\$InnerEntity_LirpFxScalarAccessor.kt")
         content shouldContain "class `OuterContainer\$InnerEntity_LirpFxScalarAccessor` : LirpFxScalarAccessor<OuterContainer.InnerEntity>"

@@ -17,12 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.JvmCompilationResult
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
-import com.tschuchort.compiletesting.configureKsp
-import com.tschuchort.compiletesting.sourcesGeneratedBySymbolProcessor
-import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -39,30 +35,13 @@ import org.junit.jupiter.api.DisplayName
 @DisplayName("RawInitializerProcessor")
 internal class RawInitializerProcessorTest : StringSpec({
 
-    fun compileWithProcessor(vararg sources: SourceFile): JvmCompilationResult {
-        val compilation =
-            KotlinCompilation().apply {
-                this.sources = sources.toList()
-                inheritClassPath = true
-            }
-        compilation.configureKsp { withCompilation = true }
-        compilation.symbolProcessorProviders += RawInitializerProcessorProvider()
-        return compilation.compile()
-    }
-
-    fun JvmCompilationResult.generatedFileContent(name: String): String {
-        val file =
-            sourcesGeneratedBySymbolProcessor.firstOrNull { it.name == name }
-                ?: error("Generated file '$name' not found among: " + sourcesGeneratedBySymbolProcessor.map { it.name }.toList())
-        return file.readText()
-    }
-
     "generates initializer for entity with reactiveProperty + non-reactive var scalar" {
         // `lastDateModified` is inherited from ReactiveEntityBase as a plain `var LocalDateTime` —
         // it is not a constructor parameter and not delegated, so the processor must emit a
         // raw-init entry for it alongside the reactive `x`.
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                RawInitializerProcessorProvider(),
                 SourceFile.kotlin(
                     "Foo.kt",
                     """
@@ -93,7 +72,8 @@ internal class RawInitializerProcessorTest : StringSpec({
 
     "generates initializer for entity with @Version field" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                RawInitializerProcessorProvider(),
                 SourceFile.kotlin(
                     "Versioned.kt",
                     """
@@ -118,7 +98,8 @@ internal class RawInitializerProcessorTest : StringSpec({
 
     "generates initializer for entity with @Aggregate single-ref Id" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                RawInitializerProcessorProvider(),
                 SourceFile.kotlin(
                     "WithOwner.kt",
                     """
@@ -142,7 +123,8 @@ internal class RawInitializerProcessorTest : StringSpec({
 
     "RawInitializerProcessor skips private var properties" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                RawInitializerProcessorProvider(),
                 SourceFile.kotlin(
                     "WithPrivate.kt",
                     """
@@ -168,7 +150,8 @@ internal class RawInitializerProcessorTest : StringSpec({
 
     "RawInitializerProcessor emits entries for public var properties when private siblings are present" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                RawInitializerProcessorProvider(),
                 SourceFile.kotlin(
                     "MixedVisibility.kt",
                     """
@@ -197,7 +180,8 @@ internal class RawInitializerProcessorTest : StringSpec({
 
     "RawInitializerProcessor skips non-ctor var with private set" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                RawInitializerProcessorProvider(),
                 SourceFile.kotlin(
                     "WithPrivateSetter.kt",
                     """
@@ -224,7 +208,8 @@ internal class RawInitializerProcessorTest : StringSpec({
 
     "RawInitializerProcessor skips non-ctor var with internal set" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                RawInitializerProcessorProvider(),
                 SourceFile.kotlin(
                     "WithInternalSetter.kt",
                     """
@@ -250,7 +235,8 @@ internal class RawInitializerProcessorTest : StringSpec({
 
     "RawInitializerProcessor still excludes @PersistenceIgnore-annotated public var" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                RawInitializerProcessorProvider(),
                 SourceFile.kotlin(
                     "WithIgnore.kt",
                     """
@@ -276,7 +262,8 @@ internal class RawInitializerProcessorTest : StringSpec({
 
     "RawInitializerProcessor still excludes @Transient-annotated public var" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                RawInitializerProcessorProvider(),
                 SourceFile.kotlin(
                     "WithTransient.kt",
                     """
@@ -301,7 +288,8 @@ internal class RawInitializerProcessorTest : StringSpec({
 
     "RawInitializerProcessor compiles entity with only private var fields" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                RawInitializerProcessorProvider(),
                 SourceFile.kotlin(
                     "OnlyPrivate.kt",
                     """
@@ -329,7 +317,8 @@ internal class RawInitializerProcessorTest : StringSpec({
 
     "RawInitializerProcessor emits internal class declaration for top-level internal entity" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                RawInitializerProcessorProvider(),
                 SourceFile.kotlin(
                     "InternalFoo.kt",
                     """
@@ -352,7 +341,8 @@ internal class RawInitializerProcessorTest : StringSpec({
 
     "RawInitializerProcessor emits internal class declaration for internal entity nested in internal outer" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                RawInitializerProcessorProvider(),
                 SourceFile.kotlin(
                     "InternalOuter.kt",
                     """
@@ -377,7 +367,8 @@ internal class RawInitializerProcessorTest : StringSpec({
 
     "RawInitializerProcessor emits internal class declaration for public entity nested in internal outer" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                RawInitializerProcessorProvider(),
                 SourceFile.kotlin(
                     "InternalOuterPublicInner.kt",
                     """
@@ -402,7 +393,8 @@ internal class RawInitializerProcessorTest : StringSpec({
 
     "RawInitializerProcessor silently skips private-nested entity without generating a file" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                RawInitializerProcessorProvider(),
                 SourceFile.kotlin(
                     "PrivateOuter.kt",
                     """
@@ -422,13 +414,14 @@ internal class RawInitializerProcessorTest : StringSpec({
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         // Structural processors (RawInitializerProcessor) silently skip private/protected entities
-        val generatedNames = result.sourcesGeneratedBySymbolProcessor.map { it.name }
+        val generatedNames = result.generatedNames()
         generatedNames.contains("PrivateOuter\$HiddenEntity_LirpRawInitializer.kt") shouldBe false
     }
 
     "skips collection-ref properties" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                RawInitializerProcessorProvider(),
                 SourceFile.kotlin(
                     "Parent.kt",
                     """

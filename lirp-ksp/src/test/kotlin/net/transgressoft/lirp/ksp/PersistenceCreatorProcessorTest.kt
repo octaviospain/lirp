@@ -17,12 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.JvmCompilationResult
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
-import com.tschuchort.compiletesting.configureKsp
-import com.tschuchort.compiletesting.sourcesGeneratedBySymbolProcessor
-import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
@@ -40,31 +36,11 @@ import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 @OptIn(ExperimentalCompilerApi::class)
 class PersistenceCreatorProcessorTest : StringSpec({
 
-    fun compileWithProcessor(vararg sources: SourceFile): JvmCompilationResult {
-        val compilation =
-            KotlinCompilation().apply {
-                this.sources = sources.toList()
-                inheritClassPath = true
-            }
-        compilation.configureKsp { withCompilation = true }
-        compilation.symbolProcessorProviders += TableDefProcessorProvider()
-        return compilation.compile()
-    }
-
-    fun JvmCompilationResult.generatedFileContent(name: String): String {
-        val file =
-            sourcesGeneratedBySymbolProcessor.firstOrNull { it.name == name }
-                ?: error(
-                    "Generated file '$name' not found among: " +
-                        sourcesGeneratedBySymbolProcessor.map { it.name }.toList()
-                )
-        return file.readText()
-    }
-
     // flyweight @Embeddable (internal ctor) reconstructed via its companion @PersistenceCreator
     "flyweight @Embeddable with internal ctor uses companion factory in fromRow" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "FlyweightArtistEntity.kt",
                     """
@@ -105,7 +81,8 @@ class PersistenceCreatorProcessorTest : StringSpec({
     // internal entity reconstructed via a public secondary-constructor @PersistenceCreator
     "internal entity uses public secondary ctor @PersistenceCreator in fromRow" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "InternalTrackEntity.kt",
                     """
@@ -143,7 +120,8 @@ class PersistenceCreatorProcessorTest : StringSpec({
     // a creator taking a reordered subset of the entity's params binds by name, not positionally
     "entity @PersistenceCreator with reordered subset binds by named args" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ReorderedCreatorEntity.kt",
                     """
@@ -185,7 +163,8 @@ class PersistenceCreatorProcessorTest : StringSpec({
     // an internal entity whose @PersistenceCreator is a non-public SECONDARY CONSTRUCTOR warns
     "internal entity with non-public secondary-ctor creator warns only" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "InternalSecondaryCtorEntity.kt",
                     """
@@ -216,7 +195,8 @@ class PersistenceCreatorProcessorTest : StringSpec({
     // a creator referencing a @PersistenceIgnore'd (unmapped) ctor param without a default errors
     "entity creator param bound to an excluded ctor param produces compilation error" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ExcludedParamCreatorEntity.kt",
                     """
@@ -251,7 +231,8 @@ class PersistenceCreatorProcessorTest : StringSpec({
     // @PersistenceIgnore non-null defaulted embeddable ctor param omitted from fromRow
     "@PersistenceIgnore non-null param with default is omitted from fromRow" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ConfigEmbeddableEntity.kt",
                     """
@@ -291,7 +272,8 @@ class PersistenceCreatorProcessorTest : StringSpec({
     // @PersistenceCreator wins over a public primary constructor
     "@PersistenceCreator wins over a public primary ctor" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "PublicCtorWithCreatorEntity.kt",
                     """
@@ -333,7 +315,8 @@ class PersistenceCreatorProcessorTest : StringSpec({
     // multiple @PersistenceCreator on the same type produces a compilation error
     "multiple @PersistenceCreator on same type produces compilation error" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "AmbiguousCreatorEntity.kt",
                     """
@@ -367,7 +350,8 @@ class PersistenceCreatorProcessorTest : StringSpec({
     // unmatched creator param without a default produces a compilation error
     "unmatched creator param without default produces compilation error" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "UnmatchedParamEntity.kt",
                     """
@@ -400,7 +384,8 @@ class PersistenceCreatorProcessorTest : StringSpec({
     // non-public primary ctor without a creator falls back to the primary ctor and warns
     "non-public primary ctor without creator falls back to primary ctor with warning" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NonPublicCtorEntity.kt",
                     """
@@ -433,7 +418,8 @@ class PersistenceCreatorProcessorTest : StringSpec({
     // internal entity with a non-public resolved creator warns only (no error; codegen proceeds)
     "internal entity with non-public resolved creator warns only" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "InternalEntityInternalCreator.kt",
                     """
@@ -472,7 +458,8 @@ class PersistenceCreatorProcessorTest : StringSpec({
     // into a different package without an import — compiles.
     "body-declared @Embedded var uses fully-qualified companion factory in fromRow" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BodyFlyweightEntity.kt",
                     """
@@ -514,7 +501,8 @@ class PersistenceCreatorProcessorTest : StringSpec({
     // multiple @PersistenceCreator on a nested @Embeddable produces a compilation error naming both
     "multiple @PersistenceCreator on an @Embeddable produces compilation error" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "AmbiguousEmbeddableEntity.kt",
                     """
@@ -554,7 +542,8 @@ class PersistenceCreatorProcessorTest : StringSpec({
     // a creator param on an @Embeddable with no mapped column and no default is a compilation error
     "unmatched @Embeddable creator param without default produces compilation error" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "UnmatchedEmbeddableEntity.kt",
                     """
@@ -593,7 +582,8 @@ class PersistenceCreatorProcessorTest : StringSpec({
     // an internal @Embeddable whose resolved creator is not public warns only; codegen proceeds
     "internal @Embeddable with non-public creator warns only" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "InternalEmbeddableEntity.kt",
                     """
@@ -632,7 +622,8 @@ class PersistenceCreatorProcessorTest : StringSpec({
     // an @Embeddable with a non-public primary ctor and no creator falls back and warns
     "@Embeddable with non-public primary ctor and no creator falls back with warning" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NoCreatorEmbeddableEntity.kt",
                     """

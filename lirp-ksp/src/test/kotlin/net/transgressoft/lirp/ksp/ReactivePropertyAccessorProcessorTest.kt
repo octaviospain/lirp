@@ -17,12 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.JvmCompilationResult
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
-import com.tschuchort.compiletesting.configureKsp
-import com.tschuchort.compiletesting.sourcesGeneratedBySymbolProcessor
-import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -54,27 +50,10 @@ import org.junit.jupiter.api.DisplayName
 @DisplayName("ReactivePropertyAccessorProcessor")
 internal class ReactivePropertyAccessorProcessorTest : StringSpec({
 
-    fun compileWithProcessor(vararg sources: SourceFile): JvmCompilationResult {
-        val compilation =
-            KotlinCompilation().apply {
-                this.sources = sources.toList()
-                inheritClassPath = true
-            }
-        compilation.configureKsp { withCompilation = true }
-        compilation.symbolProcessorProviders += ReactivePropertyAccessorProcessorProvider()
-        return compilation.compile()
-    }
-
-    fun JvmCompilationResult.generatedFileContent(name: String): String {
-        val file =
-            sourcesGeneratedBySymbolProcessor.firstOrNull { it.name == name }
-                ?: error("Generated file '$name' not found among: ${sourcesGeneratedBySymbolProcessor.map { it.name }.toList()}")
-        return file.readText()
-    }
-
     "generates accessor for entity with single reactiveProperty Int field" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                ReactivePropertyAccessorProcessorProvider(),
                 SourceFile.kotlin(
                     "Foo.kt",
                     """
@@ -100,7 +79,8 @@ internal class ReactivePropertyAccessorProcessorTest : StringSpec({
 
     "skips entities with no reactiveProperty fields" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                ReactivePropertyAccessorProcessorProvider(),
                 SourceFile.kotlin(
                     "Plain.kt",
                     """
@@ -116,13 +96,14 @@ internal class ReactivePropertyAccessorProcessorTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val generatedNames = result.sourcesGeneratedBySymbolProcessor.map { it.name }
+        val generatedNames = result.generatedNames()
         generatedNames.contains("Plain_LirpReactivePropertyAccessor.kt") shouldBe false
     }
 
     "ReactivePropertyAccessorProcessor emits internal class declaration for top-level internal entity" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                ReactivePropertyAccessorProcessorProvider(),
                 SourceFile.kotlin(
                     "InternalBar.kt",
                     """
@@ -145,7 +126,8 @@ internal class ReactivePropertyAccessorProcessorTest : StringSpec({
 
     "ReactivePropertyAccessorProcessor emits internal class declaration for entity nested in internal outer" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                ReactivePropertyAccessorProcessorProvider(),
                 SourceFile.kotlin(
                     "InternalOuterReactive.kt",
                     """
@@ -170,7 +152,8 @@ internal class ReactivePropertyAccessorProcessorTest : StringSpec({
 
     "ReactivePropertyAccessorProcessor silently skips private-nested entity without generating a file" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                ReactivePropertyAccessorProcessorProvider(),
                 SourceFile.kotlin(
                     "PrivateOuterReactive.kt",
                     """
@@ -190,13 +173,14 @@ internal class ReactivePropertyAccessorProcessorTest : StringSpec({
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         // Structural processors silently skip private/protected entities
-        val generatedNames = result.sourcesGeneratedBySymbolProcessor.map { it.name }
+        val generatedNames = result.generatedNames()
         generatedNames.contains("PrivateOuterReactive\$HiddenReactive_LirpReactivePropertyAccessor.kt") shouldBe false
     }
 
     "ReactivePropertyAccessorProcessor skips private reactive delegates" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                ReactivePropertyAccessorProcessorProvider(),
                 SourceFile.kotlin(
                     "WithPrivateDelegate.kt",
                     """
@@ -222,7 +206,8 @@ internal class ReactivePropertyAccessorProcessorTest : StringSpec({
 
     "handles entity with multiple reactiveProperty fields" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                ReactivePropertyAccessorProcessorProvider(),
                 SourceFile.kotlin(
                     "Bar.kt",
                     """

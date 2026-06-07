@@ -17,12 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.JvmCompilationResult
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
-import com.tschuchort.compiletesting.configureKsp
-import com.tschuchort.compiletesting.sourcesGeneratedBySymbolProcessor
-import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -37,20 +33,10 @@ import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 @OptIn(ExperimentalCompilerApi::class)
 class ConverterCodegenTest : StringSpec({
 
-    fun compileWithProcessor(vararg sources: SourceFile): JvmCompilationResult {
-        val compilation =
-            KotlinCompilation().apply {
-                this.sources = sources.toList()
-                inheritClassPath = true
-            }
-        compilation.configureKsp { withCompilation = true }
-        compilation.symbolProcessorProviders += TableDefProcessorProvider()
-        return compilation.compile()
-    }
-
     "TableDefProcessor accepts sentinel converter default and emits no converter codegen" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "SentinelEntity.kt",
                     """
@@ -72,18 +58,15 @@ class ConverterCodegenTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val generated =
-            result.sourcesGeneratedBySymbolProcessor
-                .firstOrNull { it.name == "SentinelEntity_LirpTableDef.kt" }
-                ?.readText()
-                ?: error("SentinelEntity_LirpTableDef.kt not generated")
+        val generated = result.generatedFileContent("SentinelEntity_LirpTableDef.kt")
         generated shouldNotContain ".fromSql("
         generated shouldNotContain ".toSql("
     }
 
     "TableDefProcessor rejects non-object converter with a diagnostic naming the converter" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NonObjectConverterEntity.kt",
                     """
@@ -120,7 +103,8 @@ class ConverterCodegenTest : StringSpec({
 
     "TableDefProcessor rejects converter with unsupported S type via a diagnostic" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BadSEntity.kt",
                     """
@@ -158,7 +142,8 @@ class ConverterCodegenTest : StringSpec({
 
     "TableDefProcessor emits converter-routed fromRow and toParams for non-null scalar" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "TagEntity.kt",
                     """
@@ -188,11 +173,7 @@ class ConverterCodegenTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val generated =
-            result.sourcesGeneratedBySymbolProcessor
-                .firstOrNull { it.name == "TagEntity_LirpTableDef.kt" }
-                ?.readText()
-                ?: error("TagEntity_LirpTableDef.kt not generated")
+        val generated = result.generatedFileContent("TagEntity_LirpTableDef.kt")
         generated shouldContain "test.UpperCaseConverter.sqlType"
         generated shouldContain "test.UpperCaseConverter.fromSql("
         generated shouldContain "as kotlin.String"
@@ -201,7 +182,8 @@ class ConverterCodegenTest : StringSpec({
 
     "TableDefProcessor emits nullable converter-routed fromRow and toParams" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NullableTagEntity.kt",
                     """
@@ -231,11 +213,7 @@ class ConverterCodegenTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val generated =
-            result.sourcesGeneratedBySymbolProcessor
-                .firstOrNull { it.name == "NullableTagEntity_LirpTableDef.kt" }
-                ?.readText()
-                ?: error("NullableTagEntity_LirpTableDef.kt not generated")
+        val generated = result.generatedFileContent("NullableTagEntity_LirpTableDef.kt")
         generated shouldContain "as? kotlin.String"
         generated shouldContain "?.let { test.NullableConverter.fromSql(it) }"
         generated shouldContain "entity.nickname?.let { test.NullableConverter.toSql(it) }"
@@ -243,7 +221,8 @@ class ConverterCodegenTest : StringSpec({
 
     "TableDefProcessor refines TextType converter sqlType to VarcharType when length hint is set" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "VarcharTagEntity.kt",
                     """
@@ -273,11 +252,7 @@ class ConverterCodegenTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val generated =
-            result.sourcesGeneratedBySymbolProcessor
-                .firstOrNull { it.name == "VarcharTagEntity_LirpTableDef.kt" }
-                ?.readText()
-                ?: error("VarcharTagEntity_LirpTableDef.kt not generated")
+        val generated = result.generatedFileContent("VarcharTagEntity_LirpTableDef.kt")
         generated shouldContain "ColumnType.VarcharType(64)"
         // The base converter sqlType reference must NOT appear for this column — the refinement
         // supersedes it. Search for "PathLikeConverter.sqlType" specifically because the
@@ -287,7 +262,8 @@ class ConverterCodegenTest : StringSpec({
 
     "TableDefProcessor refines numeric converter sqlType to DecimalType when precision and scale hints are set" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "MoneyEntity.kt",
                     """
@@ -319,17 +295,14 @@ class ConverterCodegenTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val generated =
-            result.sourcesGeneratedBySymbolProcessor
-                .firstOrNull { it.name == "MoneyEntity_LirpTableDef.kt" }
-                ?.readText()
-                ?: error("MoneyEntity_LirpTableDef.kt not generated")
+        val generated = result.generatedFileContent("MoneyEntity_LirpTableDef.kt")
         generated shouldContain "ColumnType.DecimalType(19, 4)"
     }
 
     "TableDefProcessor rejects length hint on BooleanType converter as incompatible" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BadHintEntity.kt",
                     """
@@ -366,7 +339,8 @@ class ConverterCodegenTest : StringSpec({
 
     "TableDefProcessor accepts converter with supported S type kotlin.Short" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ShortEntity.kt",
                     """
@@ -402,7 +376,8 @@ class ConverterCodegenTest : StringSpec({
 
     "TableDefProcessor accepts entity when no converter annotation is declared" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NoSupertypeConverterEntity.kt",
                     """
@@ -434,7 +409,8 @@ class ConverterCodegenTest : StringSpec({
 
     "TableDefProcessor accepts converter with supported S type kotlin.Byte" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ByteEntity.kt",
                     """
@@ -470,7 +446,8 @@ class ConverterCodegenTest : StringSpec({
 
     "TableDefProcessor accepts converter with supported S type kotlin.Boolean" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BoolConverterEntity.kt",
                     """
@@ -502,11 +479,7 @@ class ConverterCodegenTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val generated =
-            result.sourcesGeneratedBySymbolProcessor
-                .firstOrNull { it.name == "BoolConverterEntity_LirpTableDef.kt" }
-                ?.readText()
-                ?: error("BoolConverterEntity_LirpTableDef.kt not generated")
+        val generated = result.generatedFileContent("BoolConverterEntity_LirpTableDef.kt")
         // The converter's sqlType reference (not the literal ColumnType.BooleanType) is used when
         // no length/precision/scale hint is present — the base expression delegates to the converter.
         generated shouldContain "test.TriStateConverter.sqlType"
@@ -516,7 +489,8 @@ class ConverterCodegenTest : StringSpec({
 
     "TableDefProcessor accepts converter with supported S type kotlin.Double" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "DoubleConverterEntity.kt",
                     """
@@ -552,7 +526,8 @@ class ConverterCodegenTest : StringSpec({
 
     "TableDefProcessor accepts converter with supported S type kotlin.Float" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "FloatConverterEntity.kt",
                     """
@@ -588,7 +563,8 @@ class ConverterCodegenTest : StringSpec({
 
     "TableDefProcessor accepts converter with supported S type java.math.BigDecimal" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BigDecimalConverterEntity.kt",
                     """

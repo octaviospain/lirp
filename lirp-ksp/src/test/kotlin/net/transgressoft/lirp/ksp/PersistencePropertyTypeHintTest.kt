@@ -17,12 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.JvmCompilationResult
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
-import com.tschuchort.compiletesting.configureKsp
-import com.tschuchort.compiletesting.sourcesGeneratedBySymbolProcessor
-import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -38,30 +34,10 @@ import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 @OptIn(ExperimentalCompilerApi::class)
 class PersistencePropertyTypeHintTest : StringSpec({
 
-    fun compileWithProcessor(vararg sources: SourceFile): JvmCompilationResult {
-        val compilation =
-            KotlinCompilation().apply {
-                this.sources = sources.toList()
-                inheritClassPath = true
-            }
-        compilation.configureKsp { withCompilation = true }
-        compilation.symbolProcessorProviders += TableDefProcessorProvider()
-        return compilation.compile()
-    }
-
-    fun JvmCompilationResult.generatedContent(name: String): String {
-        val file =
-            sourcesGeneratedBySymbolProcessor.firstOrNull { it.name == name }
-                ?: error(
-                    "Generated file '$name' not found among: " +
-                        sourcesGeneratedBySymbolProcessor.map { it.name }.toList()
-                )
-        return file.readText()
-    }
-
     "TableDefProcessor maps type=TEXT hint to ColumnType.TextType" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "TextHintEntity.kt",
                     """
@@ -83,12 +59,13 @@ class PersistencePropertyTypeHintTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedContent("TextHintEntity_LirpTableDef.kt") shouldContain "ColumnType.TextType"
+        result.generatedFileContent("TextHintEntity_LirpTableDef.kt") shouldContain "ColumnType.TextType"
     }
 
     "TableDefProcessor maps type=INT hint to ColumnType.IntType" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "IntHintEntity.kt",
                     """
@@ -110,12 +87,13 @@ class PersistencePropertyTypeHintTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedContent("IntHintEntity_LirpTableDef.kt") shouldContain "ColumnType.IntType"
+        result.generatedFileContent("IntHintEntity_LirpTableDef.kt") shouldContain "ColumnType.IntType"
     }
 
     "TableDefProcessor maps type=BIGINT hint to ColumnType.LongType" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BigintHintEntity.kt",
                     """
@@ -137,12 +115,13 @@ class PersistencePropertyTypeHintTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedContent("BigintHintEntity_LirpTableDef.kt") shouldContain "ColumnType.LongType"
+        result.generatedFileContent("BigintHintEntity_LirpTableDef.kt") shouldContain "ColumnType.LongType"
     }
 
     "TableDefProcessor maps type=BOOLEAN hint to ColumnType.BooleanType" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BoolHintEntity.kt",
                     """
@@ -164,12 +143,13 @@ class PersistencePropertyTypeHintTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedContent("BoolHintEntity_LirpTableDef.kt") shouldContain "ColumnType.BooleanType"
+        result.generatedFileContent("BoolHintEntity_LirpTableDef.kt") shouldContain "ColumnType.BooleanType"
     }
 
     "TableDefProcessor maps type=DOUBLE hint to ColumnType.DoubleType" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "DoubleHintEntity.kt",
                     """
@@ -191,12 +171,13 @@ class PersistencePropertyTypeHintTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedContent("DoubleHintEntity_LirpTableDef.kt") shouldContain "ColumnType.DoubleType"
+        result.generatedFileContent("DoubleHintEntity_LirpTableDef.kt") shouldContain "ColumnType.DoubleType"
     }
 
     "TableDefProcessor maps type=FLOAT hint to ColumnType.FloatType" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "FloatHintEntity.kt",
                     """
@@ -218,12 +199,13 @@ class PersistencePropertyTypeHintTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedContent("FloatHintEntity_LirpTableDef.kt") shouldContain "ColumnType.FloatType"
+        result.generatedFileContent("FloatHintEntity_LirpTableDef.kt") shouldContain "ColumnType.FloatType"
     }
 
     "TableDefProcessor maps type=UUID hint to ColumnType.UuidType" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "UuidHintEntity.kt",
                     """
@@ -245,12 +227,13 @@ class PersistencePropertyTypeHintTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedContent("UuidHintEntity_LirpTableDef.kt") shouldContain "ColumnType.UuidType"
+        result.generatedFileContent("UuidHintEntity_LirpTableDef.kt") shouldContain "ColumnType.UuidType"
     }
 
     "TableDefProcessor maps type=DATE hint to ColumnType.DateType" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "DateHintEntity.kt",
                     """
@@ -272,12 +255,13 @@ class PersistencePropertyTypeHintTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedContent("DateHintEntity_LirpTableDef.kt") shouldContain "ColumnType.DateType"
+        result.generatedFileContent("DateHintEntity_LirpTableDef.kt") shouldContain "ColumnType.DateType"
     }
 
     "TableDefProcessor maps type=DATETIME hint to ColumnType.DateTimeType" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "DatetimeHintEntity.kt",
                     """
@@ -299,12 +283,13 @@ class PersistencePropertyTypeHintTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedContent("DatetimeHintEntity_LirpTableDef.kt") shouldContain "ColumnType.DateTimeType"
+        result.generatedFileContent("DatetimeHintEntity_LirpTableDef.kt") shouldContain "ColumnType.DateTimeType"
     }
 
     "TableDefProcessor maps type=DECIMAL hint to ColumnType.DecimalType with default precision and scale" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "DecimalDefaultHintEntity.kt",
                     """
@@ -327,12 +312,13 @@ class PersistencePropertyTypeHintTest : StringSpec({
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         // Default precision=19, scale=2 when not specified
-        result.generatedContent("DecimalDefaultHintEntity_LirpTableDef.kt") shouldContain "ColumnType.DecimalType(19, 2)"
+        result.generatedFileContent("DecimalDefaultHintEntity_LirpTableDef.kt") shouldContain "ColumnType.DecimalType(19, 2)"
     }
 
     "TableDefProcessor maps type=DECIMAL hint with explicit precision and scale" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "DecimalPrecisionHintEntity.kt",
                     """
@@ -354,12 +340,13 @@ class PersistencePropertyTypeHintTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedContent("DecimalPrecisionHintEntity_LirpTableDef.kt") shouldContain "ColumnType.DecimalType(10, 3)"
+        result.generatedFileContent("DecimalPrecisionHintEntity_LirpTableDef.kt") shouldContain "ColumnType.DecimalType(10, 3)"
     }
 
     "TableDefProcessor maps type=VARCHAR with length to ColumnType.VarcharType" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "VarcharHintEntity.kt",
                     """
@@ -381,12 +368,13 @@ class PersistencePropertyTypeHintTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedContent("VarcharHintEntity_LirpTableDef.kt") shouldContain "ColumnType.VarcharType(128)"
+        result.generatedFileContent("VarcharHintEntity_LirpTableDef.kt") shouldContain "ColumnType.VarcharType(128)"
     }
 
     "TableDefProcessor rejects type=VARCHAR without length" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "VarcharNoLengthEntity.kt",
                     """
@@ -414,7 +402,8 @@ class PersistencePropertyTypeHintTest : StringSpec({
 
     "TableDefProcessor rejects unknown type hint" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "UnknownHintEntity.kt",
                     """
@@ -442,7 +431,8 @@ class PersistencePropertyTypeHintTest : StringSpec({
 
     "TableDefProcessor rejects precision/scale hint on String-based converter" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "StringConverterPrecisionEntity.kt",
                     """
@@ -478,7 +468,8 @@ class PersistencePropertyTypeHintTest : StringSpec({
 
     "TableDefProcessor rejects length hint on numeric-based converter" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "LongConverterLengthEntity.kt",
                     """
@@ -516,7 +507,8 @@ class PersistencePropertyTypeHintTest : StringSpec({
 
     "TableDefProcessor accepts type hint on converter column overriding the converter sqlType" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ConverterWithTypeHintEntity.kt",
                     """
@@ -547,7 +539,7 @@ class PersistencePropertyTypeHintTest : StringSpec({
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         // type hint overrides converter's sqlType expression
-        val content = result.generatedContent("ConverterWithTypeHintEntity_LirpTableDef.kt")
+        val content = result.generatedFileContent("ConverterWithTypeHintEntity_LirpTableDef.kt")
         content shouldContain "ColumnType.VarcharType(10)"
         content shouldContain "test.CodeConverter.fromSql("
         content shouldContain "test.CodeConverter.toSql("

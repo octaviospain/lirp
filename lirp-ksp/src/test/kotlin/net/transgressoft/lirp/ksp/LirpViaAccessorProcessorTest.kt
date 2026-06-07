@@ -17,12 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.JvmCompilationResult
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
-import com.tschuchort.compiletesting.configureKsp
-import com.tschuchort.compiletesting.sourcesGeneratedBySymbolProcessor
-import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -81,27 +77,10 @@ internal class LirpViaAccessorProcessorTest : FunSpec({
             """
         )
 
-    fun compileWithProcessor(vararg sources: SourceFile): JvmCompilationResult {
-        val compilation =
-            KotlinCompilation().apply {
-                this.sources = sources.toList()
-                inheritClassPath = true
-            }
-        compilation.configureKsp { withCompilation = true }
-        compilation.symbolProcessorProviders += LirpViaAccessorProcessorProvider()
-        return compilation.compile()
-    }
-
-    fun JvmCompilationResult.generatedFileContent(name: String): String {
-        val file =
-            sourcesGeneratedBySymbolProcessor.firstOrNull { it.name == name }
-                ?: error("Generated file '$name' not found among: ${sourcesGeneratedBySymbolProcessor.map { it.name }.toList()}")
-        return file.readText()
-    }
-
     test("emits accessor file declaring LirpViaAccessor implementation for single-ref entity") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                LirpViaAccessorProcessorProvider(),
                 SourceFile.kotlin(
                     "OrderEntity.kt",
                     """
@@ -139,7 +118,8 @@ internal class LirpViaAccessorProcessorTest : FunSpec({
 
     test("emits ViaCollectionAccessorEntry for collection-typed aggregateList property") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                LirpViaAccessorProcessorProvider(),
                 collectionDelegateStubs,
                 SourceFile.kotlin(
                     "PlaylistEntity.kt",
@@ -177,7 +157,8 @@ internal class LirpViaAccessorProcessorTest : FunSpec({
 
     test("emits ViaCollectionAccessorEntry for aggregateSet property without distinguishing list/set") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                LirpViaAccessorProcessorProvider(),
                 collectionDelegateStubs,
                 SourceFile.kotlin(
                     "PlaylistGroupEntity.kt",
@@ -214,7 +195,8 @@ internal class LirpViaAccessorProcessorTest : FunSpec({
 
     test("emits both collection and single entries on the same accessor file") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                LirpViaAccessorProcessorProvider(),
                 collectionDelegateStubs,
                 SourceFile.kotlin(
                     "AlbumEntity.kt",
@@ -268,7 +250,8 @@ internal class LirpViaAccessorProcessorTest : FunSpec({
 
     test("produces no accessor file for entity without @Aggregate properties") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                LirpViaAccessorProcessorProvider(),
                 SourceFile.kotlin(
                     "PlainEntity.kt",
                     """
@@ -284,7 +267,7 @@ internal class LirpViaAccessorProcessorTest : FunSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val generatedNames = result.sourcesGeneratedBySymbolProcessor.map { it.name }
+        val generatedNames = result.generatedNames()
         generatedNames.none { it == "PlainEntity_LirpViaAccessor.kt" } shouldBe true
     }
 
@@ -294,7 +277,8 @@ internal class LirpViaAccessorProcessorTest : FunSpec({
         // declaring the property's value directly through a constructor invocation triggers the
         // type-walking fallback in isCollectionReference.
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                LirpViaAccessorProcessorProvider(),
                 collectionDelegateStubs,
                 SourceFile.kotlin(
                     "NoFactoryCall.kt",
@@ -329,7 +313,8 @@ internal class LirpViaAccessorProcessorTest : FunSpec({
 
     test("emits one accessor file when entity has two @Aggregate properties") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                LirpViaAccessorProcessorProvider(),
                 collectionDelegateStubs,
                 SourceFile.kotlin(
                     "MultiRefEntity.kt",
@@ -368,9 +353,7 @@ internal class LirpViaAccessorProcessorTest : FunSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val accessorFiles = result.sourcesGeneratedBySymbolProcessor.filter { it.name == "MultiRefEntity_LirpViaAccessor.kt" }.toList()
-        accessorFiles.size shouldBe 1
-        val content = accessorFiles.single().readText()
+        val content = result.generatedFileContent("MultiRefEntity_LirpViaAccessor.kt")
         content shouldContain "refName = \"tags\""
         content shouldContain "refName = \"categories\""
         content shouldContain "TagRef::class.java"
@@ -382,7 +365,8 @@ internal class LirpViaAccessorProcessorTest : FunSpec({
         // container object: the accessor file must still land in the same package and reference
         // the binary class name correctly.
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                LirpViaAccessorProcessorProvider(),
                 collectionDelegateStubs,
                 SourceFile.kotlin(
                     "NestedHost.kt",
@@ -414,10 +398,10 @@ internal class LirpViaAccessorProcessorTest : FunSpec({
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         // Accessor file naming follows the binary class name (with `${'$'}` separator) but the
         // enclosing package stays `test`. Look up the file by package qualified name.
-        val accessor =
-            result.sourcesGeneratedBySymbolProcessor.firstOrNull { it.name.endsWith("PostEntity_LirpViaAccessor.kt") }
-                ?: error("Accessor for nested PostEntity not generated; got ${result.sourcesGeneratedBySymbolProcessor.map { it.name }.toList()}")
-        val content = accessor.readText()
+        val accessorName =
+            result.generatedNames().firstOrNull { it.endsWith("PostEntity_LirpViaAccessor.kt") }
+                ?: error("Accessor for nested PostEntity not generated; got ${result.generatedNames()}")
+        val content = result.generatedFileContent(accessorName)
         content shouldContain "refName = \"comments\""
         content shouldContain "CommentRef::class.java"
         content shouldContain "package test"
@@ -428,7 +412,8 @@ internal class LirpViaAccessorProcessorTest : FunSpec({
         // the processor must read the resolved KSType, not the declaration name, so the bound
         // type (UserNotification) lands in the generated descriptor rather than the unbound generic.
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                LirpViaAccessorProcessorProvider(),
                 collectionDelegateStubs,
                 SourceFile.kotlin(
                     "GenericEntity.kt",
