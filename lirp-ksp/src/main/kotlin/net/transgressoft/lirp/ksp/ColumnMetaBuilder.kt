@@ -64,6 +64,18 @@ internal sealed interface Eligibility {
  * type-expression derivation, and the exclusion rules that determine which properties become
  * SQL columns. Used by [EmbeddableAnalyzer] for both top-level entity scalars and nested
  * `@Embeddable` leaf columns.
+ *
+ * **Two distinct column-building entry points — not duplicates:**
+ * - [buildColumnMeta] handles top-level entity properties: it resolves PK status, `@Version`
+ *   identity, aggregate FK exclusion, per-property `isMutable`/`isCtorParam`, and converter
+ *   rejection on PK/version/FK columns.
+ * - [buildEmbeddedLeafColumn] handles scalar leaves inside an `@Embeddable` hierarchy: it
+ *   stamps the concatenated `prefix + snake(leafName)` column name, the entity-rooted
+ *   `embeddedPath`, and `isInsideEmbedded = true`, while suppressing PK/version/aggregate
+ *   logic that is inapplicable inside an `@Embeddable`. Both entry points share the same
+ *   converter resolution and type-expression pipeline; the structural metadata they produce
+ *   is intentionally different. The traversal that calls these methods lives entirely in
+ *   [EmbeddableAnalyzer], keeping the column-building logic here free of tree-walk concerns.
  */
 internal class ColumnMetaBuilder(private val logger: KSPLogger) {
 

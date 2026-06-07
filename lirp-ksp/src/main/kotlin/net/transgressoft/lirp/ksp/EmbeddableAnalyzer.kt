@@ -41,6 +41,18 @@ import com.google.devtools.ksp.symbol.Modifier
  *
  * Column-name collision detection is intentionally left to the caller ([TableDefProcessor])
  * so it runs once on the fully flattened list rather than per-embeddable.
+ *
+ * **Relationship with [ColumnMetaBuilder]:**
+ * This class owns the tree-traversal logic — walking ctor params and body-declared properties,
+ * dispatching `@Embedded` sites into recursive descent, and building [CtorSlot] structures for
+ * code generation. [ColumnMetaBuilder] is a collaborator, not a duplicate: scalar leaf columns
+ * inside an `@Embeddable` hierarchy are resolved via [ColumnMetaBuilder.buildEmbeddedLeafColumn],
+ * which stamps the concatenated prefix-name, embedded access path, and `isInsideEmbedded = true`
+ * markers that distinguish embedded scalars from top-level entity columns. Top-level scalars use
+ * [ColumnMetaBuilder.buildColumnMeta], which additionally handles PK detection, `@Version`,
+ * aggregate FK exclusion, and per-property `isMutable`/`isCtorParam` flags that are meaningless
+ * inside an `@Embeddable`. The two methods serve structurally different column shapes; hoisting a
+ * shared walk helper is not safe and the split is kept deliberate.
  */
 internal class EmbeddableAnalyzer(
     private val logger: KSPLogger,
