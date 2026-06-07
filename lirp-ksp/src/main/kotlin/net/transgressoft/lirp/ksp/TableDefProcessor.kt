@@ -506,7 +506,11 @@ class TableDefProcessor(
      * public. A non-public resolved creator on an internal entity warns rather than fails, since the
      * descriptor still compiles inside the declaring module.
      */
-    private fun resolveEntityCreator(classDecl: KSClassDeclaration, className: String): EntityCreator? {
+    private fun resolveEntityCreator(
+        classDecl: KSClassDeclaration,
+        className: String,
+        availableParamNames: Set<String>
+    ): EntityCreator? {
         when (val resolution = resolveCreator(classDecl)) {
             is CreatorResolution.Ambiguous -> {
                 logger.error(
@@ -517,13 +521,14 @@ class TableDefProcessor(
                 return null
             }
             is CreatorResolution.Found -> {
-                val entityCtorParamNames =
-                    classDecl.primaryConstructor?.parameters?.mapNotNull { it.name?.asString() }?.toSet() ?: emptySet()
                 val resolvedParamNames = mutableListOf<String>()
                 for (param in resolution.params) {
                     val paramName = param.name?.asString() ?: continue
                     when {
-                        paramName in entityCtorParamNames -> resolvedParamNames += paramName
+                        // Validate against the emitted slot names, not raw ctor param names: an
+                        // excluded ctor param (e.g. @PersistenceIgnore) produces no slot/column, so
+                        // fromRow would have no source to bind the creator parameter to.
+                        paramName in availableParamNames -> resolvedParamNames += paramName
                         param.hasDefault -> { /* omit so the default value applies at instantiation */ }
                         else -> {
                             logger.error(
@@ -534,7 +539,7 @@ class TableDefProcessor(
                         }
                     }
                 }
-                if (classDecl.hasInternalNonPublicCreator(resolution.callExpression)) {
+                if (classDecl.hasInternalNonPublicCreator()) {
                     logger.warn(
                         "$className is internal and its @PersistenceCreator '${resolution.callExpression}' is not " +
                             "public; the generated descriptor may not compile outside its own module. Add a public " +
@@ -578,7 +583,10 @@ class TableDefProcessor(
         val selfType = resolveDescriptorSelfType(classDecl, className) ?: return
         val tableDefName = "${className}_LirpTableDef"
 
-        val creator = resolveEntityCreator(classDecl, className) ?: return
+        // Validate creator params against the names that actually produce a slot/column source,
+        // so a creator referencing an excluded (e.g. @PersistenceIgnore'd) ctor param is rejected.
+        val mappableParamNames = collected.ctorSlots.mapTo(mutableSetOf()) { it.ctorParamName }
+        val creator = resolveEntityCreator(classDecl, className, mappableParamNames) ?: return
 
         val tableName = resolveTableName(classDecl, className)
         val resolvedShape = collected

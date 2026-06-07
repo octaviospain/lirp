@@ -160,17 +160,19 @@ internal fun List<KSAnnotated>.formatCreatorOffenders(): String =
     }
 
 /**
- * True when [this] is `internal` and the resolved creator named by [callExpression] is itself not
- * publicly accessible — the generated descriptor would then fail to compile outside the declaring
- * module. The creator's simple name is the segment after the last `.` in [callExpression].
+ * True when [this] is `internal` and its resolved `@PersistenceCreator` — a companion-object
+ * function or a secondary constructor — is itself not publicly accessible, so the generated
+ * descriptor would fail to compile outside the declaring module. Resolves the annotated declaration
+ * directly (the same way [resolveCreator] does), so it covers both creator kinds. Must be called
+ * only after ambiguity has been ruled out, since at most one annotated target is expected.
  */
-internal fun KSClassDeclaration.hasInternalNonPublicCreator(callExpression: String): Boolean {
+internal fun KSClassDeclaration.hasInternalNonPublicCreator(): Boolean {
     if (getVisibility() != Visibility.INTERNAL) return false
-    val creatorName = callExpression.substringAfterLast('.')
     val companion = declarations.filterIsInstance<KSClassDeclaration>().firstOrNull { it.isCompanionObject }
-    val creatorVis =
-        companion?.getDeclaredFunctions()?.firstOrNull { it.simpleName.asString() == creatorName }?.getVisibility()
-    return creatorVis != null && creatorVis != Visibility.PUBLIC && creatorVis != Visibility.JAVA_PACKAGE
+    val annotatedFn = companion?.getDeclaredFunctions()?.firstOrNull { it.annotations.has(PERSISTENCE_CREATOR_FQN) }
+    val annotatedCtor = getConstructors().firstOrNull { it != primaryConstructor && it.annotations.has(PERSISTENCE_CREATOR_FQN) }
+    val creatorVis = (annotatedFn ?: annotatedCtor)?.getVisibility() ?: return false
+    return creatorVis != Visibility.PUBLIC && creatorVis != Visibility.JAVA_PACKAGE
 }
 
 /**

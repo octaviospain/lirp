@@ -259,7 +259,11 @@ internal object TableDefSourceEmitter {
 
         // Return type is the self-type R; the body constructs the concrete class (a subtype of R).
         appendLine("    override fun fromRow(row: ResultRow, table: Table): $selfType {")
-        appendLine("        val entity = ${buildEntityConstruction(creatorCallExpression ?: className, ctorSlots, orderedCtorCols)}")
+        appendLine(
+            "        val entity = ${
+                buildEntityConstruction(className, creatorCallExpression, constructorParamNames, creatorParamNames, ctorSlots, orderedCtorCols)
+            }"
+        )
 
         // Body-declared (non-ctor) reactive properties are assigned with events disabled: emitting
         // during hydration would schedule a stray write-back that races the repository's mutation
@@ -275,17 +279,40 @@ internal object TableDefSourceEmitter {
     }
 
     /**
-     * Builds the entity-construction expression for `fromRow`: a `@PersistenceCreator` call when
-     * [callTarget] is a factory, otherwise the primary constructor. Uses the structured
-     * [ctorSlots] tree to emit nested constructor expressions for `@Embedded` parameters, falling
-     * back to flat column-by-name lookup ([orderedCtorCols]) for the common no-embedded case.
+     * Builds the entity-construction expression for `fromRow`.
+     *
+     * When a `@PersistenceCreator` is present ([creatorCallExpression] non-null), the creator may
+     * take a subset of the entity's parameters in a different order, so arguments are emitted as
+     * **named** arguments in the creator's own parameter order ([creatorParamNames]); binding
+     * positionally to the primary constructor would misbind or fail to compile. Without a creator,
+     * the primary constructor is called positionally — using the structured [ctorSlots] tree to
+     * emit nested constructor expressions for `@Embedded` parameters, or falling back to flat
+     * column-by-name lookup ([orderedCtorCols]) for the common no-embedded case.
      */
-    private fun buildEntityConstruction(callTarget: String, ctorSlots: List<CtorSlot>, orderedCtorCols: List<ColumnMeta>): String {
+    private fun buildEntityConstruction(
+        className: String,
+        creatorCallExpression: String?,
+        constructorParamNames: List<String>,
+        creatorParamNames: List<String>?,
+        ctorSlots: List<CtorSlot>,
+        orderedCtorCols: List<ColumnMeta>
+    ): String {
+        val callTarget = creatorCallExpression ?: className
         val ctorArgs =
-            if (ctorSlots.isNotEmpty()) {
-                ctorSlots.joinToString(", ") { buildCtorArgExpression(it) }
-            } else {
-                orderedCtorCols.joinToString(", ") { buildRowAccess(it) }
+            when {
+                creatorCallExpression != null -> {
+                    val slotByName = ctorSlots.associateBy { it.ctorParamName }
+                    val colByName = orderedCtorCols.associateBy { it.propertyName }
+                    (creatorParamNames ?: constructorParamNames).joinToString(", ") { name ->
+                        val arg =
+                            slotByName[name]?.let { buildCtorArgExpression(it) }
+                                ?: colByName[name]?.let { buildRowAccess(it) }
+                                ?: error("No slot or column source for @PersistenceCreator parameter '$name'")
+                        "$name = $arg"
+                    }
+                }
+                ctorSlots.isNotEmpty() -> ctorSlots.joinToString(", ") { buildCtorArgExpression(it) }
+                else -> orderedCtorCols.joinToString(", ") { buildRowAccess(it) }
             }
         return "$callTarget($ctorArgs)"
     }

@@ -615,7 +615,7 @@ internal class EmbeddableAnalyzer(
             }
             is CreatorResolution.Found -> {
                 val creatorChildren = matchCreatorChildren(typeDecl, resolution, childSlots) ?: return null
-                if (typeDecl.hasInternalNonPublicCreator(resolution.callExpression)) {
+                if (typeDecl.hasInternalNonPublicCreator()) {
                     logger.warn(
                         "${typeDecl.qualifiedName?.asString()} is internal and its @PersistenceCreator " +
                             "'${resolution.callExpression}' is not public; the generated descriptor may not compile " +

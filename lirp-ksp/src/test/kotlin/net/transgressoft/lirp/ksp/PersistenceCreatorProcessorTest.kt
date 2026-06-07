@@ -132,9 +132,120 @@ class PersistenceCreatorProcessorTest : StringSpec({
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         val content = result.generatedFileContent("InternalTrackEntity_LirpTableDef.kt")
         val fromRowBlock = content.substringAfter("override fun fromRow").substringBefore("override fun ")
-        // The creator uses only (id, title); durationMs is omitted — it has the default 0L.
-        fromRowBlock shouldContain "InternalTrackEntity("
-        fromRowBlock shouldNotContain "durationMs = "
+        // The creator takes only (id, title); the call must be by NAMED args limited to those two so
+        // it binds to the secondary @PersistenceCreator (not positionally to the 3-arg primary ctor).
+        // durationMs is omitted entirely — it has the default 0L.
+        fromRowBlock shouldContain "InternalTrackEntity(id = "
+        fromRowBlock shouldContain "title = "
+        fromRowBlock shouldNotContain "durationMs"
+    }
+
+    // a creator taking a reordered subset of the entity's params binds by name, not positionally
+    "entity @PersistenceCreator with reordered subset binds by named args" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "ReorderedCreatorEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.PersistenceCreator
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                    @PersistenceMapping
+                    data class ReorderedCreatorEntity(
+                        override val id: Int,
+                        val first: String,
+                        val second: String
+                    ) : ReactiveEntityBase<Int, ReorderedCreatorEntity>() {
+                        companion object {
+                            // Declared in (second, id, first) order — deliberately not the ctor order.
+                            @PersistenceCreator
+                            fun of(second: String, id: Int, first: String): ReorderedCreatorEntity =
+                                ReorderedCreatorEntity(id, first, second)
+                        }
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = ReorderedCreatorEntity(id, first, second)
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("ReorderedCreatorEntity_LirpTableDef.kt")
+        val fromRowBlock = content.substringAfter("override fun fromRow").substringBefore("override fun ")
+        // Args emitted in the creator's declared order (second, id, first), each named.
+        fromRowBlock shouldContain "ReorderedCreatorEntity.of(second = "
+        val secondIdx = fromRowBlock.indexOf("second = ")
+        val idIdx = fromRowBlock.indexOf("id = ")
+        val firstIdx = fromRowBlock.indexOf("first = ")
+        (secondIdx < idIdx && idIdx < firstIdx) shouldBe true
+    }
+
+    // an internal entity whose @PersistenceCreator is a non-public SECONDARY CONSTRUCTOR warns
+    "internal entity with non-public secondary-ctor creator warns only" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "InternalSecondaryCtorEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.PersistenceCreator
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                    @PersistenceMapping
+                    internal data class InternalSecondaryCtorEntity internal constructor(
+                        override val id: Int,
+                        val name: String,
+                        val extra: Int
+                    ) : ReactiveEntityBase<Int, InternalSecondaryCtorEntity>() {
+                        @PersistenceCreator
+                        internal constructor(id: Int, name: String) : this(id, name, 0)
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = InternalSecondaryCtorEntity(id, name, extra)
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.messages shouldContain "not public"
+    }
+
+    // a creator referencing a @PersistenceIgnore'd (unmapped) ctor param without a default errors
+    "entity creator param bound to an excluded ctor param produces compilation error" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "ExcludedParamCreatorEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.PersistenceCreator
+                    import net.transgressoft.lirp.persistence.PersistenceIgnore
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                    @PersistenceMapping
+                    data class ExcludedParamCreatorEntity(
+                        override val id: Int,
+                        @PersistenceIgnore val transientNote: String
+                    ) : ReactiveEntityBase<Int, ExcludedParamCreatorEntity>() {
+                        companion object {
+                            @PersistenceCreator
+                            fun of(id: Int, transientNote: String): ExcludedParamCreatorEntity =
+                                ExcludedParamCreatorEntity(id, transientNote)
+                        }
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = ExcludedParamCreatorEntity(id, transientNote)
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldNotBe KotlinCompilation.ExitCode.OK
+        result.messages shouldContain "transientNote"
+        result.messages shouldContain "no mapped column source"
     }
 
     // @PersistenceIgnore non-null defaulted embeddable ctor param omitted from fromRow
