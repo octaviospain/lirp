@@ -26,6 +26,7 @@ import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 
 /**
@@ -236,9 +237,9 @@ class EmbeddableTableDefProcessorTest : StringSpec({
     }
 
     "flattens @Embedded scalar leaf with @PersistenceProperty converter" {
-        // fix-up: lirp-ksp does NOT depend on lirp-sql, so the Phase 56 PathConverter
-        // testFixture is unreachable. Inline a minimal String→String converter as a stand-in;
-        // the codegen path is identical regardless of the S/T types involved.
+        // lirp-ksp does NOT depend on lirp-sql, so the shared PathConverter test fixture is
+        // unreachable here. Inline a minimal String→String converter as a stand-in; the codegen
+        // path is identical regardless of the S/T types involved.
         val result =
             compileWithProcessor(
                 SourceFile.kotlin(
@@ -396,6 +397,47 @@ class EmbeddableTableDefProcessorTest : StringSpec({
         // preserved — producing "address_geo_lat", not "geo_lat".
         content shouldContain "name = \"address_geo_lat\""
         content shouldContain "name = \"address_geo_lng\""
+    }
+
+    "@PersistenceIgnore non-null defaulted embeddable ctor param omitted from fromRow" {
+        val result =
+            compileWithProcessor(
+                SourceFile.kotlin(
+                    "IgnoredDefaultedParamEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.Embeddable
+                    import net.transgressoft.lirp.persistence.Embedded
+                    import net.transgressoft.lirp.persistence.PersistenceIgnore
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+
+                    @Embeddable
+                    data class TagEmbeddable(
+                        val name: String,
+                        @PersistenceIgnore val cachedHash: Int = 0
+                    )
+
+                    @PersistenceMapping
+                    data class IgnoredDefaultedParamEntity(
+                        override val id: Int,
+                        @Embedded val tag: TagEmbeddable
+                    ) : ReactiveEntityBase<Int, IgnoredDefaultedParamEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = IgnoredDefaultedParamEntity(id, tag)
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("IgnoredDefaultedParamEntity_LirpTableDef.kt")
+        val fromRowBlock = content.substringAfter("override fun fromRow").substringBefore("override fun ")
+        // The persisted scalar must appear in the embeddable reconstruction expression.
+        fromRowBlock shouldContain "name = "
+        // The @PersistenceIgnore non-null defaulted param must be omitted entirely — neither named
+        // nor passed null — so the default value applies at instantiation time.
+        fromRowBlock shouldNotContain "cachedHash"
     }
 
     "top-level explicit prefix does not bleed into nested auto-derived prefix" {

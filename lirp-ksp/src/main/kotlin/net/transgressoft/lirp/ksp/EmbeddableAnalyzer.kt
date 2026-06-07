@@ -68,6 +68,19 @@ internal class EmbeddableAnalyzer(
     )
 
     /**
+     * Carries the state that stays constant across a single `@Embedded` recursive descent — the
+     * owning entity ([rootClass]), the flat column accumulator, the visited-`@Embeddable`-files set,
+     * and the deferral slot. Bundling these into one object keeps the recursive
+     * [buildEmbeddedSlot] / [buildEmbeddableChildSlot] signatures small.
+     */
+    private class EmbeddedDescent(
+        val rootClass: KSClassDeclaration,
+        val columnsAccumulator: MutableList<ColumnMeta>,
+        val embeddableFiles: MutableSet<KSFile>,
+        val deferralHolder: Array<Pair<KSClassDeclaration, Triple<String, String, String>>?>?
+    )
+
+    /**
      * Walks the entity's primary constructor in declaration order, routing each parameter to one
      * of three paths: an `@Embedded` parameter triggers recursive descent into the referenced
      * `@Embeddable` (flattening its scalars and recording an [EmbeddedCtorSlot]); a regular
@@ -194,13 +207,10 @@ internal class EmbeddableAnalyzer(
                     prop = prop,
                     ctorParamName = paramName,
                     embeddedAnnotation = embeddedAnnotation,
-                    rootClass = classDecl,
-                    columnsAccumulator = columns,
                     parentPrefix = autoDerivedPrefix(paramName),
                     parentPath = paramName,
                     topLevelPropertyName = paramName,
-                    embeddableFiles = embeddableFiles,
-                    deferralHolder = deferralHolder
+                    descent = EmbeddedDescent(classDecl, columns, embeddableFiles, deferralHolder)
                 )
             deferralHolder[0]?.let { return it }
             if (slot != null) ctorSlots += slot
@@ -328,16 +338,18 @@ internal class EmbeddableAnalyzer(
                 prop = prop,
                 ctorParamName = propName,
                 embeddedAnnotation = embeddedAnnotation,
-                rootClass = classDecl,
-                columnsAccumulator = columns,
                 parentPrefix = autoDerivedPrefix(propName),
                 parentPath = propName,
                 topLevelPropertyName = propName,
-                embeddableFiles = embeddableFiles,
-                deferralHolder = deferralHolder
+                descent = EmbeddedDescent(classDecl, columns, embeddableFiles, deferralHolder)
             )
         deferralHolder[0]?.let { return it }
-        if (slot != null) setterSlots += EmbeddedSetterSlot(slot.ctorParamName, slot.embeddableTypeFqn, slot.children)
+        // Propagate the resolved @PersistenceCreator call expression so a body-declared @Embedded var
+        // reconstructs through the factory just like a ctor-param @Embedded; dropping it here would
+        // fall back to the (possibly non-public) primary constructor.
+        if (slot != null) {
+            setterSlots += EmbeddedSetterSlot(slot.ctorParamName, slot.embeddableTypeFqn, slot.children, slot.creatorCallExpression)
+        }
         return null
     }
 
@@ -521,53 +533,138 @@ internal class EmbeddableAnalyzer(
      *
      * Returns `null` when the referenced type is not a class or lacks a qualified name.
      */
-    @Suppress("kotlin:S107")
     private fun buildEmbeddedSlot(
         prop: KSPropertyDeclaration,
         ctorParamName: String,
         embeddedAnnotation: KSAnnotation,
-        rootClass: KSClassDeclaration,
-        columnsAccumulator: MutableList<ColumnMeta>,
         parentPrefix: String,
         parentPath: String,
         topLevelPropertyName: String,
-        embeddableFiles: MutableSet<KSFile> = mutableSetOf(),
-        deferralHolder: Array<Pair<KSClassDeclaration, Triple<String, String, String>>?>? = null
+        descent: EmbeddedDescent
     ): EmbeddedCtorSlot? {
         // An @Embedded container type that is still a KSP error type this round must be deferred
         // (re-queued for a later round), not run through structural validation — which would treat
         // it as "must reference a class type" and emit a spurious diagnostic while skipping the
         // deferral path entirely. Mirrors the scalar/leaf error-type deferral in ColumnMetaBuilder.
         if (prop.type.resolve().isError) {
-            deferralHolder?.set(
+            descent.deferralHolder?.set(
                 0,
-                rootClass to deferralDetail(rootClass, topLevelPropertyName, prop, unresolvedAnnotation = false)
+                descent.rootClass to deferralDetail(descent.rootClass, topLevelPropertyName, prop, unresolvedAnnotation = false)
             )
             return null
         }
         // Kind checks run before descent so the recursion only ever visits well-formed embeddables.
         val typeDecl = validateEmbeddableTarget(prop) ?: return null
         val typeFqn = typeDecl.qualifiedName?.asString() ?: return null
-        typeDecl.containingFile?.let { embeddableFiles += it }
+        typeDecl.containingFile?.let { descent.embeddableFiles += it }
 
         val effectivePrefix = effectivePrefix(embeddedAnnotation, ctorParamName, parentPrefix)
         reportBodyDeclaredEmbeddedInEmbeddable(typeDecl, typeFqn)
 
+        val childSlots =
+            buildChildSlots(typeDecl, typeFqn, effectivePrefix, parentPath, topLevelPropertyName, descent)
+                ?: return null
+        return applyCreatorToEmbeddedSlot(typeDecl, typeFqn, ctorParamName, childSlots)
+    }
+
+    /**
+     * Builds one [CtorSlot] per primary-constructor parameter of [typeDecl], appending flattened
+     * leaf columns to the accumulator. Returns `null` when any child parameter fails to resolve so
+     * the caller aborts the whole slot rather than emitting an incomplete constructor tree. All
+     * children are visited even after a failure so every malformed parameter is diagnosed.
+     */
+    private fun buildChildSlots(
+        typeDecl: KSClassDeclaration,
+        typeFqn: String,
+        effectivePrefix: String,
+        parentPath: String,
+        topLevelPropertyName: String,
+        descent: EmbeddedDescent
+    ): List<CtorSlot>? {
         val childSlots = mutableListOf<CtorSlot>()
         var anyChildFailed = false
         for (childParam in typeDecl.primaryConstructor?.parameters.orEmpty()) {
             val slot =
-                buildEmbeddableChildSlot(
-                    typeDecl, typeFqn, childParam, effectivePrefix,
-                    parentPath, topLevelPropertyName, rootClass, columnsAccumulator, embeddableFiles,
-                    deferralHolder
-                )
+                buildEmbeddableChildSlot(typeDecl, typeFqn, childParam, effectivePrefix, parentPath, topLevelPropertyName, descent)
             if (slot == null) anyChildFailed = true else childSlots += slot
         }
-        // When any child fails, abort the whole slot so the outer entity is reported as unmapped
-        // rather than silently emitting partial codegen with an incomplete constructor tree.
-        if (anyChildFailed) return null
-        return EmbeddedCtorSlot(ctorParamName, typeFqn, childSlots)
+        return if (anyChildFailed) null else childSlots
+    }
+
+    /**
+     * Routes the embeddable's reconstruction through its `@PersistenceCreator` when present and
+     * falls back to the primary constructor otherwise. A present creator's parameters are matched
+     * by name against [childSlots]; an ambiguous creator or an unmatched non-defaulted parameter is
+     * a hard error (returns `null` to abort). A non-public reconstruction seam on an internal type
+     * is a warning, since the descriptor still compiles inside the declaring module.
+     */
+    private fun applyCreatorToEmbeddedSlot(
+        typeDecl: KSClassDeclaration,
+        typeFqn: String,
+        ctorParamName: String,
+        childSlots: List<CtorSlot>
+    ): EmbeddedCtorSlot? {
+        return when (val resolution = resolveCreator(typeDecl)) {
+            is CreatorResolution.Ambiguous -> {
+                logger.error(
+                    "Multiple @PersistenceCreator targets on ${typeDecl.qualifiedName?.asString()}: " +
+                        "${resolution.conflicting.formatCreatorOffenders()}; exactly one is required.",
+                    typeDecl
+                )
+                null
+            }
+            is CreatorResolution.Found -> {
+                val creatorChildren = matchCreatorChildren(typeDecl, resolution, childSlots) ?: return null
+                if (typeDecl.hasInternalNonPublicCreator(resolution.callExpression)) {
+                    logger.warn(
+                        "${typeDecl.qualifiedName?.asString()} is internal and its @PersistenceCreator " +
+                            "'${resolution.callExpression}' is not public; the generated descriptor may not compile " +
+                            "outside its own module. Add a public @PersistenceCreator to make it cross-module usable."
+                    )
+                }
+                EmbeddedCtorSlot(ctorParamName, typeFqn, creatorChildren, resolution.callExpression)
+            }
+            CreatorResolution.None -> {
+                if (typeDecl.hasNonPublicPrimaryConstructor()) {
+                    logger.warn(
+                        "${typeDecl.qualifiedName?.asString()} has a non-public primary constructor and no " +
+                            "@PersistenceCreator; the generated descriptor may not compile outside its own module."
+                    )
+                }
+                EmbeddedCtorSlot(ctorParamName, typeFqn, childSlots)
+            }
+        }
+    }
+
+    /**
+     * Matches creator parameters by name against [childSlots], preserving creator-parameter order;
+     * child slots absent from the creator signature are dropped. A defaulted parameter with no
+     * mapped slot is omitted so its default applies at instantiation; a non-defaulted one with no
+     * mapped slot is a hard error and returns `null` to abort.
+     */
+    private fun matchCreatorChildren(
+        typeDecl: KSClassDeclaration,
+        resolution: CreatorResolution.Found,
+        childSlots: List<CtorSlot>
+    ): List<CtorSlot>? {
+        val slotByName = childSlots.associateBy { it.ctorParamName }
+        val creatorChildren = mutableListOf<CtorSlot>()
+        for (param in resolution.params) {
+            val paramName = param.name?.asString() ?: continue
+            when (val slot = slotByName[paramName]) {
+                is ScalarCtorSlot, is EmbeddedCtorSlot -> creatorChildren += slot
+                else ->
+                    if (!param.hasDefault) {
+                        logger.error(
+                            "@PersistenceCreator param '$paramName' on ${typeDecl.qualifiedName?.asString()} " +
+                                "has no mapped column source.",
+                            typeDecl
+                        )
+                        return null
+                    }
+            }
+        }
+        return creatorChildren
     }
 
     /**
@@ -611,7 +708,6 @@ internal class EmbeddableAnalyzer(
      * Returns `null` (after logging where applicable) when the parameter is unresolvable, carries an
      * unsupported `@ElementCollection`, or fails leaf-column construction.
      */
-    @Suppress("kotlin:S107")
     private fun buildEmbeddableChildSlot(
         typeDecl: KSClassDeclaration,
         typeFqn: String,
@@ -619,10 +715,7 @@ internal class EmbeddableAnalyzer(
         effectivePrefix: String,
         parentPath: String,
         topLevelPropertyName: String,
-        rootClass: KSClassDeclaration,
-        columnsAccumulator: MutableList<ColumnMeta>,
-        embeddableFiles: MutableSet<KSFile>,
-        deferralHolder: Array<Pair<KSClassDeclaration, Triple<String, String, String>>?>? = null
+        descent: EmbeddedDescent
     ): CtorSlot? {
         val childParamName = childParam.name?.asString() ?: return null
         val childProp =
@@ -634,9 +727,9 @@ internal class EmbeddableAnalyzer(
             is Eligibility.Deferred -> {
                 // Attribute the deferral to the owning @PersistenceMapping entity (rootClass), not
                 // the nested @Embeddable: TableDefProcessor re-queues and prunes by the entity FQN.
-                deferralHolder?.set(
+                descent.deferralHolder?.set(
                     0,
-                    rootClass to deferralDetail(rootClass, childParamName, childProp, childEligibility.unresolvedAnnotation)
+                    descent.rootClass to deferralDetail(descent.rootClass, childParamName, childProp, childEligibility.unresolvedAnnotation)
                 )
                 return null
             }
@@ -657,6 +750,9 @@ internal class EmbeddableAnalyzer(
                     )
                     return null
                 }
+                // Non-null param with default: omit from the named-arg call so the default applies.
+                if (!isNullable && childParam.hasDefault) return OmittedCtorSlot
+                // Nullable param: emit null.
                 return IgnoredCtorSlot(childParamName)
             }
             is Eligibility.Column -> { /* property is eligible — proceed */ }
@@ -680,13 +776,10 @@ internal class EmbeddableAnalyzer(
                 prop = childProp,
                 ctorParamName = childParamName,
                 embeddedAnnotation = childEmbedded,
-                rootClass = rootClass,
-                columnsAccumulator = columnsAccumulator,
                 parentPrefix = "${effectivePrefix}${autoDerivedPrefix(childParamName)}",
                 parentPath = "$parentPath.$childParamName",
                 topLevelPropertyName = topLevelPropertyName,
-                embeddableFiles = embeddableFiles,
-                deferralHolder = deferralHolder
+                descent = descent
             )
         }
 
@@ -702,15 +795,15 @@ internal class EmbeddableAnalyzer(
             )
         return when (leafEligibility) {
             is Eligibility.Deferred -> {
-                deferralHolder?.set(
+                descent.deferralHolder?.set(
                     0,
-                    rootClass to deferralDetail(rootClass, childParamName, childProp, leafEligibility.unresolvedAnnotation)
+                    descent.rootClass to deferralDetail(descent.rootClass, childParamName, childProp, leafEligibility.unresolvedAnnotation)
                 )
                 null
             }
             is Eligibility.Excluded -> null
             is Eligibility.Column -> {
-                columnsAccumulator += leafEligibility.meta
+                descent.columnsAccumulator += leafEligibility.meta
                 ScalarCtorSlot(childParamName, leafEligibility.meta)
             }
         }

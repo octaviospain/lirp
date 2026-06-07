@@ -463,6 +463,98 @@ class TableDefProcessor(
         return true
     }
 
+    /**
+     * Resolves the reactive self-type `R` the generated descriptor is typed on. Returns the
+     * concrete class name when `R` equals the class (self-referential) or cannot be resolved (with
+     * a warning that the descriptor may not be assignable to a `Repository` bound on `R`), the
+     * resolved interface name otherwise, or `null` to signal that generation must be skipped — the
+     * one unrenderable case being a generic entity whose `R` is an unsubstituted type parameter.
+     */
+    private fun resolveDescriptorSelfType(classDecl: KSClassDeclaration, className: String): String? {
+        val resolvedSelfType = resolveReactiveSelfType(classDecl)
+        if (resolvedSelfType == null && classDecl.typeParameters.isNotEmpty()) {
+            logger.warn(
+                "Skipping _LirpTableDef generation for ${classDecl.qualifiedName?.asString()}: its reactive " +
+                    "self-type R is an unsubstituted type parameter, so no valid SqlTableDef<R> can be generated"
+            )
+            return null
+        }
+        return when {
+            resolvedSelfType == null -> {
+                logger.warn(
+                    "Could not resolve reactive self-type R for ${classDecl.qualifiedName?.asString()}; " +
+                        "generated TableDef is typed on the concrete class and may not be assignable " +
+                        "to a Repository bound on R : ReactiveEntity"
+                )
+                className
+            }
+            resolvedSelfType == classDecl.qualifiedName?.asString() -> className
+            else -> resolvedSelfType
+        }
+    }
+
+    /** Entity-level `@PersistenceCreator` resolution outcome consumed by `fromRow` emission. */
+    private data class EntityCreator(val callExpression: String?, val paramNames: List<String>?)
+
+    /**
+     * Resolves the entity-level `@PersistenceCreator` reconstruction target. Returns `null` to abort
+     * generation when the configuration is invalid (more than one creator, or a creator parameter
+     * with no mapped column source) — both surfaced as compilation errors. A present creator always
+     * takes precedence over the primary constructor; its parameters are matched by name against the
+     * entity's constructor params, omitting any defaulted parameter that has no column source. When
+     * no creator exists, falls back to the primary constructor and warns if that constructor is not
+     * public. A non-public resolved creator on an internal entity warns rather than fails, since the
+     * descriptor still compiles inside the declaring module.
+     */
+    private fun resolveEntityCreator(classDecl: KSClassDeclaration, className: String): EntityCreator? {
+        when (val resolution = resolveCreator(classDecl)) {
+            is CreatorResolution.Ambiguous -> {
+                logger.error(
+                    "Multiple @PersistenceCreator targets on $className: " +
+                        "${resolution.conflicting.formatCreatorOffenders()}; exactly one is required.",
+                    classDecl
+                )
+                return null
+            }
+            is CreatorResolution.Found -> {
+                val entityCtorParamNames =
+                    classDecl.primaryConstructor?.parameters?.mapNotNull { it.name?.asString() }?.toSet() ?: emptySet()
+                val resolvedParamNames = mutableListOf<String>()
+                for (param in resolution.params) {
+                    val paramName = param.name?.asString() ?: continue
+                    when {
+                        paramName in entityCtorParamNames -> resolvedParamNames += paramName
+                        param.hasDefault -> { /* omit so the default value applies at instantiation */ }
+                        else -> {
+                            logger.error(
+                                "@PersistenceCreator param '$paramName' on $className has no mapped column source.",
+                                classDecl
+                            )
+                            return null
+                        }
+                    }
+                }
+                if (classDecl.hasInternalNonPublicCreator(resolution.callExpression)) {
+                    logger.warn(
+                        "$className is internal and its @PersistenceCreator '${resolution.callExpression}' is not " +
+                            "public; the generated descriptor may not compile outside its own module. Add a public " +
+                            "@PersistenceCreator to make it cross-module usable."
+                    )
+                }
+                return EntityCreator(resolution.callExpression, resolvedParamNames)
+            }
+            CreatorResolution.None -> {
+                if (classDecl.hasNonPublicPrimaryConstructor()) {
+                    logger.warn(
+                        "$className has a non-public primary constructor and no @PersistenceCreator; " +
+                            "the generated descriptor may not compile outside its own module."
+                    )
+                }
+                return EntityCreator(null, null)
+            }
+        }
+    }
+
     private fun generateTableDef(
         classDecl: KSClassDeclaration,
         sqlTableDefAvailable: Boolean,
@@ -483,36 +575,10 @@ class TableDefProcessor(
         val packageName = classDecl.packageName.asString()
         val className = classDecl.simpleName.asString()
 
-        // Resolve the reactive self-type R that the generated descriptor is typed on. Three branches:
-        //   null       → R unresolvable; fall back to the concrete class and emit a warning
-        //   R == class → self-referential; use the simple name for byte-identical output
-        //   otherwise  → distinct reactive interface; type the descriptor on its fully qualified name
-        val resolvedSelfType = resolveReactiveSelfType(classDecl)
-        // A generic entity has no renderable non-raw descriptor type: typing on the bare class name
-        // would emit `SqlTableDef<GenericEntity>`, which Kotlin rejects as a raw generic. Skip
-        // generation rather than emit uncompilable source.
-        if (resolvedSelfType == null && classDecl.typeParameters.isNotEmpty()) {
-            logger.warn(
-                "Skipping _LirpTableDef generation for ${classDecl.qualifiedName?.asString()}: its reactive " +
-                    "self-type R is an unsubstituted type parameter, so no valid SqlTableDef<R> can be generated"
-            )
-            return
-        }
-        val selfType: String =
-            when {
-                resolvedSelfType == null -> {
-                    logger.warn(
-                        "Could not resolve reactive self-type R for ${classDecl.qualifiedName?.asString()}; " +
-                            "generated TableDef is typed on the concrete class and may not be assignable " +
-                            "to a Repository bound on R : ReactiveEntity"
-                    )
-                    className
-                }
-                resolvedSelfType == classDecl.qualifiedName?.asString() -> className
-                else -> resolvedSelfType
-            }
-
+        val selfType = resolveDescriptorSelfType(classDecl, className) ?: return
         val tableDefName = "${className}_LirpTableDef"
+
+        val creator = resolveEntityCreator(classDecl, className) ?: return
 
         val tableName = resolveTableName(classDecl, className)
         val resolvedShape = collected
@@ -580,7 +646,9 @@ class TableDefProcessor(
                         setterSlots = setterSlots,
                         foreignKeys = foreignKeys,
                         junctionRefs = if (emitJunctions) junctionRefs else emptyList(),
-                        isReactiveEntity = extendsReactiveEntityBase(classDecl)
+                        isReactiveEntity = extendsReactiveEntityBase(classDecl),
+                        creatorCallExpression = creator.callExpression,
+                        creatorParamNames = creator.paramNames
                     ),
                     visibility = visibility
                 )

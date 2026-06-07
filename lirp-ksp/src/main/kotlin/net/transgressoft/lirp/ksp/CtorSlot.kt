@@ -38,7 +38,7 @@ internal sealed interface CtorSlot {
 
 /**
  * A primary-constructor parameter backed by exactly one flattened column. Carries the resolved
- * [ColumnMeta] (including a `ColumnConverter` FQN when a Phase 56 converter is bound). Used both
+ * [ColumnMeta] (including a `ColumnConverter` FQN when a converter is bound). Used both
  * for top-level entity scalars and for scalar leaves inside an `@Embedded` value object.
  */
 internal data class ScalarCtorSlot(
@@ -50,32 +50,48 @@ internal data class ScalarCtorSlot(
  * A primary-constructor parameter whose value is an `@Embeddable` instance reconstructed from
  * flattened columns. The [embeddableTypeFqn] names the embeddable's fully-qualified class so
  * `fromRow` can emit a constructor invocation; [children] holds the nested slots in declaration
- * order — they may themselves be [EmbeddedCtorSlot]s for recursive nesting.
+ * order — they may themselves be [EmbeddedCtorSlot]s for recursive nesting. When a
+ * `@PersistenceCreator` factory is designated on the embeddable, [creatorCallExpression] holds the
+ * call expression (e.g. `"Artist.of"`) to emit instead of the bare [embeddableTypeFqn].
  */
 internal data class EmbeddedCtorSlot(
     override val ctorParamName: String,
     val embeddableTypeFqn: String,
-    val children: List<CtorSlot>
+    val children: List<CtorSlot>,
+    val creatorCallExpression: String? = null
 ) : CtorSlot
 
 /**
  * A primary-constructor parameter annotated with `@PersistenceIgnore` inside an `@Embeddable`
- * class. Not mapped to any column; the generated `fromRow` emits `null` for this parameter
- * position. Only nullable parameters are safe today — the named-argument omission for parameters
- * with defaults is handled separately.
+ * class and whose type is nullable. Not mapped to any column; the generated `fromRow` emits
+ * `null` for this parameter position. Non-null parameters with a default value use
+ * [OmittedCtorSlot] instead so the default applies at instantiation time.
  */
 internal data class IgnoredCtorSlot(
     override val ctorParamName: String
 ) : CtorSlot
 
 /**
+ * Sentinel for a primary-constructor parameter that is excluded from the generated named-argument
+ * call because it is non-nullable, has a default value, and is either `@PersistenceIgnore`d or
+ * absent from the `@PersistenceCreator`'s parameter list. The generated `fromRow` omits the
+ * argument entirely so the default applies at instantiation time.
+ */
+internal data object OmittedCtorSlot : CtorSlot {
+    override val ctorParamName: String get() = "<omitted>"
+}
+
+/**
  * A body-declared reactive `var` property whose value is an `@Embeddable` instance reconstructed
  * from flattened leaf columns and dispatched via
  * [net.transgressoft.lirp.persistence.LirpRawInitializer] `silentSetter` on load.
- * Consumed by `appendApplyScalarRow`; invisible to `appendFromRow`.
+ * Consumed by `appendApplyScalarRow`; invisible to `appendFromRow`. When a `@PersistenceCreator`
+ * factory is designated on the embeddable, [creatorCallExpression] holds the call expression to
+ * emit instead of the bare [embeddableTypeFqn].
  */
 internal data class EmbeddedSetterSlot(
     override val ctorParamName: String,
     val embeddableTypeFqn: String,
-    val children: List<CtorSlot>
+    val children: List<CtorSlot>,
+    val creatorCallExpression: String? = null
 ) : CtorSlot
