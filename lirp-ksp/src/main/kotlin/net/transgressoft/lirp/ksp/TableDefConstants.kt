@@ -59,6 +59,7 @@ internal const val EMBEDDABLE_FQN = "net.transgressoft.lirp.persistence.Embeddab
 internal const val EMBEDDED_FQN = "net.transgressoft.lirp.persistence.Embedded"
 internal const val ELEMENT_COLLECTION_FQN = "net.transgressoft.lirp.persistence.ElementCollection"
 internal const val PERSISTENCE_IGNORE_FQN = "net.transgressoft.lirp.persistence.PersistenceIgnore"
+internal const val PERSISTENCE_CREATOR_FQN = "net.transgressoft.lirp.persistence.PersistenceCreator"
 internal const val KOTLIN_LIST_FQN = "kotlin.collections.List"
 internal const val KOTLIN_SET_FQN = "kotlin.collections.Set"
 internal const val KOTLIN_MUTABLE_LIST_FQN = "kotlin.collections.MutableList"

@@ -32,7 +32,9 @@ internal data class ObjectBodyParams(
     val setterSlots: List<EmbeddedSetterSlot> = emptyList(),
     val foreignKeys: List<ForeignKeyMeta> = emptyList(),
     val junctionRefs: List<JunctionRefInfo> = emptyList(),
-    val isReactiveEntity: Boolean = true
+    val isReactiveEntity: Boolean = true,
+    val creatorCallExpression: String? = null,
+    val creatorParamNames: List<String>? = null
 )
 
 /**
@@ -141,7 +143,11 @@ internal object TableDefSourceEmitter {
         appendLine("    )")
         if (canGenerateSqlMapping) {
             appendLine()
-            appendFromRow(className, selfType, columns, constructorParamNames, params.ctorSlots, params.setterSlots, params.isReactiveEntity)
+            appendFromRow(
+                className, selfType, columns, constructorParamNames,
+                params.ctorSlots, params.setterSlots, params.isReactiveEntity,
+                params.creatorCallExpression, params.creatorParamNames
+            )
             appendLine()
             appendToParams(className, selfType, columns)
             appendLine()
@@ -238,11 +244,14 @@ internal object TableDefSourceEmitter {
         constructorParamNames: List<String>,
         ctorSlots: List<CtorSlot> = emptyList(),
         embeddedSetterSlots: List<EmbeddedSetterSlot> = emptyList(),
-        isReactiveEntity: Boolean = true
+        isReactiveEntity: Boolean = true,
+        creatorCallExpression: String? = null,
+        creatorParamNames: List<String>? = null
     ) {
         val columnsByName = columns.associateBy { it.propertyName }
-        // Preserve constructor parameter declaration order for correct positional arguments
-        val orderedCtorCols = constructorParamNames.mapNotNull { columnsByName[it] }
+        // When a creator is present, its param list may be a subset of the primary-ctor params;
+        // use it to drive the flat column-lookup order so unlisted params are omitted.
+        val orderedCtorCols = (creatorParamNames ?: constructorParamNames).mapNotNull { columnsByName[it] }
         val ctorParamNameSet = constructorParamNames.toSet()
         // Setter cols exclude both ctor params and embedded-derived columns (the latter share their
         // top-level entity ctor-param name and are reconstructed inside the ctor invocation).
@@ -250,39 +259,85 @@ internal object TableDefSourceEmitter {
 
         // Return type is the self-type R; the body constructs the concrete class (a subtype of R).
         appendLine("    override fun fromRow(row: ResultRow, table: Table): $selfType {")
-        // When CtorSlot information is available (entities with @Embedded ctor params), use the
-        // structured tree to emit nested constructor expressions; otherwise fall back to the flat
-        // column-by-name lookup for the common no-embedded case.
-        val ctorArgs =
-            if (ctorSlots.isNotEmpty()) {
-                ctorSlots.joinToString(", ") { buildCtorArgExpression(it) }
-            } else {
-                orderedCtorCols.joinToString(", ") { buildRowAccess(it) }
-            }
-        appendLine("        val entity = $className($ctorArgs)")
-        // Populate body-declared (non-ctor) columns with events disabled for reactive entities.
-        // These are reactive property setters; emitting during hydration would schedule a stray
-        // write-back of the just-loaded values that races the repository's mutation subscription.
-        // Mirrors the withEventsDisabled guard applied in applyScalarRow / applyJunctionRows.
-        // Non-reactive `@PersistenceMapping` classes lack withEventsDisabled, so set directly.
+        appendLine(
+            "        val entity = ${
+                buildEntityConstruction(className, creatorCallExpression, constructorParamNames, creatorParamNames, ctorSlots, orderedCtorCols)
+            }"
+        )
+
+        // Body-declared (non-ctor) reactive properties are assigned with events disabled: emitting
+        // during hydration would schedule a stray write-back that races the repository's mutation
+        // subscription. Non-reactive @PersistenceMapping classes lack withEventsDisabled, so they
+        // assign directly.
         val wrapInEventsDisabled = isReactiveEntity && (setterCols.isNotEmpty() || embeddedSetterSlots.isNotEmpty())
         val setterIndent = if (wrapInEventsDisabled) "            " else "        "
         if (wrapInEventsDisabled) appendLine("        entity.withEventsDisabled {")
-        for (col in setterCols) {
-            val rowAccess = buildRowAccess(col)
-            appendLine("${setterIndent}entity.${col.propertyName} = $rowAccess")
-        }
-        // Body-declared `@Embedded var` properties are excluded from setterCols (their leaves are
-        // isInsideEmbedded); reconstruct each from its nested constructor expression so a standalone
-        // fromRow() (e.g. the conflict-recovery reload) hydrates them instead of leaving the var at
-        // its default. Mirrors the reconstruction already emitted in applyScalarRow.
-        for (slot in embeddedSetterSlots) {
-            val reconstruction = buildCtorArgExpression(EmbeddedCtorSlot(slot.ctorParamName, slot.embeddableTypeFqn, slot.children))
-            appendLine("${setterIndent}entity.${slot.ctorParamName} = $reconstruction")
-        }
+        appendSetterAssignments(setterCols, embeddedSetterSlots, setterIndent)
         if (wrapInEventsDisabled) appendLine(INNER_BLOCK_CLOSE)
         appendLine("        return entity")
         appendLine(METHOD_CLOSE)
+    }
+
+    /**
+     * Builds the entity-construction expression for `fromRow`.
+     *
+     * When a `@PersistenceCreator` is present ([creatorCallExpression] non-null), the creator may
+     * take a subset of the entity's parameters in a different order, so arguments are emitted as
+     * **named** arguments in the creator's own parameter order ([creatorParamNames]); binding
+     * positionally to the primary constructor would misbind or fail to compile. Without a creator,
+     * the primary constructor is called positionally — using the structured [ctorSlots] tree to
+     * emit nested constructor expressions for `@Embedded` parameters, or falling back to flat
+     * column-by-name lookup ([orderedCtorCols]) for the common no-embedded case.
+     */
+    private fun buildEntityConstruction(
+        className: String,
+        creatorCallExpression: String?,
+        constructorParamNames: List<String>,
+        creatorParamNames: List<String>?,
+        ctorSlots: List<CtorSlot>,
+        orderedCtorCols: List<ColumnMeta>
+    ): String {
+        val callTarget = creatorCallExpression ?: className
+        val ctorArgs =
+            when {
+                creatorCallExpression != null -> {
+                    val slotByName = ctorSlots.associateBy { it.ctorParamName }
+                    val colByName = orderedCtorCols.associateBy { it.propertyName }
+                    (creatorParamNames ?: constructorParamNames).joinToString(", ") { name ->
+                        val arg =
+                            slotByName[name]?.let { buildCtorArgExpression(it) }
+                                ?: colByName[name]?.let { buildRowAccess(it) }
+                                ?: error("No slot or column source for @PersistenceCreator parameter '$name'")
+                        "$name = $arg"
+                    }
+                }
+                ctorSlots.isNotEmpty() -> ctorSlots.joinToString(", ") { buildCtorArgExpression(it) }
+                else -> orderedCtorCols.joinToString(", ") { buildRowAccess(it) }
+            }
+        return "$callTarget($ctorArgs)"
+    }
+
+    /**
+     * Emits the post-construction reactive-property assignments inside `fromRow`: flat setter
+     * columns and the reconstruction of each body-declared `@Embedded var`. Body-declared
+     * `@Embedded var` leaves are `isInsideEmbedded`, so they are excluded from [setterCols] and
+     * rebuilt here from their nested constructor expression (routing through the creator when
+     * present) — this hydrates the var on a standalone `fromRow()` (e.g. conflict-recovery reload)
+     * rather than leaving it at its default.
+     */
+    private fun StringBuilder.appendSetterAssignments(
+        setterCols: List<ColumnMeta>,
+        embeddedSetterSlots: List<EmbeddedSetterSlot>,
+        indent: String
+    ) {
+        for (col in setterCols) {
+            appendLine("${indent}entity.${col.propertyName} = ${buildRowAccess(col)}")
+        }
+        for (slot in embeddedSetterSlots) {
+            val reconstruction =
+                buildCtorArgExpression(EmbeddedCtorSlot(slot.ctorParamName, slot.embeddableTypeFqn, slot.children, slot.creatorCallExpression))
+            appendLine("${indent}entity.${slot.ctorParamName} = $reconstruction")
+        }
     }
 
     fun StringBuilder.appendToParams(className: String, selfType: String, columns: List<ColumnMeta>) {
@@ -354,7 +409,8 @@ internal object TableDefSourceEmitter {
             // property name (the RawInitializer entry name); the value is the full nested
             // constructor expression reconstructed via buildCtorArgExpression.
             for (slot in embeddedSetterSlots) {
-                val reconstruction = buildCtorArgExpression(EmbeddedCtorSlot(slot.ctorParamName, slot.embeddableTypeFqn, slot.children))
+                val reconstruction =
+                    buildCtorArgExpression(EmbeddedCtorSlot(slot.ctorParamName, slot.embeddableTypeFqn, slot.children, slot.creatorCallExpression))
                 appendLine("                \"${slot.ctorParamName}\" -> $reconstruction")
             }
             appendLine("                else -> continue")
@@ -386,15 +442,21 @@ internal object TableDefSourceEmitter {
         when (slot) {
             is ScalarCtorSlot -> buildRowAccess(slot.column)
             is EmbeddedCtorSlot -> {
+                val callTarget = slot.creatorCallExpression ?: slot.embeddableTypeFqn
                 val inner =
-                    slot.children.joinToString(", ") { child ->
-                        "${child.ctorParamName} = ${buildCtorArgExpression(child)}"
-                    }
-                "${slot.embeddableTypeFqn}($inner)"
+                    slot.children
+                        .filterNot { it is OmittedCtorSlot }
+                        .joinToString(", ") { child ->
+                            "${child.ctorParamName} = ${buildCtorArgExpression(child)}"
+                        }
+                "$callTarget($inner)"
             }
-            // @PersistenceIgnore on a nested @Embeddable constructor param: emit null so the
+            // @PersistenceIgnore on a nullable @Embeddable constructor param: emit null so the
             // ignored param is excluded from SQL column mapping while the constructor still compiles.
             is IgnoredCtorSlot -> "null"
+            // OmittedCtorSlot must be filtered from EmbeddedCtorSlot.children before dispatch so
+            // the default applies at instantiation time; reaching here is an invariant violation.
+            is OmittedCtorSlot -> error("OmittedCtorSlot must be filtered before buildCtorArgExpression dispatch")
             // EmbeddedSetterSlot is consumed directly by appendApplyScalarRow via a synthetic
             // EmbeddedCtorSlot wrapper; it must never reach this dispatch path.
             is EmbeddedSetterSlot -> error("EmbeddedSetterSlot must not be passed to buildCtorArgExpression directly")
