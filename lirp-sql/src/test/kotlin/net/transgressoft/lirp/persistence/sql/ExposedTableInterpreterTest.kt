@@ -39,7 +39,6 @@ import org.jetbrains.exposed.v1.core.UuidColumnType
 import org.jetbrains.exposed.v1.core.VarCharColumnType
 import org.jetbrains.exposed.v1.datetime.KotlinLocalDateColumnType
 import org.jetbrains.exposed.v1.datetime.KotlinLocalDateTimeColumnType
-import org.junit.jupiter.api.DisplayName
 import kotlin.uuid.ExperimentalUuidApi
 
 /**
@@ -47,7 +46,6 @@ import kotlin.uuid.ExperimentalUuidApi
  * to the corresponding JetBrains Exposed column type without requiring a live database connection.
  */
 @OptIn(ExperimentalUuidApi::class)
-@DisplayName("ExposedTableInterpreter")
 internal class ExposedTableInterpreterTest : StringSpec({
 
     val interpreter = ExposedTableInterpreter()

@@ -23,13 +23,12 @@ import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.assertions.throwables.shouldThrow
-import io.kotest.core.spec.style.FunSpec
+import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
-import org.junit.jupiter.api.DisplayName
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.time.Duration.Companion.milliseconds
@@ -40,8 +39,7 @@ import kotlinx.coroutines.delay
  * Unit tests for [SqlRepository] using H2 in-memory databases to verify SQL-first CRUD semantics,
  * event emission, lifecycle management, and entity loading on initialization.
  */
-@DisplayName("SqlRepository")
-internal class SqlRepositoryTest : FunSpec({
+internal class SqlRepositoryTest : StringSpec({
 
     /** Returns a unique JDBC URL for an isolated H2 in-memory database per test. */
     fun freshJdbcUrl() = "jdbc:h2:mem:${UUID.randomUUID()};DB_CLOSE_DELAY=-1"
@@ -62,7 +60,7 @@ internal class SqlRepositoryTest : FunSpec({
         return HikariDataSource(config)
     }
 
-    test("adds entity and persists to database") {
+    "SqlRepository adds entity and persists to database" {
         val jdbcUrl = freshJdbcUrl()
         val repo = SqlRepository(jdbcUrl, TestPersonTableDef)
         val person =
@@ -86,7 +84,7 @@ internal class SqlRepositoryTest : FunSpec({
         repo2.close()
     }
 
-    test("emits CREATE event on add") {
+    "SqlRepository emits CREATE event on add" {
         val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef)
         val received = AtomicReference<CrudEvent.Type?>()
         repo.subscribe { event -> received.set(event.type) }
@@ -101,7 +99,7 @@ internal class SqlRepositoryTest : FunSpec({
         repo.close()
     }
 
-    test("removes entity and deletes from database") {
+    "SqlRepository removes entity and deletes from database" {
         val jdbcUrl = freshJdbcUrl()
         val repo = SqlRepository(jdbcUrl, TestPersonTableDef)
         val person =
@@ -124,7 +122,7 @@ internal class SqlRepositoryTest : FunSpec({
         repo2.close()
     }
 
-    test("emits DELETE event on remove") {
+    "SqlRepository emits DELETE event on remove" {
         val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef)
         val person = TestPerson(3).apply { firstName = "Dave" }
         val received = AtomicReference<CrudEvent.Type?>()
@@ -142,7 +140,7 @@ internal class SqlRepositoryTest : FunSpec({
         repo.close()
     }
 
-    test("loads existing rows from database on initialization") {
+    "SqlRepository loads existing rows from database on initialization" {
         val jdbcUrl = freshJdbcUrl()
         // First repository inserts a row
         val repo1 = SqlRepository(jdbcUrl, TestPersonTableDef)
@@ -163,14 +161,14 @@ internal class SqlRepositoryTest : FunSpec({
         repo2.close()
     }
 
-    test("auto-creates table on initialization") {
+    "SqlRepository auto-creates table on initialization" {
         // Creating the repository on a fresh DB should not throw; table is created automatically
         val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef)
         repo.size() shouldBe 0
         repo.close()
     }
 
-    test("throws IllegalStateException on add after close") {
+    "SqlRepository throws IllegalStateException on add after close" {
         val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef)
         repo.close()
 
@@ -179,7 +177,7 @@ internal class SqlRepositoryTest : FunSpec({
         }
     }
 
-    test("closes HikariCP pool when owning the datasource") {
+    "SqlRepository closes HikariCP pool when owning the datasource" {
         val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef)
         // Access the HikariDataSource to verify it is shut down after repo.close()
         val dataSourceField = SqlRepository::class.java.getDeclaredField("dataSource")
@@ -191,7 +189,7 @@ internal class SqlRepositoryTest : FunSpec({
         hikariDs.isClosed.shouldBeTrue()
     }
 
-    test("does not close user-provided datasource on close") {
+    "SqlRepository does not close user-provided datasource on close" {
         val jdbcUrl = freshJdbcUrl()
         val externalDs = buildExternalDataSource(jdbcUrl)
         val repo = SqlRepository(externalDs, TestPersonTableDef)
@@ -202,7 +200,7 @@ internal class SqlRepositoryTest : FunSpec({
         externalDs.close()
     }
 
-    test("persists entity mutation to database via flush") {
+    "SqlRepository persists entity mutation to database via flush" {
         val jdbcUrl = freshJdbcUrl()
         val repo = SqlRepository(jdbcUrl, TestPersonTableDef)
         val person =
@@ -225,7 +223,7 @@ internal class SqlRepositoryTest : FunSpec({
         repo.close()
     }
 
-    test("clears all entities from database and in-memory") {
+    "SqlRepository clears all entities from database and in-memory" {
         val jdbcUrl = freshJdbcUrl()
         val repo = SqlRepository(jdbcUrl, TestPersonTableDef)
         repo.add(TestPerson(20).apply { firstName = "Grace" })
@@ -242,7 +240,7 @@ internal class SqlRepositoryTest : FunSpec({
         repo2.close()
     }
 
-    test("removeAll deletes specified entities from database") {
+    "SqlRepository removeAll deletes specified entities from database" {
         val jdbcUrl = freshJdbcUrl()
         val repo = SqlRepository(jdbcUrl, TestPersonTableDef)
         val p1 = TestPerson(30).apply { firstName = "Iris" }
@@ -266,347 +264,341 @@ internal class SqlRepositoryTest : FunSpec({
         repo2.close()
     }
 
-    context("Deferred loading") {
+    "SqlRepository constructs with table created but empty when loadOnInit is false" {
+        val jdbcUrl = freshJdbcUrl()
+        val repo = SqlRepository(jdbcUrl, TestPersonTableDef, loadOnInit = false)
 
-        test("constructs with table created but empty when loadOnInit is false") {
-            val jdbcUrl = freshJdbcUrl()
-            val repo = SqlRepository(jdbcUrl, TestPersonTableDef, loadOnInit = false)
+        repo.size() shouldBe 0
+        repo.isLoaded shouldBe false
 
-            repo.size() shouldBe 0
-            repo.isLoaded shouldBe false
-
-            // Verify the table was created by the deferred constructor itself
-            // by querying the fresh database directly via JDBC
-            val ds = buildExternalDataSource(jdbcUrl)
-            ds.connection.use { conn ->
-                conn.createStatement().use { stmt ->
-                    val rs = stmt.executeQuery("SELECT COUNT(*) FROM test_persons")
-                    rs.next()
-                    rs.getInt(1) shouldBe 0
-                }
+        // Verify the table was created by the deferred constructor itself
+        // by querying the fresh database directly via JDBC
+        val ds = buildExternalDataSource(jdbcUrl)
+        ds.connection.use { conn ->
+            conn.createStatement().use { stmt ->
+                val rs = stmt.executeQuery("SELECT COUNT(*) FROM test_persons")
+                rs.next()
+                rs.getInt(1) shouldBe 0
             }
-            ds.close()
-
-            repo.close()
         }
+        ds.close()
 
-        test("load() populates repository from database") {
-            val jdbcUrl = freshJdbcUrl()
-            val seedRepo = SqlRepository(jdbcUrl, TestPersonTableDef)
-            seedRepo.add(TestPerson(1).apply { firstName = "Alice" })
-            seedRepo.add(TestPerson(2).apply { firstName = "Bob" })
-            seedRepo.close()
-
-            val repo = SqlRepository(jdbcUrl, TestPersonTableDef, loadOnInit = false)
-            repo.size() shouldBe 0
-
-            repo.load()
-
-            repo.size() shouldBe 2
-            repo.isLoaded shouldBe true
-            repo.findById(1).shouldBePresent { it.firstName shouldBe "Alice" }
-            repo.findById(2).shouldBePresent { it.firstName shouldBe "Bob" }
-
-            repo.close()
-        }
-
-        test("load() twice throws IllegalStateException") {
-            val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef, loadOnInit = false)
-            repo.load()
-
-            shouldThrow<IllegalStateException> { repo.load() }
-
-            repo.close()
-        }
-
-        test("add() before load() throws IllegalStateException") {
-            val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef, loadOnInit = false)
-
-            shouldThrow<IllegalStateException> {
-                repo.add(TestPerson(99).apply { firstName = "Zara" })
-            }
-
-            repo.close()
-        }
-
-        test("load() after close() throws IllegalStateException") {
-            val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef, loadOnInit = false)
-            repo.close()
-
-            shouldThrow<IllegalStateException> { repo.load() }
-        }
-
-        test("isLoaded reflects state before and after load()") {
-            val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef, loadOnInit = false)
-            repo.isLoaded shouldBe false
-
-            repo.load()
-
-            repo.isLoaded shouldBe true
-
-            repo.close()
-        }
-
-        test("CRUD operations work normally after explicit load()") {
-            val jdbcUrl = freshJdbcUrl()
-            val repo = SqlRepository(jdbcUrl, TestPersonTableDef, loadOnInit = false)
-            repo.load()
-
-            repo.add(TestPerson(10).apply { firstName = "Carol" })
-
-            repo.size() shouldBe 1
-            repo.close()
-
-            val repo2 = SqlRepository(jdbcUrl, TestPersonTableDef)
-            repo2.size() shouldBe 1
-            repo2.findById(10).shouldBePresent { it.firstName shouldBe "Carol" }
-            repo2.close()
-        }
-
-        test("default loadOnInit=true loads rows eagerly") {
-            val jdbcUrl = freshJdbcUrl()
-            val seedRepo = SqlRepository(jdbcUrl, TestPersonTableDef)
-            seedRepo.add(TestPerson(5).apply { firstName = "Eve" })
-            seedRepo.close()
-
-            val repo = SqlRepository(jdbcUrl, TestPersonTableDef)
-
-            repo.size() shouldBe 1
-            repo.isLoaded shouldBe true
-            repo.findById(5).shouldBePresent { it.firstName shouldBe "Eve" }
-
-            repo.close()
-        }
+        repo.close()
     }
 
-    context("Mutable aggregate collection delegates") {
+    "SqlRepository load() populates repository from database" {
+        val jdbcUrl = freshJdbcUrl()
+        val seedRepo = SqlRepository(jdbcUrl, TestPersonTableDef)
+        seedRepo.add(TestPerson(1).apply { firstName = "Alice" })
+        seedRepo.add(TestPerson(2).apply { firstName = "Bob" })
+        seedRepo.close()
 
-        test("persists mutable aggregate trackIds and reloads them") {
-            val jdbcUrl = freshJdbcUrl()
+        val repo = SqlRepository(jdbcUrl, TestPersonTableDef, loadOnInit = false)
+        repo.size() shouldBe 0
 
-            val trackRepo = SqlTestTrackRepository(jdbcUrl)
-            val playlistRepo = MutablePlaylistSqlRepository(jdbcUrl)
+        repo.load()
 
-            val track1 = SqlTestTrack(1, "Track A")
-            val track2 = SqlTestTrack(2, "Track B")
-            trackRepo.add(track1)
-            trackRepo.add(track2)
+        repo.size() shouldBe 2
+        repo.isLoaded shouldBe true
+        repo.findById(1).shouldBePresent { it.firstName shouldBe "Alice" }
+        repo.findById(2).shouldBePresent { it.firstName shouldBe "Bob" }
 
-            val playlist = MutablePlaylistSql(1L).also { it.name = "SQL Playlist" }
-            playlistRepo.add(playlist)
+        repo.close()
+    }
 
-            playlist.tracks.add(track1)
-            playlist.tracks.add(track2)
-            delay(50.milliseconds)
+    "SqlRepository load() twice throws IllegalStateException" {
+        val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef, loadOnInit = false)
+        repo.load()
 
-            playlistRepo.close()
-            trackRepo.close()
+        shouldThrow<IllegalStateException> { repo.load() }
 
-            val trackRepo2 = SqlTestTrackRepository(jdbcUrl)
-            val playlistRepo2 = MutablePlaylistSqlRepository(jdbcUrl)
+        repo.close()
+    }
 
-            playlistRepo2.findById(1L).shouldBePresent {
-                it.trackIds shouldContainExactly listOf(1, 2)
-                it.tracks.resolveAll() shouldHaveSize 2
-            }
+    "SqlRepository add() before load() throws IllegalStateException" {
+        val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef, loadOnInit = false)
 
-            playlistRepo2.close()
-            trackRepo2.close()
+        shouldThrow<IllegalStateException> {
+            repo.add(TestPerson(99).apply { firstName = "Zara" })
         }
 
-        test("persists further mutations after reload") {
-            val jdbcUrl = freshJdbcUrl()
+        repo.close()
+    }
 
-            val trackRepo1 = SqlTestTrackRepository(jdbcUrl)
-            val playlistRepo1 = MutablePlaylistSqlRepository(jdbcUrl)
+    "SqlRepository load() after close() throws IllegalStateException" {
+        val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef, loadOnInit = false)
+        repo.close()
 
-            val t1 = SqlTestTrack(1, "T1")
-            val t2 = SqlTestTrack(2, "T2")
-            val t3 = SqlTestTrack(3, "T3")
-            trackRepo1.add(t1)
-            trackRepo1.add(t2)
-            trackRepo1.add(t3)
+        shouldThrow<IllegalStateException> { repo.load() }
+    }
 
-            val playlist = MutablePlaylistSql(1L).also { it.name = "Evolving" }
-            playlistRepo1.add(playlist)
-            playlist.tracks.add(t1)
-            playlist.tracks.add(t2)
-            delay(50.milliseconds)
+    "SqlRepository isLoaded reflects state before and after load()" {
+        val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef, loadOnInit = false)
+        repo.isLoaded shouldBe false
 
-            playlistRepo1.close()
-            trackRepo1.close()
+        repo.load()
 
-            val trackRepo2 = SqlTestTrackRepository(jdbcUrl)
-            val playlistRepo2 = MutablePlaylistSqlRepository(jdbcUrl)
+        repo.isLoaded shouldBe true
 
-            val reloaded = playlistRepo2.findById(1L).get()
-            reloaded.trackIds shouldContainExactly listOf(1, 2)
+        repo.close()
+    }
 
-            val reloadedT1 = trackRepo2.findById(1).get()
-            val reloadedT3 = trackRepo2.findById(3).get()
-            reloaded.tracks.add(reloadedT3)
-            reloaded.tracks.remove(reloadedT1)
-            delay(50.milliseconds)
+    "SqlRepository CRUD operations work normally after explicit load()" {
+        val jdbcUrl = freshJdbcUrl()
+        val repo = SqlRepository(jdbcUrl, TestPersonTableDef, loadOnInit = false)
+        repo.load()
 
-            playlistRepo2.close()
-            trackRepo2.close()
+        repo.add(TestPerson(10).apply { firstName = "Carol" })
 
-            val trackRepo3 = SqlTestTrackRepository(jdbcUrl)
-            val playlistRepo3 = MutablePlaylistSqlRepository(jdbcUrl)
+        repo.size() shouldBe 1
+        repo.close()
 
-            eventually(1.seconds) {
-                playlistRepo3.findById(1L).shouldBePresent {
-                    it.trackIds shouldContainExactly listOf(2, 3)
-                }
-            }
+        val repo2 = SqlRepository(jdbcUrl, TestPersonTableDef)
+        repo2.size() shouldBe 1
+        repo2.findById(10).shouldBePresent { it.firstName shouldBe "Carol" }
+        repo2.close()
+    }
 
-            playlistRepo3.close()
-            trackRepo3.close()
+    "SqlRepository default loadOnInit=true loads rows eagerly" {
+        val jdbcUrl = freshJdbcUrl()
+        val seedRepo = SqlRepository(jdbcUrl, TestPersonTableDef)
+        seedRepo.add(TestPerson(5).apply { firstName = "Eve" })
+        seedRepo.close()
+
+        val repo = SqlRepository(jdbcUrl, TestPersonTableDef)
+
+        repo.size() shouldBe 1
+        repo.isLoaded shouldBe true
+        repo.findById(5).shouldBePresent { it.firstName shouldBe "Eve" }
+
+        repo.close()
+    }
+
+    "SqlRepository persists mutable aggregate trackIds and reloads them" {
+        val jdbcUrl = freshJdbcUrl()
+
+        val trackRepo = SqlTestTrackRepository(jdbcUrl)
+        val playlistRepo = MutablePlaylistSqlRepository(jdbcUrl)
+
+        val track1 = SqlTestTrack(1, "Track A")
+        val track2 = SqlTestTrack(2, "Track B")
+        trackRepo.add(track1)
+        trackRepo.add(track2)
+
+        val playlist = MutablePlaylistSql(1L).also { it.name = "SQL Playlist" }
+        playlistRepo.add(playlist)
+
+        playlist.tracks.add(track1)
+        playlist.tracks.add(track2)
+        delay(50.milliseconds)
+
+        playlistRepo.close()
+        trackRepo.close()
+
+        val trackRepo2 = SqlTestTrackRepository(jdbcUrl)
+        val playlistRepo2 = MutablePlaylistSqlRepository(jdbcUrl)
+
+        playlistRepo2.findById(1L).shouldBePresent {
+            it.trackIds shouldContainExactly listOf(1, 2)
+            it.tracks.resolveAll() shouldHaveSize 2
         }
 
-        test("addAll on mutable aggregate persists all added trackIds") {
-            val jdbcUrl = freshJdbcUrl()
-            val trackRepo = SqlTestTrackRepository(jdbcUrl)
-            val playlistRepo = MutablePlaylistSqlRepository(jdbcUrl)
+        playlistRepo2.close()
+        trackRepo2.close()
+    }
 
-            val t1 = SqlTestTrack(1, "T1")
-            val t2 = SqlTestTrack(2, "T2")
-            val t3 = SqlTestTrack(3, "T3")
-            trackRepo.add(t1)
-            trackRepo.add(t2)
-            trackRepo.add(t3)
+    "SqlRepository persists further mutations after reload" {
+        val jdbcUrl = freshJdbcUrl()
 
-            val playlist = MutablePlaylistSql(1L).also { it.name = "Bulk" }
-            playlistRepo.add(playlist)
+        val trackRepo1 = SqlTestTrackRepository(jdbcUrl)
+        val playlistRepo1 = MutablePlaylistSqlRepository(jdbcUrl)
 
-            playlist.tracks.addAll(listOf(t1, t2, t3))
-            delay(50.milliseconds)
+        val t1 = SqlTestTrack(1, "T1")
+        val t2 = SqlTestTrack(2, "T2")
+        val t3 = SqlTestTrack(3, "T3")
+        trackRepo1.add(t1)
+        trackRepo1.add(t2)
+        trackRepo1.add(t3)
 
-            playlistRepo.close()
-            trackRepo.close()
+        val playlist = MutablePlaylistSql(1L).also { it.name = "Evolving" }
+        playlistRepo1.add(playlist)
+        playlist.tracks.add(t1)
+        playlist.tracks.add(t2)
+        delay(50.milliseconds)
 
-            val trackRepo2 = SqlTestTrackRepository(jdbcUrl)
-            val playlistRepo2 = MutablePlaylistSqlRepository(jdbcUrl)
+        playlistRepo1.close()
+        trackRepo1.close()
 
-            playlistRepo2.findById(1L).shouldBePresent {
-                it.trackIds shouldContainExactly listOf(1, 2, 3)
-                it.tracks.resolveAll() shouldHaveSize 3
+        val trackRepo2 = SqlTestTrackRepository(jdbcUrl)
+        val playlistRepo2 = MutablePlaylistSqlRepository(jdbcUrl)
+
+        val reloaded = playlistRepo2.findById(1L).get()
+        reloaded.trackIds shouldContainExactly listOf(1, 2)
+
+        val reloadedT1 = trackRepo2.findById(1).get()
+        val reloadedT3 = trackRepo2.findById(3).get()
+        reloaded.tracks.add(reloadedT3)
+        reloaded.tracks.remove(reloadedT1)
+        delay(50.milliseconds)
+
+        playlistRepo2.close()
+        trackRepo2.close()
+
+        val trackRepo3 = SqlTestTrackRepository(jdbcUrl)
+        val playlistRepo3 = MutablePlaylistSqlRepository(jdbcUrl)
+
+        eventually(1.seconds) {
+            playlistRepo3.findById(1L).shouldBePresent {
+                it.trackIds shouldContainExactly listOf(2, 3)
             }
-
-            playlistRepo2.close()
-            trackRepo2.close()
         }
 
-        test("removeAll on mutable aggregate persists remaining trackIds") {
-            val jdbcUrl = freshJdbcUrl()
-            val trackRepo = SqlTestTrackRepository(jdbcUrl)
-            val playlistRepo = MutablePlaylistSqlRepository(jdbcUrl)
+        playlistRepo3.close()
+        trackRepo3.close()
+    }
 
-            val t1 = SqlTestTrack(1, "T1")
-            val t2 = SqlTestTrack(2, "T2")
-            val t3 = SqlTestTrack(3, "T3")
-            trackRepo.add(t1)
-            trackRepo.add(t2)
-            trackRepo.add(t3)
+    "SqlRepository addAll on mutable aggregate persists all added trackIds" {
+        val jdbcUrl = freshJdbcUrl()
+        val trackRepo = SqlTestTrackRepository(jdbcUrl)
+        val playlistRepo = MutablePlaylistSqlRepository(jdbcUrl)
 
-            val playlist = MutablePlaylistSql(1L, listOf(1, 2, 3)).also { it.name = "BulkRemove" }
-            playlistRepo.add(playlist)
+        val t1 = SqlTestTrack(1, "T1")
+        val t2 = SqlTestTrack(2, "T2")
+        val t3 = SqlTestTrack(3, "T3")
+        trackRepo.add(t1)
+        trackRepo.add(t2)
+        trackRepo.add(t3)
 
-            playlist.tracks.removeAll(listOf(t1, t3))
-            delay(50.milliseconds)
+        val playlist = MutablePlaylistSql(1L).also { it.name = "Bulk" }
+        playlistRepo.add(playlist)
 
-            playlistRepo.close()
-            trackRepo.close()
+        playlist.tracks.addAll(listOf(t1, t2, t3))
+        delay(50.milliseconds)
 
-            val trackRepo2 = SqlTestTrackRepository(jdbcUrl)
-            val playlistRepo2 = MutablePlaylistSqlRepository(jdbcUrl)
+        playlistRepo.close()
+        trackRepo.close()
 
-            playlistRepo2.findById(1L).shouldBePresent {
-                it.trackIds shouldContainExactly listOf(2)
-            }
+        val trackRepo2 = SqlTestTrackRepository(jdbcUrl)
+        val playlistRepo2 = MutablePlaylistSqlRepository(jdbcUrl)
 
-            playlistRepo2.close()
-            trackRepo2.close()
+        playlistRepo2.findById(1L).shouldBePresent {
+            it.trackIds shouldContainExactly listOf(1, 2, 3)
+            it.tracks.resolveAll() shouldHaveSize 3
         }
 
-        test("emits UPDATE event when mutable aggregate collection is mutated") {
-            val jdbcUrl = freshJdbcUrl()
-            val trackRepo = SqlTestTrackRepository(jdbcUrl)
-            val playlistRepo = MutablePlaylistSqlRepository(jdbcUrl)
-            val received = AtomicReference<CrudEvent.Type?>()
-            playlistRepo.subscribe { event -> received.set(event.type) }
-            delay(100.milliseconds)
+        playlistRepo2.close()
+        trackRepo2.close()
+    }
 
-            val t1 = SqlTestTrack(1, "Track")
-            trackRepo.add(t1)
+    "SqlRepository removeAll on mutable aggregate persists remaining trackIds" {
+        val jdbcUrl = freshJdbcUrl()
+        val trackRepo = SqlTestTrackRepository(jdbcUrl)
+        val playlistRepo = MutablePlaylistSqlRepository(jdbcUrl)
 
-            val playlist = MutablePlaylistSql(1L).also { it.name = "EventTest" }
-            playlistRepo.add(playlist)
-            delay(50.milliseconds)
+        val t1 = SqlTestTrack(1, "T1")
+        val t2 = SqlTestTrack(2, "T2")
+        val t3 = SqlTestTrack(3, "T3")
+        trackRepo.add(t1)
+        trackRepo.add(t2)
+        trackRepo.add(t3)
 
-            playlist.tracks.add(t1)
+        val playlist = MutablePlaylistSql(1L, listOf(1, 2, 3)).also { it.name = "BulkRemove" }
+        playlistRepo.add(playlist)
 
-            eventually(10.seconds) {
-                received.get() shouldBe CrudEvent.Type.UPDATE
-            }
+        playlist.tracks.removeAll(listOf(t1, t3))
+        delay(50.milliseconds)
 
-            playlistRepo.close()
-            trackRepo.close()
+        playlistRepo.close()
+        trackRepo.close()
+
+        val trackRepo2 = SqlTestTrackRepository(jdbcUrl)
+        val playlistRepo2 = MutablePlaylistSqlRepository(jdbcUrl)
+
+        playlistRepo2.findById(1L).shouldBePresent {
+            it.trackIds shouldContainExactly listOf(2)
         }
 
-        test("loads entity with initial trackIds and delegate resolves correctly") {
-            val jdbcUrl = freshJdbcUrl()
-            val trackRepo = SqlTestTrackRepository(jdbcUrl)
-            val playlistRepo = MutablePlaylistSqlRepository(jdbcUrl)
+        playlistRepo2.close()
+        trackRepo2.close()
+    }
 
-            val t1 = SqlTestTrack(10, "Pre-existing Track")
-            trackRepo.add(t1)
+    "SqlRepository emits UPDATE event when mutable aggregate collection is mutated" {
+        val jdbcUrl = freshJdbcUrl()
+        val trackRepo = SqlTestTrackRepository(jdbcUrl)
+        val playlistRepo = MutablePlaylistSqlRepository(jdbcUrl)
+        val received = AtomicReference<CrudEvent.Type?>()
+        playlistRepo.subscribe { event -> received.set(event.type) }
+        delay(100.milliseconds)
 
-            val playlist = MutablePlaylistSql(1L, listOf(10)).also { it.name = "Pre-loaded" }
-            playlistRepo.add(playlist)
+        val t1 = SqlTestTrack(1, "Track")
+        trackRepo.add(t1)
 
-            playlistRepo.close()
-            trackRepo.close()
+        val playlist = MutablePlaylistSql(1L).also { it.name = "EventTest" }
+        playlistRepo.add(playlist)
+        delay(50.milliseconds)
 
-            val trackRepo2 = SqlTestTrackRepository(jdbcUrl)
-            val playlistRepo2 = MutablePlaylistSqlRepository(jdbcUrl)
+        playlist.tracks.add(t1)
 
-            playlistRepo2.findById(1L).shouldBePresent {
-                it.trackIds shouldContainExactly listOf(10)
-                it.tracks.resolveAll() shouldHaveSize 1
-                it.tracks.resolveAll().first().id shouldBe 10
-            }
-
-            playlistRepo2.close()
-            trackRepo2.close()
+        eventually(10.seconds) {
+            received.get() shouldBe CrudEvent.Type.UPDATE
         }
 
-        test("clear on mutable aggregate persists empty state") {
-            val jdbcUrl = freshJdbcUrl()
-            val trackRepo1 = SqlTestTrackRepository(jdbcUrl)
-            val playlistRepo1 = MutablePlaylistSqlRepository(jdbcUrl)
+        playlistRepo.close()
+        trackRepo.close()
+    }
 
-            val t1 = SqlTestTrack(1, "T1")
-            trackRepo1.add(t1)
+    "SqlRepository loads entity with initial trackIds and delegate resolves correctly" {
+        val jdbcUrl = freshJdbcUrl()
+        val trackRepo = SqlTestTrackRepository(jdbcUrl)
+        val playlistRepo = MutablePlaylistSqlRepository(jdbcUrl)
 
-            val playlist = MutablePlaylistSql(1L).also { it.name = "ClearMe" }
-            playlistRepo1.add(playlist)
-            playlist.tracks.add(t1)
-            playlist.tracks.clear()
-            delay(50.milliseconds)
+        val t1 = SqlTestTrack(10, "Pre-existing Track")
+        trackRepo.add(t1)
 
-            playlistRepo1.close()
-            trackRepo1.close()
+        val playlist = MutablePlaylistSql(1L, listOf(10)).also { it.name = "Pre-loaded" }
+        playlistRepo.add(playlist)
 
-            val trackRepo2 = SqlTestTrackRepository(jdbcUrl)
-            val playlistRepo2 = MutablePlaylistSqlRepository(jdbcUrl)
+        playlistRepo.close()
+        trackRepo.close()
 
-            playlistRepo2.findById(1L).shouldBePresent {
-                it.trackIds shouldBe emptyList()
-            }
+        val trackRepo2 = SqlTestTrackRepository(jdbcUrl)
+        val playlistRepo2 = MutablePlaylistSqlRepository(jdbcUrl)
 
-            playlistRepo2.close()
-            trackRepo2.close()
+        playlistRepo2.findById(1L).shouldBePresent {
+            it.trackIds shouldContainExactly listOf(10)
+            it.tracks.resolveAll() shouldHaveSize 1
+            it.tracks.resolveAll().first().id shouldBe 10
         }
+
+        playlistRepo2.close()
+        trackRepo2.close()
+    }
+
+    "SqlRepository clear on mutable aggregate persists empty state" {
+        val jdbcUrl = freshJdbcUrl()
+        val trackRepo1 = SqlTestTrackRepository(jdbcUrl)
+        val playlistRepo1 = MutablePlaylistSqlRepository(jdbcUrl)
+
+        val t1 = SqlTestTrack(1, "T1")
+        trackRepo1.add(t1)
+
+        val playlist = MutablePlaylistSql(1L).also { it.name = "ClearMe" }
+        playlistRepo1.add(playlist)
+        playlist.tracks.add(t1)
+        playlist.tracks.clear()
+        delay(50.milliseconds)
+
+        playlistRepo1.close()
+        trackRepo1.close()
+
+        val trackRepo2 = SqlTestTrackRepository(jdbcUrl)
+        val playlistRepo2 = MutablePlaylistSqlRepository(jdbcUrl)
+
+        playlistRepo2.findById(1L).shouldBePresent {
+            it.trackIds shouldBe emptyList()
+        }
+
+        playlistRepo2.close()
+        trackRepo2.close()
     }
 })

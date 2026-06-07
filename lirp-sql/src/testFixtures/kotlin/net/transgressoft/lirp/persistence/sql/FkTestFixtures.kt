@@ -21,6 +21,7 @@ import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.persistence.ColumnDef
 import net.transgressoft.lirp.persistence.ColumnType
+import net.transgressoft.lirp.persistence.LirpRawInitializer
 import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.Table
@@ -124,6 +125,10 @@ object FkChildTableDef : SqlTableDef<FkChild> {
             entity.name = row[cols["name"]!! as Column<String>]
         }
     }
+
+    override fun applyScalarRow(entity: FkChild, row: ResultRow, table: Table, rawInit: LirpRawInitializer<FkChild>) {
+        // No-op: entity state is fully populated by fromRow.
+    }
 }
 
 /**
@@ -160,7 +165,7 @@ object FkParentChildrenJunctionAccessor : JunctionAccessor<FkParent> {
  * and a nullable `single_child_id` scalar column. The scalar FK constraint is NOT installed at
  * table creation — tests install it via [FkScalarFkInstaller] for the cascade action under test.
  */
-object FkParentTableDef : SqlTableDef<FkParent> {
+object FkParentTableDef : SqlTableDef<FkParent>, VersionedTableDef<FkParent>, JunctionAware<FkParent> {
     override val tableName = "fk_parents"
     override val columns =
         listOf(
@@ -218,6 +223,10 @@ object FkParentTableDef : SqlTableDef<FkParent> {
         entity.withEventsDisabled {
             entity.childIds = ids.filterIsInstance<Int>()
         }
+    }
+
+    override fun applyScalarRow(entity: FkParent, row: ResultRow, table: Table, rawInit: LirpRawInitializer<FkParent>) {
+        // No-op: entity state is fully populated by fromRow.
     }
 }
 

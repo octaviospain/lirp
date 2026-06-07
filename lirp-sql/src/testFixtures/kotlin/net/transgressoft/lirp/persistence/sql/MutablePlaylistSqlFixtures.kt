@@ -22,6 +22,7 @@ import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.persistence.Aggregate
 import net.transgressoft.lirp.persistence.ColumnDef
 import net.transgressoft.lirp.persistence.ColumnType
+import net.transgressoft.lirp.persistence.LirpRawInitializer
 import net.transgressoft.lirp.persistence.LirpRegistryInfo
 import net.transgressoft.lirp.persistence.mutableAggregateList
 import org.jetbrains.exposed.v1.core.Column
@@ -74,6 +75,10 @@ object SqlTestTrackTableDef : SqlTableDef<SqlTestTrack> {
         val cols = table.columns.associateBy { it.name }
         entity.title = row[cols["title"]!! as Column<String>]
         // id is PK — immutable on SqlTestTrack
+    }
+
+    override fun applyScalarRow(entity: SqlTestTrack, row: ResultRow, table: Table, rawInit: LirpRawInitializer<SqlTestTrack>) {
+        // No-op: entity state is fully populated by fromRow.
     }
 }
 
@@ -153,6 +158,10 @@ object MutablePlaylistSqlTableDef : SqlTableDef<MutablePlaylistSql> {
         // DB" operation), the in-memory `tracks` collection would silently diverge from the DB
         // row. In that case, reconcile the delegate's `referenceIds` here (clear + addAll inside
         // `entity.withEventsDisabled { ... }`) before claiming `@Version` support on this entity.
+    }
+
+    override fun applyScalarRow(entity: MutablePlaylistSql, row: ResultRow, table: Table, rawInit: LirpRawInitializer<MutablePlaylistSql>) {
+        // No-op: entity state is fully populated by fromRow.
     }
 }
 

@@ -19,6 +19,7 @@ package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.persistence.ColumnDef
 import net.transgressoft.lirp.persistence.ColumnType
+import net.transgressoft.lirp.persistence.LirpRawInitializer
 import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.Table
@@ -105,5 +106,9 @@ object AllTypesTableDef : SqlTableDef<AllTypesEntity> {
         entity.decimalVal = row[cols["decimal_val"]!! as Column<BigDecimal>]
         entity.enumVal = row[cols["enum_val"]!! as Column<String>]
         // id is PK — immutable on AllTypesEntity
+    }
+
+    override fun applyScalarRow(entity: AllTypesEntity, row: ResultRow, table: Table, rawInit: LirpRawInitializer<AllTypesEntity>) {
+        // No-op: entity state is fully populated by fromRow.
     }
 }

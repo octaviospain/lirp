@@ -18,12 +18,12 @@
 package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.persistence.RegistryBase
+import net.transgressoft.lirp.persistence.fx.FxToolkitInit
 import net.transgressoft.lirp.persistence.fx.fxAggregateList
 import net.transgressoft.lirp.persistence.fx.fxProjectionMap
 import net.transgressoft.lirp.testing.reactiveScope
-import io.kotest.core.spec.style.FunSpec
+import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
-import org.junit.jupiter.api.DisplayName
 import java.util.UUID
 
 /**
@@ -34,8 +34,7 @@ import java.util.UUID
  * The projection operates on the in-memory aggregate list — the SQL layer provides persistence
  * and round-trip fidelity, while the projection map groups entities by [FxSqlTestEntity.groupProperty].
  */
-@DisplayName("FxSqlProjectionMapTest")
-internal class FxSqlProjectionMapTest : FunSpec({
+internal class FxSqlProjectionMapTest : StringSpec({
 
     fun freshJdbcUrl() = "jdbc:h2:mem:${UUID.randomUUID()};DB_CLOSE_DELAY=-1"
 
@@ -50,7 +49,7 @@ internal class FxSqlProjectionMapTest : FunSpec({
         RegistryBase.deregisterRepository(FxSqlTestEntity::class.java)
     }
 
-    test("fxProjectionMap groups SQL-persisted entities by groupProperty") {
+    "fxProjectionMap groups SQL-persisted entities by groupProperty" {
         val jdbcUrl = freshJdbcUrl()
         val itemRepo = FxSqlTestItemRepository(jdbcUrl)
         val entityRepo = FxSqlTestEntityRepository(jdbcUrl)
@@ -80,7 +79,7 @@ internal class FxSqlProjectionMapTest : FunSpec({
         itemRepo.close()
     }
 
-    test("fxProjectionMap updates when entity is added after SQL persistence") {
+    "fxProjectionMap updates when entity is added after SQL persistence" {
         val jdbcUrl = freshJdbcUrl()
         val itemRepo = FxSqlTestItemRepository(jdbcUrl)
         val entityRepo = FxSqlTestEntityRepository(jdbcUrl)
@@ -110,7 +109,7 @@ internal class FxSqlProjectionMapTest : FunSpec({
         itemRepo.close()
     }
 
-    test("fxProjectionMap reloads and groups entities from SQL round-trip") {
+    "fxProjectionMap reloads and groups entities from SQL round-trip" {
         val jdbcUrl = freshJdbcUrl()
         var itemRepo = FxSqlTestItemRepository(jdbcUrl)
         var entityRepo = FxSqlTestEntityRepository(jdbcUrl)

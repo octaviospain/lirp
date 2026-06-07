@@ -21,6 +21,7 @@ import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.persistence.ColumnDef
 import net.transgressoft.lirp.persistence.ColumnType
+import net.transgressoft.lirp.persistence.LirpRawInitializer
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.nondeterministic.eventually
@@ -311,6 +312,10 @@ internal object TestTrackTableDef : SqlTableDef<TestTrack> {
         val cols = table.columns.associateBy { it.name }
         entity.title = row[cols["title"]!! as Column<String>]
     }
+
+    override fun applyScalarRow(entity: TestTrack, row: ResultRow, table: Table, rawInit: LirpRawInitializer<TestTrack>) {
+        // No-op: entity state is fully populated by fromRow.
+    }
 }
 
 /** Junction descriptor for [TestPlaylist.trackIds]. */
@@ -329,7 +334,7 @@ internal object TestPlaylistTracksJunctionDef : JunctionTableDef {
     override val itemFkOnDelete: CascadeAction = CascadeAction.CASCADE
 }
 
-internal object TestPlaylistTableDef : SqlTableDef<TestPlaylist> {
+internal object TestPlaylistTableDef : SqlTableDef<TestPlaylist>, JunctionAware<TestPlaylist> {
     override val tableName: String = "test_playlists"
     override val columns: List<ColumnDef> =
         listOf(
@@ -371,6 +376,10 @@ internal object TestPlaylistTableDef : SqlTableDef<TestPlaylist> {
                 entity.trackIds = ids.filterIsInstance<Int>()
             }
         }
+    }
+
+    override fun applyScalarRow(entity: TestPlaylist, row: ResultRow, table: Table, rawInit: LirpRawInitializer<TestPlaylist>) {
+        // No-op: entity state is fully populated by fromRow.
     }
 }
 

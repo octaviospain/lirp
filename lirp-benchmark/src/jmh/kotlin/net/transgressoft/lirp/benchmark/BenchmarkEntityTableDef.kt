@@ -2,6 +2,7 @@ package net.transgressoft.lirp.benchmark
 
 import net.transgressoft.lirp.persistence.ColumnDef
 import net.transgressoft.lirp.persistence.ColumnType
+import net.transgressoft.lirp.persistence.LirpRawInitializer
 import net.transgressoft.lirp.persistence.sql.SqlTableDef
 import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.ResultRow
@@ -49,5 +50,9 @@ object BenchmarkEntityTableDef : SqlTableDef<BenchmarkEntity> {
     override fun applyRow(entity: BenchmarkEntity, row: ResultRow, table: Table) {
         val cols = table.columns.associateBy { it.name }
         entity.name = row[cols["name"]!! as Column<String>]
+    }
+
+    override fun applyScalarRow(entity: BenchmarkEntity, row: ResultRow, table: Table, rawInit: LirpRawInitializer<BenchmarkEntity>) {
+        // No-op: entity state is fully populated by fromRow.
     }
 }

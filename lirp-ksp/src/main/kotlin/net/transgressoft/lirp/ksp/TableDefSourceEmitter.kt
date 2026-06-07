@@ -50,7 +50,8 @@ internal object TableDefSourceEmitter {
         canGenerateSqlMapping: Boolean,
         columns: List<ColumnMeta>,
         emitsForeignKeys: Boolean = false,
-        emitsJunctions: Boolean = false
+        emitsJunctions: Boolean = false,
+        emitsVersioned: Boolean = false
     ) {
         if (packageName.isNotEmpty()) {
             appendLine("package $packageName")
@@ -64,12 +65,17 @@ internal object TableDefSourceEmitter {
             appendLine("import org.jetbrains.exposed.v1.core.Column")
             appendLine("import org.jetbrains.exposed.v1.core.ResultRow")
             appendLine("import org.jetbrains.exposed.v1.core.Table")
+            if (emitsVersioned) {
+                appendLine("import net.transgressoft.lirp.persistence.sql.VersionedTableDef")
+            }
             if (emitsForeignKeys) {
                 appendLine("import net.transgressoft.lirp.entity.CascadeAction")
+                appendLine("import net.transgressoft.lirp.persistence.sql.ForeignKeyAware")
                 appendLine("import net.transgressoft.lirp.persistence.sql.ForeignKeyDef")
             }
             if (emitsJunctions) {
                 appendLine("import net.transgressoft.lirp.persistence.sql.JunctionAccessor")
+                appendLine("import net.transgressoft.lirp.persistence.sql.JunctionAware")
                 appendLine("import net.transgressoft.lirp.persistence.sql.JunctionTableDef")
             }
             appendConditionalTypeImports(columns)
@@ -126,7 +132,18 @@ internal object TableDefSourceEmitter {
         // Type parameter is the reactive self-type R so the descriptor satisfies the repository
         // bound `R : ReactiveEntity<K, R>`. Method bodies downcast to the concrete class via
         // `val entity = entityRef as $className` when R differs from the concrete class.
-        val superType = if (canGenerateSqlMapping) "SqlTableDef<$selfType>" else "LirpTableDef<$selfType>"
+        val superType =
+            if (canGenerateSqlMapping) {
+                val extras =
+                    buildList {
+                        if (columns.any { it.isVersion }) add("VersionedTableDef<$selfType>")
+                        if (foreignKeys.isNotEmpty()) add("ForeignKeyAware")
+                        if (junctionRefs.isNotEmpty()) add("JunctionAware<$selfType>")
+                    }
+                if (extras.isEmpty()) "SqlTableDef<$selfType>" else "SqlTableDef<$selfType>, ${extras.joinToString(", ")}"
+            } else {
+                "LirpTableDef<$selfType>"
+            }
         appendLine("$visibility object $tableDefName : $superType {")
         appendLine("    override val tableName: String = \"$tableName\"")
         appendLine("    override val columns: List<ColumnDef> = listOf(")

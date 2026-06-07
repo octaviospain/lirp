@@ -21,6 +21,7 @@ import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.ColumnDef
 import net.transgressoft.lirp.persistence.ColumnType
 import net.transgressoft.lirp.persistence.DefaultAudioPlaylist
+import net.transgressoft.lirp.persistence.LirpRawInitializer
 import net.transgressoft.lirp.persistence.LirpRegistryInfo
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.MutableAudioPlaylist
@@ -67,6 +68,10 @@ object AudioItemSqlTableDef : SqlTableDef<AudioItem> {
         entity.title = row[cols["title"]!! as Column<String>]
         entity.albumName = row[cols["album_name"]!! as Column<String>]
         // id is PK — immutable on AudioItem
+    }
+
+    override fun applyScalarRow(entity: AudioItem, row: ResultRow, table: Table, rawInit: LirpRawInitializer<AudioItem>) {
+        // No-op: entity state is fully populated by fromRow.
     }
 }
 
@@ -119,6 +124,10 @@ object AudioPlaylistSqlTableDef : SqlTableDef<MutableAudioPlaylist> {
         // id is PK — immutable. audio_item_ids/playlist_ids are backed by aggregate delegates
         // (val), so the collection state is managed via the aggregate delegate's mutation API —
         // not applicable to applyRow (the delegate is constructed once at fromRow time).
+    }
+
+    override fun applyScalarRow(entity: MutableAudioPlaylist, row: ResultRow, table: Table, rawInit: LirpRawInitializer<MutableAudioPlaylist>) {
+        // No-op: entity state is fully populated by fromRow.
     }
 }
 
