@@ -136,7 +136,7 @@ class LirpRepositoryProcessor(
     private fun generateRegistryInfo(classDecl: KSClassDeclaration, entityClassFqn: String) {
         val packageName = classDecl.packageName.asString()
         val className = classDecl.jvmBinaryName()
-        val infoName = "${className}_LirpRegistryInfo"
+        val infoName = "$className${LirpGenNames.REGISTRY_INFO_SUFFIX}"
         val entitySimpleName = entityClassFqn.substringAfterLast('.')
 
         val file =

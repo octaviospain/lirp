@@ -17,19 +17,19 @@
 
 package net.transgressoft.lirp.ksp
 
+import com.google.devtools.ksp.processing.CodeGenerator
+import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.processing.SymbolProcessor
-import com.google.devtools.ksp.processing.SymbolProcessorEnvironment
-import com.google.devtools.ksp.processing.SymbolProcessorProvider
 
 /**
- * KSP entry point for the LIRP accessor validation processor, registered via `META-INF/services`.
+ * KSP entry point for [LirpAccessorValidationProcessor], registered via `META-INF/services`.
  *
- * Passes [SymbolProcessorEnvironment.codeGenerator] to [LirpAccessorValidationProcessor] so it can
- * write a sentinel file in round 1, guaranteeing that KSP runs a second processing round even when
- * no other processor generates files. Without a generated file, KSP may skip round 2.
+ * Passes [CodeGenerator] to [LirpAccessorValidationProcessor] so it can write a sentinel file
+ * in round 1, guaranteeing that KSP runs a second processing round even when no other processor
+ * generates files. Without a generated file, KSP may skip round 2.
  */
-class LirpAccessorValidationProcessorProvider : SymbolProcessorProvider {
+class LirpAccessorValidationProcessorProvider : LirpProcessorProvider() {
 
-    override fun create(environment: SymbolProcessorEnvironment): SymbolProcessor =
-        LirpAccessorValidationProcessor(environment.codeGenerator, environment.logger)
+    override fun createProcessor(codeGenerator: CodeGenerator, logger: KSPLogger): SymbolProcessor =
+        LirpAccessorValidationProcessor(codeGenerator, logger)
 }

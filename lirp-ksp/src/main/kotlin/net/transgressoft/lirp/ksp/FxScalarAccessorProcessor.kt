@@ -97,7 +97,7 @@ class FxScalarAccessorProcessor(
         val packageName = classDecl.packageName.asString()
         val jvmName = classDecl.jvmBinaryName()
         val kotlinName = classDecl.kotlinNestedName()
-        val accessorName = "${jvmName}_LirpFxScalarAccessor"
+        val accessorName = "$jvmName${LirpGenNames.FX_SCALAR_ACCESSOR_SUFFIX}"
         // Backtick-escape the class name in Kotlin source when it contains '$' (nested class separator)
         val accessorSourceName = if ('$' in accessorName) "`$accessorName`" else accessorName
 

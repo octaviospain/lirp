@@ -136,15 +136,12 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
         // so the CREATE and DELETE events are disabled by default.
         // READ is disabled also because its use case is not clear yet
         activateEvents(UPDATE)
-        try {
-            val infoClass = Class.forName(this::class.java.name + "_LirpRegistryInfo")
-            val info = infoClass.getDeclaredConstructor().newInstance() as LirpRegistryInfo
+        val info = KspAccessorLoader.load<LirpRegistryInfo>(this::class.java, KspAccessorLoader.REGISTRY_INFO_SUFFIX)
+        if (info != null) {
             val registered = context.register(info.entityClass, this)
             check(registered || context.registryFor(info.entityClass) === this) {
                 "A repository for ${info.entityClass.simpleName} is already registered. Only one @LirpRepository per entity type is allowed."
             }
-        } catch (_: ClassNotFoundException) {
-            // Not a @LirpRepository-annotated subclass — skip silently
         }
     }
 
@@ -154,8 +151,8 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
     }
 
     /**
-     * Loads the KSP-generated [LirpIndexAccessor] for the entity's class via a convention-based
-     * [Class.forName] lookup (`{EntityClassName}_LirpIndexAccessor`). Uses double-checked locking
+     * Loads the KSP-generated [LirpIndexAccessor] for the entity's class via [KspAccessorLoader],
+     * which performs a convention-based lookup by class name. Uses double-checked locking
      * to ensure loading runs exactly once and the result is visible to all threads.
      *
      * The generated accessor provides [IndexEntry] descriptors with direct property getter lambdas,
@@ -179,16 +176,10 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
         }
     }
 
-    @Suppress("UNCHECKED_CAST")
     private fun loadAccessorEntries(entity: T): List<IndexEntry<T>> =
-        try {
-            val accessorClass = Class.forName("${entity.javaClass.name}_LirpIndexAccessor")
-            val accessor = accessorClass.getDeclaredConstructor().newInstance() as LirpIndexAccessor<T>
-            accessor.entries
-        } catch (_: ClassNotFoundException) {
-            // No LirpIndexAccessor generated — warn only since @Indexed delegate is not a runtime-visible pattern
-            emptyList()
-        }
+        KspAccessorLoader.load<LirpIndexAccessor<T>>(entity.javaClass, KspAccessorLoader.INDEX_ACCESSOR_SUFFIX)
+            ?.entries
+            ?: emptyList()
 
     private fun registerIndexBuckets(entries: List<IndexEntry<T>>) {
         for (entry in entries) {
@@ -336,7 +327,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
 
     /**
      * Loads the KSP-generated [LirpRefAccessor] for the entity's class via a convention-based
-     * [Class.forName] lookup (`{EntityClassName}_LirpRefAccessor`). Uses double-checked locking
+     * [KspAccessorLoader] lookup (`{EntityClassName}_LirpRefAccessor`). Uses double-checked locking
      * to ensure loading runs exactly once and the result is visible to all threads.
      *
      * The generated accessor provides [RefEntry] descriptors with direct ID getter lambdas,
@@ -347,7 +338,6 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
      * Anonymous and local class entities are skipped early — they can never have KSP-generated
      * accessors and do not require the [failFastIfDelegatePresent] check.
      */
-    @Suppress("UNCHECKED_CAST")
     protected fun discoverRefs(entity: T) {
         if (refEntries != null) return
         synchronized(this) {
@@ -357,14 +347,11 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
                 refEntries = emptyList()
                 return
             }
-            try {
-                val accessorClass = Class.forName("${entity.javaClass.name}_LirpRefAccessor")
-                val accessor = accessorClass.getDeclaredConstructor().newInstance() as LirpRefAccessor<T>
-                val discoveredEntries = accessor.entries
-                val discoveredCollectionEntries = accessor.collectionEntries
-                collectionRefEntries = discoveredCollectionEntries
-                refEntries = discoveredEntries
-            } catch (_: ClassNotFoundException) {
+            val accessor = KspAccessorLoader.load<LirpRefAccessor<T>>(entity.javaClass, KspAccessorLoader.REF_ACCESSOR_SUFFIX)
+            if (accessor != null) {
+                collectionRefEntries = accessor.collectionEntries
+                refEntries = accessor.entries
+            } else {
                 failFastIfDelegatePresent(entity.javaClass, AggregateRefDelegate::class.java, "LirpRefAccessor")
                 failFastIfDelegatePresent(entity.javaClass, AggregateCollectionRef::class.java, "LirpRefAccessor")
                 failFastIfDelegatePresent(entity.javaClass, MutableAggregateCollectionRef::class.java, "LirpRefAccessor")
@@ -377,7 +364,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
 
     /**
      * Loads the KSP-generated [LirpViaAccessor] for the entity's class via a convention-based
-     * [Class.forName] lookup (`{EntityClassName}_LirpViaAccessor`). Uses double-checked locking
+     * [KspAccessorLoader] lookup (`{EntityClassName}_LirpViaAccessor`). Uses double-checked locking
      * to ensure loading runs exactly once and the result is visible to all threads — mirrors
      * [discoverIndexes] exactly.
      *
@@ -389,7 +376,6 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
      * Anonymous and local class entities are skipped early — they can never have KSP-generated
      * accessors because they lack stable binary names.
      */
-    @Suppress("UNCHECKED_CAST")
     protected fun discoverViaAccessors(entity: T) {
         if (viaAccessorDiscovered) return
         synchronized(this) {
@@ -399,13 +385,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
                 viaAccessorDiscovered = true
                 return
             }
-            viaAccessor =
-                try {
-                    val accessorClass = Class.forName("${entity.javaClass.name}_LirpViaAccessor")
-                    accessorClass.getDeclaredConstructor().newInstance() as LirpViaAccessor<T>
-                } catch (_: ClassNotFoundException) {
-                    null
-                }
+            viaAccessor = KspAccessorLoader.load(entity.javaClass, KspAccessorLoader.VIA_ACCESSOR_SUFFIX)
             viaAccessorDiscovered = true
         }
     }
@@ -670,31 +650,6 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
     override fun hashCode() = Objects.hash(entitiesById)
 
     companion object {
-        /**
-         * Cache for [LirpRefAccessor] instances per entity class, to avoid repeated [Class.forName]
-         * lookups during RESTRICT reference scans. Uses [Optional] as the map value to cache both
-         * "found" and "not found" states — [ConcurrentHashMap] does not accept null values directly.
-         * Context-independent: the same accessor class is valid regardless of which context the registry is in.
-         */
-        @JvmStatic
-        private val refAccessorCache: ConcurrentHashMap<Class<*>, Optional<LirpRefAccessor<Any>>> = ConcurrentHashMap()
-
-        /**
-         * Cross-class cache for [LirpViaAccessor] instances, mirroring [refAccessorCache]. The Query
-         * DSL planner consults this cache when resolving `via(KProperty1)` references across registries,
-         * so the lookup must be O(1) after the first hit. Uses [Optional] as the map value to cache both
-         * "found" and "not found" states — [ConcurrentHashMap] does not accept null values directly.
-         */
-        @JvmStatic
-        private val viaAccessorCache: ConcurrentHashMap<Class<*>, Optional<LirpViaAccessor<Any>>> = ConcurrentHashMap()
-
-        /**
-         * Cache for [LirpRawInitializer] instances per entity class, mirroring [refAccessorCache].
-         * Used by repository bulk-load paths to apply persisted column values to a freshly constructed
-         * entity via silent setters. Lookup is O(1) after the first hit per entity class.
-         */
-        @JvmStatic
-        private val rawInitializerCache: ConcurrentHashMap<Class<*>, LirpRawInitializer<Any>> = ConcurrentHashMap()
 
         /**
          * Registers a [RegistryBase] instance for the given entity class in the default [LirpContext].
@@ -794,52 +749,36 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
         internal fun cascadeKey(entityClass: Class<*>, entityId: Any): String = "${entityClass.name}:$entityId"
 
         /**
-         * Returns the [LirpRefAccessor] for [entityClass], loading it via a convention-based
-         * [Class.forName] lookup on first call and caching the result. Returns `null` if no
-         * KSP-generated accessor exists for the class.
+         * Returns the [LirpRefAccessor] for [entityClass], loading it via [KspAccessorLoader] on
+         * first call and caching the result. Returns `null` if no KSP-generated accessor exists
+         * for the class.
          */
         @JvmStatic
-        @Suppress("UNCHECKED_CAST")
         internal fun refAccessorFor(entityClass: Class<*>): LirpRefAccessor<Any>? {
             if (entityClass.isAnonymousClass || entityClass.isLocalClass)
                 return null
-            return refAccessorCache.computeIfAbsent(entityClass) {
-                try {
-                    val accessorClass = Class.forName("${entityClass.name}_LirpRefAccessor")
-                    Optional.of(accessorClass.getDeclaredConstructor().newInstance() as LirpRefAccessor<Any>)
-                } catch (_: ClassNotFoundException) {
-                    Optional.empty()
-                }
-            }.orElse(null)
+            return KspAccessorLoader.load(entityClass, KspAccessorLoader.REF_ACCESSOR_SUFFIX)
         }
 
         /**
-         * Returns the [LirpViaAccessor] for [entityClass], loading it via a convention-based
-         * [Class.forName] lookup on first call and caching the result. Returns `null` if no
-         * KSP-generated accessor exists for the class (entity has no `@Aggregate` properties)
-         * or when [entityClass] is anonymous / local (no stable binary name).
+         * Returns the [LirpViaAccessor] for [entityClass], loading it via [KspAccessorLoader] on
+         * first call and caching the result. Returns `null` if no KSP-generated accessor exists
+         * for the class (entity has no `@Aggregate` properties) or when [entityClass] is anonymous
+         * or local (no stable binary name).
          *
          * Consumed by the cross-aggregate Query DSL planner to resolve `via(prop)` references to
          * the descriptor that names the child entity class.
          */
         @JvmStatic
-        @Suppress("UNCHECKED_CAST")
         internal fun viaAccessorFor(entityClass: Class<*>): LirpViaAccessor<Any>? {
             if (entityClass.isAnonymousClass || entityClass.isLocalClass)
                 return null
-            return viaAccessorCache.computeIfAbsent(entityClass) {
-                try {
-                    val accessorClass = Class.forName("${entityClass.name}_LirpViaAccessor")
-                    Optional.of(accessorClass.getDeclaredConstructor().newInstance() as LirpViaAccessor<Any>)
-                } catch (_: ClassNotFoundException) {
-                    Optional.empty()
-                }
-            }.orElse(null)
+            return KspAccessorLoader.load(entityClass, KspAccessorLoader.VIA_ACCESSOR_SUFFIX)
         }
 
         /**
-         * Returns the [LirpRawInitializer] for [entityClass], loading it via a convention-based
-         * [Class.forName] lookup on first call and caching the result.
+         * Returns the [LirpRawInitializer] for [entityClass], loading it via [KspAccessorLoader]
+         * on first call and caching the result.
          *
          * Throws a clear `configure KSP` error when [entityClass] is a persisted entity but no
          * generated `<entityClass>_LirpRawInitializer` exists — KSP is mandatory for persisted
@@ -848,18 +787,11 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
          * @throws IllegalStateException when the entity has no generated raw initializer
          */
         @JvmStatic
-        @Suppress("UNCHECKED_CAST")
         internal fun rawInitializerFor(entityClass: Class<*>): LirpRawInitializer<Any> =
-            rawInitializerCache.computeIfAbsent(entityClass) {
-                try {
-                    val accessorClass = Class.forName("${entityClass.name}_LirpRawInitializer")
-                    accessorClass.getDeclaredConstructor().newInstance() as LirpRawInitializer<Any>
-                } catch (_: ClassNotFoundException) {
-                    error(
-                        "Entity ${entityClass.simpleName} has no generated LirpRawInitializer — apply the net.transgressoft.lirp.sql Gradle plugin or add lirp-ksp to your build.gradle dependencies block to configure KSP."
-                    )
-                }
-            }
+            KspAccessorLoader.load(entityClass, KspAccessorLoader.RAW_INITIALIZER_SUFFIX)
+                ?: error(
+                    "Entity ${entityClass.simpleName} has no generated LirpRawInitializer — apply the net.transgressoft.lirp.sql Gradle plugin or add lirp-ksp to your build.gradle dependencies block to configure KSP."
+                )
 
         /**
          * Public cross-module entry point for [rawInitializerFor].
@@ -867,7 +799,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
          * `lirp-sql` (a separate Gradle / Kotlin module) needs to resolve raw initializers from
          * `SqlRepository.loadFromStore`. Kotlin `internal` visibility is module-scoped, so the
          * cross-module call site goes through this thin public wrapper. The actual cache and
-         * `Class.forName` lookup live in [rawInitializerFor].
+         * accessor lookup live in [rawInitializerFor] via [KspAccessorLoader].
          *
          * @throws IllegalStateException when the entity has no generated raw initializer
          */

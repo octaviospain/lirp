@@ -218,7 +218,7 @@ class ReactiveEntityRefProcessor(
         val className = classDecl.jvmBinaryName()
         // Kotlin-level name for type references: uses dots for nesting (e.g. Outer.RefEntity)
         val kotlinClassName = classDecl.kotlinNestedName()
-        val accessorName = "${className}_LirpRefAccessor"
+        val accessorName = "$className${LirpGenNames.REF_ACCESSOR_SUFFIX}"
 
         val singleEntries = mutableListOf<RefPropertyMeta>()
         val collectionMetas = mutableListOf<CollectionRefPropertyMeta>()

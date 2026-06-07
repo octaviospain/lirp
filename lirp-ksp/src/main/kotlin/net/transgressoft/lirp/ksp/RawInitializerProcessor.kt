@@ -184,7 +184,7 @@ class RawInitializerProcessor(
         val packageName = classDecl.packageName.asString()
         val jvmName = classDecl.jvmBinaryName()
         val kotlinName = classDecl.kotlinNestedName()
-        val initializerName = "${jvmName}_LirpRawInitializer"
+        val initializerName = "$jvmName${LirpGenNames.RAW_INITIALIZER_SUFFIX}"
         val initializerSourceName = if ('$' in initializerName) "`$initializerName`" else initializerName
 
         val containingFile =
