@@ -33,13 +33,8 @@ import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.batchInsert
 import org.jetbrains.exposed.v1.jdbc.deleteAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
-import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import javax.sql.DataSource
-import kotlin.uuid.ExperimentalUuidApi
-import kotlin.uuid.Uuid
-import kotlin.uuid.toJavaUuid
-import kotlin.uuid.toKotlinUuid
 
 /**
  * SQL-backed reactive repository using JetBrains Exposed and HikariCP connection pooling.
@@ -161,13 +156,18 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      */
     private val staleIds: ConcurrentHashMap<K, StaleEntry> = ConcurrentHashMap()
 
+    // Resolved once: the type argument is erased, so the cast is unchecked by construction but
+    // safe — JunctionAware members are typed on the same self-type R as this repository's tableDef.
+    @Suppress("UNCHECKED_CAST")
+    private val junctionAware: JunctionAware<R>? = tableDef as? JunctionAware<R>
+
     /**
      * Cached interpretations of this entity's junction descriptors, keyed by descriptor reference.
      * Reused across `loadFromStore`, `writePending`, and `installJunctionForeignKeys` so we don't
      * re-allocate Exposed [Table] objects on every call.
      */
     private val junctionTables: Map<JunctionTableDef, ExposedJunctionTable> =
-        (tableDef as? JunctionAware<R>)?.junctionTableDefs.orEmpty().associateWith { interpreter.interpretJunction(it) }
+        junctionAware?.junctionTableDefs.orEmpty().associateWith { interpreter.interpretJunction(it) }
 
     init {
         // Fail-loud co-presence guards. Implementing JunctionAware / VersionedTableDef forces the
@@ -176,15 +176,15 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         // KSP-generated _LirpTableDef classes always keep these in lock-step; only hand-written
         // SqlTableDefs can drift, and silently doing so corrupts junction state or strands the
         // in-memory version. Surfacing it here is the bug detector, not a recoverable condition.
-        (tableDef as? JunctionAware<R>)?.let { junctionAware ->
-            val descriptorSet = junctionAware.junctionTableDefs.toSet()
-            val accessorDescriptorSet = junctionAware.junctionAccessors.map { it.descriptor }.toSet()
+        junctionAware?.let { ja ->
+            val descriptorSet = ja.junctionTableDefs.toSet()
+            val accessorDescriptorSet = ja.junctionAccessors.map { it.descriptor }.toSet()
             check(
-                junctionAware.junctionTableDefs.size == junctionAware.junctionAccessors.size &&
+                ja.junctionTableDefs.size == ja.junctionAccessors.size &&
                     descriptorSet == accessorDescriptorSet
             ) {
-                "SqlTableDef '${tableDef::class.qualifiedName}' declares ${junctionAware.junctionTableDefs.size} " +
-                    "junction descriptor(s) but ${junctionAware.junctionAccessors.size} junction accessor(s). " +
+                "SqlTableDef '${tableDef::class.qualifiedName}' declares ${ja.junctionTableDefs.size} " +
+                    "junction descriptor(s) but ${ja.junctionAccessors.size} junction accessor(s). " +
                     "A JunctionAware implementation must provide a matching accessor for every junction descriptor. " +
                     "Use the @PersistenceMapping KSP processor to generate both."
             }
@@ -378,56 +378,65 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                 deletes.size == 1 -> writePipeline.executeDeleteSingle(deletes.first(), conflicts)
             }
         }
-        // The main transaction has committed. Recover every accumulated conflict — each path
-        // re-SELECTs the canonical row and emits a [StandardCrudEvent.Conflict]. A recovery
-        // failure must NOT escape to [writePending]: the base class would interpret it as a
-        // generic write failure and re-enqueue the whole drained snapshot, re-applying the
-        // non-conflicting ops that already succeeded. Log + continue per conflict.
-        val rec = recovery
-        if (rec != null) {
-            conflicts.forEach { conflict ->
-                try {
-                    rec.recoverEntityFromConflict(conflict.id, conflict.expectedVersion)
-                } catch (e: Exception) {
-                    log.error(e) {
-                        "recoverEntityFromConflict threw for id=${conflict.id} " +
-                            "(expectedVersion=${conflict.expectedVersion}); conflict may not have been fully recovered"
-                    }
-                    // Enqueue for bounded retry on the next flush cycle. The retry loop in
-                    // drainStaleIds() escalates to a RecoveryFailed event after MAX_RECOVERY_ATTEMPTS
-                    // total failures for the same id.
-                    // Preserve the ORIGINAL expectedVersion across retries for an id: once an entry
-                    // is queued, its expectedVersion is the row state at first-conflict capture and
-                    // must not be overwritten by a subsequent conflict carrying a newer version, or
-                    // the retry would silently re-target a different row generation.
-                    staleIds.compute(conflict.id) { _, prev ->
-                        prev?.copy(attempts = prev.attempts + 1)
-                            ?: StaleEntry(conflict.expectedVersion, 1)
-                    }
-                }
-            }
-            // Hard backstop against unbounded growth under pathological recovery failure. This is a
-            // round-number cap, not a precision LRU — ConcurrentHashMap iteration order is acceptable
-            // as the eviction heuristic.
-            if (staleIds.size > STALE_IDS_CAP) {
-                val overflow = staleIds.size - STALE_IDS_CAP
-                log.warn {
-                    "staleIds cap exceeded (${staleIds.size} > $STALE_IDS_CAP); " +
-                        "dropping $overflow oldest entries to prevent unbounded growth"
-                }
-                val it = staleIds.keys.iterator()
-                var dropped = 0
-                while (dropped < overflow && it.hasNext()) {
-                    it.next()
-                    it.remove()
-                    dropped++
-                }
-            }
-        }
+        // The main transaction has committed. Recover every accumulated conflict outside it.
+        recoverConflicts(conflicts)
         // Honor the base-class contract: `dirty` signals pending work and must be cleared once
         // the SQL transaction commits successfully. Without this, a repository reports itself as
         // dirty forever after the first successful flush even when pendingCells is empty.
         dirty.set(false)
+    }
+
+    /**
+     * Recovers every accumulated optimistic-lock conflict after the main transaction has committed.
+     * Each path re-SELECTs the canonical row and emits a [StandardCrudEvent.Conflict]. A recovery
+     * failure must NOT escape to [writePending]: the base class would interpret it as a generic
+     * write failure and re-enqueue the whole drained snapshot, re-applying the non-conflicting ops
+     * that already succeeded. Failures are logged and the id is enqueued for bounded retry.
+     */
+    private fun recoverConflicts(conflicts: List<PendingConflict<K>>) {
+        val rec = recovery ?: return
+        conflicts.forEach { conflict ->
+            try {
+                rec.recoverEntityFromConflict(conflict.id, conflict.expectedVersion)
+            } catch (e: Exception) {
+                log.error(e) {
+                    "recoverEntityFromConflict threw for id=${conflict.id} " +
+                        "(expectedVersion=${conflict.expectedVersion}); conflict may not have been fully recovered"
+                }
+                // Enqueue for bounded retry on the next flush cycle. drainStaleIds() escalates to a
+                // RecoveryFailed event after MAX_RECOVERY_ATTEMPTS total failures for the same id.
+                // Preserve the ORIGINAL expectedVersion across retries: once an entry is queued, its
+                // expectedVersion is the row state at first-conflict capture and must not be
+                // overwritten by a subsequent conflict carrying a newer version, or the retry would
+                // silently re-target a different row generation.
+                staleIds.compute(conflict.id) { _, prev ->
+                    prev?.copy(attempts = prev.attempts + 1)
+                        ?: StaleEntry(conflict.expectedVersion, 1)
+                }
+            }
+        }
+        evictStaleIdsOverflow()
+    }
+
+    /**
+     * Hard backstop against unbounded `staleIds` growth under pathological recovery failure. This
+     * is a round-number cap, not a precision LRU — ConcurrentHashMap iteration order is acceptable
+     * as the eviction heuristic.
+     */
+    private fun evictStaleIdsOverflow() {
+        if (staleIds.size <= STALE_IDS_CAP) return
+        val overflow = staleIds.size - STALE_IDS_CAP
+        log.warn {
+            "staleIds cap exceeded (${staleIds.size} > $STALE_IDS_CAP); " +
+                "dropping $overflow oldest entries to prevent unbounded growth"
+        }
+        val it = staleIds.keys.iterator()
+        var dropped = 0
+        while (dropped < overflow && it.hasNext()) {
+            it.next()
+            it.remove()
+            dropped++
+        }
     }
 
     /**
@@ -503,23 +512,5 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                 }
             return HikariDataSource(config)
         }
-
-        /**
-         * Converts a `java.util.UUID` to `kotlin.uuid.Uuid` for Exposed column operations.
-         * Exposed 1.x uses `kotlin.uuid.Uuid` natively; entity IDs may be `java.util.UUID`.
-         */
-        @OptIn(ExperimentalUuidApi::class)
-        private fun toExposedId(id: Any): Any =
-            if (id is UUID) id.toKotlinUuid() else id
-
-        /**
-         * Converts a `kotlin.uuid.Uuid` read from Exposed column back to `java.util.UUID` for
-         * domain-model comparison. Junction `parent_id` / `item_id` columns return `kotlin.uuid.Uuid`;
-         * entity IDs stored as `java.util.UUID` must be normalized to the same type for map lookups
-         * and collection matching to succeed.
-         */
-        @OptIn(ExperimentalUuidApi::class)
-        private fun toDomainId(id: Any): Any =
-            if (id is Uuid) id.toJavaUuid() else id
     }
 }

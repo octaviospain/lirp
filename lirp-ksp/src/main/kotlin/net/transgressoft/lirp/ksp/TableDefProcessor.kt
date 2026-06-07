@@ -511,14 +511,14 @@ class TableDefProcessor(
         className: String,
         availableParamNames: Set<String>
     ): EntityCreator? {
-        when (val resolution = resolveCreator(classDecl)) {
+        return when (val resolution = resolveCreator(classDecl)) {
             is CreatorResolution.Ambiguous -> {
                 logger.error(
                     "Multiple @PersistenceCreator targets on $className: " +
                         "${resolution.conflicting.formatCreatorOffenders()}; exactly one is required.",
                     classDecl
                 )
-                return null
+                null
             }
             is CreatorResolution.Found -> {
                 val resolvedParamNames = mutableListOf<String>()
@@ -546,7 +546,7 @@ class TableDefProcessor(
                             "@PersistenceCreator to make it cross-module usable."
                     )
                 }
-                return EntityCreator(resolution.callExpression, resolvedParamNames)
+                EntityCreator(resolution.callExpression, resolvedParamNames)
             }
             CreatorResolution.None -> {
                 if (classDecl.hasNonPublicPrimaryConstructor()) {
@@ -555,7 +555,7 @@ class TableDefProcessor(
                             "the generated descriptor may not compile outside its own module."
                     )
                 }
-                return EntityCreator(null, null)
+                EntityCreator(null, null)
             }
         }
     }
@@ -585,7 +585,7 @@ class TableDefProcessor(
 
         // Validate creator params against the names that actually produce a slot/column source,
         // so a creator referencing an excluded (e.g. @PersistenceIgnore'd) ctor param is rejected.
-        val mappableParamNames = collected.ctorSlots.mapTo(mutableSetOf()) { it.ctorParamName }
+        val mappableParamNames = collected.ctorSlots.map { it.ctorParamName }.toSet()
         val creator = resolveEntityCreator(classDecl, className, mappableParamNames) ?: return
 
         val tableName = resolveTableName(classDecl, className)
