@@ -115,7 +115,7 @@ internal class ViaDepthLimitTest : FunSpec({
         message shouldContain "depth 3"
     }
 
-    test("depth-4 diagnostic mentions Phase 54 CONTEXT.md") {
+    test("depth-4 diagnostic mentions LIRP wiki for supported relationship patterns") {
         val ex =
             shouldThrow<IllegalStateException> {
                 DepthA::refB via repoB where {
@@ -126,6 +126,6 @@ internal class ViaDepthLimitTest : FunSpec({
                     }
                 }
             }
-        (ex.message ?: "") shouldContain "Phase 54 CONTEXT.md"
+        (ex.message ?: "") shouldContain "LIRP wiki"
     }
 })

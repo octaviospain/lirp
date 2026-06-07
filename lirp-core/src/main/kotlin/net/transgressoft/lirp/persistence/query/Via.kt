@@ -347,7 +347,8 @@ private fun enforceMaxViaDepth(self: Predicate<*>, thisLevelName: String, childP
         val chain = (listOf(thisLevelName) + viaChain(childPredicate)).joinToString(" → ")
         error(
             "Nested 'via' chain exceeds depth $MAX_VIA_DEPTH ($chain). " +
-                "LIRP enforces a depth-$MAX_VIA_DEPTH limit; see Phase 54 CONTEXT.md."
+                "LIRP enforces a depth-$MAX_VIA_DEPTH limit on cross-aggregate via traversal; " +
+                "see the LIRP wiki for supported relationship patterns."
         )
     }
 }
