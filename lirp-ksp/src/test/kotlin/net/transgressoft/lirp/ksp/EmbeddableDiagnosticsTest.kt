@@ -17,11 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.JvmCompilationResult
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
-import com.tschuchort.compiletesting.configureKsp
-import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -40,20 +37,10 @@ import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 @OptIn(ExperimentalCompilerApi::class)
 class EmbeddableDiagnosticsTest : StringSpec({
 
-    fun compileWithProcessor(vararg sources: SourceFile): JvmCompilationResult {
-        val compilation =
-            KotlinCompilation().apply {
-                this.sources = sources.toList()
-                inheritClassPath = true
-            }
-        compilation.configureKsp { withCompilation = true }
-        compilation.symbolProcessorProviders += TableDefProcessorProvider()
-        return compilation.compile()
-    }
-
     "accepts @Embedded on var constructor parameter" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "VarEmbeddedEntity.kt",
                     """
@@ -83,7 +70,8 @@ class EmbeddableDiagnosticsTest : StringSpec({
 
     "rejects @Embedded on body-declared read-only val" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BodyValEmbeddedEntity.kt",
                     """
@@ -114,7 +102,8 @@ class EmbeddableDiagnosticsTest : StringSpec({
 
     "rejects @Embedded on body-declared var with custom getter" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BodyVarCustomGetterEmbeddedEntity.kt",
                     """
@@ -147,7 +136,8 @@ class EmbeddableDiagnosticsTest : StringSpec({
 
     "rejects @Embedded referencing a non-@Embeddable type" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NonEmbeddableTargetEntity.kt",
                     """
@@ -178,7 +168,8 @@ class EmbeddableDiagnosticsTest : StringSpec({
 
     "rejects @Embedded referencing a non-class typealias" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "TypeAliasTargetEntity.kt",
                     """
@@ -212,7 +203,8 @@ class EmbeddableDiagnosticsTest : StringSpec({
 
     "rejects @Embeddable on non-data class" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NonDataClassEmbeddable.kt",
                     """
@@ -244,7 +236,8 @@ class EmbeddableDiagnosticsTest : StringSpec({
 
     "rejects @Embeddable on abstract class" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "AbstractEmbeddable.kt",
                     """
@@ -276,7 +269,8 @@ class EmbeddableDiagnosticsTest : StringSpec({
 
     "rejects @Embeddable on sealed class" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "SealedEmbeddable.kt",
                     """
@@ -308,7 +302,8 @@ class EmbeddableDiagnosticsTest : StringSpec({
 
     "rejects @Embeddable on object declaration" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ObjectEmbeddable.kt",
                     """
@@ -342,7 +337,8 @@ class EmbeddableDiagnosticsTest : StringSpec({
 
     "rejects column collision across two @Embedded siblings with identical explicit prefix" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "SiblingCollisionEntity.kt",
                     """
@@ -377,7 +373,8 @@ class EmbeddableDiagnosticsTest : StringSpec({
 
     "rejects @Embeddable data class with zero-parameter primary constructor" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ZeroParamEmbeddable.kt",
                     """
@@ -409,7 +406,8 @@ class EmbeddableDiagnosticsTest : StringSpec({
 
     "rejects nullable @Embedded property with clear diagnostic" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NullableEmbeddedEntity.kt",
                     """
@@ -441,7 +439,8 @@ class EmbeddableDiagnosticsTest : StringSpec({
 
     "rejects @Embeddable with unsupported scalar leaf type causing whole entity to fail" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "InvalidLeafEmbeddableEntity.kt",
                     """
@@ -476,7 +475,8 @@ class EmbeddableDiagnosticsTest : StringSpec({
 
     "rejects column collision between @Embedded grandchild and a sibling scalar with matching name" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "GrandchildCollisionEntity.kt",
                     """

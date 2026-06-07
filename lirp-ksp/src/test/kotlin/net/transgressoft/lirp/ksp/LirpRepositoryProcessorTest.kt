@@ -17,12 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.JvmCompilationResult
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
-import com.tschuchort.compiletesting.configureKsp
-import com.tschuchort.compiletesting.sourcesGeneratedBySymbolProcessor
-import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -42,27 +38,10 @@ import org.junit.jupiter.api.DisplayName
 @DisplayName("LirpRepositoryProcessor")
 internal class LirpRepositoryProcessorTest : FunSpec({
 
-    fun compileWithProcessor(vararg sources: SourceFile): JvmCompilationResult {
-        val compilation =
-            KotlinCompilation().apply {
-                this.sources = sources.toList()
-                inheritClassPath = true
-            }
-        compilation.configureKsp { withCompilation = true }
-        compilation.symbolProcessorProviders += LirpRepositoryProcessorProvider()
-        return compilation.compile()
-    }
-
-    fun JvmCompilationResult.generatedFileContent(name: String): String {
-        val file =
-            sourcesGeneratedBySymbolProcessor.firstOrNull { it.name == name }
-                ?: error("Generated file '$name' not found among: ${sourcesGeneratedBySymbolProcessor.map { it.name }.toList()}")
-        return file.readText()
-    }
-
     test("generates _LirpRegistryInfo for top-level repository") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                LirpRepositoryProcessorProvider(),
                 SourceFile.kotlin(
                     "TrackRepo.kt",
                     """
@@ -91,7 +70,8 @@ internal class LirpRepositoryProcessorTest : FunSpec({
 
     test("generates \$-separated info class name for 1-level inner repository") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                LirpRepositoryProcessorProvider(),
                 SourceFile.kotlin(
                     "Outer.kt",
                     """
@@ -122,7 +102,8 @@ internal class LirpRepositoryProcessorTest : FunSpec({
 
     test("generates \$-separated info class name for 3-level nested repository") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                LirpRepositoryProcessorProvider(),
                 SourceFile.kotlin(
                     "A.kt",
                     """
@@ -155,7 +136,8 @@ internal class LirpRepositoryProcessorTest : FunSpec({
 
     test("inner repository info references inner entity with correct simple name") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                LirpRepositoryProcessorProvider(),
                 SourceFile.kotlin(
                     "Domain.kt",
                     """
@@ -185,7 +167,8 @@ internal class LirpRepositoryProcessorTest : FunSpec({
 
     test("delegation-based @LirpRepository compiles successfully and generates no _LirpRegistryInfo") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                LirpRepositoryProcessorProvider(),
                 SourceFile.kotlin(
                     "DelegatingRepo.kt",
                     """
@@ -208,14 +191,13 @@ internal class LirpRepositoryProcessorTest : FunSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.sourcesGeneratedBySymbolProcessor
-            .filter { it.name.contains("DelegatingRepo") }
-            .toList() shouldBe emptyList()
+        result.generatedNames().filter { it.contains("DelegatingRepo") } shouldBe emptyList()
     }
 
     test("delegation class with zero Repository-typed constructor params warns and generates no _LirpRegistryInfo") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                LirpRepositoryProcessorProvider(),
                 SourceFile.kotlin(
                     "ZeroParamDelegation.kt",
                     """
@@ -239,15 +221,14 @@ internal class LirpRepositoryProcessorTest : FunSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.sourcesGeneratedBySymbolProcessor
-            .filter { it.name.contains("ZeroParamDelegation") }
-            .toList() shouldBe emptyList()
+        result.generatedNames().filter { it.contains("ZeroParamDelegation") } shouldBe emptyList()
         result.messages shouldContain "must have exactly one Repository-typed constructor parameter"
     }
 
     test("delegation class with multiple Repository-typed constructor params warns and generates no _LirpRegistryInfo") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                LirpRepositoryProcessorProvider(),
                 SourceFile.kotlin(
                     "MultiParamDelegation.kt",
                     """
@@ -272,15 +253,14 @@ internal class LirpRepositoryProcessorTest : FunSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.sourcesGeneratedBySymbolProcessor
-            .filter { it.name.contains("MultiParamDelegation") }
-            .toList() shouldBe emptyList()
+        result.generatedNames().filter { it.contains("MultiParamDelegation") } shouldBe emptyList()
         result.messages shouldContain "must have exactly one Repository-typed constructor parameter"
     }
 
     test("class annotated with @LirpRepository that neither extends base nor delegates gets warn-and-skip") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                LirpRepositoryProcessorProvider(),
                 SourceFile.kotlin(
                     "NotARepo.kt",
                     """
@@ -294,9 +274,7 @@ internal class LirpRepositoryProcessorTest : FunSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.sourcesGeneratedBySymbolProcessor
-            .filter { it.name.contains("NotARepo") }
-            .toList() shouldBe emptyList()
+        result.generatedNames().filter { it.contains("NotARepo") } shouldBe emptyList()
         result.messages shouldContain "Cannot determine entity class"
     }
 })

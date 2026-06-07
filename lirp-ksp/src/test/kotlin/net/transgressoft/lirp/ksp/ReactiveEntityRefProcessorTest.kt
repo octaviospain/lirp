@@ -17,12 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.JvmCompilationResult
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
-import com.tschuchort.compiletesting.configureKsp
-import com.tschuchort.compiletesting.sourcesGeneratedBySymbolProcessor
-import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.datatest.withTests
 import io.kotest.engine.names.WithDataTestName
@@ -123,27 +119,10 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
             """
         )
 
-    fun compileWithProcessor(vararg sources: SourceFile): JvmCompilationResult {
-        val compilation =
-            KotlinCompilation().apply {
-                this.sources = sources.toList()
-                inheritClassPath = true
-            }
-        compilation.configureKsp { withCompilation = true }
-        compilation.symbolProcessorProviders += ReactiveEntityRefProcessorProvider()
-        return compilation.compile()
-    }
-
-    fun JvmCompilationResult.generatedFileContent(name: String): String {
-        val file =
-            sourcesGeneratedBySymbolProcessor.firstOrNull { it.name == name }
-                ?: error("Generated file '$name' not found among: ${sourcesGeneratedBySymbolProcessor.map { it.name }.toList()}")
-        return file.readText()
-    }
-
     test("generates entries for entity with single aggregate property") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                ReactiveEntityRefProcessorProvider(),
                 SourceFile.kotlin(
                     "InvoiceEntity.kt",
                     """
@@ -178,7 +157,8 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
 
     test("generates collectionEntries for entity with aggregateList property") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                ReactiveEntityRefProcessorProvider(),
                 collectionDelegateStubs,
                 SourceFile.kotlin(
                     "PlaylistEntity.kt",
@@ -217,7 +197,8 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
 
     test("generates collectionEntries for entity with aggregateSet property") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                ReactiveEntityRefProcessorProvider(),
                 collectionDelegateStubs,
                 SourceFile.kotlin(
                     "PlaylistGroupEntity.kt",
@@ -254,7 +235,8 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
 
     test("generates both entries and collectionEntries for entity with mixed single and collection refs") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                ReactiveEntityRefProcessorProvider(),
                 collectionDelegateStubs,
                 SourceFile.kotlin(
                     "AlbumEntity.kt",
@@ -324,7 +306,8 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
             BubbleUpCase("aggregateSet", "Set<Int>", "BubbleUpSetEntity", "TagEntity")
         ) { case ->
             val result =
-                compileWithProcessor(
+                KspTestSupport.compile(
+                    ReactiveEntityRefProcessorProvider(),
                     collectionDelegateStubs,
                     SourceFile.kotlin(
                         "${case.entityName}.kt",
@@ -358,7 +341,8 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
 
     test("generates isOrdered=true for aggregateList and isOrdered=false for aggregateSet") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                ReactiveEntityRefProcessorProvider(),
                 collectionDelegateStubs,
                 SourceFile.kotlin(
                     "MixedCollectionEntity.kt",
@@ -404,7 +388,8 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
 
     test("uses @Aggregate annotation for detection and ignores unannotated properties") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                ReactiveEntityRefProcessorProvider(),
                 collectionDelegateStubs,
                 SourceFile.kotlin(
                     "PartialAnnotationEntity.kt",
@@ -446,7 +431,8 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
 
     test("generates \$-separated accessor name for 1-level inner class entity") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                ReactiveEntityRefProcessorProvider(),
                 SourceFile.kotlin(
                     "Outer.kt",
                     """
@@ -482,7 +468,8 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
 
     test("generates \$-separated accessor name for 3-level nested entity") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                ReactiveEntityRefProcessorProvider(),
                 SourceFile.kotlin(
                     "A.kt",
                     """
@@ -519,7 +506,8 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
 
     test("top-level entity accessor generation unchanged after inner class support") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                ReactiveEntityRefProcessorProvider(),
                 SourceFile.kotlin(
                     "TopLevelEntity.kt",
                     """
@@ -553,7 +541,8 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
 
     test("generates collectionEntries for entity with mutableAggregateList returning MutableList") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                ReactiveEntityRefProcessorProvider(),
                 collectionDelegateStubs,
                 SourceFile.kotlin(
                     "MutablePlaylistEntity.kt",

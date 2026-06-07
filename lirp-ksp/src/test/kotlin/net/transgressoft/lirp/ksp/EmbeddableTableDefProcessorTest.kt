@@ -17,12 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.JvmCompilationResult
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
-import com.tschuchort.compiletesting.configureKsp
-import com.tschuchort.compiletesting.sourcesGeneratedBySymbolProcessor
-import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -38,30 +34,10 @@ import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 @OptIn(ExperimentalCompilerApi::class)
 class EmbeddableTableDefProcessorTest : StringSpec({
 
-    fun compileWithProcessor(vararg sources: SourceFile): JvmCompilationResult {
-        val compilation =
-            KotlinCompilation().apply {
-                this.sources = sources.toList()
-                inheritClassPath = true
-            }
-        compilation.configureKsp { withCompilation = true }
-        compilation.symbolProcessorProviders += TableDefProcessorProvider()
-        return compilation.compile()
-    }
-
-    fun JvmCompilationResult.generatedFileContent(name: String): String {
-        val file =
-            sourcesGeneratedBySymbolProcessor.firstOrNull { it.name == name }
-                ?: error(
-                    "Generated file '$name' not found among: " +
-                        sourcesGeneratedBySymbolProcessor.map { it.name }.toList()
-                )
-        return file.readText()
-    }
-
     "flattens @Embedded with default prefix derives snake_case property name" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "DefaultPrefixEntity.kt",
                     """
@@ -94,7 +70,8 @@ class EmbeddableTableDefProcessorTest : StringSpec({
 
     "flattens @Embedded with explicit prefix uses verbatim string" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ExplicitPrefixEntity.kt",
                     """
@@ -127,7 +104,8 @@ class EmbeddableTableDefProcessorTest : StringSpec({
 
     "flattens @Embedded with empty-string prefix reverts to auto-derived default" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "EmptyPrefixEntity.kt",
                     """
@@ -160,7 +138,8 @@ class EmbeddableTableDefProcessorTest : StringSpec({
 
     "flattens 2-level recursive @Embedded concatenating prefixes parent to child" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "TwoLevelEntity.kt",
                     """
@@ -200,7 +179,8 @@ class EmbeddableTableDefProcessorTest : StringSpec({
 
     "flattens 3-level recursive @Embedded" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ThreeLevelEntity.kt",
                     """
@@ -241,7 +221,8 @@ class EmbeddableTableDefProcessorTest : StringSpec({
         // unreachable here. Inline a minimal String→String converter as a stand-in; the codegen
         // path is identical regardless of the S/T types involved.
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ConverterInEmbeddableEntity.kt",
                     """
@@ -287,7 +268,8 @@ class EmbeddableTableDefProcessorTest : StringSpec({
 
     "reconstructs @Embedded value object in fromRow via nested constructor expression" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "FromRowShapeEntity.kt",
                     """
@@ -323,7 +305,8 @@ class EmbeddableTableDefProcessorTest : StringSpec({
 
     "reconstructs body-declared @Embedded var in fromRow, not only in applyScalarRow" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BodyEmbeddedEntity.kt",
                     """
@@ -358,7 +341,8 @@ class EmbeddableTableDefProcessorTest : StringSpec({
 
     "nested explicit prefix preserves ancestor prefix segment" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NestedExplicitPrefixEntity.kt",
                     """
@@ -401,7 +385,8 @@ class EmbeddableTableDefProcessorTest : StringSpec({
 
     "@PersistenceIgnore non-null defaulted embeddable ctor param omitted from fromRow" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "IgnoredDefaultedParamEntity.kt",
                     """
@@ -442,7 +427,8 @@ class EmbeddableTableDefProcessorTest : StringSpec({
 
     "top-level explicit prefix does not bleed into nested auto-derived prefix" {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "TopLevelExplicitPrefixEntity.kt",
                     """

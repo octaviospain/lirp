@@ -17,34 +17,24 @@
 
 package net.transgressoft.lirp.persistence.sql
 
-import javafx.application.Platform
+import com.zaxxer.hikari.HikariConfig
+import com.zaxxer.hikari.HikariDataSource
 
 /**
- * Headless JavaFX toolkit initializer for test environments.
- * Uses Monocle as the glass platform to avoid requiring a display.
+ * Shared Hikari pool factory for Testcontainers integration-test support objects.
+ *
+ * Extracted to avoid repeating the same [HikariConfig] wiring in each container support object.
  */
-object FxToolkitInit {
-
-    @Volatile
-    private var initialized = false
-
-    fun ensureInitialized() {
-        if (initialized)
-            return
-        synchronized(this) {
-            if (initialized)
-                return
-            System.setProperty("java.awt.headless", "true")
-            System.setProperty("glass.platform", "Monocle")
-            System.setProperty("monocle.platform", "Headless")
-            System.setProperty("prism.order", "sw")
-            try {
-                Platform.startup {}
-            } catch (_: IllegalStateException) {
-                // Toolkit already initialized
-            }
-            Platform.setImplicitExit(false)
-            initialized = true
+internal fun hikariDataSource(
+    jdbcUrl: String,
+    username: String,
+    password: String
+): HikariDataSource =
+    HikariDataSource(
+        HikariConfig().apply {
+            this.jdbcUrl = jdbcUrl
+            this.username = username
+            this.password = password
+            maximumPoolSize = 10
         }
-    }
-}
+    )

@@ -8,6 +8,7 @@ apply plugin: 'java-test-fixtures'
 // `rootProject.project(':lirp-core')` (a real Project lookup) and force evaluation order so
 // the source set output is available when this script reads it.
 evaluationDependsOn(':lirp-core')
+evaluationDependsOn(':lirp-fx')
 
 ktlint {
     filter {
@@ -80,6 +81,7 @@ dependencies {
     integrationTestRuntimeOnly libs.mariadb
 
     testImplementation project(':lirp-fx')
+    testImplementation files(rootProject.project(':lirp-fx').sourceSets.test.output)
 
     // JavaFX for fx delegate SQL persistence tests
     testImplementation "org.openjfx:javafx-base:21:${fxPlatform}"

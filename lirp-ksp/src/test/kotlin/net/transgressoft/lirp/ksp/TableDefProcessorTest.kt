@@ -17,13 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.JvmCompilationResult
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
-import com.tschuchort.compiletesting.configureKsp
-import com.tschuchort.compiletesting.kspProcessorOptions
-import com.tschuchort.compiletesting.sourcesGeneratedBySymbolProcessor
-import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -41,33 +36,10 @@ import org.junit.jupiter.api.DisplayName
 @DisplayName("TableDefProcessor")
 internal class TableDefProcessorTest : FunSpec({
 
-    fun compileWithProcessor(
-        vararg sources: SourceFile,
-        options: Map<String, String> = emptyMap()
-    ): JvmCompilationResult {
-        val compilation =
-            KotlinCompilation().apply {
-                this.sources = sources.toList()
-                inheritClassPath = true
-            }
-        compilation.configureKsp { withCompilation = true }
-        if (options.isNotEmpty()) {
-            compilation.kspProcessorOptions.putAll(options)
-        }
-        compilation.symbolProcessorProviders += TableDefProcessorProvider()
-        return compilation.compile()
-    }
-
-    fun JvmCompilationResult.generatedFileContent(name: String): String {
-        val file =
-            sourcesGeneratedBySymbolProcessor.firstOrNull { it.name == name }
-                ?: error("Generated file '$name' not found among: ${sourcesGeneratedBySymbolProcessor.map { it.name }.toList()}")
-        return file.readText()
-    }
-
     test("generates _LirpTableDef for minimal entity with convention defaults") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "MinimalEntity.kt",
                     """
@@ -94,7 +66,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("generates _LirpTableDef with annotation overrides for table name and column config") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ProductEntity.kt",
                     """
@@ -128,7 +101,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("maps reactiveProperty delegate to declared type") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ReactiveEntity.kt",
                     """
@@ -157,7 +131,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("excludes @PersistenceIgnore properties from generated descriptor") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "EntityWithIgnored.kt",
                     """
@@ -188,7 +163,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("triggers on @PersistenceProperty without class-level @PersistenceMapping") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ImplicitEntity.kt",
                     """
@@ -215,7 +191,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("generates SqlTableDef implementation for entity with all-mutable non-PK properties") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "MutableEntity.kt",
                     """
@@ -241,7 +218,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("generates fromRow that constructs entity with id and sets mutable properties") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "EntityWithFromRow.kt",
                     """
@@ -270,7 +248,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("generates fromRow that hydrates a reactive entity inside withEventsDisabled") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ReactiveFromRowEntity.kt",
                     """
@@ -302,7 +281,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("generates toParams that returns all column-value pairs including PK") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "EntityWithToParams.kt",
                     """
@@ -328,7 +308,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("generates SqlTableDef when every non-PK column is a primary-constructor val") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ImmutableEntity.kt",
                     """
@@ -355,7 +336,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("generates correct Exposed v1 imports in SqlTableDef generated code") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ImportCheckEntity.kt",
                     """
@@ -380,7 +362,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("generates correct enum handling as String in fromRow and toParams") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "EntityWithEnum.kt",
                     """
@@ -406,7 +389,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("reports KSP error for unsupported property type") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BadEntity.kt",
                     """
@@ -433,7 +417,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("generates UUID primary key column for entity with UUID id") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "UuidKeyEntity.kt",
                     """
@@ -463,7 +448,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("generates nullable columns for entity with all nullable non-PK properties") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NullableEntity.kt",
                     """
@@ -490,7 +476,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("generates SqlTableDef for entity mixing ctor-param val and body-level var properties") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "MixedEntity.kt",
                     """
@@ -520,7 +507,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("generates SqlTableDef for ReactiveEntityBase data class with ctor-param val and sibling reactive var") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "CtorValReactive.kt",
                     """
@@ -557,7 +545,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("still falls back to LirpTableDef when a non-ctor non-PK property is immutable") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BodyValEntity.kt",
                     """
@@ -582,7 +571,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("generates correct descriptor for UUID PK entity with @PersistenceIgnore field") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "UuidIgnoreEntity.kt",
                     """
@@ -632,7 +622,7 @@ internal class TableDefProcessorTest : FunSpec({
                 """
             )
         // No options passed — resolver-only detection
-        val result = compileWithProcessor(source)
+        val result = KspTestSupport.compile(TableDefProcessorProvider(), source)
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         val content = result.generatedFileContent("ResolverDetectedEntity_LirpTableDef.kt")
@@ -661,7 +651,7 @@ internal class TableDefProcessorTest : FunSpec({
                 }
                 """
             )
-        val result = compileWithProcessor(source, options = emptyMap())
+        val result = KspTestSupport.compile(TableDefProcessorProvider(), source, options = emptyMap())
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         // In monorepo, resolver finds SqlTableDef — so SqlTableDef is still generated
@@ -671,7 +661,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("generates nullable UUID, LocalDate, LocalDateTime, and enum conversions in fromRow and toParams") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NullableTypesEntity.kt",
                     """
@@ -723,7 +714,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("generates BigDecimal import and correct column type for DecimalType properties") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "DecimalEntity.kt",
                     """
@@ -756,7 +748,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("generates correct ordered multi-param constructor call in fromRow") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "MultiParamEntity.kt",
                     """
@@ -792,7 +785,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("falls back to LirpTableDef when constructor param has no matching column") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "UnmappedCtorEntity.kt",
                     """
@@ -818,7 +812,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("generates isVersion = true in ColumnDef for a valid @Version property") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "VersionedEntity.kt",
                     """
@@ -847,7 +842,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("generates symmetric applyRow function for entity with @Version") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "VersionedEntity2.kt",
                     """
@@ -879,7 +875,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("rejects @Version on a non-Long property") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BadVersion1.kt",
                     """
@@ -904,7 +901,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("rejects @Version on a val property") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BadVersion2.kt",
                     """
@@ -929,7 +927,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("rejects multiple @Version properties on one class") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BadVersion3.kt",
                     """
@@ -955,7 +954,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("rejects @Version on a non-delegated property") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BadVersion4.kt",
                     """
@@ -980,7 +980,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("entity without @Version has isVersion = false on all columns") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "Unversioned.kt",
                     """
@@ -1006,7 +1007,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("generates bumpVersion override for entity with @Version") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BumpCheck.kt",
                     """
@@ -1033,7 +1035,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("does NOT generate bumpVersion override for entity without @Version") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NoBump.kt",
                     """
@@ -1060,7 +1063,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("emits Playlist_Items_LirpJunctionTableDef for aggregateList collection ref") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "Playlist.kt",
                     """
@@ -1106,7 +1110,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("emits unordered junction descriptor without position column for aggregateSet") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "Album.kt",
                     """
@@ -1143,7 +1148,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("attaches RESTRICT foreign key to scalar backing single-entity aggregate") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "Order.kt",
                     """
@@ -1184,7 +1190,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("rejects DETACH on non-nullable backing scalar at compile time") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BadDetach.kt",
                     """
@@ -1220,7 +1227,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("allows DETACH on nullable backing scalar and emits SET_NULL semantics") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "GoodDetach.kt",
                     """
@@ -1258,7 +1266,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("resolves backing scalar from optionalAggregate lambda and emits SET_NULL FK") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "OptionalAggregateRef.kt",
                     """
@@ -1294,7 +1303,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("_LirpTableDef overrides junctionTableDefs for entity with aggregateList collection ref") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "PlaylistJunctionWiring.kt",
                     """
@@ -1333,7 +1343,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("_LirpTableDef overrides junctionAccessors with idsOf returning the backing field") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "PlaylistAccessorWiring.kt",
                     """
@@ -1372,7 +1383,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("_LirpTableDef overrides applyJunctionRows wrapping mutation in withEventsDisabled") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "PlaylistApplyJunction.kt",
                     """
@@ -1411,7 +1423,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("_LirpTableDef does NOT override junction members when entity has no collection aggregates") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "Plain.kt",
                     """
@@ -1437,7 +1450,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("KSP-emitted _LirpTableDef applies junction rows at runtime without firing MutationEvents") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "RuntimePlaylist.kt",
                     """
@@ -1526,7 +1540,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("KSP emits a clear error when aggregateList backing field is not a writable List<K>") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BadBacking.kt",
                     """
@@ -1564,7 +1579,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("TableDefProcessor emits internal object declaration for top-level internal entity") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "InternalPersisted.kt",
                     """
@@ -1589,7 +1605,8 @@ internal class TableDefProcessorTest : FunSpec({
     test("TableDefProcessor emits internal object declaration for internal entity with multiple properties") {
         // Verifies that the internal modifier is propagated correctly for an internal entity with several columns
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "InternalMultiProp.kt",
                     """
@@ -1616,7 +1633,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("TableDefProcessor fails compilation for private-nested entity with @PersistenceMapping") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "PrivateOuterTableDef.kt",
                     """
@@ -1642,7 +1660,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("TableDefProcessor maps kotlin.Short to ColumnType.IntType and emits .toShort() narrowing in fromRow") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ShortEntity.kt",
                     """
@@ -1669,7 +1688,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("TableDefProcessor maps kotlin.Byte to ColumnType.IntType and emits .toByte() narrowing in fromRow") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ByteEntity.kt",
                     """
@@ -1696,7 +1716,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("TableDefProcessor maps nullable kotlin.Short to nullable ColumnType.IntType with safe narrowing") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NullableShortEntity.kt",
                     """
@@ -1723,7 +1744,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("TableDefProcessor maps nullable kotlin.Byte to nullable ColumnType.IntType with safe narrowing") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "NullableByteEntity.kt",
                     """
@@ -1750,7 +1772,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("TableDefProcessor excludes @kotlinx.serialization.Transient mirror and generates delegate-backed column for lirp+kotlinx+reactive-delegate entity") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "AudioItem.kt",
                     """
@@ -1788,7 +1811,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("TableDefProcessor preserves existing kotlin.Int code generation when Short and Byte are also present") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "MixedIntegersEntity.kt",
                     """
@@ -1830,7 +1854,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("TableDefProcessor emits targeted diagnostic for permanently unresolved property type") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "BrokenEntity.kt",
                     """
@@ -1852,7 +1877,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("TableDefProcessor emits no terminal diagnostic when types resolve") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "ResolvableEntity.kt",
                     """
@@ -1876,7 +1902,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("TableDefProcessor generates descriptor typed on distinct reactive interface for MutableAudioItem/AudioItem split") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "AudioItem.kt",
                     """
@@ -1908,7 +1935,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("TableDefProcessor resolves R through an intermediate reactive base class") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "MultiLevelEntity.kt",
                     """
@@ -1942,7 +1970,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("TableDefProcessor falls back to concrete class typing when R is not resolvable") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "PlainMapped.kt",
                     """
@@ -1965,7 +1994,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("TableDefProcessor types the descriptor on the class itself for a self-referential reactive entity") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "SelfReactive.kt",
                     """
@@ -1993,7 +2023,8 @@ internal class TableDefProcessorTest : FunSpec({
 
     test("TableDefProcessor skips generation when R stays an unsubstituted type parameter on a generic entity") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "GenericReactive.kt",
                     """
@@ -2014,12 +2045,13 @@ internal class TableDefProcessorTest : FunSpec({
 
         // A raw SqlTableDef<GenericReactive> would not compile, so the processor skips generation.
         result.messages shouldContain "Skipping _LirpTableDef generation for test.GenericReactive"
-        result.sourcesGeneratedBySymbolProcessor.any { it.name == "GenericReactive_LirpTableDef.kt" } shouldBe false
+        result.generatedNames().any { it == "GenericReactive_LirpTableDef.kt" } shouldBe false
     }
 
     test("TableDefProcessor renders type arguments for a concrete parameterized reactive self-type") {
         val result =
-            compileWithProcessor(
+            KspTestSupport.compile(
+                TableDefProcessorProvider(),
                 SourceFile.kotlin(
                     "Tagged.kt",
                     """
