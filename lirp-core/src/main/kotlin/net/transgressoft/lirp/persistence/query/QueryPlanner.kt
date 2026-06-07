@@ -83,6 +83,8 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
     private val sortedBucketFor: (String) -> NavigableMap<Comparable<Any>, MutableSet<T>>? = { null }
 ) {
 
+    private val viaJoinExecutor = ViaJoinExecutor<T>()
+
     /**
      * Execution strategy selected by the planner.
      */
@@ -160,9 +162,9 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
      * @return a [Plan] containing the strategy and result sequence
      */
     fun execute(query: Query<T>, registry: Registry<*, T>): Plan<T> {
-        // Normalise Via* fold rules (Plan 01 ViaNormalizer) before any strategy selection.
+        // Normalise Via* fold rules before any strategy selection.
         // ViaNormalizer is a no-op for predicates without Via* nodes, so this stays cheap
-        // for Phase 52-only queries.
+        // for queries that do not use cross-aggregate traversal.
         val pred = query.predicate?.let { normalize(it) }
         val (strategy, candidates) = selectStrategyAndCandidates(pred, registry)
         val ordered = applyOrdering(candidates, query.orderBy)
@@ -611,130 +613,12 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
     }
 
     /**
-     * Core Via execution: splits hybrid `And(NonVia, Via*)`, selects a strategy for the
-     * Via* arm, and applies the NonVia arm as a lazy post-filter. Multi-Via*
-     * compounds that cannot be isolated to a single top-level Via* arm fall back to a
-     * per-parent `predicate.matches(p)` loop — each `Via*.matches` handles its own live
-     * access correctness. The returned sequence is fully lazy.
+     * Core Via execution: delegates to [ViaJoinExecutor] which handles strategy dispatch
+     * and all hash-join / per-parent-loop implementations. Strategy selection via
+     * [chooseStrategy] and the [ViaStrategy] enum remain in this class.
      */
-    private fun executeViaPlan(pred: Predicate<T>, parentRegistry: Registry<*, T>): Sequence<T> {
-        val (nonVia, viaArm) = splitHybridAnd(pred)
-        if (viaArm == null) {
-            // Multi-Via* compound (e.g. And(Via*, Via*) or Or(Via*, Via*)) — fall back to a
-            // straight per-parent loop: each Via* node's `matches` already handles its own
-            // live-read invariant, so correctness is preserved without strategy selection.
-            log.debug { "Via planner: multi-Via* compound, falling back to per-parent loop on full predicate" }
-            return sequence {
-                for (p in parentRegistry) {
-                    if (pred.matches(p)) yield(p)
-                }
-            }
-        }
-
-        val strategy = chooseStrategy(viaArm, parentRegistry)
-        val viaResults =
-            when (strategy) {
-                ViaStrategy.PER_PARENT_LOOP -> perParentLoop(viaArm, parentRegistry)
-                ViaStrategy.HASH_JOIN -> hashJoin(viaArm, parentRegistry)
-            }
-
-        return if (nonVia != null) viaResults.filter { nonVia.matches(it) } else viaResults
-    }
-
-    /**
-     * Lazy per-parent loop execution. Each parent is yielded one at a time; live reads of
-     * `parentProp` happen inside the Via* node's `matches` implementation, never cached
-     * here. Suitable as the test seam entry point.
-     */
-    private fun perParentLoop(via: Predicate<T>, parentRegistry: Registry<*, T>): Sequence<T> =
-        sequence {
-            for (p in parentRegistry) {
-                if (via.matches(p)) yield(p)
-            }
-        }
-
-    /**
-     * Hash-join execution. Materialises matching child ids into a [HashSet] once, then
-     * iterates parents lazily testing the live `parentProp` collection against the set
-     * with the quantifier appropriate to the Via* operator.
-     *
-     * **Live-read invariant is preserved.** Although the matching-children set is snapshotted
-     * up-front (the strategy's defining property), each parent's `parentProp.get(p)` call
-     * runs at yield time. An `@Aggregate(onDelete = DETACH)` reconciliation that runs
-     * mid-iteration is reflected on the very next parent yielded — the snapshot only fixes
-     * which child ids are "interesting", never which parents reference them.
-     *
-     * Empty-collection semantics and null-single-entity semantics are preserved per the
-     * Via* operator's contract.
-     */
-    @Suppress("UNCHECKED_CAST")
-    private fun hashJoin(via: Predicate<T>, parentRegistry: Registry<*, T>): Sequence<T> =
-        when (via) {
-            is ViaAnyMatch<*, *, *> ->
-                hashJoinAnyMatch(via as ViaAnyMatch<T, Comparable<Any>, IdentifiableEntity<Comparable<Any>>>, parentRegistry)
-            is ViaAllMatch<*, *, *> ->
-                hashJoinAllMatch(via as ViaAllMatch<T, Comparable<Any>, IdentifiableEntity<Comparable<Any>>>, parentRegistry)
-            is ViaNoneMatch<*, *, *> ->
-                hashJoinNoneMatch(via as ViaNoneMatch<T, Comparable<Any>, IdentifiableEntity<Comparable<Any>>>, parentRegistry)
-            is ViaWhere<*, *, *> ->
-                hashJoinWhere(via as ViaWhere<T, Comparable<Any>, IdentifiableEntity<Comparable<Any>>>, parentRegistry)
-            else -> error("hashJoin called with non-Via predicate: ${via::class.simpleName}")
-        }
-
-    private fun <K : Comparable<K>, C : IdentifiableEntity<K>> matchingChildIds(
-        registry: Registry<K, C>,
-        predicate: Predicate<C>
-    ): HashSet<K> = registry.asSequence().filter { predicate.matches(it) }.map { it.id }.toHashSet()
-
-    private fun hashJoinAnyMatch(
-        v: ViaAnyMatch<T, Comparable<Any>, IdentifiableEntity<Comparable<Any>>>,
-        parentRegistry: Registry<*, T>
-    ): Sequence<T> {
-        val matchingIds = matchingChildIds(v.childRegistry, v.childPredicate)
-        return sequence {
-            for (p in parentRegistry) {
-                if (v.parentProp.get(p).any { it in matchingIds }) yield(p)
-            }
-        }
-    }
-
-    private fun hashJoinAllMatch(
-        v: ViaAllMatch<T, Comparable<Any>, IdentifiableEntity<Comparable<Any>>>,
-        parentRegistry: Registry<*, T>
-    ): Sequence<T> {
-        val matchingIds = matchingChildIds(v.childRegistry, v.childPredicate)
-        return sequence {
-            for (p in parentRegistry) {
-                val refs = v.parentProp.get(p)
-                if (refs.isEmpty() || refs.all { it in matchingIds }) yield(p)
-            }
-        }
-    }
-
-    private fun hashJoinNoneMatch(
-        v: ViaNoneMatch<T, Comparable<Any>, IdentifiableEntity<Comparable<Any>>>,
-        parentRegistry: Registry<*, T>
-    ): Sequence<T> {
-        val matchingIds = matchingChildIds(v.childRegistry, v.childPredicate)
-        return sequence {
-            for (p in parentRegistry) {
-                if (v.parentProp.get(p).none { it in matchingIds }) yield(p)
-            }
-        }
-    }
-
-    private fun hashJoinWhere(
-        v: ViaWhere<T, Comparable<Any>, IdentifiableEntity<Comparable<Any>>>,
-        parentRegistry: Registry<*, T>
-    ): Sequence<T> {
-        val matchingIds = matchingChildIds(v.childRegistry, v.childPredicate)
-        return sequence {
-            for (p in parentRegistry) {
-                val id = v.parentProp.get(p)
-                if (id != null && id in matchingIds) yield(p)
-            }
-        }
-    }
+    private fun executeViaPlan(pred: Predicate<T>, parentRegistry: Registry<*, T>): Sequence<T> =
+        viaJoinExecutor.executeViaPlan(pred, parentRegistry, ::splitHybridAnd, ::chooseStrategy)
 
     /**
      * Composes a [Comparator] from a list of [OrderClause]s.
