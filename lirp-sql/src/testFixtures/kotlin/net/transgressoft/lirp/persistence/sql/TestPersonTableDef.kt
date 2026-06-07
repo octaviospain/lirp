@@ -19,6 +19,7 @@ package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.persistence.ColumnDef
 import net.transgressoft.lirp.persistence.ColumnType
+import net.transgressoft.lirp.persistence.LirpRawInitializer
 import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.Table
@@ -65,5 +66,9 @@ object TestPersonTableDef : SqlTableDef<TestPerson> {
         entity.lastName = row[cols["last_name"]!! as Column<String>]
         entity.age = row[cols["age"]!! as Column<Int>]
         // id is PK — immutable on TestPerson
+    }
+
+    override fun applyScalarRow(entity: TestPerson, row: ResultRow, table: Table, rawInit: LirpRawInitializer<TestPerson>) {
+        // No-op: entity state is fully populated by fromRow.
     }
 }

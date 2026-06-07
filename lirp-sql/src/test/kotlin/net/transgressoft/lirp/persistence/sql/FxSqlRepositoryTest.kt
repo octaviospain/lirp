@@ -19,11 +19,11 @@ package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.persistence.RegistryBase
+import net.transgressoft.lirp.persistence.fx.FxToolkitInit
 import io.kotest.assertions.nondeterministic.eventually
-import io.kotest.core.spec.style.FunSpec
+import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
-import org.junit.jupiter.api.DisplayName
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.time.Duration.Companion.milliseconds
@@ -35,8 +35,7 @@ import kotlinx.coroutines.delay
  * [fxBoolean], [fxDouble], [fxObject]) with [fxAggregateList] collection delegates.
  * Uses H2 in-memory databases for fast isolated tests.
  */
-@DisplayName("FxSqlRepositoryTest")
-internal class FxSqlRepositoryTest : FunSpec({
+internal class FxSqlRepositoryTest : StringSpec({
 
     fun freshJdbcUrl() = "jdbc:h2:mem:${UUID.randomUUID()};DB_CLOSE_DELAY=-1"
 
@@ -49,7 +48,7 @@ internal class FxSqlRepositoryTest : FunSpec({
         RegistryBase.deregisterRepository(FxSqlTestEntity::class.java)
     }
 
-    test("adds entity with fx scalar properties and persists to database") {
+    "FxSqlRepository adds entity with fx scalar properties and persists to database" {
         val jdbcUrl = freshJdbcUrl()
         val itemRepo = FxSqlTestItemRepository(jdbcUrl)
         val entityRepo = FxSqlTestEntityRepository(jdbcUrl)
@@ -74,7 +73,7 @@ internal class FxSqlRepositoryTest : FunSpec({
         itemRepo2.close()
     }
 
-    test("persists fx scalar property mutation via flush") {
+    "FxSqlRepository persists fx scalar property mutation via flush" {
         val jdbcUrl = freshJdbcUrl()
         val itemRepo = FxSqlTestItemRepository(jdbcUrl)
         val entityRepo = FxSqlTestEntityRepository(jdbcUrl)
@@ -96,7 +95,7 @@ internal class FxSqlRepositoryTest : FunSpec({
         itemRepo2.close()
     }
 
-    test("persists all fx scalar types correctly") {
+    "FxSqlRepository persists all fx scalar types correctly" {
         val jdbcUrl = freshJdbcUrl()
         val itemRepo = FxSqlTestItemRepository(jdbcUrl)
         val entityRepo = FxSqlTestEntityRepository(jdbcUrl)
@@ -121,7 +120,7 @@ internal class FxSqlRepositoryTest : FunSpec({
         itemRepo2.close()
     }
 
-    test("null tag property persists and reloads as null") {
+    "FxSqlRepository null tag property persists and reloads as null" {
         val jdbcUrl = freshJdbcUrl()
         val itemRepo = FxSqlTestItemRepository(jdbcUrl)
         val entityRepo = FxSqlTestEntityRepository(jdbcUrl)
@@ -142,7 +141,7 @@ internal class FxSqlRepositoryTest : FunSpec({
         itemRepo2.close()
     }
 
-    test("persists fx aggregate itemIds and reloads them") {
+    "FxSqlRepository persists fx aggregate itemIds and reloads them" {
         val jdbcUrl = freshJdbcUrl()
         val itemRepo = FxSqlTestItemRepository(jdbcUrl)
         val entityRepo = FxSqlTestEntityRepository(jdbcUrl)
@@ -171,7 +170,7 @@ internal class FxSqlRepositoryTest : FunSpec({
         itemRepo2.close()
     }
 
-    test("persists mutations on fx aggregate after reload") {
+    "FxSqlRepository persists mutations on fx aggregate after reload" {
         val jdbcUrl = freshJdbcUrl()
         var itemRepo = FxSqlTestItemRepository(jdbcUrl)
         var entityRepo = FxSqlTestEntityRepository(jdbcUrl)
@@ -216,7 +215,7 @@ internal class FxSqlRepositoryTest : FunSpec({
         itemRepo.close()
     }
 
-    test("clear on fx aggregate persists empty state") {
+    "FxSqlRepository clear on fx aggregate persists empty state" {
         val jdbcUrl = freshJdbcUrl()
         val itemRepo = FxSqlTestItemRepository(jdbcUrl)
         val entityRepo = FxSqlTestEntityRepository(jdbcUrl)
@@ -241,7 +240,7 @@ internal class FxSqlRepositoryTest : FunSpec({
         itemRepo2.close()
     }
 
-    test("fx scalar property mutation emits UPDATE CrudEvent from SqlRepository") {
+    "FxSqlRepository fx scalar property mutation emits UPDATE CrudEvent from SqlRepository" {
         val jdbcUrl = freshJdbcUrl()
         val itemRepo = FxSqlTestItemRepository(jdbcUrl)
         val entityRepo = FxSqlTestEntityRepository(jdbcUrl)
@@ -263,7 +262,7 @@ internal class FxSqlRepositoryTest : FunSpec({
         itemRepo.close()
     }
 
-    test("entity with both scalar and collection mutations persists all changes") {
+    "FxSqlRepository entity with both scalar and collection mutations persists all changes" {
         val jdbcUrl = freshJdbcUrl()
         val itemRepo = FxSqlTestItemRepository(jdbcUrl)
         val entityRepo = FxSqlTestEntityRepository(jdbcUrl)

@@ -19,6 +19,7 @@ package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.persistence.ColumnDef
 import net.transgressoft.lirp.persistence.ColumnType
+import net.transgressoft.lirp.persistence.LirpRawInitializer
 import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.Table
@@ -28,7 +29,7 @@ import org.jetbrains.exposed.v1.core.Table
  * additional `version` column flagged `isVersion = true` to exercise the optimistic-locking
  * code path in `SqlRepository`.
  */
-object TestVersionedPersonTableDef : SqlTableDef<TestVersionedPerson> {
+object TestVersionedPersonTableDef : SqlTableDef<TestVersionedPerson>, VersionedTableDef<TestVersionedPerson> {
     override val tableName = "test_versioned_persons"
     override val columns =
         listOf(
@@ -73,5 +74,9 @@ object TestVersionedPersonTableDef : SqlTableDef<TestVersionedPerson> {
 
     override fun bumpVersion(entity: TestVersionedPerson, newVersion: Long) {
         entity.version = newVersion
+    }
+
+    override fun applyScalarRow(entity: TestVersionedPerson, row: ResultRow, table: Table, rawInit: LirpRawInitializer<TestVersionedPerson>) {
+        // No-op: entity state is fully populated by fromRow.
     }
 }

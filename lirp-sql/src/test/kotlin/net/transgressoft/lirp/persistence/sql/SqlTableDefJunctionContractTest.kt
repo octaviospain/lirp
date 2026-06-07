@@ -20,9 +20,11 @@ package net.transgressoft.lirp.persistence.sql
 import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.persistence.ColumnDef
 import net.transgressoft.lirp.persistence.ColumnType
+import net.transgressoft.lirp.persistence.LirpRawInitializer
 import io.kotest.core.spec.style.StringSpec
-import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.nulls.shouldBeNull
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeSameInstanceAs
 import org.jetbrains.exposed.v1.core.Column
@@ -30,15 +32,14 @@ import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.Table
 
 /**
- * Contract tests for the junction-aware extension surface added to [SqlTableDef]:
- * [SqlTableDef.junctionTableDefs], [SqlTableDef.junctionAccessors], and
- * [SqlTableDef.applyJunctionRows].
+ * Contract tests for the capability-interface segregation of [SqlTableDef]:
+ * [JunctionAware], [VersionedTableDef], and [ForeignKeyAware].
  *
- * The defaults must be safe — every existing hand-written `SqlTableDef` implementation must
- * continue to compile and pass without overriding any of the three members. The KSP-emitted
- * overrides for entities with `@Aggregate` collection refs are tested separately in `lirp-ksp`.
+ * A plain [SqlTableDef] implementer that does not opt into any capability interface
+ * returns `null` from every `as?` cast — no junction, version, or FK behaviour fires.
+ * KSP-generated `_LirpTableDef` classes wire the correct sub-interfaces automatically.
  */
-class SqlTableDefJunctionContractTest : StringSpec({
+internal class SqlTableDefJunctionContractTest : StringSpec({
 
     data class Dummy(val id: Int)
 
@@ -53,17 +54,23 @@ class SqlTableDefJunctionContractTest : StringSpec({
             override fun toParams(entity: Dummy, table: Table): Map<Column<*>, Any?> = emptyMap()
 
             override fun applyRow(entity: Dummy, row: ResultRow, table: Table) = Unit
+
+            override fun applyScalarRow(entity: Dummy, row: ResultRow, table: Table, rawInit: LirpRawInitializer<Dummy>) = Unit
         }
 
-    "SqlTableDef junctionTableDefs defaults to empty list" {
-        minimalDef.junctionTableDefs.shouldBeEmpty()
+    "plain SqlTableDef is not JunctionAware" {
+        (minimalDef as? JunctionAware<*>).shouldBeNull()
     }
 
-    "SqlTableDef junctionAccessors defaults to empty list" {
-        minimalDef.junctionAccessors.shouldBeEmpty()
+    "plain SqlTableDef is not VersionedTableDef" {
+        (minimalDef as? VersionedTableDef<*>).shouldBeNull()
     }
 
-    "SqlTableDef applyJunctionRows is a no-op by default" {
+    "plain SqlTableDef is not ForeignKeyAware" {
+        (minimalDef as? ForeignKeyAware).shouldBeNull()
+    }
+
+    "JunctionAware implementer exposes junctionTableDefs and junctionAccessors" {
         val descriptor =
             object : JunctionTableDef {
                 override val tableName: String = "dummy_items"
@@ -75,8 +82,37 @@ class SqlTableDefJunctionContractTest : StringSpec({
                 override val itemFkOnDelete: CascadeAction = CascadeAction.DETACH
             }
 
-        // Default body is a no-op — no exception, no observable side effect on the entity.
-        minimalDef.applyJunctionRows(Dummy(1), descriptor, listOf(10, 20, 30))
+        val accessor =
+            object : JunctionAccessor<Dummy> {
+                override val descriptor: JunctionTableDef = descriptor
+
+                override fun idsOf(entity: Dummy): Collection<Any> = listOf(entity.id)
+            }
+
+        val junctionDef =
+            object : SqlTableDef<Dummy>, JunctionAware<Dummy> {
+                override val tableName = "dummy"
+                override val columns: List<ColumnDef> =
+                    listOf(ColumnDef("id", ColumnType.IntType, nullable = false, primaryKey = true))
+
+                override fun fromRow(row: ResultRow, table: Table): Dummy = error("not used")
+
+                override fun toParams(entity: Dummy, table: Table): Map<Column<*>, Any?> = emptyMap()
+
+                override fun applyRow(entity: Dummy, row: ResultRow, table: Table) = Unit
+
+                override fun applyScalarRow(entity: Dummy, row: ResultRow, table: Table, rawInit: LirpRawInitializer<Dummy>) = Unit
+
+                override val junctionTableDefs: List<JunctionTableDef> = listOf(descriptor)
+                override val junctionAccessors: List<JunctionAccessor<Dummy>> = listOf(accessor)
+
+                override fun applyJunctionRows(entity: Dummy, descriptor: JunctionTableDef, ids: List<Any>) = Unit
+            }
+
+        val junctionAware = junctionDef as? JunctionAware<Dummy>
+        junctionAware.shouldNotBeNull()
+        junctionAware.junctionTableDefs.shouldHaveSize(1)
+        junctionAware.junctionAccessors.shouldHaveSize(1)
     }
 
     "JunctionAccessor exposes descriptor reference and idsOf contract" {

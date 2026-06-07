@@ -23,6 +23,7 @@ import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.persistence.Aggregate
 import net.transgressoft.lirp.persistence.ColumnDef
 import net.transgressoft.lirp.persistence.ColumnType
+import net.transgressoft.lirp.persistence.LirpRawInitializer
 import net.transgressoft.lirp.persistence.LirpRegistryInfo
 import net.transgressoft.lirp.persistence.fx.fxAggregateList
 import net.transgressoft.lirp.persistence.fx.fxBoolean
@@ -80,6 +81,10 @@ object FxSqlTestItemTableDef : SqlTableDef<FxSqlTestItem> {
         val cols = table.columns.associateBy { it.name }
         entity.title = row[cols["title"]!! as Column<String>]
         // id is PK — immutable on FxSqlTestItem
+    }
+
+    override fun applyScalarRow(entity: FxSqlTestItem, row: ResultRow, table: Table, rawInit: LirpRawInitializer<FxSqlTestItem>) {
+        // No-op: entity state is fully populated by fromRow.
     }
 }
 
@@ -206,6 +211,10 @@ object FxSqlTestEntityTableDef : SqlTableDef<FxSqlTestEntity> {
         // id is PK — immutable. item_ids is backed by the `items` fxAggregateList delegate
         // (val), whose collection state is managed via the delegate's mutation API —
         // not applicable to applyRow (the delegate is constructed once at fromRow time).
+    }
+
+    override fun applyScalarRow(entity: FxSqlTestEntity, row: ResultRow, table: Table, rawInit: LirpRawInitializer<FxSqlTestEntity>) {
+        // No-op: entity state is fully populated by fromRow.
     }
 }
 

@@ -21,6 +21,7 @@ import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.persistence.ColumnDef
 import net.transgressoft.lirp.persistence.ColumnType
+import net.transgressoft.lirp.persistence.LirpRawInitializer
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.nondeterministic.eventually
@@ -275,9 +276,13 @@ internal object ScalarFkChildTableDef : SqlTableDef<ScalarFkChild> {
         val cols = table.columns.associateBy { it.name }
         entity.withEventsDisabled { entity.name = row[cols["name"]!! as Column<String>] }
     }
+
+    override fun applyScalarRow(entity: ScalarFkChild, row: ResultRow, table: Table, rawInit: LirpRawInitializer<ScalarFkChild>) {
+        // No-op: entity state is fully populated by fromRow.
+    }
 }
 
-internal class ScalarFkParentTableDef(private val onDelete: CascadeAction) : SqlTableDef<ScalarFkParent> {
+internal class ScalarFkParentTableDef(private val onDelete: CascadeAction) : SqlTableDef<ScalarFkParent>, ForeignKeyAware {
     override val tableName = "fk_scalar_parents"
     override val columns =
         listOf(
@@ -319,5 +324,9 @@ internal class ScalarFkParentTableDef(private val onDelete: CascadeAction) : Sql
         entity.withEventsDisabled {
             entity.childId = row[cols["single_child_id"]!! as Column<Int?>]
         }
+    }
+
+    override fun applyScalarRow(entity: ScalarFkParent, row: ResultRow, table: Table, rawInit: LirpRawInitializer<ScalarFkParent>) {
+        // No-op: entity state is fully populated by fromRow.
     }
 }
