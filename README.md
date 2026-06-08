@@ -32,7 +32,7 @@ LIRP solves a specific problem: **most reactive libraries make you wire streams 
 
 LIRP's sweet spot: **small-to-medium datasets where entities need both reactivity and persistence with zero boilerplate** — configuration stores, user preferences, catalog management, any bounded context where the working set fits in memory.
 
-Built on Kotlin Coroutines and Kotlin Serialization. Targets **JVM 17+, Kotlin 2.3.10**.
+Built on Kotlin Coroutines and Kotlin Serialization. Targets **JVM 21 toolchain, JVM 17+ runtime, Kotlin 2.3.10**.
 
 ## Quick Start
 
@@ -43,7 +43,7 @@ reactive entity + in-memory / JSON repository surface; add `lirp-sql` for the SQ
 `lirp-fx` for the JavaFX bridge. The `net.transgressoft.lirp.sql` Gradle plugin wires up the KSP
 processor for you so generated accessors are produced at build time.
 
-**Requirements:** JVM 17+, Kotlin 2.3.10.
+**Requirements:** JVM 21 toolchain (JVM 17+ runtime), Kotlin 2.3.10.
 
 Gradle (Kotlin DSL):
 ```kotlin
@@ -117,64 +117,29 @@ Maven:
 See [Consuming LIRP](https://github.com/octaviospain/lirp/wiki/Consuming-LIRP) for the
 compatibility matrix and troubleshooting common setup failures.
 
-### Hello world
+### Core example
 
-Declare a reactive entity, register a repository, subscribe — no event bus, no manual Flow collection:
-
-```kotlin
-data class Product(override val id: Int, var name: String, initialPrice: Double = 0.0) :
-    ReactiveEntityBase<Int, Product>() {
-    var price: Double by reactiveProperty(initialPrice)
-
-    override val uniqueId = "product-$id"
-    override fun clone() = Product(id, name, price)
-}
-
-@LirpRepository
-class ProductRepository : VolatileRepository<Int, Product>("Products") {
-    fun create(id: Int, name: String, price: Double = 0.0): Product =
-        Product(id, name, price).also { add(it) }
-}
-
-val repo = ProductRepository()
-val widget = repo.create(1, "Widget", 29.99)
-
-widget.subscribe { event ->
-    println("Price changed: ${event.oldEntity.price} -> ${event.newEntity.price}")
-}
-widget.price = 39.99  // prints: Price changed: 29.99 -> 39.99
-```
-
-Subscribe to repository-level events to track creation, updates, and deletions:
+The following shows a reactive entity with a parent aggregate reference, a repository, entity-level
+and repository-level subscriptions, and a property mutation that fires events through both:
 
 ```kotlin
-repo.subscribe { event ->
-    when (event) {
-        is StandardCrudEvent.Create -> println("Added: ${event.entity.name}")
-        is StandardCrudEvent.Update -> println("Updated product ${event.entityId}")
-        is StandardCrudEvent.Delete -> println("Removed product ${event.entityId}")
-    }
-}
-```
-
-See [Core Concepts](https://github.com/octaviospain/lirp/wiki/Core-Concepts) for the reactive-property model, subscription patterns, and entity lifecycle.
-
-## SQL Persistence
-
-`SqlRepository` persists entities to a relational database automatically. Repository operations emit `CrudEvent`s immediately, while persistence is handled by the repository internals. See the SQL Persistence wiki page for exact write-path and flush behavior.
-
-```kotlin
+// @PersistenceMapping: marks the entity for KSP codegen — generates Album_LirpTableDef
+// (the Exposed table) and accessors, mapping it to the "albums" table
 @PersistenceMapping(name = "albums")
 data class Album(
     override val id: Int,
     var title: String,
+    // @Indexed: secondary index for O(1) equality lookups on genre
     @Indexed val genre: String,
     var artistId: Int,
     initialRating: Double = 0.0
 ) : ReactiveEntityBase<Int, Album>() {
     var rating: Double by reactiveProperty(initialRating)
 
+    // @Aggregate: declares a cross-entity reference; onDelete sets the cascade mode and
+    // bubbleUp = true propagates child mutations to the artist's subscribers too
     @Aggregate(bubbleUp = true, onDelete = CascadeAction.DETACH)
+    // @Transient: the resolved reference is computed from artistId, not a stored column
     @Transient
     val artist by aggregate<Int, Artist> { artistId }
 
@@ -182,103 +147,89 @@ data class Album(
     override fun clone() = Album(id, title, genre, artistId, rating)
 }
 
+// @LirpRepository: registers the repository for context wiring and create()-factory codegen
 @LirpRepository
-class AlbumRepository(context: LirpContext) :
-    SqlRepository<Int, Album>(context, Album_LirpTableDef, "jdbc:postgresql://localhost:5432/mydb")
+class AlbumRepository : VolatileRepository<Int, Album>("Albums") {
+    fun create(id: Int, title: String, genre: String, artistId: Int): Album =
+        Album(id, title, genre, artistId).also { add(it) }
+}
+
+val repo = AlbumRepository()
+
+// Repository-level: track all structural changes
+repo.subscribe { event ->
+    when (event) {
+        is StandardCrudEvent.Create -> println("Added: ${event.entity.title}")
+        is StandardCrudEvent.Update -> println("Updated album ${event.entityId}")
+        is StandardCrudEvent.Delete -> println("Removed album ${event.entityId}")
+        else -> {}
+    }
+}
+
+val nevermind = repo.create(1, "Nevermind", "rock", 42)
+
+// Entity-level: fine-grained property change tracking
+nevermind.subscribe { event ->
+    println("Rating changed: ${event.oldEntity.rating} -> ${event.newEntity.rating}")
+}
+
+nevermind.rating = 9.5  // fires both entity subscriber and repository Update event
 ```
 
-Reads are served from the in-memory `ConcurrentHashMap`, so `findById` avoids SQL round-trips. Write behavior differs by operation type; refer to the SQL Persistence wiki for current flush/transaction details.
+See [Core Concepts](https://github.com/octaviospain/lirp/wiki/Core-Concepts) for the reactive-property model, subscription patterns, and entity lifecycle.
+
+## SQL Persistence
+
+`SqlRepository` persists entities to a relational database automatically. Reads are served from
+the in-memory `ConcurrentHashMap` — `findById` never round-trips to the database. Writes are
+enqueued into a debounced pipeline (default 100 ms, max 1 s) and flushed on a background
+coroutine. See [SQL Persistence](https://github.com/octaviospain/lirp/wiki/SQL-Persistence) for
+write-path and flush details.
+
+```kotlin
+@LirpRepository
+class AlbumRepository(dataSource: DataSource) :
+    SqlRepository<Int, Album>(dataSource, Album_LirpTableDef)
+
+// Or build the pool from a JDBC URL — the repository owns the HikariDataSource lifecycle
+@LirpRepository
+class AlbumRepository :
+    SqlRepository<Int, Album>("jdbc:postgresql://localhost:5432/mydb", Album_LirpTableDef)
+```
 
 ### Credential handling
 
 JDBC URLs frequently embed secrets. Treat them like passwords, not like configuration.
 
-**Inject credentials via environment variables** rather than embedding them in the URL or committing them to source control. Use the three-argument constructor overload so the password never appears inside the URL string:
+Prefer injecting credentials via a pre-configured `DataSource` rather than embedding them in the
+URL string. For example, build a `HikariDataSource` from environment variables and pass it to the
+`SqlRepository(dataSource, tableDef)` constructor — credentials never appear inside the URL
+itself, and the calling code controls pool lifecycle:
 
 ```kotlin
-@LirpRepository
-class AlbumRepository(context: LirpContext) :
-    SqlRepository<Int, Album>(
-        context,
-        Album_LirpTableDef,
-        url = System.getenv("JDBC_URL") ?: error("JDBC_URL not set"),
-        username = System.getenv("DB_USER"),
-        password = System.getenv("DB_PASSWORD"),
-    )
+val config = HikariConfig().apply {
+    jdbcUrl  = System.getenv("JDBC_URL")  ?: error("JDBC_URL not set")
+    // inject user/password via config rather than the URL to avoid leaking them in logs
+    setUsername(System.getenv("DB_USER"))
+    setPassword(System.getenv("DB_PASSWORD"))
+}
+val repo = AlbumRepository(HikariDataSource(config))
 ```
 
-**Never log a raw JDBC URL in production.** Passwords commonly appear in the userinfo segment (`user:pwd@host`), in query parameters (`?password=...`), or as H2 semicolon properties (`;PASSWORD=...`). Connection-pool metrics, HikariCP DEBUG logs, and error stack traces all routinely capture the URL.
-
-When you must include a URL in diagnostic output, route it through `ConnectionUrlSanitizer`:
+When you must include a URL in diagnostic output, route it through `ConnectionUrlSanitizer` to
+mask passwords before they reach logs:
 
 ```kotlin
 import net.transgressoft.lirp.persistence.sql.ConnectionUrlSanitizer
 
-// masks the password with **** in userinfo, query-string, and H2 semicolon surfaces
 logger.debug { "Connecting to: ${ConnectionUrlSanitizer.sanitize(jdbcUrl)}" }
-
 // jdbc:postgresql://user:secret@host:5432/db  →  jdbc:postgresql://user:****@host:5432/db
-// jdbc:h2:mem:test;USER=sa;PASSWORD=secret    →  jdbc:h2:mem:test;USER=sa;PASSWORD=****
 ```
 
-`sanitize` handles all five supported dialects (PostgreSQL, MySQL, MariaDB, SQLite, H2), is case-insensitive on the `password` key, and returns malformed input verbatim — it never throws. It is defence-in-depth for logging, not a substitute for env-var injection.
-
-See the [SQL Persistence wiki page](https://github.com/octaviospain/lirp/wiki/SQL-Persistence#credential-handling) for the long-form guidance.
-
-### `@Embeddable` + `@Embedded` — flatten value objects into prefixed columns
-
-Persist value-object types by flattening their scalar fields into prefixed columns of the parent entity's table — no extra table, no join.
-
-```kotlin
-@Embeddable
-data class Artist(val name: String, val country: String)
-
-@PersistenceMapping(name = "albums")
-data class Album(
-    override val id: Int,
-    var title: String,
-    @Embedded val performer: Artist,                  // default prefix → "performer_"
-    @Embedded(prefix = "PROD_") val producer: Artist, // explicit prefix
-) : ReactiveEntityBase<Int, Album>() { /* ... */ }
-```
-
-- **Placement:** `@Embeddable` on a concrete `data class`; `@Embedded` on constructor-`val`/`var` parameters or body-declared reactive `var` properties.
-- **Cross-module:** `@Embeddable` types may be defined in a separate module or library. KSP resolves their annotations at the embedding site without any extra configuration.
-- **Default prefix:** derived from the property name as `snake_case + "_"` (e.g. `performer` → `performer_`).
-- **Recursive nesting:** `@Embeddable` types may themselves declare `@Embedded` fields; prefixes concatenate parent-to-child.
-- **Composition with converters:** scalar fields inside an `@Embeddable` may carry `@PersistenceProperty(converter = MyConverter::class)` to route non-scalar domain types through a custom `ColumnConverter`.
-- **Compile-time validation:** KSP fails the build on column-name collisions across flattened fields.
-
-See [SQL Persistence](https://github.com/octaviospain/lirp/wiki/SQL-Persistence) on the wiki for the full documentation.
-
-### `@ElementCollection` — value-element collections as JSON-array columns
-
-Persist a `List<E>` or `Set<E>` of value elements as a single JSON-array `TEXT` column on the entity's own table — distinct from `@Aggregate` references, which warrant junction tables and FK semantics.
-
-```kotlin
-@JvmInline
-value class Genre(val name: String)
-
-object GenreConverter : ColumnConverter<Genre, String> {
-    override val sqlType = ColumnType.TextType
-    override fun toSql(value: Genre) = value.name
-    override fun fromSql(raw: String) = Genre(raw)
-}
-
-@PersistenceMapping
-data class AudioItem(
-    override val id: Int,
-    @ElementCollection(elementConverter = GenreConverter::class)
-    val genres: Set<Genre> = emptySet(),
-) : ReactiveEntityBase<Int, AudioItem>() { /* ... */ }
-```
-
-- **Single column:** generates `genres TEXT NOT NULL`; the empty collection round-trips as `[]`, never `NULL`.
-- **Native element encoding:** the JSON mirrors the converter's scalar type — `["rock","jazz"]` for a `String`-backed converter, `[1,2,3]` for an `Int`-backed one.
-- **Placement:** constructor parameters (`val`/`var`) and body-declared `var x by reactiveProperty(...)` reactive properties both work; `Set<E>` and `List<E>` are both supported (`List` preserves order).
-- **Element types:** the converter's persistence-facing `S` must be one of the eight Kotlin primitives; wrap richer types (`UUID`, `LocalDate`, …) in a String-shaped converter.
-
-See [SQL Persistence](https://github.com/octaviospain/lirp/wiki/SQL-Persistence) on the wiki for the full documentation.
+`sanitize` handles all five supported dialects, is case-insensitive on the `password` key, and
+returns malformed input verbatim — it never throws. See the
+[SQL Persistence wiki page](https://github.com/octaviospain/lirp/wiki/SQL-Persistence#credential-handling)
+for the full guidance.
 
 ## Query DSL
 
@@ -286,44 +237,27 @@ LIRP provides a type-safe, Kotlin-native query DSL for filtering, ordering, and 
 
 ```kotlin
 // Equality filter — auto-routes through @Indexed if available
-val books = repo.query { where { Product::category eq "books" } }.toList()
+val rockAlbums = repo.query { where { Album::genre eq "rock" } }.toList()
 
-// Range filter
-val premium = repo.query { where { Product::price gte 50.0 } }.toList()
-
-// Composite predicates with AND, OR, NOT
-val featured = repo.query {
-    where {
-        (Product::category eq "electronics") and (Product::price gt 100.0)
-    }
-}.toList()
-
-// Ordering and pagination
-val page = repo.query {
-    where { Product::stock gt 0 }
-    orderBy(Product::price, Direction.ASC)
-    offset(20)
+// Composite predicates with AND, OR, NOT; ordering and pagination
+val topRated = repo.query {
+    where { (Album::genre eq "rock") and (Album::rating gte 8.0) }
+    orderBy(Album::rating, Direction.DESC)
     limit(10)
 }.toList()
-```
 
-The returned `Sequence<T>` is lazy — no evaluation occurs until a terminal operation (`toList`, `firstOrNull`, `count`, etc.). When `activateEvents(READ)` is enabled, a `StandardCrudEvent.Read` fires on every terminal operation.
-
-Cross-aggregate predicates pivot a foreign-key property into a related repository with `via`, and compose with the usual `and` / `or` / `not`:
-
-```kotlin
-// Single-entity reference: orders whose customer lives in Berlin
-val berlinOrders = orders.query {
-    where { Order::customerId via customers where { Customer::city eq "Berlin" } }
+// Cross-aggregate via: albums whose artist is from a given country
+val britishAlbums = repo.query {
+    where { Album::artistId via artists where { Artist::country eq "UK" } }
 }.toList()
 
-// Collection reference: playlists with at least one track over $100
-val premiumPlaylists = playlists.query {
-    where { Playlist::trackIds via tracks anyMatch { Track::price gt 100.0 } }
+// Collection reference: playlists that include at least one top-rated track
+val featuredPlaylists = playlists.query {
+    where { Playlist::trackIds via tracks anyMatch { Track::rating gt 9.0 } }
 }.toList()
 ```
 
-The planner picks per-parent loop or child-set hash-join per query from a live cardinality estimate, reads the parent's foreign keys on every match (so `@Aggregate(onDelete = DETACH)` is immediately visible to subsequent queries), and rejects chains deeper than 3 levels at construction time. See the wiki page [Query DSL](https://github.com/octaviospain/lirp/wiki/Query-DSL) for the full operator reference, planner strategies, and Java interop notes.
+The returned `Sequence<T>` is lazy — no evaluation occurs until a terminal operation (`toList`, `firstOrNull`, `count`, etc.). See [Query DSL](https://github.com/octaviospain/lirp/wiki/Query-DSL) for the full operator reference, planner strategies, and Java interop notes.
 
 | Persistence target | Module | Status |
 |---|---|---|
@@ -343,9 +277,11 @@ Deep coverage of the write pipeline, collapse algorithm, transactional guarantee
 - **Secondary indexes** — `@Indexed` for O(1) equality lookups
 - **Type-safe Query DSL** — Kotlin-native filtering, ordering, and pagination with automatic index routing
 - **Optimistic locking** — `@Version` triggers versioned UPDATE/DELETE; conflicts surface as `StandardCrudEvent.Conflict` with canonical state
-- **Convention-over-configuration KSP codegen** — `@PersistenceMapping` generates table definitions; annotations only when you need to customize. Generated companions match the entity's own visibility, so an `internal` entity (e.g. a concrete implementation kept behind a public interface) produces compiling `internal` companions; an explicitly-annotated `private`/`protected` entity fails the build with a targeted diagnostic rather than uncompilable output
-- **Robust column eligibility** — `@PersistenceIgnore` and `@Transient` (both `kotlin.jvm` and `kotlinx.serialization`) exclude a property from the generated table, so JSON-only mirrors and lazy caches never leak into the schema. Property types still resolving during KSP's multi-round processing are deferred and retried rather than dropped, and a type that never resolves fails the build with a targeted diagnostic instead of a silently-missing column
-- **Custom column converters** — route non-scalar domain types (`java.nio.file.Path`, `java.time.Duration`, value wrappers) through a consumer-supplied `ColumnConverter<D, S>` `object` referenced via `@PersistenceProperty(converter = MyConverter::class)`. The contract lives in `lirp-api`; currently consumed by the SQL persistence path, while JSON-backed entities continue to rely on `kotlinx.serialization`.
+- **Convention-over-configuration KSP codegen** — `@PersistenceMapping` generates table definitions; annotations only when you need to customize. Generated companions match the entity's own visibility, so an `internal` entity produces compiling `internal` companions; an explicitly-annotated `private`/`protected` entity fails the build with a targeted diagnostic rather than uncompilable output
+- **Robust column eligibility** — `@PersistenceIgnore` and `@Transient` (both `kotlin.jvm` and `kotlinx.serialization`) exclude a property from the generated table. Property types still resolving during KSP's multi-round processing are deferred and retried rather than dropped, and a type that never resolves fails the build with a targeted diagnostic instead of a silently-missing column
+- **Custom column converters** — route non-scalar domain types through a consumer-supplied `ColumnConverter<D, S>` `object` referenced via `@PersistenceProperty(converter = MyConverter::class)`. The contract lives in `lirp-api`
+- **Embeddable value objects** — `@Embeddable` + `@Embedded` flattens value-object fields into prefixed columns on the parent entity's table (no join, no extra table)
+- **Element collections** — `@ElementCollection` persists a `List<E>` or `Set<E>` of scalar-backed values as a single JSON-array `TEXT` column
 - **JSON persistence** — debounced file writes via `JsonFileRepository`, zero-reflection `LirpEntitySerializer`
 - **Repository-as-factory** — typed `create()` methods with automatic `@LirpRepository` registration
 - **JavaFX integration** (`lirp-fx`) — `fxAggregateList`/`fxAggregateSet` bridging lirp collections with `ObservableList`/`ObservableSet`, scalar delegates (`fxString`, `fxInteger`, etc.), read-only `ObservableMap` projections
@@ -381,21 +317,34 @@ Benchmarks run with JMH 1.37 on OpenJDK 21.0.10, 13th Gen Intel Core i7-13700, 6
 
 The **[LIRP Wiki](https://github.com/octaviospain/lirp/wiki)** is the canonical reference. Start with the page that matches your question:
 
-| Page | What's there                                                                                                                                 |
-|---|----------------------------------------------------------------------------------------------------------------------------------------------|
-| [Home](https://github.com/octaviospain/lirp/wiki) | Guided tour, entry points by use case                                                                                                        |
-| [Consuming LIRP](https://github.com/octaviospain/lirp/wiki/Consuming-LIRP) | External-consumer setup: Gradle plugin, Gradle manual, Maven, compatibility matrix, KSP troubleshooting                                      |
-| [Core Concepts](https://github.com/octaviospain/lirp/wiki/Core-Concepts) | Reactive entities, `reactiveProperty()`, lazy publishers, events, subscription patterns, `withEventsDisabled`                                |
-| [Query DSL](https://github.com/octaviospain/lirp/wiki/Query-DSL) | type-safe, Kotlin-native query DSL for filtering, ordering, and paginating entities                                                          |
+| Page | What's there |
+|---|---|
+| [Home](https://github.com/octaviospain/lirp/wiki) | Guided tour, entry points by use case |
+| [Consuming LIRP](https://github.com/octaviospain/lirp/wiki/Consuming-LIRP) | External-consumer setup: Gradle plugin, Gradle manual, Maven, compatibility matrix, KSP troubleshooting |
+| [Core Concepts](https://github.com/octaviospain/lirp/wiki/Core-Concepts) | Reactive entities, `reactiveProperty()`, lazy publishers, events, subscription patterns, `withEventsDisabled` |
+| [Query DSL](https://github.com/octaviospain/lirp/wiki/Query-DSL) | Type-safe, Kotlin-native query DSL for filtering, ordering, and paginating entities |
 | [DDD & Aggregates](https://github.com/octaviospain/lirp/wiki/DDD-and-Aggregates) | `@Aggregate`, `aggregate`, `optionalAggregate`, collection delegates, cascade, bubble-up, `CollectionChangeEvent`, app-side ↔ SQL FK mapping |
-| [Persistence](https://github.com/octaviospain/lirp/wiki/Persistence) | Repository hierarchy, `PersistentRepositoryBase`, debounced write pipeline, deferred loading                                                 |
-| [SQL Persistence](https://github.com/octaviospain/lirp/wiki/SQL-Persistence) | `SqlRepository`, entity annotations, type mapping, dialect support, batch SQL, foreign keys & junction tables, deferred FK installation      |
-| [Transactional Boundaries](https://github.com/octaviospain/lirp/wiki/Transactional-Boundaries) | Single-aggregate atomicity, `@Version` optimistic locking, `Conflict` event, saga/compensation pattern                                       |
-| [JSON Persistence](https://github.com/octaviospain/lirp/wiki/JSON-Persistence) | `JsonFileRepository`, `LirpEntitySerializer`, polymorphic serializers, deferred loading, `JsonFkPolicy` reconciliation                       |
-| [JavaFX Integration](https://github.com/octaviospain/lirp/wiki/JavaFX-Integration) | `lirp-fx`, `fxAggregateList`/`fxAggregateSet`, scalar delegates, dual notification, FX thread dispatch                                       |
-| [Projection Maps](https://github.com/octaviospain/lirp/wiki/Projection-Maps) | `projectionMap` and `fxProjectionMap` — read-only grouped views                                                                              |
-| [Java Interop](https://github.com/octaviospain/lirp/wiki/Java-Interop) | Full Java examples for entities, repositories, subscriptions, collection events                                                              |
-| [Architecture Overview](https://github.com/octaviospain/lirp/wiki/Architecture-Overview) | Entity hierarchy, event flow, module dependency, repository lifecycle diagrams                                                               |
+| [Persistence](https://github.com/octaviospain/lirp/wiki/Persistence) | Repository hierarchy, `PersistentRepositoryBase`, debounced write pipeline, deferred loading |
+| [SQL Persistence](https://github.com/octaviospain/lirp/wiki/SQL-Persistence) | `SqlRepository`, entity annotations, type mapping, dialect support, batch SQL, foreign keys & junction tables, deferred FK installation |
+| [Transactional Boundaries](https://github.com/octaviospain/lirp/wiki/Transactional-Boundaries) | Single-aggregate atomicity, `@Version` optimistic locking, `Conflict` event, saga/compensation pattern |
+| [JSON Persistence](https://github.com/octaviospain/lirp/wiki/JSON-Persistence) | `JsonFileRepository`, `LirpEntitySerializer`, polymorphic serializers, deferred loading, `JsonFkPolicy` reconciliation |
+| [JavaFX Integration](https://github.com/octaviospain/lirp/wiki/JavaFX-Integration) | `lirp-fx`, `fxAggregateList`/`fxAggregateSet`, scalar delegates, dual notification, FX thread dispatch |
+| [Projection Maps](https://github.com/octaviospain/lirp/wiki/Projection-Maps) | `projectionMap` and `fxProjectionMap` — read-only grouped views |
+| [Java Interop](https://github.com/octaviospain/lirp/wiki/Java-Interop) | Full Java examples for entities, repositories, subscriptions, collection events |
+| [Architecture Overview](https://github.com/octaviospain/lirp/wiki/Architecture-Overview) | Entity hierarchy, event flow, module dependency, repository lifecycle diagrams |
+
+### Module overview
+
+| Module | Role |
+|---|---|
+| `lirp-api` | Pure interfaces & contracts: `ReactiveEntity`, `Repository`, event types, annotations (`@PersistenceMapping`, `@Aggregate`, `@Indexed`, `@Version`, `@LirpRepository`). No implementation. |
+| `lirp-core` | Reactive entity machinery (`ReactiveEntityBase`, `reactiveProperty`), `VolatileRepository`, `JsonFileRepository`, `LirpEntitySerializer`, `projectionMap`, `LirpContext`, debounced write pipeline. |
+| `lirp-ksp` | KSP processor generating per-entity `<Entity>_LirpTableDef`, `LirpFxScalarAccessor`, repository registration. Drives convention-over-configuration codegen. |
+| `lirp-sql-api` | Pure SQL contracts: `SqlTableDef`, `JunctionAware`, `ForeignKeyAware`, `VersionedTableDef`. Sits between `lirp-api` and `lirp-sql` — no implementation, no Exposed/HikariCP dependency. |
+| `lirp-sql` | `SqlRepository` built on JetBrains Exposed + HikariCP. Supports PostgreSQL/MySQL/MariaDB/SQLite (MS SQL/Oracle untested). |
+| `lirp-fx` | JavaFX bridge: `fxAggregateList`/`fxAggregateSet`, scalar delegates (`fxString`, `fxInteger`...), read-only `ObservableMap` projections, FX thread dispatch. |
+| `lirp-gradle-plugin` | `net.transgressoft.lirp.sql` Gradle plugin auto-configuring KSP for consumers. |
+| `lirp-benchmark` | JMH benchmarks. |
 
 ## Contributing
 
