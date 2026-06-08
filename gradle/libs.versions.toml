@@ -11,13 +11,13 @@ kctfork = "0.13.0"
 postgresql = "42.7.11"
 mysql = "9.7.0"
 mariadb = "3.5.8"
-sqlite = "3.53.1.0"
+sqlite = "3.53.2.0"
 jmh = "1.37"
 jol = "0.17"
 springDataJpa = "4.0.5"
-hibernate = "7.3.5.Final"
+hibernate = "7.4.0.Final"
 jakartaPersistence = "3.2.0"
-ch-qos-logback = "1.5.32"
+ch-qos-logback = "1.5.34"
 
 [libraries]
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
@@ -56,13 +56,13 @@ postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" 
 mysql = { module = "com.mysql:mysql-connector-j", version.ref = "mysql" }
 mariadb = { module = "org.mariadb.jdbc:mariadb-java-client", version.ref = "mariadb" }
 sqlite = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite" }
-mockk = "io.mockk:mockk:1.14.9"
+mockk = "io.mockk:mockk:1.14.11"
 logback-core = { module = "ch.qos.logback:logback-core", version.ref = "ch-qos-logback" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "ch-qos-logback" }
 jsr305 = "com.google.code.findbugs:jsr305:3.0.2"
-kotlin-logging = "io.github.oshai:kotlin-logging-jvm:8.0.02"
+kotlin-logging = "io.github.oshai:kotlin-logging-jvm:8.0.4"
 
-junit-bom = "org.junit:junit-bom:6.0.3"
+junit-bom = "org.junit:junit-bom:6.1.0"
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 
