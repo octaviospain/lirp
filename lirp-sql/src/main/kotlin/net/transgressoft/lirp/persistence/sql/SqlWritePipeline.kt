@@ -102,6 +102,15 @@ internal class SqlWritePipeline<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     fun executeUpdate(op: PendingUpdate<K, R>, conflicts: MutableList<PendingConflict<K>>) {
         val expected = op.expectedVersion
         val vc = versionCol
+        // Invariant: a versioned table (vc != null) must always carry an expectedVersion.
+        // extractVersion() reads toParams()[vc] as? Long and the version column is always
+        // populated for @Version entities, so expected == null with vc != null is a caller bug.
+        if (vc != null && expected == null) {
+            error(
+                "executeUpdate called with a null expectedVersion for versioned entity id=${op.entity.id}. " +
+                    "This is a caller bug: extractVersion() should always produce a non-null Long for @Version entities."
+            )
+        }
         val rowsAffected =
             table.update({
                 // Safe: pkCol is the PK column registered by ExposedTableInterpreter. Exposed's
@@ -112,14 +121,16 @@ internal class SqlWritePipeline<K : Comparable<K>, R : ReactiveEntity<K, R>>(
             }) { stmt ->
                 tableDef.toParams(op.entity, table).forEach { (col, value) ->
                     // Safe: col was registered by ExposedTableInterpreter from the declared LirpTableDef column type.
+                    // Skip the version column here — it is set exclusively via the explicit +1 override below so that
+                    // toParams' pre-bump value never reaches the statement unguarded.
+                    if (col == vc) return@forEach
                     @Suppress("UNCHECKED_CAST")
                     stmt[col as Column<Any?>] = value
                 }
-                // Advance the DB version to match the in-memory bump applied below. `toParams`
-                // emits the pre-bump `entity.version` (what the caller saw), so without this
-                // override the UPDATE would re-write the same version and leave the row at the
-                // expected value — the next mutation's `WHERE version = expected + 1` predicate
-                // would then miss and spuriously register an optimistic-lock conflict.
+                // Advance the DB version to match the in-memory bump applied below. toParams
+                // emits the pre-bump entity.version (what the caller saw); excluding it above
+                // and setting it only here guarantees the version column is always written as
+                // expected + 1, never as the stale pre-bump value.
                 if (expected != null && vc != null) {
                     @Suppress("UNCHECKED_CAST")
                     stmt[vc as Column<Any?>] = expected + 1
