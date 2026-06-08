@@ -17,12 +17,17 @@
 
 package net.transgressoft.lirp.persistence.sql
 
+import net.transgressoft.lirp.event.ReactiveScope
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.engine.names.WithDataTestName
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.sql.SQLException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 
 /**
  * Database configuration for data-driven integration tests.
@@ -68,16 +73,70 @@ object DatabaseTestSupport {
     }
 
     /**
+     * Reads a single row by primary key via raw JDBC on [dataSource], returning the requested
+     * [columns] as a name → value map (SQL `NULL`s map to `null`), or `null` when no row matches.
+     *
+     * Integration tests poll the persisted row with this instead of reconstructing a full
+     * [SqlRepository] on every `eventually` iteration: repeated repository construction opens a new
+     * pooled connection, bulk-loads the whole table, and registers reactive subscriptions on each
+     * poll — adding load to the very scopes the pending flush depends on. A single short-lived read
+     * keeps the polling loop cheap.
+     */
+    fun readRow(dataSource: HikariDataSource, table: String, id: String, vararg columns: String): Map<String, Any?>? =
+        dataSource.connection.use { conn ->
+            // Quote identifiers with the dialect's own quote string so reserved words (e.g. `year`)
+            // parse on every engine — MySQL/MariaDB use backticks, the rest use double quotes.
+            val q = conn.metaData.identifierQuoteString.takeIf { it.isNotBlank() } ?: "\""
+            val selectCols = columns.joinToString(", ") { "$q$it$q" }
+            conn.prepareStatement("SELECT $selectCols FROM $q$table$q WHERE id = ?").use { ps ->
+                ps.setString(1, id)
+                ps.executeQuery().use { rs ->
+                    if (!rs.next()) {
+                        null
+                    } else {
+                        columns.associateWith { col ->
+                            val value = rs.getObject(col)
+                            if (rs.wasNull()) null else value
+                        }
+                    }
+                }
+            }
+        }
+
+    /**
      * Runs [block] with a fresh [HikariDataSource] from [db], dropping [tableDef] beforehand
      * for isolation. The data source is always closed in a finally block, even if the test fails.
      */
     inline fun withDatabaseTest(db: DbConfig, tableDef: SqlTableDef<*>, block: (HikariDataSource) -> Unit) {
+        // Isolate the reactive scopes per test. The production ioScope is JVM-global and
+        // single-threaded; under the integration suite a slow dialect's blocking flush would
+        // otherwise queue every other repository's flush behind it on that one shared thread,
+        // starving the async write under verification (reproducible on any dialect, including
+        // in-memory H2, and on master). A fresh scope per test keeps one test's flush from blocking
+        // another. The scopes mirror the production parallelism exactly — ioScope stays
+        // single-threaded so the global write-serialization guarantee that
+        // SqlRepositoryConcurrencyIntegrationTest relies on is preserved — they are merely isolated,
+        // not widened. The scope is cancelled and the defaults restored afterwards; this relies on
+        // the integration specs running sequentially, so the global swap is never concurrent.
+        val isolatedFlowScope = CoroutineScope(Dispatchers.Default.limitedParallelism(4) + SupervisorJob())
+        val isolatedIoScope = CoroutineScope(Dispatchers.IO.limitedParallelism(1) + SupervisorJob())
+        val previousFlowScope = ReactiveScope.flowScope
+        val previousIoScope = ReactiveScope.ioScope
+        ReactiveScope.flowScope = isolatedFlowScope
+        ReactiveScope.ioScope = isolatedIoScope
         val dataSource = db.buildDataSource()
         try {
             dropTable(dataSource, tableDef)
             block(dataSource)
         } finally {
-            dataSource.close()
+            try {
+                dataSource.close()
+            } finally {
+                isolatedFlowScope.cancel()
+                isolatedIoScope.cancel()
+                ReactiveScope.flowScope = previousFlowScope
+                ReactiveScope.ioScope = previousIoScope
+            }
         }
     }
 }

@@ -137,7 +137,6 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
             allConstructorParams
                 .filter { param -> param.name != null && param.name !in delegateNames && param.name in memberProps }
                 .map { param ->
-                    @Suppress("UNCHECKED_CAST")
                     val prop =
                         memberProps[param.name!!]
                             ?: error("Constructor param '${param.name}' has no corresponding member property on ${kClass.simpleName}")

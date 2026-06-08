@@ -56,71 +56,75 @@ internal class SqlVersionClobberTest : StringSpec({
 
     "[SqlWritePipeline] fails fast when executeUpdate receives null expectedVersion for versioned entity" {
         val repo: SqlRepository<Int, TestVersionedPerson> = SqlRepository(freshJdbcUrl(), TestVersionedPersonTableDef)
-        val pipeline = pipelineOf(repo)
+        try {
+            val pipeline = pipelineOf(repo)
 
-        val person =
-            TestVersionedPerson(1).also {
-                it.firstName = "Alice"
-                it.lastName = "Smith"
-                it.age = 30
+            val person =
+                TestVersionedPerson(1).also {
+                    it.firstName = "Alice"
+                    it.lastName = "Smith"
+                    it.age = 30
+                }
+            // Insert the entity so there is a row to update.
+            repo.add(person)
+            eventually(5.seconds) { repo.findById(1).shouldBePresent { it shouldBe person } }
+
+            // Drive executeUpdate directly with null expectedVersion — the caller-bug path
+            // that must be rejected with error() rather than silently clobbering the version column.
+            val nullVersionOp = PendingUpdate(person, expectedVersion = null)
+            val conflicts = mutableListOf<PendingConflict<Int>>()
+
+            shouldThrow<IllegalStateException> {
+                transaction(db = dbOf(repo)) {
+                    pipeline.executeUpdate(nullVersionOp, conflicts)
+                }
             }
-        // Insert the entity so there is a row to update.
-        repo.add(person)
-        eventually(5.seconds) { repo.findById(1).shouldBePresent { it shouldBe person } }
 
-        // Drive executeUpdate directly with null expectedVersion — the caller-bug path
-        // that must be rejected with error() rather than silently clobbering the version column.
-        val nullVersionOp = PendingUpdate(person, expectedVersion = null)
-        val conflicts = mutableListOf<PendingConflict<Int>>()
+            // No conflict accumulated — fail-fast exits before conflict logic.
+            conflicts.isEmpty() shouldBe true
 
-        shouldThrow<IllegalStateException> {
-            transaction(db = dbOf(repo)) {
-                pipeline.executeUpdate(nullVersionOp, conflicts)
-            }
+            // Version remains 0 on the live entity (nothing was flushed by the rejected call).
+            person.version shouldBe 0L
+        } finally {
+            repo.close()
         }
-
-        // No conflict accumulated — fail-fast exits before conflict logic.
-        conflicts.isEmpty() shouldBe true
-
-        // Version remains 0 on the live entity (nothing was flushed by the rejected call).
-        person.version shouldBe 0L
-
-        repo.close()
     }
 
     "[SqlWritePipeline] bumps version to expected + 1 on a normal versioned update" {
         val repo: SqlRepository<Int, TestVersionedPerson> = SqlRepository(freshJdbcUrl(), TestVersionedPersonTableDef)
-        val db = dbOf(repo)
+        try {
+            val db = dbOf(repo)
 
-        val person =
-            TestVersionedPerson(2).also {
-                it.firstName = "Bob"
-                it.lastName = "Jones"
-                it.age = 25
-            }
-        repo.add(person)
-
-        // Wait for the INSERT to reach the DB before mutating, so the subsequent mutation
-        // is enqueued as an UPDATE rather than merged into the pending INSERT.
-        eventually(5.seconds) {
-            val count =
-                transaction(db = db) {
-                    exec("SELECT COUNT(*) FROM ${TestVersionedPersonTableDef.tableName} WHERE id = 2") { rs ->
-                        if (rs.next()) rs.getInt(1) else 0
-                    }
+            val person =
+                TestVersionedPerson(2).also {
+                    it.firstName = "Bob"
+                    it.lastName = "Jones"
+                    it.age = 25
                 }
-            count shouldBe 1
+            repo.add(person)
+
+            // Wait for the INSERT to reach the DB before mutating, so the subsequent mutation
+            // is enqueued as an UPDATE rather than merged into the pending INSERT.
+            eventually(5.seconds) {
+                val count =
+                    transaction(db = db) {
+                        exec("SELECT COUNT(*) FROM ${TestVersionedPersonTableDef.tableName} WHERE id = 2") { rs ->
+                            if (rs.next()) rs.getInt(1) else 0
+                        }
+                    }
+                count shouldBe 1
+            }
+
+            // Mutate the entity — now an UPDATE is enqueued; subscription captures expectedVersion = 0L.
+            // Pipeline must persist version = 1L and bump the in-memory version to match.
+            person.firstName = "Robert"
+
+            eventually(5.seconds) {
+                // person is the live registry entity; bumpVersion sets person.version directly after flush.
+                person.version shouldBe 1L
+            }
+        } finally {
+            repo.close()
         }
-
-        // Mutate the entity — now an UPDATE is enqueued; subscription captures expectedVersion = 0L.
-        // Pipeline must persist version = 1L and bump the in-memory version to match.
-        person.firstName = "Robert"
-
-        eventually(5.seconds) {
-            // person is the live registry entity; bumpVersion sets person.version directly after flush.
-            person.version shouldBe 1L
-        }
-
-        repo.close()
     }
 })

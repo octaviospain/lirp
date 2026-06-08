@@ -19,11 +19,25 @@ package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.databases
 import io.kotest.assertions.nondeterministic.eventually
+import io.kotest.assertions.nondeterministic.eventuallyConfig
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.datatest.withTests
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+
+/**
+ * Polling config for cross-dialect persistence assertions. A mutation is persisted asynchronously
+ * (reactive event dispatch → debounced flush on a shared single-threaded write scope), so reads are
+ * retried with a generous window; a coarse `interval` keeps the lightweight raw reads from adding
+ * load to the very scopes the pending flush depends on.
+ */
+private val persistedRowPoll =
+    eventuallyConfig {
+        duration = 30.seconds
+        interval = 200.milliseconds
+    }
 
 /**
  * Joint cross-dialect canary asserting that the three KSP robustness fixes from issue #207
@@ -91,17 +105,11 @@ internal class CombinedKspRobustnessIT : FunSpec({
                     it.notes = "n1"
                     it.year = 2024
                 }
-                eventually(10.seconds) {
-                    val verify = SqlRepository(ds, CombinedKspFixtureEntity_LirpTableDef)
-                    try {
-                        verify.findById("e2").shouldBePresent {
-                            it.label shouldBe "L"
-                            it.year shouldBe 2024.toShort()
-                            it.notes shouldBe "n1"
-                        }
-                    } finally {
-                        verify.close()
-                    }
+                eventually(persistedRowPoll) {
+                    val row = DatabaseTestSupport.readRow(ds, "combined_ksp_fixture", "e2", "label", "year", "notes")!!
+                    row["label"] shouldBe "L"
+                    (row["year"] as Number).toShort() shouldBe 2024.toShort()
+                    row["notes"] shouldBe "n1"
                 }
                 repo.close()
             }
@@ -128,15 +136,9 @@ internal class CombinedKspRobustnessIT : FunSpec({
                     it.nullableYear shouldBe null
                     it.nullableYear = 999
                 }
-                eventually(10.seconds) {
-                    val afterAssign = SqlRepository(ds, CombinedKspFixtureEntity_LirpTableDef)
-                    try {
-                        afterAssign.findById("e3").shouldBePresent {
-                            it.nullableYear shouldBe 999.toShort()
-                        }
-                    } finally {
-                        afterAssign.close()
-                    }
+                eventually(persistedRowPoll) {
+                    val row = DatabaseTestSupport.readRow(ds, "combined_ksp_fixture", "e3", "nullable_year")!!
+                    (row["nullable_year"] as Number).toShort() shouldBe 999.toShort()
                 }
                 repo2.close()
 
@@ -144,15 +146,9 @@ internal class CombinedKspRobustnessIT : FunSpec({
                 repo4.findById("e3").shouldBePresent {
                     it.nullableYear = null
                 }
-                eventually(10.seconds) {
-                    val afterClear = SqlRepository(ds, CombinedKspFixtureEntity_LirpTableDef)
-                    try {
-                        afterClear.findById("e3").shouldBePresent {
-                            it.nullableYear shouldBe null
-                        }
-                    } finally {
-                        afterClear.close()
-                    }
+                eventually(persistedRowPoll) {
+                    val row = DatabaseTestSupport.readRow(ds, "combined_ksp_fixture", "e3", "nullable_year")!!
+                    row["nullable_year"] shouldBe null
                 }
                 repo4.close()
             }
@@ -183,23 +179,26 @@ internal class CombinedKspRobustnessIT : FunSpec({
                     it.setCacheValue(99)
                     it.notes = "trigger"
                 }
-                eventually(10.seconds) {
-                    val verify = SqlRepository(ds, CombinedKspFixtureEntity_LirpTableDef)
-                    try {
-                        verify.findById("e4").shouldBePresent {
-                            // The sibling flush happened (rules out "no flush at all" as the
-                            // explanation for cache being absent from the row).
-                            it.notes shouldBe "trigger"
-                            // The private field is still excluded — the 99 written in-memory
-                            // never reached the row, so the reloaded entity gets the initializer
-                            // default again.
-                            it.cacheValue() shouldBe 0
-                        }
-                    } finally {
-                        verify.close()
-                    }
+                // Poll the persisted row with a lightweight raw read until the sibling flush lands —
+                // constructing a repository per poll would add event-subscription load to the shared
+                // reactive scopes and starve the very flush we are waiting for.
+                eventually(persistedRowPoll) {
+                    val row = DatabaseTestSupport.readRow(ds, "combined_ksp_fixture", "e4", "notes")!!
+                    // The sibling flush happened (rules out "no flush at all" as the explanation
+                    // for the cache being absent from the row).
+                    row["notes"] shouldBe "trigger"
                 }
                 reloaded.close()
+
+                // The flush has landed; a single reload confirms the private field was excluded —
+                // the 99 written in-memory never reached the row, so the rehydrated entity falls
+                // back to the property initializer default.
+                val verify = SqlRepository(ds, CombinedKspFixtureEntity_LirpTableDef)
+                try {
+                    verify.findById("e4").shouldBePresent { it.cacheValue() shouldBe 0 }
+                } finally {
+                    verify.close()
+                }
             }
         }
     }
