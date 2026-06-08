@@ -250,6 +250,13 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         @Volatile
         private var maxDelayJob: Job? = null
 
+        // Nanosecond timestamp of the first enqueue in the current mutation window.
+        // Set on the first enqueue of a window; reset to 0 on flush so the next window
+        // gets a fresh deadline. The max-delay cap is derived from this value, not from
+        // when maxDelayJob was last armed, so a new enqueue after an idle flush cannot
+        // push the cap's deadline forward.
+        private val startNanos = AtomicLong(0L)
+
         /**
          * Persists the grouped pending payload to the backing store.
          *
@@ -301,6 +308,9 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
                     clearFlag = hadClear.getAndSet(false)
                     capturedEpoch = clearEpoch.get()
                 }
+                // Reset the window origin so the next enqueue after this flush starts a fresh
+                // max-delay deadline rather than inheriting the stale timestamp.
+                startNanos.set(0L)
                 if (snapshot.isEmpty() && !clearFlag) return
                 val inserts = snapshot.values.filterIsInstance<PendingCell.Insert<K, R>>().map { it.entity }
                 val updates =
@@ -412,14 +422,28 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         }
 
         private fun scheduleFlush() {
-            // Start max-delay job only on the first enqueue of a new mutation window.
-            // This job fires unconditionally after maxDelayMillis to prevent starvation.
-            // The null-check is not synchronized: two concurrent calls may both launch a max-delay
-            // job. This is harmless — the second flush drains an already-empty map and returns.
+            // Record the first-enqueue timestamp for the current mutation window.
+            // compareAndSet(0, now) is a no-op on every subsequent enqueue in the same window,
+            // ensuring the max-delay deadline is always relative to the FIRST enqueue, not the
+            // most-recent one. startNanos is reset to 0 in flush() so the next window gets a
+            // fresh origin. The unsynchronized read is intentional: two concurrent first-enqueues
+            // may both observe 0 and both call compareAndSet; only one wins, and both outcomes
+            // produce a valid first-enqueue time within a few nanoseconds of each other.
+            val now = System.nanoTime()
+            startNanos.compareAndSet(0L, now)
+
+            // Arm the max-delay cap only when the current window has no active cap job.
+            // Compute the remaining window relative to startNanos so that a new enqueue arriving
+            // after a debounce-triggered flush (which nulls maxDelayJob) does not re-arm a fresh
+            // full maxDelayMillis — it schedules only the time remaining until the original
+            // deadline. The unsynchronized null-check is harmless: two concurrent calls may both
+            // launch a max-delay job. The second flush drains an already-empty map and returns.
             if (maxDelayJob == null || maxDelayJob!!.isCompleted || maxDelayJob!!.isCancelled) {
+                val elapsedMillis = (System.nanoTime() - startNanos.get()) / 1_000_000L
+                val remainingMillis = (maxDelayMillis - elapsedMillis).coerceAtLeast(0L)
                 maxDelayJob =
                     ReactiveScope.ioScope.launch {
-                        delay(maxDelayMillis.milliseconds)
+                        delay(remainingMillis.milliseconds)
                         maxDelayJob = null
                         flush()
                     }
