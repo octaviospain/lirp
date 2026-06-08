@@ -122,7 +122,6 @@ internal object TableDefSourceEmitter {
         val selfType = params.selfType
         val canGenerateSqlMapping = params.canGenerateSqlMapping
         val columns = params.columns
-        val constructorParamNames = params.constructorParamNames
         val foreignKeys = params.foreignKeys
         val junctionRefs = params.junctionRefs
         appendLine("/** KSP-generated table descriptor for [$className]. */")

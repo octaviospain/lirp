@@ -573,6 +573,28 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
         return hashBucket[value]?.toSet() ?: emptySet()
     }
 
+    /**
+     * Returns the live index bucket for [value] under [indexName] without copying it.
+     *
+     * Both bucket types — sorted navigable-set and hash `ConcurrentHashMap.newKeySet()` — are
+     * weakly-consistent concurrent sets safe to iterate without a defensive copy. Callers must
+     * only read (intersect/flatMap), never mutate the returned collection.
+     *
+     * The public [findByIndex] contract (defensive `.toSet()` snapshot) is preserved for external
+     * callers. This internal variant exists solely for the query planner hot path where the
+     * per-lookup allocation matters.
+     */
+    internal fun findByIndexNoCopy(indexName: String, value: Any): Collection<T> {
+        val sortedBucket = sortedIndexes[indexName]
+        if (sortedBucket != null) {
+            return sortedBucket[requireComparableKey(indexName, value)] ?: emptySet()
+        }
+        val hashBucket =
+            hashIndexes[indexName]
+                ?: throw IllegalArgumentException("No index declared for property '$indexName'")
+        return hashBucket[value] ?: emptySet()
+    }
+
     override fun findFirstByIndex(indexName: String, value: Any): Optional<out T> {
         val sortedBucket = sortedIndexes[indexName]
         if (sortedBucket != null) {

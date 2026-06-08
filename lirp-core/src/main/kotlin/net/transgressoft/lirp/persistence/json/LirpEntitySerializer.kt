@@ -30,6 +30,7 @@ import net.transgressoft.lirp.persistence.ReactivePropertyDelegateWithAccessors
 import net.transgressoft.lirp.persistence.ReactivePropertyEntry
 import kotlin.reflect.KClass
 import kotlin.reflect.KParameter
+import kotlin.reflect.KProperty1
 import kotlin.reflect.full.createType
 import kotlin.reflect.full.memberProperties
 import kotlin.reflect.full.primaryConstructor
@@ -78,7 +79,8 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
      */
     private data class ConstructorParamInfo(
         val param: KParameter,
-        val serializer: KSerializer<Any?>
+        val serializer: KSerializer<Any?>,
+        val property: KProperty1<*, *>
     )
 
     /**
@@ -134,7 +136,13 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
         constructorParams =
             allConstructorParams
                 .filter { param -> param.name != null && param.name !in delegateNames && param.name in memberProps }
-                .map { param -> ConstructorParamInfo(param, serializer(param.type)) }
+                .map { param ->
+                    @Suppress("UNCHECKED_CAST")
+                    val prop =
+                        memberProps[param.name!!]
+                            ?: error("Constructor param '${param.name}' has no corresponding member property on ${kClass.simpleName}")
+                    ConstructorParamInfo(param, serializer(param.type), prop)
+                }
 
         // Track constructor params that are also reactive delegates — they are serialized as
         // delegate fields but must be forwarded to the constructor during deserialization
@@ -302,15 +310,10 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
         val composite = encoder.beginStructure(descriptor)
         var index = 0
 
-        // Encode constructor params via their corresponding member properties
+        // Encode constructor params via their memoized member properties (resolved once in init)
         for (info in constructorParams) {
-            val propName = info.param.name!!
-            val memberProp =
-                kClass.memberProperties.find { it.name == propName }
-                    ?: throw IllegalStateException(
-                        "Constructor param '$propName' has no corresponding member property on ${kClass.simpleName}"
-                    )
-            val propValue = memberProp.get(value)
+            @Suppress("UNCHECKED_CAST")
+            val propValue = (info.property as KProperty1<E, *>).get(value)
             composite.encodeSerializableElement(descriptor, index++, info.serializer, propValue)
         }
 
