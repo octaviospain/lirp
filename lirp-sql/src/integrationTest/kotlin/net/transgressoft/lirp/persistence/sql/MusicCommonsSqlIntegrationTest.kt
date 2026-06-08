@@ -199,16 +199,17 @@ class MusicCommonsSqlIntegrationTest : MusicCommonsIntegrationTestBase() {
     /**
      * Registers [registry] under [entityClass] in [ctx] via reflection.
      *
-     * [LirpContext.register] is `internal` and receives a `$lirp_core` JVM name suffix due to
-     * Kotlin's internal visibility mangling, so it is not directly callable from the lirp-sql module.
+     * [LirpContext.register] is `internal` and receives a module-name JVM suffix due to Kotlin's
+     * internal visibility mangling, so it is not directly callable from the lirp-sql module. The
+     * method is resolved by its `register$` prefix and parameter types rather than a hard-coded
+     * suffix, which keeps the lookup stable across changes to the mangling scheme.
      */
     private fun registerInContext(ctx: LirpContext, entityClass: Class<*>, registry: Registry<*, *>) {
         val method =
-            LirpContext::class.java.getDeclaredMethod(
-                "register\$lirp_core",
-                Class::class.java,
-                Registry::class.java
-            )
+            LirpContext::class.java.declaredMethods.single {
+                it.name.startsWith("register\$") &&
+                    it.parameterTypes.contentEquals(arrayOf(Class::class.java, Registry::class.java))
+            }
         method.isAccessible = true
         method.invoke(ctx, entityClass, registry)
     }

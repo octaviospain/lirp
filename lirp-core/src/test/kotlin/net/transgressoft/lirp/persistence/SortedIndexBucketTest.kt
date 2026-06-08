@@ -189,6 +189,7 @@ internal class SortedIndexBucketTest : StringSpec({
         bucket.shouldNotBeNull()
         bucket.firstKey() shouldBe 10
         bucket.lastKey() shouldBe 50
+        bucket.keys.map { it as Int }.isSorted().shouldBeTrue()
 
         repo.sortedBucketForIndex("label").shouldBeNull()
     }

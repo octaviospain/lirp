@@ -24,7 +24,6 @@ import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.Table
 import java.math.BigDecimal
-import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
@@ -35,7 +34,6 @@ import kotlinx.datetime.LocalDateTime
  * The `uuid` column uses [ColumnType.UuidType] which Exposed translates to the native UUID type per dialect.
  * The `enum_val` column uses [ColumnType.EnumType] which is stored as `VARCHAR(255)` for portability.
  */
-@OptIn(ExperimentalUuidApi::class)
 object AllTypesTableDef : SqlTableDef<AllTypesEntity> {
     override val tableName = "all_types"
     override val columns =

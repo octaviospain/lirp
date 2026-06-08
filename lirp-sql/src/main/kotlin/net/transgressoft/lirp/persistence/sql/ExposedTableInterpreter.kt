@@ -26,7 +26,6 @@ import org.jetbrains.exposed.v1.core.ReferenceOption
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.datetime.date
 import org.jetbrains.exposed.v1.datetime.datetime
-import kotlin.uuid.ExperimentalUuidApi
 
 /**
  * Converts a persistence-agnostic [LirpTableDef] descriptor into a live JetBrains Exposed [Table]
@@ -139,7 +138,6 @@ class ExposedTableInterpreter {
  * Internal Exposed [Table] subclass that registers columns from a list of [ColumnDef] descriptors
  * and exposes a column-by-name index populated during construction.
  */
-@OptIn(ExperimentalUuidApi::class)
 private class LirpDynamicTable(
     tableName: String,
     columnDefs: List<ColumnDef>,
@@ -215,7 +213,6 @@ private class LirpDynamicJunctionTable(
         primaryKey = PrimaryKey(parentCol, itemCol)
     }
 
-    @OptIn(ExperimentalUuidApi::class)
     private fun buildJunctionColumn(col: JunctionColumnDef): Column<*> {
         val raw: Column<*> =
             when (val type = col.type) {

@@ -29,7 +29,6 @@ import org.jetbrains.exposed.v1.jdbc.JdbcTransaction
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import javax.sql.DataSource
-import kotlin.uuid.ExperimentalUuidApi
 
 /**
  * Installs and manages the SQL schema for a [SqlRepository]'s entity and junction tables,
@@ -252,7 +251,6 @@ internal class SqlSchemaInstaller<K : Comparable<K>, R>(
  * rendering the `REFERENCES <tbl>(<col>)` clause, so the shadow table never needs to be created
  * in the database.
  */
-@OptIn(ExperimentalUuidApi::class)
 internal class ShadowEntityIdTable(
     tableName: String,
     columnName: String,
