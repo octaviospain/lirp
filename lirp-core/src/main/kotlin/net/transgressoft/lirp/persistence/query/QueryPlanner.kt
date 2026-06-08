@@ -19,6 +19,7 @@ package net.transgressoft.lirp.persistence.query
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.persistence.Registry
+import net.transgressoft.lirp.persistence.RegistryBase
 import io.github.oshai.kotlinlogging.KotlinLogging
 import java.util.NavigableMap
 import kotlin.reflect.KProperty1
@@ -197,12 +198,21 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
         indexable: List<IndexableLeaf>,
         registry: Registry<*, T>
     ): Pair<Strategy, Sequence<T>> {
+        // Use the internal non-copying index read when available (RegistryBase), falling back to the
+        // public defensive-copy findByIndex for any other Registry implementation.
+        val noCopyRegistry = registry as? RegistryBase<*, T>
         var working: Set<T>? = null
         for (leaf in indexable) {
-            val hit: Set<T> =
+            val hit: Collection<T> =
                 when (leaf) {
-                    is IndexableLeaf.Single -> registry.findByIndex(leaf.indexName, leaf.value)
-                    is IndexableLeaf.Multi -> leaf.values.flatMapTo(HashSet()) { registry.findByIndex(leaf.indexName, it) }
+                    is IndexableLeaf.Single ->
+                        noCopyRegistry?.findByIndexNoCopy(leaf.indexName, leaf.value)
+                            ?: registry.findByIndex(leaf.indexName, leaf.value)
+                    is IndexableLeaf.Multi ->
+                        leaf.values.flatMapTo(HashSet()) { v ->
+                            noCopyRegistry?.findByIndexNoCopy(leaf.indexName, v)
+                                ?: registry.findByIndex(leaf.indexName, v)
+                        }
                     // RangeSlice candidates are pre-materialised from NavigableMap bucket sets —
                     // no further findByIndex dispatch needed. The cast is safe: RangeSlice is
                     // constructed only via rangeLeaf(), which receives Set<T> from rangeSlice().
@@ -211,7 +221,7 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
                         leaf.candidates as Set<T>
                     }
                 }
-            working = working?.let { it intersect hit } ?: hit
+            working = working?.let { it intersect hit } ?: hit.toHashSet()
             if (working.isEmpty()) break
         }
         val candidateSet = working ?: emptySet()
