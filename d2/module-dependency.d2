@@ -1,39 +1,79 @@
 direction: right
 
-title: Module Dependency {
+title: Module Dependency Graph {
     near: top-center
     shape: text
     style.font-size: 24
     style.bold: true
 }
 
-lirp-api: "lirp-api (contracts)" {
+lirp-api: "lirp-api\n(pure contracts — no internal deps)" {
     style.fill: "#e8f4fd"
     style.stroke: "#2196f3"
-
-    LirpEntity
-    IdentifiableEntity
-    ReactiveEntity
-    Repository
-    Registry
-    CrudEvent
-    MutationEvent
-    AggregateMutationEvent
 }
 
-lirp-core: "lirp-core (implementations)" {
+lirp-sql-api: "lirp-sql-api\n(SQL table-def contracts)" {
+    style.fill: "#e8f4fd"
+    style.stroke: "#2196f3"
+}
+
+lirp-core: "lirp-core\n(reactive entities, repositories,\nJSON persistence, LirpContext)" {
     style.fill: "#fce4ec"
     style.stroke: "#e91e63"
-
-    ReactiveEntityBase
-    VolatileRepository
-    JsonFileRepository
-    FlexibleJsonFileRepository
-    FlowEventPublisher
-    AggregateRefDelegate
-    LirpContext
 }
 
-lirp-core -> lirp-api: depends on {
-    style.stroke: "#666"
+lirp-ksp: "lirp-ksp\n(KSP processor — codegen)" {
+    style.fill: "#f3e5f5"
+    style.stroke: "#6a1b9a"
+}
+
+lirp-sql: "lirp-sql\n(SqlRepository — Exposed + HikariCP)" {
+    style.fill: "#fff3e0"
+    style.stroke: "#e65100"
+}
+
+lirp-fx: "lirp-fx\n(JavaFX bridge)" {
+    style.fill: "#e8f5e9"
+    style.stroke: "#2e7d32"
+}
+
+lirp-gradle-plugin: "lirp-gradle-plugin\n(auto-configures KSP for consumers)" {
+    style.fill: "#fffde7"
+    style.stroke: "#f9a825"
+}
+
+lirp-benchmark: "lirp-benchmark\n(JMH)" {
+    style.fill: "#eceff1"
+    style.stroke: "#546e7a"
+}
+
+# api edges (compile-scope: api project(...))
+lirp-core -> lirp-api: api
+lirp-ksp -> lirp-api: api
+lirp-sql-api -> lirp-api: api
+lirp-sql -> lirp-api: api
+lirp-sql -> lirp-sql-api: api
+lirp-sql -> lirp-core: api
+lirp-fx -> lirp-core: api
+
+# ksp processor wiring
+lirp-core -> lirp-ksp: ksp {
+    style.stroke-dash: 3
+    style.stroke: "#6a1b9a"
+}
+lirp-sql -> lirp-ksp: ksp {
+    style.stroke-dash: 3
+    style.stroke: "#6a1b9a"
+}
+lirp-fx -> lirp-ksp: kspTest {
+    style.stroke-dash: 3
+    style.stroke: "#6a1b9a"
+}
+
+# benchmark (jmh-scope)
+lirp-benchmark -> lirp-core: jmh
+lirp-benchmark -> lirp-sql: jmh
+lirp-benchmark -> lirp-ksp: ksp {
+    style.stroke-dash: 3
+    style.stroke: "#6a1b9a"
 }

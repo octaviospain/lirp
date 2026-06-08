@@ -12,6 +12,21 @@ LirpEntity: LirpEntity {
     "<<interface>>"
 }
 
+Cloneable: "java.lang.Cloneable" {
+    shape: class
+    "<<interface>>"
+}
+
+FlowPublisher: "Flow.Publisher<MutationEvent>" {
+    shape: class
+    "<<interface>>"
+}
+
+AutoCloseable: AutoCloseable {
+    shape: class
+    "<<interface>>"
+}
+
 IdentifiableEntity: IdentifiableEntity {
     shape: class
     "<<interface>>"
@@ -43,6 +58,21 @@ LirpEntity -> IdentifiableEntity: {
     target-arrowhead.style.filled: false
 }
 IdentifiableEntity -> ReactiveEntity: {
+    style.stroke-dash: 0
+    target-arrowhead.shape: triangle
+    target-arrowhead.style.filled: false
+}
+IdentifiableEntity -> Cloneable: extends {
+    style.stroke-dash: 0
+    target-arrowhead.shape: triangle
+    target-arrowhead.style.filled: false
+}
+ReactiveEntity -> FlowPublisher: extends {
+    style.stroke-dash: 0
+    target-arrowhead.shape: triangle
+    target-arrowhead.style.filled: false
+}
+ReactiveEntity -> AutoCloseable: extends {
     style.stroke-dash: 0
     target-arrowhead.shape: triangle
     target-arrowhead.style.filled: false

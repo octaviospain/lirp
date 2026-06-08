@@ -1,0 +1,50 @@
+direction: down
+
+title: Optimistic-Lock Conflict Recovery {
+    near: top-center
+    shape: text
+    style.font-size: 24
+    style.bold: true
+}
+
+flow: "" {
+    shape: sequence_diagram
+
+    pipeline: SqlWritePipeline
+    db: "SQL backend"
+    recovery: OptimisticLockRecovery
+    inMemory: "in-memory entity"
+    subs: subscribers
+
+    pipeline -> db: "UPDATE … SET …, version = expected + 1\nWHERE id = ? AND version = expected" {
+        style.bold: true
+    }
+    db -> pipeline: "rowsAffected = 0\n(version moved on — conflict)" {
+        style.stroke: "#c62828"
+    }
+    pipeline -> pipeline: "accumulate conflict entry\n(id, expectedVersion)"
+
+    pipeline -> recovery: "recoverEntityFromConflict(id, expectedVersion)\n(drained at start of next flush)"
+    recovery -> db: "re-SELECT canonical row WHERE id = ?"
+    db -> recovery: "canonicalRow (actualVersion)"
+
+    recovery -> inMemory: "withEventsDisabled { applyRow(entity, canonicalRow, table) }" {
+        style.bold: true
+    }
+    recovery -> subs: "emitAsync(Conflict(reconciled, pre-swap clone,\n  expectedVersion, actualVersion))" {
+        style.stroke: "#1565c0"
+        style.bold: true
+    }
+}
+
+notes: Notes {
+    near: bottom-center
+    shape: text
+    style.font-size: 13
+    |md
+    - Conflict detection is post-commit and non-rolling-back: other rows in the same flush are not reverted.
+    - `applyRow` runs under `withEventsDisabled` so reconciliation emits no spurious mutation/Create event.
+    - `Conflict(entities, oldEntities, expectedVersion, actualVersion)`; `actualVersion > expectedVersion`, or `-1` sentinel when a third writer deleted the row.
+    - After `MAX_RECOVERY_ATTEMPTS` (3) consecutive recovery failures for an id, a `RecoveryFailed` event is emitted instead.
+    |
+}

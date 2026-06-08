@@ -1,6 +1,6 @@
 # D2 Diagram Sources
 
-This directory contains [D2](https://d2lang.com) diagram source files — the single source of truth for all diagrams in the [LIRP GitHub Wiki](https://github.com/Transgressoft/lirp/wiki). Rendered SVGs are placed in the wiki repository at `../lirp.wiki/images/` and referenced in wiki Markdown pages.
+This directory contains [D2](https://d2lang.com) diagram source files — the single source of truth for all diagrams in the [LIRP GitHub Wiki](https://github.com/octaviospain/lirp/wiki). Rendered SVGs are placed in the wiki repository at `../lirp.wiki/images/` and referenced in wiki Markdown pages.
 
 ## Files
 
@@ -18,7 +18,10 @@ This directory contains [D2](https://d2lang.com) diagram source files — the si
 | `debounce-scenario-burst.d2` | Debounce scenario: burst followed by inactivity |
 | `debounce-scenario-continuous.d2` | Debounce scenario: continuous mutations (maxDelay fires) |
 | `flush-error-recovery.d2` | writePending() failure recovery pipeline |
-| `sql-architecture.d2` | SQL persistence class hierarchy and table descriptors |
+| `sql-architecture.d2` | SQL persistence class hierarchy and capability-segregated table descriptors |
+| `junction-table.d2` | Junction-table layout for collection aggregates (parent/item FK cascade policies) |
+| `optimistic-lock-conflict.d2` | Sequence: versioned UPDATE → zero rows → re-SELECT → reconcile → `Conflict` event |
+| `sqlite-factory.d2` | SQLite factory selection (fileBacked vs inMemory), pool pinning, and PRAGMA bundle |
 
 ## Local Rendering
 

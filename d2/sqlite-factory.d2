@@ -1,0 +1,65 @@
+direction: down
+
+title: SqliteRepository Factory Selection {
+    near: top-center
+    shape: text
+    style.font-size: 24
+    style.bold: true
+}
+
+factory: SqliteRepository {
+    style.fill: "#f3e5f5"
+    style.stroke: "#6a1b9a"
+
+    fileBacked: "fileBacked(path, tableDef, loadOnInit)" {
+        style.fill: "#e8f5e9"
+        style.stroke: "#2e7d32"
+        "jdbc:sqlite:<path>"
+        "poolSize = 4"
+    }
+    inMemory: "inMemory(tableDef, loadOnInit)" {
+        style.fill: "#e3f2fd"
+        style.stroke: "#1565c0"
+        "jdbc:sqlite::memory:"
+        "poolSize = 1 (pinned)"
+    }
+}
+
+pragma: PRAGMA bundle (URL query parameters) {
+    style.fill: "#fff3e0"
+    style.stroke: "#e65100"
+    "?foreign_keys=on"
+    "&journal_mode=wal"
+    "&busy_timeout=5000"
+    "&synchronous=normal"
+}
+
+pool: HikariDataSource {
+    style.fill: "#eceff1"
+    style.stroke: "#546e7a"
+    "ownsDataSource = true"
+    "PRAGMAs applied per connection"
+}
+
+repo: "SqlRepository<K, R>" {
+    style.fill: "#fce4ec"
+    style.stroke: "#e91e63"
+    "per-connection FK enforcement boundary"
+}
+
+factory.fileBacked -> pragma: appends
+factory.inMemory -> pragma: appends
+pragma -> pool: jdbcUrl
+pool -> repo: backs
+
+notes: Notes {
+    near: bottom-center
+    shape: text
+    style.font-size: 13
+    |md
+    - PRAGMAs travel as URL query parameters (xerial parses via `extractPragmasFromFilename`), not Hikari `connectionInitSql` (which drops all but the first statement).
+    - `inMemory` is pinned to a single connection: each `:memory:` connection is a private database, so a multi-connection pool would lose schema/data.
+    - `fileBacked` uses a 4-connection pool; WAL mode enables concurrent reads.
+    - `foreign_keys = on` is per-connection in SQLite; applying it on every pooled connection makes FK enforcement reliable.
+    |
+}

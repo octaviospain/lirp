@@ -1,0 +1,54 @@
+direction: right
+
+title: Junction Table — Collection Aggregates {
+    near: top-center
+    shape: text
+    style.font-size: 24
+    style.bold: true
+}
+
+playlist: Playlist (parent) {
+    shape: sql_table
+    style.fill: "#e3f2fd"
+    style.stroke: "#1565c0"
+    id: BIGINT {constraint: primary_key}
+    name: VARCHAR
+}
+
+junction: playlist_tracks (junction) {
+    shape: sql_table
+    style.fill: "#fff3e0"
+    style.stroke: "#e65100"
+    parent_id: BIGINT {constraint: [primary_key; foreign_key]}
+    item_id: BIGINT {constraint: [primary_key; foreign_key]}
+    position: INT {constraint: "ordered only (aggregateList)"}
+}
+
+track: Track (item) {
+    shape: sql_table
+    style.fill: "#e8f5e9"
+    style.stroke: "#2e7d32"
+    id: BIGINT {constraint: primary_key}
+    title: VARCHAR
+}
+
+junction.parent_id -> playlist.id: "parent FK\nalways CASCADE" {
+    style.stroke: "#c62828"
+    style.bold: true
+}
+junction.item_id -> track.id: "item FK\n= @Aggregate.onDelete" {
+    style.stroke: "#1565c0"
+    style.bold: true
+}
+
+notes: Notes {
+    near: bottom-center
+    shape: text
+    style.font-size: 13
+    |md
+    - Composite PK `(parent_id, item_id)`; `position` column present only for **aggregateList** (`isOrdered = true`), absent for **aggregateSet**.
+    - `parentFkOnDelete` is **always `CASCADE`** — orphaned junction rows are pure housekeeping when the parent is deleted.
+    - `itemFkOnDelete` mirrors the user-declared `@Aggregate(onDelete = …)` → `RESTRICT` / `CASCADE` / `SET_NULL`.
+    - Descriptor: `JunctionTableDef` (lirp-sql-api), surfaced via `JunctionAware<E>.junctionTableDefs`.
+    |
+}

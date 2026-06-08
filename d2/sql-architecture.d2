@@ -19,30 +19,66 @@ repo-hierarchy: Repository Hierarchy {
     PersistentRepositoryBase -> VolatileRepository: extends
 }
 
-table-hierarchy: Table Descriptors {
+table-hierarchy: Table Descriptors (capability-interface segregation) {
     style.fill: "#fff3e0"
     style.stroke: "#e65100"
 
-    SqlTableDef: "SqlTableDef<E>" {
-        "entity-row mapping (KSP-generated)"
-    }
     LirpTableDef: "LirpTableDef<E>" {
         "persistence-agnostic descriptor (lirp-api)"
     }
+    SqlTableDef: "SqlTableDef<E>" {
+        "core mapping: fromRow / toParams / applyRow (lirp-sql-api)"
+    }
+
+    VersionedTableDef: "VersionedTableDef<E>" {
+        style.fill: "#ffe0b2"
+        "opt-in: optimistic locking — version() / bumpVersion()"
+    }
+    ForeignKeyAware: "ForeignKeyAware" {
+        style.fill: "#ffe0b2"
+        "opt-in: single-entity FKs — foreignKeys()"
+    }
+    JunctionAware: "JunctionAware<E>" {
+        style.fill: "#ffe0b2"
+        "opt-in: collection aggregates — junctionTableDefs / accessors"
+    }
 
     SqlTableDef -> LirpTableDef: extends
+
+    KspGenerated: "<Entity>_LirpTableDef (KSP-generated)" {
+        style.fill: "#f3e5f5"
+        style.stroke: "#6a1b9a"
+        "implements SqlTableDef + applicable capability interfaces"
+    }
+
+    KspGenerated -> SqlTableDef: implements
+    KspGenerated -> VersionedTableDef: implements (when @Version)
+    KspGenerated -> ForeignKeyAware: implements (when single-entity @Aggregate)
+    KspGenerated -> JunctionAware: implements (when collection @Aggregate)
 }
 
 interpreter: ExposedTableInterpreter {
     style.fill: "#e8f5e9"
     style.stroke: "#2e7d32"
-    "converts LirpTableDef → Exposed Table"
+    "interpret(LirpTableDef) → ExposedTable"
 }
 
 exposed-table: ExposedTable {
     style.fill: "#e8f5e9"
     style.stroke: "#2e7d32"
-    "wraps Table + column-by-name index"
+    "table + columnsByName + versionCol"
+}
+
+repo-hierarchy.SqlRepository -> table-hierarchy.SqlTableDef: drives flush via {
+    style.stroke: "#666"
+}
+repo-hierarchy.SqlRepository -> table-hierarchy.VersionedTableDef: as? cast {
+    style.stroke-dash: 3
+    style.stroke: "#666"
+}
+repo-hierarchy.SqlRepository -> table-hierarchy.JunctionAware: as? cast {
+    style.stroke-dash: 3
+    style.stroke: "#666"
 }
 
 table-hierarchy.LirpTableDef -> interpreter: reads
