@@ -30,7 +30,6 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.util.Optional
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.toKotlinUuid
 
 /**
@@ -206,7 +205,6 @@ internal class OptimisticLockRecovery<K : Comparable<K>, R : ReactiveEntity<K, R
         }
     }
 
-    @OptIn(ExperimentalUuidApi::class)
     private fun toExposedId(id: Any): Any =
         if (id is UUID) id.toKotlinUuid() else id
 }

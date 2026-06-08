@@ -30,7 +30,6 @@ import org.jetbrains.exposed.v1.jdbc.JdbcTransaction
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.util.UUID
-import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 import kotlin.uuid.toJavaUuid
 import kotlin.uuid.toKotlinUuid
@@ -213,7 +212,6 @@ internal class SqlEntityLoader<K : Comparable<K>, R : ReactiveEntity<K, R>>(
          * Converts a `java.util.UUID` to `kotlin.uuid.Uuid` for Exposed column operations.
          * Exposed 1.x uses `kotlin.uuid.Uuid` natively; entity IDs may be `java.util.UUID`.
          */
-        @OptIn(ExperimentalUuidApi::class)
         internal fun toExposedId(id: Any): Any =
             if (id is UUID) id.toKotlinUuid() else id
 
@@ -223,7 +221,6 @@ internal class SqlEntityLoader<K : Comparable<K>, R : ReactiveEntity<K, R>>(
          * entity IDs stored as `java.util.UUID` must be normalized to the same type for map lookups
          * and collection matching to succeed.
          */
-        @OptIn(ExperimentalUuidApi::class)
         internal fun toDomainId(id: Any): Any =
             if (id is Uuid) id.toJavaUuid() else id
     }

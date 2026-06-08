@@ -28,7 +28,6 @@ import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.update
 import java.util.UUID
-import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.toKotlinUuid
 
 /**
@@ -249,7 +248,6 @@ internal class SqlWritePipeline<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         }
     }
 
-    @OptIn(ExperimentalUuidApi::class)
     private fun toExposedId(id: Any): Any =
         if (id is UUID) id.toKotlinUuid() else id
 }
