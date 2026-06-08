@@ -104,25 +104,27 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
 
     "max-delay cap forces flush even under continuous mutations" {
         val shortDebounce = TestPersistentRepository(ctx, debounceMillis = 200L, maxDelayMillis = 500L)
+        try {
+            val customer = Customer(20, "Eve")
+            shortDebounce.add(customer)
 
-        val customer = Customer(20, "Eve")
-        shortDebounce.add(customer)
+            // Mutate every 150ms to keep resetting the 200ms debounce (no debounce flush yet),
+            // while the 500ms max-delay job runs to completion
+            repeat(3) { i ->
+                testScheduler.advanceTimeBy(150)
+                testScheduler.runCurrent()
+                customer.updateName("Name-$i")
+            }
 
-        // Mutate every 150ms to keep resetting the 200ms debounce (no debounce flush yet),
-        // while the 500ms max-delay job runs to completion
-        repeat(3) { i ->
-            testScheduler.advanceTimeBy(150)
+            // 450ms elapsed; debounce still restarting. Advance to 500ms total.
+            testScheduler.advanceTimeBy(60)
             testScheduler.runCurrent()
-            customer.updateName("Name-$i")
+
+            // max-delay cap (500ms) should have fired
+            shortDebounce.writtenPayloads.isEmpty() shouldBe false
+        } finally {
+            shortDebounce.close()
         }
-
-        // 450ms elapsed; debounce still restarting. Advance to 500ms total.
-        testScheduler.advanceTimeBy(60)
-        testScheduler.runCurrent()
-
-        // max-delay cap (500ms) should have fired
-        shortDebounce.writtenPayloads.isEmpty() shouldBe false
-        shortDebounce.close()
     }
 
     "close() flushes all pending ops synchronously before returning" {
@@ -241,42 +243,47 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
         // a flush must occur within maxDelayMillis (500ms virtual) of the first enqueue under
         // a continuous mutation stream.
         val steadyRepo = TestPersistentRepository(ctx, debounceMillis = 200L, maxDelayMillis = 500L)
-        val customer = Customer(99, "Steady")
+        try {
+            val customer = Customer(99, "Steady")
 
-        // t=0: first enqueue (window origin)
-        steadyRepo.add(customer)
-        val firstEnqueueTime = testScheduler.currentTime
+            // t=0: first enqueue (window origin)
+            steadyRepo.add(customer)
+            val firstEnqueueTime = testScheduler.currentTime
 
-        // Keep mutating every 150ms — inside the 200ms debounce window — so the debounce
-        // timer keeps resetting and never fires an idle flush. The max-delay cap (500ms) must
-        // fire no later than maxDelayMillis from the first enqueue.
-        repeat(4) { i ->
-            testScheduler.advanceTimeBy(150)
-            testScheduler.runCurrent()
-            customer.updateName("Steady-$i")
+            // Keep mutating every 150ms — inside the 200ms debounce window — so the debounce
+            // timer keeps resetting and never fires an idle flush. The max-delay cap (500ms) must
+            // fire no later than maxDelayMillis from the first enqueue.
+            repeat(4) { i ->
+                testScheduler.advanceTimeBy(150)
+                testScheduler.runCurrent()
+                customer.updateName("Steady-$i")
+            }
+            // 600ms elapsed from t=0; max-delay cap (500ms) must have fired by now.
+            val elapsedMs = testScheduler.currentTime - firstEnqueueTime
+            elapsedMs shouldBe 600L
+
+            // A flush must have occurred within maxDelayMillis (500ms) of the first enqueue.
+            // The writtenPayloads list is non-empty if and only if at least one flush fired.
+            steadyRepo.writtenPayloads.isEmpty() shouldBe false
+        } finally {
+            steadyRepo.close()
         }
-        // 600ms elapsed from t=0; max-delay cap (500ms) must have fired by now.
-        val elapsedMs = testScheduler.currentTime - firstEnqueueTime
-        elapsedMs shouldBe 600L
-
-        // A flush must have occurred within maxDelayMillis (500ms) of the first enqueue.
-        // The writtenPayloads list is non-empty if and only if at least one flush fired.
-        steadyRepo.writtenPayloads.isEmpty() shouldBe false
-
-        steadyRepo.close()
     }
 
     "init via addToMemoryOnly() does NOT enqueue any pending writes" {
         val preloaded = Customer(70, "Leo")
         val initRepo = TestPersistentRepository(ctx)
-        initRepo.loadFromStorage(preloaded)
+        try {
+            initRepo.loadFromStorage(preloaded)
 
-        // Advance time to trigger any potential debounce
-        testScheduler.advanceTimeBy(200)
-        testScheduler.runCurrent()
+            // Advance time to trigger any potential debounce
+            testScheduler.advanceTimeBy(200)
+            testScheduler.runCurrent()
 
-        initRepo.writtenPayloads.shouldBeEmpty()
-        initRepo.close()
+            initRepo.writtenPayloads.shouldBeEmpty()
+        } finally {
+            initRepo.close()
+        }
     }
 })
 

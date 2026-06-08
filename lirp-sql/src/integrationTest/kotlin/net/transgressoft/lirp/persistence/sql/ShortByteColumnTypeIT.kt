@@ -19,11 +19,25 @@ package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.databases
 import io.kotest.assertions.nondeterministic.eventually
+import io.kotest.assertions.nondeterministic.eventuallyConfig
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.datatest.withTests
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+
+/**
+ * Polling config for cross-dialect persistence assertions. A mutation is persisted asynchronously
+ * (reactive event dispatch → debounced flush on a shared single-threaded write scope), so reads are
+ * retried with a generous window; a coarse `interval` keeps the lightweight raw reads from adding
+ * load to the very scopes the pending flush depends on.
+ */
+private val persistedRowPoll =
+    eventuallyConfig {
+        duration = 30.seconds
+        interval = 200.milliseconds
+    }
 
 /**
  * Cross-dialect round-trip integration test asserting that KSP-generated `_LirpTableDef`
@@ -57,27 +71,26 @@ internal class ShortByteColumnTypeIT : FunSpec({
                     it.flag shouldBe 7.toByte()
                     it.nullableFlag shouldBe null
                 }
-                // Mutate via the loaded repo, then poll a fresh repo until the debounced write
+                // Mutate via the loaded repo, then poll the persisted row until the debounced write
                 // pipeline has flushed. The subscription handler routes the reactive event through
-                // the debounce window asynchronously; `eventually` covers that dispatch latency.
+                // the debounce window asynchronously; `eventually` covers that dispatch latency while
+                // a lightweight raw read (instead of reconstructing a repository per poll) keeps the
+                // SQLite write lock contention-free.
                 reloaded.findById("e1").shouldBePresent {
                     it.year = 2024
                     it.nullableYear = 999
                     it.flag = (-12).toByte()
                     it.nullableFlag = 5
                 }
-                eventually(10.seconds) {
-                    val verifier = SqlRepository(ds, ShortByteFixtureEntity_LirpTableDef)
-                    try {
-                        verifier.findById("e1").shouldBePresent {
-                            it.year shouldBe 2024.toShort()
-                            it.nullableYear shouldBe 999.toShort()
-                            it.flag shouldBe (-12).toByte()
-                            it.nullableFlag shouldBe 5.toByte()
-                        }
-                    } finally {
-                        verifier.close()
-                    }
+                eventually(persistedRowPoll) {
+                    val row =
+                        DatabaseTestSupport.readRow(
+                            ds, "short_byte_fixture", "e1", "year", "nullable_year", "flag", "nullable_flag"
+                        )!!
+                    (row["year"] as Number).toShort() shouldBe 2024.toShort()
+                    (row["nullable_year"] as Number).toShort() shouldBe 999.toShort()
+                    (row["flag"] as Number).toByte() shouldBe (-12).toByte()
+                    (row["nullable_flag"] as Number).toByte() shouldBe 5.toByte()
                 }
                 reloaded.close()
             }
@@ -104,16 +117,10 @@ internal class ShortByteColumnTypeIT : FunSpec({
                     it.nullableYear = 42
                     it.nullableFlag = 9
                 }
-                eventually(10.seconds) {
-                    val afterAssign = SqlRepository(ds, ShortByteFixtureEntity_LirpTableDef)
-                    try {
-                        afterAssign.findById("n1").shouldBePresent {
-                            it.nullableYear shouldBe 42.toShort()
-                            it.nullableFlag shouldBe 9.toByte()
-                        }
-                    } finally {
-                        afterAssign.close()
-                    }
+                eventually(persistedRowPoll) {
+                    val row = DatabaseTestSupport.readRow(ds, "short_byte_fixture", "n1", "nullable_year", "nullable_flag")!!
+                    (row["nullable_year"] as Number).toShort() shouldBe 42.toShort()
+                    (row["nullable_flag"] as Number).toByte() shouldBe 9.toByte()
                 }
                 repo2.close()
 
@@ -122,16 +129,10 @@ internal class ShortByteColumnTypeIT : FunSpec({
                     it.nullableYear = null
                     it.nullableFlag = null
                 }
-                eventually(10.seconds) {
-                    val afterClear = SqlRepository(ds, ShortByteFixtureEntity_LirpTableDef)
-                    try {
-                        afterClear.findById("n1").shouldBePresent {
-                            it.nullableYear shouldBe null
-                            it.nullableFlag shouldBe null
-                        }
-                    } finally {
-                        afterClear.close()
-                    }
+                eventually(persistedRowPoll) {
+                    val row = DatabaseTestSupport.readRow(ds, "short_byte_fixture", "n1", "nullable_year", "nullable_flag")!!
+                    row["nullable_year"] shouldBe null
+                    row["nullable_flag"] shouldBe null
                 }
                 repo4.close()
             }
