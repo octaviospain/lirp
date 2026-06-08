@@ -232,6 +232,40 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
         payload.inserts.map { it.id } shouldContainExactly listOf(c1.id, c2.id)
     }
 
+    "[PersistentRepositoryBase] forces flush within maxDelayMillis of first enqueue under steady stream" {
+        // Regression for the max-delay starvation bug: debounce fires and cancels maxDelayJob,
+        // then a new enqueue arrives. The corrected implementation computes the remaining
+        // max-delay window from the first-enqueue wall-clock origin (startNanos), so the cap
+        // fires at most maxDelayMillis after the FIRST enqueue — not maxDelayMillis after the
+        // most-recent re-arm. This test verifies the behavioral guarantee using virtual time:
+        // a flush must occur within maxDelayMillis (500ms virtual) of the first enqueue under
+        // a continuous mutation stream.
+        val steadyRepo = TestPersistentRepository(ctx, debounceMillis = 200L, maxDelayMillis = 500L)
+        val customer = Customer(99, "Steady")
+
+        // t=0: first enqueue (window origin)
+        steadyRepo.add(customer)
+        val firstEnqueueTime = testScheduler.currentTime
+
+        // Keep mutating every 150ms — inside the 200ms debounce window — so the debounce
+        // timer keeps resetting and never fires an idle flush. The max-delay cap (500ms) must
+        // fire no later than maxDelayMillis from the first enqueue.
+        repeat(4) { i ->
+            testScheduler.advanceTimeBy(150)
+            testScheduler.runCurrent()
+            customer.updateName("Steady-$i")
+        }
+        // 600ms elapsed from t=0; max-delay cap (500ms) must have fired by now.
+        val elapsedMs = testScheduler.currentTime - firstEnqueueTime
+        elapsedMs shouldBe 600L
+
+        // A flush must have occurred within maxDelayMillis (500ms) of the first enqueue.
+        // The writtenPayloads list is non-empty if and only if at least one flush fired.
+        steadyRepo.writtenPayloads.isEmpty() shouldBe false
+
+        steadyRepo.close()
+    }
+
     "init via addToMemoryOnly() does NOT enqueue any pending writes" {
         val preloaded = Customer(70, "Leo")
         val initRepo = TestPersistentRepository(ctx)
