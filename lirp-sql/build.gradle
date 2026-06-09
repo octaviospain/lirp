@@ -37,6 +37,16 @@ def isArm64 = osArch.contains('aarch64') || osArch.contains('arm64')
 def fxPlatform = osName.contains('mac') ? (isArm64 ? 'mac-aarch64' : 'mac') : osName.contains('win') ? 'win' : 'linux'
 
 dependencies {
+    // OSV advisories on transitives of kotest-extensions-testcontainers (test/CI only, never shipped).
+    constraints {
+        integrationTestImplementation('org.apache.kafka:kafka-clients:3.9.2') {
+            because 'OSV GHSA-5qcv-4rpc-jp93, GHSA-wf66-mphr-4c4r'
+        }
+        integrationTestImplementation('org.lz4:lz4-java:1.8.1') {
+            because 'OSV GHSA-cmp6-m4wj-q63q, GHSA-vqf4-7m7x-wgfc'
+        }
+    }
+
     api project(path: ':lirp-api')
     api project(path: ':lirp-sql-api')
     api project(path: ':lirp-core')

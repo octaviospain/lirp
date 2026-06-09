@@ -2,8 +2,7 @@ name: OSV-Scanner
 
 on:
     schedule:
-        # Mondays 06:00 UTC — runs against the runtime classpath SBOM, complements
-        # the per-PR dependency-review-action which only inspects the diff.
+        # Mondays 06:00 UTC
         -   cron: '0 6 * * 1'
     workflow_dispatch:
 
@@ -51,7 +50,7 @@ jobs:
             -   name: Install OSV-Scanner CLI
                 # Verify the downloaded binary against the upstream-published
                 # SHA-256 sums before executing it. Fetching SHA256SUMS over
-                # the same HTTPS channel matches Google's own install guide;
+                # the same HTTPS channel matches Google's own installation guide;
                 # a future hardening step could pin the digest inline.
                 run: |
                     set -euo pipefail
@@ -81,3 +80,44 @@ jobs:
                 uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
                 with:
                     sarif_file: results.sarif
+
+    # Advisory job: surfaces build-time/plugin-classpath transitive vulnerabilities
+    # (bcpkix, bcpg, jackson, plexus, assertj, etc.) for visibility on dev/CI
+    # machines without failing the gate. Both scan and upload steps use
+    # continue-on-error so this job is strictly non-blocking.
+    scan-build-tooling:
+        runs-on: ubuntu-latest
+        steps:
+            -   uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+            -   name: Install OSV-Scanner CLI
+                run: |
+                    set -euo pipefail
+                    base="https://github.com/google/osv-scanner/releases/download/${OSV_SCANNER_VERSION}"
+                    curl --proto '=https' --tlsv1.2 -fsSL \
+                        "${base}/osv-scanner_linux_amd64" -o /tmp/osv-scanner_linux_amd64
+                    curl --proto '=https' --tlsv1.2 -fsSL \
+                        "${base}/osv-scanner_SHA256SUMS" -o /tmp/osv-scanner_SHA256SUMS
+                    ( cd /tmp && grep ' osv-scanner_linux_amd64$' osv-scanner_SHA256SUMS \
+                        | sha256sum --check --strict - )
+                    chmod +x /tmp/osv-scanner_linux_amd64
+                    /tmp/osv-scanner_linux_amd64 --version
+
+            -   name: Scan build tooling
+                # Scans gradle/verification-metadata.xml to surface build-time/plugin-classpath
+                # transitive vulnerabilities (bcpkix/bcpg/jackson/plexus/assertj) that never
+                # ship to consumers. Advisory only — findings are visible in Code Scanning
+                # under the 'build-tooling' category without blocking the merge gate.
+                continue-on-error: true
+                run: |
+                    /tmp/osv-scanner_linux_amd64 \
+                        --lockfile=gradle/verification-metadata.xml \
+                        --format=sarif \
+                        --output=results-build-tooling.sarif
+
+            -   name: Upload SARIF to Code Scanning
+                continue-on-error: true
+                uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+                with:
+                    sarif_file: results-build-tooling.sarif
+                    category: build-tooling
