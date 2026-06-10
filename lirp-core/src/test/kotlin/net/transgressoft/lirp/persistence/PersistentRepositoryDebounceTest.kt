@@ -60,9 +60,9 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
     }
 
     "rapid add() calls within debounce window produce exactly 1 writePending() call" {
-        val e1 = Customer(1, "Alice")
-        val e2 = Customer(2, "Bob")
-        val e3 = Customer(3, "Charlie")
+        val e1 = MutableAudioItem(1, "Track Alpha")
+        val e2 = MutableAudioItem(2, "Track Beta")
+        val e3 = MutableAudioItem(3, "Track Charlie")
 
         repo.add(e1)
         repo.add(e2)
@@ -85,8 +85,8 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
     }
 
     "after debounceMillis of inactivity, writePending() is called with collapsed ops" {
-        val customer = Customer(10, "Dan")
-        repo.add(customer)
+        val audioItem = MutableAudioItem(10, "Track Dan")
+        repo.add(audioItem)
 
         testScheduler.advanceTimeBy(50)
         testScheduler.runCurrent()
@@ -97,7 +97,7 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
 
         repo.writtenPayloads shouldHaveSize 1
         val payload = repo.writtenPayloads[0]
-        payload.inserts shouldContainExactly listOf(customer)
+        payload.inserts shouldContainExactly listOf(audioItem)
         payload.updates.shouldBeEmpty()
         payload.deletes.shouldBeEmpty()
     }
@@ -105,15 +105,15 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
     "max-delay cap forces flush even under continuous mutations" {
         val shortDebounce = TestPersistentRepository(ctx, debounceMillis = 200L, maxDelayMillis = 500L)
         try {
-            val customer = Customer(20, "Eve")
-            shortDebounce.add(customer)
+            val audioItem = MutableAudioItem(20, "Track Eve")
+            shortDebounce.add(audioItem)
 
             // Mutate every 150ms to keep resetting the 200ms debounce (no debounce flush yet),
             // while the 500ms max-delay job runs to completion
             repeat(3) { i ->
                 testScheduler.advanceTimeBy(150)
                 testScheduler.runCurrent()
-                customer.updateName("Name-$i")
+                audioItem.title = "Name-$i"
             }
 
             // 450ms elapsed; debounce still restarting. Advance to 500ms total.
@@ -128,8 +128,8 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
     }
 
     "close() flushes all pending ops synchronously before returning" {
-        val customer = Customer(30, "Frank")
-        repo.add(customer)
+        val audioItem = MutableAudioItem(30, "Track Frank")
+        repo.add(audioItem)
 
         // Don't advance time — debounce not yet fired
         repo.writtenPayloads.shouldBeEmpty()
@@ -138,21 +138,21 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
 
         // After close(), pending ops must be flushed synchronously
         repo.writtenPayloads shouldHaveSize 1
-        repo.writtenPayloads[0].inserts shouldContainExactly listOf(customer)
+        repo.writtenPayloads[0].inserts shouldContainExactly listOf(audioItem)
     }
 
     "operations after close() throw IllegalStateException" {
         repo.close()
 
-        shouldThrow<IllegalStateException> { repo.add(Customer(40, "Grace")) }
-        shouldThrow<IllegalStateException> { repo.remove(Customer(41, "Hank")) }
-        shouldThrow<IllegalStateException> { repo.removeAll(listOf(Customer(42, "Ivy"))) }
+        shouldThrow<IllegalStateException> { repo.add(MutableAudioItem(40, "Track Grace")) }
+        shouldThrow<IllegalStateException> { repo.remove(MutableAudioItem(41, "Track Hank")) }
+        shouldThrow<IllegalStateException> { repo.removeAll(listOf(MutableAudioItem(42, "Track Ivy"))) }
         shouldThrow<IllegalStateException> { repo.clear() }
     }
 
     "flush failure re-enqueues raw ops and next flush processes them" {
-        val customer = Customer(50, "Jack")
-        repo.add(customer)
+        val audioItem = MutableAudioItem(50, "Track Jack")
+        repo.add(audioItem)
         repo.failNextWrite = true
 
         // First flush: writePending throws, ops re-enqueued, retry scheduled
@@ -167,38 +167,38 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
         testScheduler.runCurrent()
 
         repo.writtenPayloads shouldHaveSize 1
-        repo.writtenPayloads[0].inserts shouldContainExactly listOf(customer)
+        repo.writtenPayloads[0].inserts shouldContainExactly listOf(audioItem)
     }
 
     "entity mutation enqueues an update and is included in next flush" {
-        val customer = Customer(60, "Kate")
-        repo.add(customer)
+        val audioItem = MutableAudioItem(60, "Track Kate")
+        repo.add(audioItem)
         testScheduler.advanceTimeBy(101)
         testScheduler.runCurrent()
         repo.writtenPayloads.clear()
 
-        customer.updateName("Kate Updated")
+        audioItem.title = "Track Kate Updated"
         testScheduler.advanceTimeBy(101)
         testScheduler.runCurrent()
 
         repo.writtenPayloads shouldHaveSize 1
         val payload = repo.writtenPayloads[0]
         payload.updates shouldHaveSize 1
-        payload.updates[0].entity.name shouldBe "Kate Updated"
+        payload.updates[0].entity.title shouldBe "Track Kate Updated"
         payload.inserts.shouldBeEmpty()
         payload.deletes.shouldBeEmpty()
     }
 
     "clear followed by add propagates hadClear=true and the post-clear insert in one flush" {
-        val c1 = Customer(80, "Mia")
-        val c2 = Customer(81, "Noah")
-        repo.add(c1)
+        val e1 = MutableAudioItem(80, "Track Mia")
+        val e2 = MutableAudioItem(81, "Track Noah")
+        repo.add(e1)
         testScheduler.advanceTimeBy(101)
         testScheduler.runCurrent()
         repo.writtenPayloads.clear()
 
         repo.clear()
-        repo.add(c2)
+        repo.add(e2)
 
         testScheduler.advanceTimeBy(101)
         testScheduler.runCurrent()
@@ -206,14 +206,14 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
         repo.writtenPayloads shouldHaveSize 1
         val payload = repo.writtenPayloads[0]
         payload.hadClear shouldBe true
-        payload.inserts shouldContainExactly listOf(c2)
+        payload.inserts shouldContainExactly listOf(e2)
         payload.updates.shouldBeEmpty()
         payload.deletes.shouldBeEmpty()
     }
 
     "flush failure with interleaved enqueue preserves both ops in the retry payload" {
-        val c1 = Customer(90, "Olivia")
-        repo.add(c1)
+        val e1 = MutableAudioItem(90, "Track Olivia")
+        repo.add(e1)
         repo.failNextWrite = true
 
         // First flush: fails, snapshot restored via mergeOlder
@@ -222,8 +222,8 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
         repo.writtenPayloads.shouldBeEmpty()
 
         // Interleaved enqueue while retry is pending
-        val c2 = Customer(91, "Pete")
-        repo.add(c2)
+        val e2 = MutableAudioItem(91, "Track Pete")
+        repo.add(e2)
 
         // Retry flush: should contain both inserts
         testScheduler.advanceTimeBy(101)
@@ -231,7 +231,7 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
 
         repo.writtenPayloads shouldHaveSize 1
         val payload = repo.writtenPayloads[0]
-        payload.inserts.map { it.id } shouldContainExactly listOf(c1.id, c2.id)
+        payload.inserts.map { it.id } shouldContainExactly listOf(e1.id, e2.id)
     }
 
     "[PersistentRepositoryBase] forces flush within maxDelayMillis of first enqueue under steady stream" {
@@ -244,10 +244,10 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
         // a continuous mutation stream.
         val steadyRepo = TestPersistentRepository(ctx, debounceMillis = 200L, maxDelayMillis = 500L)
         try {
-            val customer = Customer(99, "Steady")
+            val audioItem = MutableAudioItem(99, "Track Steady")
 
             // t=0: first enqueue (window origin)
-            steadyRepo.add(customer)
+            steadyRepo.add(audioItem)
             val firstEnqueueTime = testScheduler.currentTime
 
             // Keep mutating every 150ms — inside the 200ms debounce window — so the debounce
@@ -256,7 +256,7 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
             repeat(4) { i ->
                 testScheduler.advanceTimeBy(150)
                 testScheduler.runCurrent()
-                customer.updateName("Steady-$i")
+                audioItem.title = "Track Steady-$i"
             }
             // 600ms elapsed from t=0; max-delay cap (500ms) must have fired by now.
             val elapsedMs = testScheduler.currentTime - firstEnqueueTime
@@ -271,7 +271,7 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
     }
 
     "init via addToMemoryOnly() does NOT enqueue any pending writes" {
-        val preloaded = Customer(70, "Leo")
+        val preloaded = MutableAudioItem(70, "Track Leo")
         val initRepo = TestPersistentRepository(ctx)
         try {
             initRepo.loadFromStorage(preloaded)
@@ -289,8 +289,8 @@ internal class PersistentRepositoryDebounceTest : StringSpec({
 
 /** Captured grouped payload from one `writePending` invocation. */
 internal data class CapturedPayload(
-    val inserts: List<Customer>,
-    val updates: List<PendingUpdate<Int, Customer>>,
+    val inserts: List<AudioItem>,
+    val updates: List<PendingUpdate<Int, AudioItem>>,
     val deletes: List<Pair<Int, Long?>>,
     val hadClear: Boolean
 )
@@ -299,7 +299,7 @@ private class TestPersistentRepository(
     context: LirpContext,
     debounceMillis: Long = 100L,
     maxDelayMillis: Long = 1000L
-) : PersistentRepositoryBase<Int, Customer>(
+) : PersistentRepositoryBase<Int, AudioItem>(
         context, "TestPersistentRepo", ConcurrentHashMap(),
         debounceMillis, maxDelayMillis
     ) {
@@ -310,11 +310,11 @@ private class TestPersistentRepository(
         if (loadOnInit) load()
     }
 
-    override fun loadFromStore(): Map<Int, Customer> = emptyMap()
+    override fun loadFromStore(): Map<Int, AudioItem> = emptyMap()
 
     override fun writePending(
-        inserts: List<Customer>,
-        updates: List<PendingUpdate<Int, Customer>>,
+        inserts: List<AudioItem>,
+        updates: List<PendingUpdate<Int, AudioItem>>,
         deletes: List<Pair<Int, Long?>>,
         hadClear: Boolean
     ) {
@@ -337,7 +337,7 @@ private class TestPersistentRepository(
     val repoIsClosed: Boolean get() = closed
 
     /** Exposes [addToMemoryOnly] for testing init-path behaviour. */
-    fun loadFromStorage(entity: Customer) {
+    fun loadFromStorage(entity: AudioItem) {
         addToMemoryOnly(entity)
     }
 }

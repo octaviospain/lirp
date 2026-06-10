@@ -20,9 +20,11 @@ package net.transgressoft.lirp.persistence.query
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.persistence.Aggregate
-import net.transgressoft.lirp.persistence.BubbleUpOrder
-import net.transgressoft.lirp.persistence.Customer
+import net.transgressoft.lirp.persistence.AudioItem
+import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
+import net.transgressoft.lirp.persistence.BubbleUpAudioPlaylist
 import net.transgressoft.lirp.persistence.LirpContext
+import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.RegistryBase
 import net.transgressoft.lirp.persistence.VolatileRepository
 import net.transgressoft.lirp.persistence.aggregate
@@ -40,54 +42,54 @@ import io.kotest.matchers.shouldBe
  *
  * Verifies the convention-based `Class.forName("{Entity}_LirpViaAccessor")` discovery
  * mirrors [RegistryBase.discoverIndexes] semantics: double-checked locking, anonymous/local
- * class skip, `ClassNotFoundException` → null. The KSP-generated `BubbleUpOrder_LirpViaAccessor`
+ * class skip, `ClassNotFoundException` → null. The KSP-generated `BubbleUpAudioPlaylist_LirpViaAccessor`
  * provides the single-ref fixture; [SimpleNoAggregateEntity] (no `@Aggregate` properties)
  * exercises the negative path.
  */
 @DisplayName("Via accessor discovery")
 internal class ViaAccessorDiscoveryTest : FunSpec({
 
-    test("discoverViaAccessors finds {BubbleUpOrder}_LirpViaAccessor via Class.forName") {
-        val customers = VolatileRepository<Int, Customer>(LirpContext.default, "DiscoveryCustomers")
-        customers.add(Customer(1, "Alice"))
-        val orderRepo = TestableOrderRepo()
-        orderRepo.add(BubbleUpOrder(1L, 1))
+    test("discoverViaAccessors finds {BubbleUpAudioPlaylist}_LirpViaAccessor via Class.forName") {
+        val audioItems = AudioItemVolatileRepository(LirpContext.default)
+        audioItems.add(MutableAudioItem(1, "Track A"))
+        val playlistRepo = TestablePlaylistRepo()
+        playlistRepo.add(BubbleUpAudioPlaylist(1, 1))
 
-        val accessor = orderRepo.viaAccessorOrNull()
+        val accessor = playlistRepo.viaAccessorOrNull()
         accessor.shouldNotBeNull()
         accessor.collectionEntries.shouldBeEmpty()
         accessor.singleEntries shouldHaveSize 1
-        accessor.singleEntries[0].refName shouldBe "customer"
-        accessor.singleEntries[0].referencedClass shouldBe Customer::class.java
+        accessor.singleEntries[0].refName shouldBe "audioItem"
+        accessor.singleEntries[0].referencedClass shouldBe AudioItem::class.java
 
-        customers.close()
-        orderRepo.close()
+        audioItems.close()
+        playlistRepo.close()
     }
 
     test("viaAccessor field is populated and second discovery returns the cached accessor reference") {
-        val customers = VolatileRepository<Int, Customer>(LirpContext.default, "DiscoveryCustomers2")
-        customers.add(Customer(2, "Bob"))
-        val orderRepo = TestableOrderRepo()
-        orderRepo.add(BubbleUpOrder(2L, 2))
+        val audioItems = AudioItemVolatileRepository(LirpContext.default)
+        audioItems.add(MutableAudioItem(2, "Track B"))
+        val playlistRepo = TestablePlaylistRepo()
+        playlistRepo.add(BubbleUpAudioPlaylist(2, 2))
 
-        val first = orderRepo.viaAccessorOrNull()
-        val second = orderRepo.viaAccessorOrNull()
+        val first = playlistRepo.viaAccessorOrNull()
+        val second = playlistRepo.viaAccessorOrNull()
         first.shouldNotBeNull()
         (first === second) shouldBe true
 
-        customers.close()
-        orderRepo.close()
+        audioItems.close()
+        playlistRepo.close()
     }
 
     test("viaAccessorFor returns an accessor across registry instances for the same entity class") {
         // First call seeds the static cache; second call across an independent caller hits the cache.
-        val accessor1 = RegistryBase.viaAccessorFor(BubbleUpOrder::class.java)
-        val accessor2 = RegistryBase.viaAccessorFor(BubbleUpOrder::class.java)
+        val accessor1 = RegistryBase.viaAccessorFor(BubbleUpAudioPlaylist::class.java)
+        val accessor2 = RegistryBase.viaAccessorFor(BubbleUpAudioPlaylist::class.java)
         accessor1.shouldNotBeNull()
         accessor2.shouldNotBeNull()
         (accessor1 === accessor2) shouldBe true
         accessor1.singleEntries shouldHaveSize 1
-        accessor1.singleEntries[0].referencedClass shouldBe Customer::class.java
+        accessor1.singleEntries[0].referencedClass shouldBe AudioItem::class.java
     }
 
     test("entity with no @Aggregate properties returns null accessor") {
@@ -139,19 +141,19 @@ internal class ViaAccessorDiscoveryTest : FunSpec({
  */
 open class OpenAggregateEntity(
     override val id: Int,
-    open val customerId: Int
+    open val audioItemId: Int
 ) : ReactiveEntityBase<Int, OpenAggregateEntity>() {
     override val uniqueId: String get() = "open-agg-$id"
 
     @Aggregate
-    val customer by aggregate<Int, Customer> { customerId }
+    val audioItem by aggregate<Int, AudioItem> { audioItemId }
 
-    override fun clone() = OpenAggregateEntity(id, customerId)
+    override fun clone() = OpenAggregateEntity(id, audioItemId)
 }
 
-/** Concrete repo exposing [BubbleUpOrder]; uses real KSP-generated `BubbleUpOrder_LirpViaAccessor`. */
-internal class TestableOrderRepo :
-    VolatileRepository<Long, BubbleUpOrder>(LirpContext.default, "TestableOrders")
+/** Concrete repo exposing [BubbleUpAudioPlaylist]; uses real KSP-generated `BubbleUpAudioPlaylist_LirpViaAccessor`. */
+internal class TestablePlaylistRepo :
+    VolatileRepository<Int, BubbleUpAudioPlaylist>(LirpContext.default, "TestablePlaylists")
 
 /** Plain entity without any `@Aggregate` properties — no `_LirpViaAccessor` will exist. */
 internal open class SimpleNoAggregateEntity(

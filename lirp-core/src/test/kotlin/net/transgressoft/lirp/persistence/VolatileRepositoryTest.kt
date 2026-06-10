@@ -9,7 +9,7 @@ import net.transgressoft.lirp.event.EventType
 import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.LirpEventSubscriberBase
 import net.transgressoft.lirp.event.MutationEvent
-import net.transgressoft.lirp.testing.arbitraryCustomer
+import net.transgressoft.lirp.testing.arbitraryAudioItem
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.assertSoftly
 import io.kotest.core.spec.style.FunSpec
@@ -31,10 +31,10 @@ import java.util.concurrent.atomic.AtomicInteger
 
 internal class VolatileRepositoryTest : FunSpec({
 
-    class SomeClassSubscribedToEvents() : LirpEventSubscriberBase<Customer, CrudEvent.Type, CrudEvent<Int, Customer>>("Some Name") {
+    class SomeClassSubscribedToEvents() : LirpEventSubscriberBase<AudioItem, CrudEvent.Type, CrudEvent<Int, AudioItem>>("Some Name") {
         val createEventEntities = AtomicInteger(0)
         val deletedEventEntities = AtomicInteger(0)
-        val receivedEvents = mutableMapOf<EventType, CrudEvent<Int, Customer>>()
+        val receivedEvents = mutableMapOf<EventType, CrudEvent<Int, AudioItem>>()
 
         init {
             addOnNextEventAction(CREATE, UPDATE) { event ->
@@ -50,7 +50,7 @@ internal class VolatileRepositoryTest : FunSpec({
     }
 
     lateinit var ctx: LirpContext
-    lateinit var repository: CustomerVolatileRepo
+    lateinit var repository: AudioItemVolatileRepository
     lateinit var subscriber: SomeClassSubscribedToEvents
 
     val reactive = reactiveScope()
@@ -58,7 +58,7 @@ internal class VolatileRepositoryTest : FunSpec({
     beforeTest {
         ctx = LirpContext()
         repository =
-            CustomerVolatileRepo(ctx).apply {
+            AudioItemVolatileRepository(ctx).apply {
                 activateEvents(READ)
             }
         subscriber = SomeClassSubscribedToEvents()
@@ -70,38 +70,38 @@ internal class VolatileRepositoryTest : FunSpec({
     }
 
     test("Repository reflects addition and deletion of entities") {
-        checkAll(arbitraryCustomer()) { customer ->
+        checkAll(arbitraryAudioItem()) { audioItem ->
             repository.isEmpty shouldBe true
-            repository.create(customer.id, customer.name) shouldNotBe null
+            repository.create(audioItem.id, audioItem.title) shouldNotBe null
             repository.isEmpty shouldBe false
-            repository.findById(customer.id) shouldBe Optional.of(customer)
-            repository.findByUniqueId(customer.uniqueId) shouldBePresent { it shouldBe customer }
-            repository.search { it.name == customer.name }.shouldContainOnly(customer)
-            repository.contains(customer.id) shouldBe true
-            repository.contains { it == customer } shouldBe true
+            repository.findById(audioItem.id) shouldBe Optional.of(audioItem)
+            repository.findByUniqueId(audioItem.uniqueId) shouldBePresent { it shouldBe audioItem }
+            repository.search { it.title == audioItem.title }.shouldContainOnly(audioItem)
+            repository.contains(audioItem.id) shouldBe true
+            repository.contains { it == audioItem } shouldBe true
 
             repository.size() shouldBe 1
 
-            repository.remove(customer) shouldBe true
+            repository.remove(audioItem) shouldBe true
             repository.isEmpty shouldBe true
         }
     }
 
     test("Registry iterates over all entities via Iterable") {
-        val customers = Arb.set(arbitraryCustomer(), 3..3).next()
-        customers.forEach { repository.create(it.id, it.name) }
+        val audioItems = Arb.set(arbitraryAudioItem(), 3..3).next()
+        audioItems.forEach { repository.create(it.id, it.title) }
 
-        val iterated = mutableSetOf<Customer>()
+        val iterated = mutableSetOf<AudioItem>()
         repository.forEach(iterated::add)
 
-        iterated shouldContainOnly customers
+        iterated shouldContainOnly audioItems
     }
 
     test("Repository publishes CRUD events received by a subscriber") {
-        val customer = arbitraryCustomer().next()
-        val customer2 = arbitraryCustomer().next()
-        repository.create(customer.id, customer.name)
-        repository.create(customer2.id, customer2.name)
+        val audioItem = arbitraryAudioItem().next()
+        val audioItem2 = arbitraryAudioItem().next()
+        repository.create(audioItem.id, audioItem.title)
+        repository.create(audioItem2.id, audioItem2.title)
 
         reactive.advance()
 
@@ -111,25 +111,25 @@ internal class VolatileRepositoryTest : FunSpec({
         subscriber.createEventEntities.get() shouldBe 2
         subscriber.deletedEventEntities.get() shouldBe 0
 
-        repository.removeAll(setOf(customer, customer2)) shouldBe true
+        repository.removeAll(setOf(audioItem, audioItem2)) shouldBe true
 
         reactive.advance()
 
         assertSoftly(subscriber.receivedEvents[DELETE]) {
             this?.isDelete() shouldBe true
-            this?.entities?.values shouldContainOnly setOf(customer, customer2)
+            this?.entities?.values shouldContainOnly setOf(audioItem, audioItem2)
         }
         subscriber.createEventEntities.get() shouldBe 2
         subscriber.deletedEventEntities.get() shouldBe 2
 
-        repository.create(customer.id, customer.name)
-        repository.findById(customer.id) shouldBePresent { it shouldBe customer }
+        repository.create(audioItem.id, audioItem.title)
+        repository.findById(audioItem.id) shouldBePresent { it shouldBe audioItem }
 
         reactive.advance()
 
         assertSoftly(subscriber.receivedEvents[READ]) {
             this?.isRead() shouldBe true
-            this?.entities?.values shouldContainOnly setOf(customer)
+            this?.entities?.values shouldContainOnly setOf(audioItem)
         }
         subscriber.createEventEntities.get() shouldBe 3
         subscriber.deletedEventEntities.get() shouldBe 2
@@ -140,16 +140,16 @@ internal class VolatileRepositoryTest : FunSpec({
 
         assertSoftly(subscriber.receivedEvents[DELETE]) {
             this?.isDelete() shouldBe true
-            this?.entities?.values.shouldContainOnly(customer)
+            this?.entities?.values.shouldContainOnly(audioItem)
         }
         subscriber.createEventEntities.get() shouldBe 3
         subscriber.deletedEventEntities.get() shouldBe 3
     }
 
     test("Repository disableEvents method prevents events from being published") {
-        val customer = arbitraryCustomer().next()
+        val audioItem = arbitraryAudioItem().next()
 
-        repository.create(customer.id, customer.name)
+        repository.create(audioItem.id, audioItem.title)
 
         reactive.advance()
 
@@ -161,8 +161,8 @@ internal class VolatileRepositoryTest : FunSpec({
 
         repository.disableEvents(CREATE)
 
-        val customer2 = arbitraryCustomer().next()
-        repository.create(customer2.id, customer2.name)
+        val audioItem2 = arbitraryAudioItem().next()
+        repository.create(audioItem2.id, audioItem2.title)
 
         reactive.advance()
 
@@ -170,8 +170,8 @@ internal class VolatileRepositoryTest : FunSpec({
         subscriber.createEventEntities.get() shouldBe 0
 
         repository.activateEvents(CREATE)
-        val customer3 = arbitraryCustomer().next()
-        repository.create(customer3.id, customer3.name)
+        val audioItem3 = arbitraryAudioItem().next()
+        repository.create(audioItem3.id, audioItem3.title)
 
         reactive.advance()
 
@@ -185,7 +185,7 @@ internal class VolatileRepositoryTest : FunSpec({
         val errorMsg = mutableListOf<String>()
 
         val testSubscriber =
-            object : LirpEventSubscriberBase<Customer, CrudEvent.Type, CrudEvent<Int, Customer>>("ErrorCompleteSubscriber") {
+            object : LirpEventSubscriberBase<AudioItem, CrudEvent.Type, CrudEvent<Int, AudioItem>>("ErrorCompleteSubscriber") {
                 init {
                     addOnNextEventAction(CREATE) { /* Just observe */ }
 
@@ -224,12 +224,12 @@ internal class VolatileRepositoryTest : FunSpec({
     test("Anonymous subscription test") {
         val createEventsReceived = AtomicInteger(0)
         val updateEventsReceived = AtomicInteger(0)
-        val receivedCustomerIds = mutableSetOf<Int>()
+        val receivedAudioItemIds = mutableSetOf<Int>()
 
         val createSubscription =
             repository.subscribe(CREATE) { event ->
                 createEventsReceived.incrementAndGet()
-                event.entities.keys.forEach { receivedCustomerIds.add(it) }
+                event.entities.keys.forEach { receivedAudioItemIds.add(it) }
             }
 
         val updateSubscription =
@@ -237,49 +237,51 @@ internal class VolatileRepositoryTest : FunSpec({
                 updateEventsReceived.incrementAndGet()
             }
 
-        val customer = arbitraryCustomer().next()
-        repository.create(customer.id, customer.name) shouldNotBe null
+        val audioItem = arbitraryAudioItem().next()
+        repository.create(audioItem.id, audioItem.title) shouldNotBe null
 
         reactive.advance()
 
         createEventsReceived.get() shouldBe 1
-        receivedCustomerIds shouldContainOnly setOf(customer.id)
+        receivedAudioItemIds shouldContainOnly setOf(audioItem.id)
         updateEventsReceived.get() shouldBe 0
 
         createSubscription.cancel()
 
-        val customer2 = arbitraryCustomer().next()
-        repository.create(customer2.id, customer2.name)
+        val audioItem2 = arbitraryAudioItem().next()
+        repository.create(audioItem2.id, audioItem2.title)
 
         reactive.advance()
 
         createEventsReceived.get() shouldBe 1
-        receivedCustomerIds shouldContainOnly setOf(customer.id)
+        receivedAudioItemIds shouldContainOnly setOf(audioItem.id)
 
         updateSubscription.cancel()
     }
 
-    test("RegistryBase equals handles null and different types") {
+    test("VolatileRepository equals and hashCode are symmetric across types, instances, and content") {
+        val ctx2 = LirpContext()
+        val repository2 = AudioItemVolatileRepository(ctx2)
+        val audioItem = arbitraryAudioItem(1).next()
+
+        repository.create(audioItem.id, audioItem.title)
+        repository2.create(audioItem.id, audioItem.title)
+
+        // Reflexive and symmetric equals
+        repository.equals(repository) shouldBe true
         repository.equals(null) shouldBe false
         repository.equals("not a repository") shouldBe false
-        repository.equals(repository) shouldBe true
-    }
 
-    test("RegistryBase hashCode is consistent with equals") {
-        val ctx2 = LirpContext()
-        val repository2 = CustomerVolatileRepo(ctx2)
-        val customer = arbitraryCustomer(1).next()
-
-        repository.create(customer.id, customer.name)
-        repository2.create(customer.id, customer.name)
-
+        // Two repos with the same entities are equal and share the same hashCode
+        repository.equals(repository2) shouldBe true
         repository.hashCode() shouldBe repository2.hashCode()
+
         ctx2.close()
     }
 
     test("VolatileRepository secondary constructor with name and initialEntities populates the repository") {
-        val customer = Customer(1, "Alice")
-        val repo = VolatileRepository<Int, Customer>("TestRepo", ConcurrentHashMap(mapOf(1 to customer)))
+        val audioItem = MutableAudioItem(1, "Track Alpha")
+        val repo = VolatileRepository<Int, AudioItem>("TestRepo", ConcurrentHashMap(mapOf(1 to audioItem as AudioItem)))
 
         repo.contains(1) shouldBe true
         repo.size() shouldBe 1
@@ -288,27 +290,8 @@ internal class VolatileRepositoryTest : FunSpec({
         LirpContext.resetDefault()
     }
 
-    test("VolatileRepository equals returns false for null and different type") {
-        repository.equals(null) shouldBe false
-        repository.equals("not a repository") shouldBe false
-        repository.equals(repository) shouldBe true
-    }
-
-    test("VolatileRepository equals and hashCode are consistent for two repos with the same entities") {
-        val ctx2 = LirpContext()
-        val repo2 = CustomerVolatileRepo(ctx2)
-
-        repository.create(42, "Bob")
-        repo2.create(42, "Bob")
-
-        repository.equals(repo2) shouldBe true
-        repository.hashCode() shouldBe repo2.hashCode()
-
-        ctx2.close()
-    }
-
     test("VolatileRepository removeAll returns false when no entity in the collection is present") {
-        val absent = Customer(99, "Ghost")
+        val absent = MutableAudioItem(99, "Ghost Track")
 
         val result = repository.removeAll(listOf(absent))
 
@@ -316,8 +299,8 @@ internal class VolatileRepositoryTest : FunSpec({
     }
 
     test("RegistryBase secondary constructor with default context and publisher initializes correctly") {
-        val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<Int, Customer>>("TestRegistry")
-        val registry = object : RegistryBase<Int, Customer>(ConcurrentHashMap(), publisher) {}
+        val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<Int, AudioItem>>("TestRegistry")
+        val registry = object : RegistryBase<Int, AudioItem>(ConcurrentHashMap(), publisher) {}
 
         registry shouldNotBe null
         registry.isEmpty shouldBe true
@@ -329,7 +312,7 @@ internal class VolatileRepositoryTest : FunSpec({
     context("Mutable aggregate collection delegates") {
 
         test("entity retrieved by ID reflects mutable aggregate collection mutations") {
-            val trackRepo = AudioItemVolatileRepository(ctx)
+            val trackRepo = repository
             val playlistRepo = AudioPlaylistVolatileRepository(ctx)
 
             val t1 = trackRepo.create(1, "Track A")
@@ -346,7 +329,7 @@ internal class VolatileRepositoryTest : FunSpec({
         }
 
         test("entity reflects remove and clear on mutable aggregate") {
-            val trackRepo = AudioItemVolatileRepository(ctx)
+            val trackRepo = repository
             val playlistRepo = AudioPlaylistVolatileRepository(ctx)
 
             val t1 = trackRepo.create(1, "T1")
@@ -370,7 +353,7 @@ internal class VolatileRepositoryTest : FunSpec({
         }
 
         test("addAll on mutable aggregate updates backing IDs for all elements") {
-            val trackRepo = AudioItemVolatileRepository(ctx)
+            val trackRepo = repository
             val playlistRepo = AudioPlaylistVolatileRepository(ctx)
 
             val t1 = trackRepo.create(1, "T1")
@@ -387,7 +370,7 @@ internal class VolatileRepositoryTest : FunSpec({
         }
 
         test("removeAll on mutable aggregate removes matching elements") {
-            val trackRepo = AudioItemVolatileRepository(ctx)
+            val trackRepo = repository
             val playlistRepo = AudioPlaylistVolatileRepository(ctx)
 
             val t1 = trackRepo.create(1, "T1")
@@ -406,7 +389,7 @@ internal class VolatileRepositoryTest : FunSpec({
         }
 
         test("addAll on mutable aggregate emits exactly one MutationEvent") {
-            val trackRepo = AudioItemVolatileRepository(ctx)
+            val trackRepo = repository
             val playlistRepo = AudioPlaylistVolatileRepository(ctx)
             val events =
                 Collections.synchronizedList(
@@ -427,7 +410,7 @@ internal class VolatileRepositoryTest : FunSpec({
         }
 
         test("removeAll on mutable aggregate emits exactly one MutationEvent") {
-            val trackRepo = AudioItemVolatileRepository(ctx)
+            val trackRepo = repository
             val playlistRepo = AudioPlaylistVolatileRepository(ctx)
             val events =
                 Collections.synchronizedList(
@@ -468,7 +451,7 @@ internal class VolatileRepositoryTest : FunSpec({
         }
 
         test("removeAll with no matching elements returns false and emits no event") {
-            val trackRepo = AudioItemVolatileRepository(ctx)
+            val trackRepo = repository
             val playlistRepo = AudioPlaylistVolatileRepository(ctx)
             val events =
                 Collections.synchronizedList(
@@ -508,7 +491,7 @@ internal class VolatileRepositoryTest : FunSpec({
         }
 
         test("entity emits MutationEvent on add to mutable aggregate") {
-            val trackRepo = AudioItemVolatileRepository(ctx)
+            val trackRepo = repository
             val playlistRepo = AudioPlaylistVolatileRepository(ctx)
             val events =
                 Collections.synchronizedList(
@@ -527,7 +510,7 @@ internal class VolatileRepositoryTest : FunSpec({
         }
 
         test("entity emits MutationEvent on remove from mutable aggregate") {
-            val trackRepo = AudioItemVolatileRepository(ctx)
+            val trackRepo = repository
             val playlistRepo = AudioPlaylistVolatileRepository(ctx)
             val events =
                 Collections.synchronizedList(
@@ -548,7 +531,7 @@ internal class VolatileRepositoryTest : FunSpec({
         }
 
         test("entity emits MutationEvent on clear of mutable aggregate") {
-            val trackRepo = AudioItemVolatileRepository(ctx)
+            val trackRepo = repository
             val playlistRepo = AudioPlaylistVolatileRepository(ctx)
             val events =
                 Collections.synchronizedList(
@@ -569,7 +552,7 @@ internal class VolatileRepositoryTest : FunSpec({
         }
 
         test("multiple entities with independent mutable aggregates") {
-            val trackRepo = AudioItemVolatileRepository(ctx)
+            val trackRepo = repository
             val playlistRepo = AudioPlaylistVolatileRepository(ctx)
 
             val t1 = trackRepo.create(1, "Track 1")
@@ -602,7 +585,7 @@ internal class VolatileRepositoryTest : FunSpec({
         }
 
         test("retainAll on mutable aggregate emits exactly one MutationEvent") {
-            val trackRepo = AudioItemVolatileRepository(ctx)
+            val trackRepo = repository
             val playlistRepo = AudioPlaylistVolatileRepository(ctx)
             val events =
                 Collections.synchronizedList(

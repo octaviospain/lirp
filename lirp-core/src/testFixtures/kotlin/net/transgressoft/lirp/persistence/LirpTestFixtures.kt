@@ -29,10 +29,11 @@ import java.io.File
 import java.util.concurrent.Flow
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.serialization.KSerializer
+import kotlinx.serialization.Serializable
 
 // =====================================================================
-// Music-commons-inspired integration test fixture entities, repositories,
-// and supporting types. Mirrors the polymorphic interface hierarchy,
+// Canonical music-domain fixture entities, repositories, and supporting
+// types for lirp test suites. Mirrors the polymorphic interface hierarchy,
 // abstract base classes, and delegation patterns from music-commons.
 // =====================================================================
 
@@ -77,6 +78,21 @@ class MutableAudioItem
         override fun compareTo(other: AudioItem): Int = id.compareTo(other.id)
 
         override fun clone(): MutableAudioItem = MutableAudioItem(id, title, albumName)
+
+        /** Publishes a single mutation that atomically sets [title] to [newTitle]. */
+        fun bulkUpdate(newTitle: String) = mutateAndPublish { title = newTitle }
+
+        /** Silently disables event emission for subsequent property assignments. */
+        fun suppressEvents() = disableEvents()
+
+        /** Re-enables event emission after [suppressEvents]. */
+        fun restoreEvents() = enableEvents()
+
+        /**
+         * Executes [action] with events disabled and re-enables them on return.
+         * Any property assignments inside [action] do not emit mutation events.
+         */
+        fun <T> silently(action: () -> T): T = withEventsDisabled(action)
 
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
@@ -562,7 +578,7 @@ class ImmutablePlaylistGroupVolatileRepo internal constructor(context: LirpConte
     }
 
 // ---------------------------------------------------------------------------
-// DetachAudioPlaylist — missing cascade variant (DETACH on audioItems)
+// DetachAudioPlaylist — DETACH cascade variant on audioItems
 // ---------------------------------------------------------------------------
 
 /**
@@ -758,4 +774,457 @@ class NoneMusicPlaylistGroupRepo internal constructor(context: LirpContext) :
 
         fun create(id: Int, playlistIds: Set<Int> = emptySet()): NoneMusicPlaylistGroup =
             NoneMusicPlaylistGroup(id, playlistIds).also { add(it) }
+    }
+
+// ---------------------------------------------------------------------------
+// Bubble-up fixture entities — music-domain equivalents for BubbleUpOrder,
+// EntityA/B/C transitive chain, MutableRefOrder, OptionalRefOrder, and delegating repos
+// ---------------------------------------------------------------------------
+
+/**
+ * Scalar audio item reference with bubble-up enabled. Used to verify that a mutation on the
+ * referenced [AudioItem] propagates to this entity's subscribers as an [AggregateMutationEvent].
+ * Replaces the generic-domain [BubbleUpOrder] with music-domain naming.
+ */
+@Serializable
+class BubbleUpAudioPlaylist(
+    override val id: Int,
+    var audioItemId: Int
+) : ReactiveEntityBase<Int, BubbleUpAudioPlaylist>(), IdentifiableEntity<Int> {
+    override val uniqueId: String get() = "bubble-up-audio-playlist-$id"
+
+    @Aggregate(bubbleUp = true)
+    val audioItem by aggregate<Int, AudioItem> { audioItemId }
+
+    override fun clone(): BubbleUpAudioPlaylist = BubbleUpAudioPlaylist(id, audioItemId)
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is BubbleUpAudioPlaylist) return false
+        return id == other.id && audioItemId == other.audioItemId
+    }
+
+    override fun hashCode(): Int = 31 * id.hashCode() + audioItemId.hashCode()
+
+    override fun toString(): String = "BubbleUpAudioPlaylist(id=$id, audioItemId=$audioItemId)"
+}
+
+/** Repository for [BubbleUpAudioPlaylist] entities. */
+@LirpRepository
+class BubbleUpAudioPlaylistRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Int, BubbleUpAudioPlaylist>(context, "BubbleUpAudioPlaylists") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Int, audioItemId: Int): BubbleUpAudioPlaylist =
+            BubbleUpAudioPlaylist(id, audioItemId).also { add(it) }
+    }
+
+// ---------------------------------------------------------------------------
+// Transitive bubble-up chain — music-domain equivalents for EntityA/B/C
+// ---------------------------------------------------------------------------
+
+/**
+ * Leaf entity in the transitive bubble-up chain with a mutable [trackName] property.
+ * Replaces [EntityA] with music-domain naming.
+ */
+class BubbleAudioTrack(
+    override val id: Int,
+    val initialTrackName: String
+) : ReactiveEntityBase<Int, BubbleAudioTrack>(), IdentifiableEntity<Int> {
+    var trackName: String by reactiveProperty(initialTrackName)
+
+    override val uniqueId: String get() = "bubble-audio-track-$id"
+
+    override fun clone(): BubbleAudioTrack = BubbleAudioTrack(id, trackName)
+
+    fun updateTrackName(newName: String) {
+        trackName = newName
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is BubbleAudioTrack) return false
+        return id == other.id && trackName == other.trackName
+    }
+
+    override fun hashCode(): Int = 31 * id.hashCode() + trackName.hashCode()
+
+    override fun toString(): String = "BubbleAudioTrack(id=$id, trackName='$trackName')"
+}
+
+/**
+ * Middle entity in the transitive bubble-up chain: references [BubbleAudioTrack] with
+ * bubble-up enabled. Replaces [EntityB] with music-domain naming.
+ */
+class BubbleAudioPlaylist(
+    override val id: Int,
+    var trackId: Int
+) : ReactiveEntityBase<Int, BubbleAudioPlaylist>(), IdentifiableEntity<Int> {
+    override val uniqueId: String get() = "bubble-audio-playlist-$id"
+
+    @Aggregate(bubbleUp = true)
+    val track by aggregate<Int, BubbleAudioTrack> { trackId }
+
+    override fun clone(): BubbleAudioPlaylist = BubbleAudioPlaylist(id, trackId)
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is BubbleAudioPlaylist) return false
+        return id == other.id && trackId == other.trackId
+    }
+
+    override fun hashCode(): Int = 31 * id.hashCode() + trackId.hashCode()
+
+    override fun toString(): String = "BubbleAudioPlaylist(id=$id, trackId=$trackId)"
+}
+
+/**
+ * Top entity in the transitive bubble-up chain: references [BubbleAudioPlaylist] with
+ * bubble-up enabled. A mutation in [BubbleAudioTrack] propagates to [BubbleAudioPlaylist]
+ * but NOT to [BubbleAudioLibrary] — propagation is single-level only.
+ * Replaces [EntityC] with music-domain naming.
+ */
+class BubbleAudioLibrary(
+    override val id: Int,
+    var playlistId: Int
+) : ReactiveEntityBase<Int, BubbleAudioLibrary>(), IdentifiableEntity<Int> {
+    override val uniqueId: String get() = "bubble-audio-library-$id"
+
+    @Aggregate(bubbleUp = true)
+    val playlist by aggregate<Int, BubbleAudioPlaylist> { playlistId }
+
+    override fun clone(): BubbleAudioLibrary = BubbleAudioLibrary(id, playlistId)
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is BubbleAudioLibrary) return false
+        return id == other.id && playlistId == other.playlistId
+    }
+
+    override fun hashCode(): Int = 31 * id.hashCode() + playlistId.hashCode()
+
+    override fun toString(): String = "BubbleAudioLibrary(id=$id, playlistId=$playlistId)"
+}
+
+/** Repository for [BubbleAudioTrack] entities. */
+@LirpRepository
+class BubbleAudioTrackRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Int, BubbleAudioTrack>(context, "BubbleAudioTracks") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Int, trackName: String): BubbleAudioTrack =
+            BubbleAudioTrack(id, trackName).also { add(it) }
+    }
+
+/** Repository for [BubbleAudioPlaylist] entities. */
+@LirpRepository
+class BubbleAudioPlaylistRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Int, BubbleAudioPlaylist>(context, "BubbleAudioPlaylists") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Int, trackId: Int): BubbleAudioPlaylist =
+            BubbleAudioPlaylist(id, trackId).also { add(it) }
+    }
+
+/** Repository for [BubbleAudioLibrary] entities. */
+@LirpRepository
+class BubbleAudioLibraryRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Int, BubbleAudioLibrary>(context, "BubbleAudioLibraries") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Int, playlistId: Int): BubbleAudioLibrary =
+            BubbleAudioLibrary(id, playlistId).also { add(it) }
+    }
+
+// ---------------------------------------------------------------------------
+// MutableRefPlaylist — music-domain equivalent for MutableRefOrder
+// ---------------------------------------------------------------------------
+
+/**
+ * Playlist with a mutable reactive reference to an [AudioItem]. When [audioItemId] changes,
+ * the bubble-up subscription is re-wired to the new referenced entity.
+ * Replaces [MutableRefOrder] with music-domain naming.
+ */
+class MutableRefPlaylist(
+    override val id: Int,
+    val initialAudioItemId: Int
+) : ReactiveEntityBase<Int, MutableRefPlaylist>(), IdentifiableEntity<Int> {
+    var audioItemId: Int by reactiveProperty(initialAudioItemId)
+
+    override val uniqueId: String get() = "mutable-ref-playlist-$id"
+
+    @Aggregate(bubbleUp = true)
+    val audioItem by aggregate<Int, AudioItem> { audioItemId }
+
+    override fun clone(): MutableRefPlaylist = MutableRefPlaylist(id, audioItemId)
+
+    /** Changes the referenced audio item, triggering bubble-up re-wiring on the next [resolve]. */
+    fun changeItem(newId: Int) {
+        audioItemId = newId
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is MutableRefPlaylist) return false
+        return id == other.id && audioItemId == other.audioItemId
+    }
+
+    override fun hashCode(): Int = 31 * id.hashCode() + audioItemId.hashCode()
+
+    override fun toString(): String = "MutableRefPlaylist(id=$id, audioItemId=$audioItemId)"
+}
+
+/** Repository for [MutableRefPlaylist] entities. */
+@LirpRepository
+class MutableRefPlaylistRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Int, MutableRefPlaylist>(context, "MutableRefPlaylists") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Int, audioItemId: Int): MutableRefPlaylist =
+            MutableRefPlaylist(id, audioItemId).also { add(it) }
+    }
+
+// ---------------------------------------------------------------------------
+// OptionalRefPlaylist — music-domain equivalent for OptionalRefOrder
+// ---------------------------------------------------------------------------
+
+/**
+ * Playlist with an optional (nullable FK) reference to an [AudioItem]. Returns
+ * [java.util.Optional.empty] when [audioItemId] is null, resolves correctly when set.
+ * Replaces [OptionalRefOrder] with music-domain naming.
+ */
+class OptionalRefPlaylist(
+    override val id: Int,
+    var audioItemId: Int? = null
+) : ReactiveEntityBase<Int, OptionalRefPlaylist>(), IdentifiableEntity<Int> {
+    override val uniqueId: String get() = "optional-ref-playlist-$id"
+
+    @Aggregate(bubbleUp = false, onDelete = CascadeAction.DETACH)
+    val audioItem by optionalAggregate<Int, AudioItem> { audioItemId }
+
+    override fun clone(): OptionalRefPlaylist = OptionalRefPlaylist(id, audioItemId)
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is OptionalRefPlaylist) return false
+        return id == other.id && audioItemId == other.audioItemId
+    }
+
+    override fun hashCode(): Int = 31 * id.hashCode() + (audioItemId?.hashCode() ?: 0)
+
+    override fun toString(): String = "OptionalRefPlaylist(id=$id, audioItemId=$audioItemId)"
+}
+
+/** Repository for [OptionalRefPlaylist] entities. */
+@LirpRepository
+class OptionalRefPlaylistRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Int, OptionalRefPlaylist>(context, "OptionalRefPlaylists") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Int, audioItemId: Int? = null): OptionalRefPlaylist =
+            OptionalRefPlaylist(id, audioItemId).also { add(it) }
+    }
+
+// ---------------------------------------------------------------------------
+// Delegating repositories — music-domain equivalents for DelegatingCustomerRepo/DelegatingOrderRepo
+// ---------------------------------------------------------------------------
+
+/**
+ * Delegation-based repository wrapper for [AudioItem] entities.
+ *
+ * Demonstrates the manual registration pattern: the `init` block calls
+ * [RegistryBase.registerRepository] to register the delegate [VolatileRepository]
+ * into [LirpContext.default]. Calling [close] deregisters from the context first,
+ * then closes the delegate.
+ */
+class DelegatingAudioItemRepo(
+    private val delegate: VolatileRepository<Int, AudioItem>
+) : Repository<Int, AudioItem> by delegate, AutoCloseable {
+
+    init {
+        RegistryBase.registerRepository(AudioItem::class.java, delegate)
+    }
+
+    fun create(id: Int, title: String, albumName: String = ""): AudioItem =
+        MutableAudioItem(id, title, albumName).also { add(it) }
+
+    override fun close() {
+        RegistryBase.deregisterRepository(AudioItem::class.java)
+        delegate.close()
+    }
+}
+
+/**
+ * Delegation-based repository wrapper for [MutableAudioPlaylist] entities.
+ *
+ * Registers the delegate [VolatileRepository] into [LirpContext.default] on construction
+ * and deregisters on [close].
+ */
+class DelegatingPlaylistRepo(
+    private val delegate: VolatileRepository<Int, MutableAudioPlaylist>
+) : Repository<Int, MutableAudioPlaylist> by delegate, AutoCloseable {
+
+    init {
+        RegistryBase.registerRepository(MutableAudioPlaylist::class.java, delegate)
+    }
+
+    override fun close() {
+        RegistryBase.deregisterRepository(MutableAudioPlaylist::class.java)
+        delegate.close()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CyclicPlaylist / CyclicPlaylistChild — cycle detection fixture entities
+// ---------------------------------------------------------------------------
+
+/**
+ * Fixture entity forming a cyclic graph: [CyclicPlaylist] references [CyclicPlaylistChild]
+ * with [CascadeAction.CASCADE], and [CyclicPlaylistChild] references back with
+ * [CascadeAction.CASCADE]. Used to test cycle detection in cascade deletion.
+ */
+class CyclicPlaylist(
+    override val id: Long,
+    var childId: Long
+) : ReactiveEntityBase<Long, CyclicPlaylist>(), IdentifiableEntity<Long> {
+    override val uniqueId: String get() = "cyclic-playlist-$id"
+
+    @Aggregate(onDelete = CascadeAction.CASCADE)
+    val child by aggregate<Long, CyclicPlaylistChild> { childId }
+
+    override fun clone(): CyclicPlaylist = CyclicPlaylist(id, childId)
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is CyclicPlaylist) return false
+        return id == other.id && childId == other.childId
+    }
+
+    override fun hashCode(): Int = 31 * id.hashCode() + childId.hashCode()
+
+    override fun toString(): String = "CyclicPlaylist(id=$id, childId=$childId)"
+}
+
+/**
+ * Fixture entity forming a cyclic graph: [CyclicPlaylistChild] references [CyclicPlaylist]
+ * with [CascadeAction.CASCADE]. Used to test cycle detection in cascade deletion.
+ */
+class CyclicPlaylistChild(
+    override val id: Long,
+    var parentId: Long
+) : ReactiveEntityBase<Long, CyclicPlaylistChild>(), IdentifiableEntity<Long> {
+    override val uniqueId: String get() = "cyclic-playlist-child-$id"
+
+    @Aggregate(onDelete = CascadeAction.CASCADE)
+    val parent by aggregate<Long, CyclicPlaylist> { parentId }
+
+    override fun clone(): CyclicPlaylistChild = CyclicPlaylistChild(id, parentId)
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is CyclicPlaylistChild) return false
+        return id == other.id && parentId == other.parentId
+    }
+
+    override fun hashCode(): Int = 31 * id.hashCode() + parentId.hashCode()
+
+    override fun toString(): String = "CyclicPlaylistChild(id=$id, parentId=$parentId)"
+}
+
+/** Repository for [CyclicPlaylist] entities. */
+@LirpRepository
+class CyclicPlaylistRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Long, CyclicPlaylist>(context, "CyclicPlaylists") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Long, childId: Long): CyclicPlaylist =
+            CyclicPlaylist(id, childId).also { add(it) }
+    }
+
+/** Repository for [CyclicPlaylistChild] entities. */
+@LirpRepository
+class CyclicPlaylistChildRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Long, CyclicPlaylistChild>(context, "CyclicPlaylistChildren") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Long, parentId: Long): CyclicPlaylistChild =
+            CyclicPlaylistChild(id, parentId).also { add(it) }
+    }
+
+// ---------------------------------------------------------------------------
+// Scalar cascade-mode variants — exercise AggregateRefDelegate code paths
+// ---------------------------------------------------------------------------
+
+/**
+ * Playlist with a scalar [CascadeAction.RESTRICT] reference to an [AudioItem]: removing this
+ * entity is blocked if the referenced audio item is still referenced by another entity.
+ * Used to verify the [AggregateRefDelegate.doRestrict] code path.
+ */
+class RestrictRefPlaylist(
+    override val id: Int,
+    val audioItemId: Int
+) : ReactiveEntityBase<Int, RestrictRefPlaylist>(), IdentifiableEntity<Int> {
+    override val uniqueId: String get() = "restrict-ref-playlist-$id"
+
+    @Aggregate(onDelete = CascadeAction.RESTRICT)
+    val audioItem by aggregate<Int, AudioItem> { audioItemId }
+
+    override fun clone(): RestrictRefPlaylist = RestrictRefPlaylist(id, audioItemId)
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is RestrictRefPlaylist) return false
+        return id == other.id && audioItemId == other.audioItemId
+    }
+
+    override fun hashCode(): Int = 31 * id.hashCode() + audioItemId.hashCode()
+
+    override fun toString(): String = "RestrictRefPlaylist(id=$id, audioItemId=$audioItemId)"
+}
+
+/** Repository for [RestrictRefPlaylist] entities. */
+@LirpRepository
+class RestrictRefPlaylistRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Int, RestrictRefPlaylist>(context, "RestrictRefPlaylists") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Int, audioItemId: Int): RestrictRefPlaylist =
+            RestrictRefPlaylist(id, audioItemId).also { add(it) }
+    }
+
+/**
+ * Playlist with a scalar [CascadeAction.NONE] reference to an [AudioItem]: removing this
+ * entity does nothing to the referenced audio item.
+ * Used to verify the [AggregateRefDelegate.doCascade] NONE code path.
+ */
+class NoneRefPlaylist(
+    override val id: Int,
+    val audioItemId: Int
+) : ReactiveEntityBase<Int, NoneRefPlaylist>(), IdentifiableEntity<Int> {
+    override val uniqueId: String get() = "none-ref-playlist-$id"
+
+    @Aggregate(onDelete = CascadeAction.NONE)
+    val audioItem by aggregate<Int, AudioItem> { audioItemId }
+
+    override fun clone(): NoneRefPlaylist = NoneRefPlaylist(id, audioItemId)
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is NoneRefPlaylist) return false
+        return id == other.id && audioItemId == other.audioItemId
+    }
+
+    override fun hashCode(): Int = 31 * id.hashCode() + audioItemId.hashCode()
+
+    override fun toString(): String = "NoneRefPlaylist(id=$id, audioItemId=$audioItemId)"
+}
+
+/** Repository for [NoneRefPlaylist] entities. */
+@LirpRepository
+class NoneRefPlaylistRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Int, NoneRefPlaylist>(context, "NoneRefPlaylists") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Int, audioItemId: Int): NoneRefPlaylist =
+            NoneRefPlaylist(id, audioItemId).also { add(it) }
     }

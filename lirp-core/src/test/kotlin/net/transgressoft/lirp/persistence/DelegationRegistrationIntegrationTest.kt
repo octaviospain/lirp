@@ -44,83 +44,83 @@ internal class DelegationRegistrationIntegrationTest : StringSpec({
         LirpContext.resetDefault()
     }
 
-    "constructing DelegatingCustomerRepo registers the delegate VolatileRepository in LirpContext.default" {
-        val delegate = VolatileRepository<Int, Customer>("DelegatingCustomers")
-        DelegatingCustomerRepo(delegate)
+    "constructing DelegatingAudioItemRepo registers the delegate VolatileRepository in LirpContext.default" {
+        val delegate = VolatileRepository<Int, AudioItem>("DelegatingAudioItems")
+        DelegatingAudioItemRepo(delegate)
 
-        val registered = LirpContext.default.registryFor(Customer::class.java)
+        val registered = LirpContext.default.registryFor(AudioItem::class.java)
 
         registered.shouldNotBeNull()
         registered shouldBe delegate
         registered.shouldBeInstanceOf<VolatileRepository<*, *>>()
     }
 
-    "LirpContext.default.registries() contains exactly one entry keyed by Customer after DelegatingCustomerRepo construction" {
-        val delegate = VolatileRepository<Int, Customer>("DelegatingCustomers")
-        DelegatingCustomerRepo(delegate)
+    "LirpContext.default.registries() contains exactly one entry keyed by AudioItem after DelegatingAudioItemRepo construction" {
+        val delegate = VolatileRepository<Int, AudioItem>("DelegatingAudioItems")
+        DelegatingAudioItemRepo(delegate)
 
         val registries = LirpContext.default.registries()
 
         registries shouldHaveSize 1
-        registries shouldContainKey Customer::class.java
-        registries[Customer::class.java] shouldBe delegate
+        registries shouldContainKey AudioItem::class.java
+        registries[AudioItem::class.java] shouldBe delegate
     }
 
-    "DelegatingCustomerRepo routes add, contains, and size to the delegate" {
-        val delegate = VolatileRepository<Int, Customer>("DelegatingCustomers")
-        val wrapper = DelegatingCustomerRepo(delegate)
+    "DelegatingAudioItemRepo routes add, contains, and size to the delegate" {
+        val delegate = VolatileRepository<Int, AudioItem>("DelegatingAudioItems")
+        val wrapper = DelegatingAudioItemRepo(delegate)
 
-        val customer = wrapper.create(1, "Alice")
+        val audioItem = wrapper.create(1, "Track Alpha")
 
         wrapper.contains(1) shouldBe true
         wrapper.size() shouldBe 1
         delegate.contains(1) shouldBe true
         delegate.size() shouldBe 1
         delegate.findById(1).isPresent shouldBe true
-        delegate.findById(1).get() shouldBe customer
+        delegate.findById(1).get() shouldBe audioItem
     }
 
     "closing the wrapper deregisters from LirpContext.default and closes the delegate" {
-        val delegate = VolatileRepository<Int, Customer>("DelegatingCustomers")
-        val wrapper = DelegatingCustomerRepo(delegate)
-        wrapper.create(1, "Alice")
+        val delegate = VolatileRepository<Int, AudioItem>("DelegatingAudioItems")
+        val wrapper = DelegatingAudioItemRepo(delegate)
+        wrapper.create(1, "Track Alpha")
 
-        LirpContext.default.registryFor(Customer::class.java).shouldNotBeNull()
+        LirpContext.default.registryFor(AudioItem::class.java).shouldNotBeNull()
 
         wrapper.close()
 
-        LirpContext.default.registryFor(Customer::class.java).shouldBeNull()
+        LirpContext.default.registryFor(AudioItem::class.java).shouldBeNull()
         delegate.isClosed shouldBe true
     }
 
     "two delegation wrappers for different entity types register independently" {
-        val customerDelegate = VolatileRepository<Int, Customer>("DelegatingCustomers")
-        val orderDelegate = VolatileRepository<Long, Order>("DelegatingOrders")
-        DelegatingCustomerRepo(customerDelegate)
-        DelegatingOrderRepo(orderDelegate)
+        val audioItemDelegate = VolatileRepository<Int, AudioItem>("DelegatingAudioItems")
+        val playlistDelegate = VolatileRepository<Int, MutableAudioPlaylist>("DelegatingPlaylists")
+        DelegatingAudioItemRepo(audioItemDelegate)
+        DelegatingPlaylistRepo(playlistDelegate)
 
         val registries = LirpContext.default.registries()
 
         registries shouldHaveSize 2
-        registries[Customer::class.java] shouldBe customerDelegate
-        registries[Order::class.java] shouldBe orderDelegate
+        registries[AudioItem::class.java] shouldBe audioItemDelegate
+        registries[MutableAudioPlaylist::class.java] shouldBe playlistDelegate
     }
 
-    "constructing a second DelegatingCustomerRepo for the same entity class throws ISE" {
-        val delegate1 = VolatileRepository<Int, Customer>("DelegatingCustomers1")
-        val delegate2 = VolatileRepository<Int, Customer>("DelegatingCustomers2")
-        DelegatingCustomerRepo(delegate1)
+    "constructing a second DelegatingAudioItemRepo for the same entity class throws ISE" {
+        val delegate1 = VolatileRepository<Int, AudioItem>("DelegatingAudioItems1")
+        val delegate2 = VolatileRepository<Int, AudioItem>("DelegatingAudioItems2")
+        DelegatingAudioItemRepo(delegate1)
 
         shouldThrow<IllegalStateException> {
-            DelegatingCustomerRepo(delegate2)
-        }.message shouldBe "A repository for Customer is already registered. Only one @LirpRepository per entity type is allowed."
+            DelegatingAudioItemRepo(delegate2)
+        }.message shouldBe "A repository for AudioItem is already registered. Only one @LirpRepository per entity type is allowed."
     }
 
-    "DelegatingCustomerRepo.close() is safe to call when already deregistered" {
-        val delegate = VolatileRepository<Int, Customer>("DelegatingCustomers")
-        val wrapper = DelegatingCustomerRepo(delegate)
+    "DelegatingAudioItemRepo.close() is safe to call when already deregistered" {
+        val delegate = VolatileRepository<Int, AudioItem>("DelegatingAudioItems")
+        val wrapper = DelegatingAudioItemRepo(delegate)
 
-        RegistryBase.deregisterRepository(Customer::class.java)
+        RegistryBase.deregisterRepository(AudioItem::class.java)
 
         shouldNotThrowAny {
             wrapper.close()
@@ -128,15 +128,15 @@ internal class DelegationRegistrationIntegrationTest : StringSpec({
         delegate.isClosed shouldBe true
     }
 
-    "DelegatingOrderRepo.close() deregisters Order independently of Customer" {
-        val customerDelegate = VolatileRepository<Int, Customer>("DelegatingCustomers")
-        val orderDelegate = VolatileRepository<Long, Order>("DelegatingOrders")
-        DelegatingCustomerRepo(customerDelegate)
-        val orderWrapper = DelegatingOrderRepo(orderDelegate)
+    "DelegatingPlaylistRepo.close() deregisters MutableAudioPlaylist independently of AudioItem" {
+        val audioItemDelegate = VolatileRepository<Int, AudioItem>("DelegatingAudioItems")
+        val playlistDelegate = VolatileRepository<Int, MutableAudioPlaylist>("DelegatingPlaylists")
+        DelegatingAudioItemRepo(audioItemDelegate)
+        val playlistWrapper = DelegatingPlaylistRepo(playlistDelegate)
 
-        orderWrapper.close()
+        playlistWrapper.close()
 
-        LirpContext.default.registryFor(Order::class.java).shouldBeNull()
-        LirpContext.default.registryFor(Customer::class.java).shouldNotBeNull()
+        LirpContext.default.registryFor(MutableAudioPlaylist::class.java).shouldBeNull()
+        LirpContext.default.registryFor(AudioItem::class.java).shouldNotBeNull()
     }
 })

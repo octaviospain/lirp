@@ -18,7 +18,7 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.testing.Stress
-import net.transgressoft.lirp.testing.arbitraryCustomer
+import net.transgressoft.lirp.testing.arbitraryAudioItem
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.core.spec.style.StringSpec
@@ -46,9 +46,9 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
         val initialSize = 100
 
         val ctx = LirpContext()
-        val repository = CustomerVolatileRepo(ctx)
-        val initialEntities = (1..initialSize).map { arbitraryCustomer(it).next() }
-        initialEntities.forEach { repository.create(it.id, it.name) }
+        val repository = AudioItemVolatileRepository(ctx)
+        val initialEntities = (1..initialSize).map { arbitraryAudioItem(it).next() }
+        initialEntities.forEach { repository.create(it.id, it.title) }
 
         shouldNotThrowAny {
             val writerJobs =
@@ -56,8 +56,8 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
                     launch(Dispatchers.Default) {
                         repeat(iterationsPerCoroutine) { i ->
                             val id = initialSize + coroutineIndex * iterationsPerCoroutine + i
-                            val extra = arbitraryCustomer(id).next()
-                            repository.create(extra.id, extra.name)
+                            val extra = arbitraryAudioItem(id).next()
+                            repository.create(extra.id, extra.title)
                         }
                     }
                 }
@@ -81,11 +81,11 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
         val initialSize = 100
 
         val ctx = LirpContext()
-        val repository = CustomerVolatileRepo(ctx)
+        val repository = AudioItemVolatileRepository(ctx)
         val allEntities =
             (1..initialSize + concurrentCoroutines * iterationsPerCoroutine)
-                .map { arbitraryCustomer(it).next() }
-        allEntities.forEach { repository.create(it.id, it.name) }
+                .map { arbitraryAudioItem(it).next() }
+        allEntities.forEach { repository.create(it.id, it.title) }
 
         shouldNotThrowAny {
             val removerJobs =
@@ -117,9 +117,9 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
         val initialSize = 100
 
         val ctx = LirpContext()
-        val repository = CustomerVolatileRepo(ctx)
-        val initialEntities = (1..initialSize).map { arbitraryCustomer(it).next() }
-        initialEntities.forEach { repository.create(it.id, it.name) }
+        val repository = AudioItemVolatileRepository(ctx)
+        val initialEntities = (1..initialSize).map { arbitraryAudioItem(it).next() }
+        initialEntities.forEach { repository.create(it.id, it.title) }
 
         shouldNotThrowAny {
             val writerJobs =
@@ -127,8 +127,8 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
                     launch(Dispatchers.Default) {
                         repeat(iterationsPerCoroutine) { i ->
                             val id = initialSize + coroutineIndex * iterationsPerCoroutine + i
-                            val extra = arbitraryCustomer(id).next()
-                            repository.create(extra.id, extra.name)
+                            val extra = arbitraryAudioItem(id).next()
+                            repository.create(extra.id, extra.title)
                         }
                     }
                 }
@@ -152,9 +152,9 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
         val initialSize = 100
 
         val ctx = LirpContext()
-        val repository = CustomerVolatileRepo(ctx)
-        val initialEntities = (1..initialSize).map { arbitraryCustomer(it).next() }
-        initialEntities.forEach { repository.create(it.id, it.name) }
+        val repository = AudioItemVolatileRepository(ctx)
+        val initialEntities = (1..initialSize).map { arbitraryAudioItem(it).next() }
+        initialEntities.forEach { repository.create(it.id, it.title) }
 
         shouldNotThrowAny {
             val modifierJobs =
@@ -163,8 +163,8 @@ internal class RegistryBaseConcurrencyTest : StringSpec({
                         repeat(iterationsPerCoroutine) { i ->
                             if (i % 2 == 0) {
                                 val id = initialSize + coroutineIndex * iterationsPerCoroutine + i
-                                val extra = arbitraryCustomer(id).next()
-                                repository.create(extra.id, extra.name)
+                                val extra = arbitraryAudioItem(id).next()
+                                repository.create(extra.id, extra.title)
                             } else {
                                 val entity = initialEntities[(coroutineIndex + i) % initialSize]
                                 repository.remove(entity)

@@ -46,83 +46,83 @@ internal class LirpRepositoryDiscoveryTest : FunSpec({
     }
 
     test("annotated repo auto-registers at construction") {
-        val repo = CustomerVolatileRepo(ctx)
+        val repo = AudioItemVolatileRepository(ctx)
 
-        ctx.registryFor(Customer::class.java).shouldNotBeNull() shouldBe repo
+        ctx.registryFor(AudioItem::class.java).shouldNotBeNull() shouldBe repo
     }
 
     test("duplicate registration for same entity type throws ISE") {
-        CustomerVolatileRepo(ctx)
+        AudioItemVolatileRepository(ctx)
 
         shouldThrow<IllegalStateException> {
-            CustomerVolatileRepo(ctx)
-        }.message shouldBe "A repository for Customer is already registered. Only one @LirpRepository per entity type is allowed."
+            AudioItemVolatileRepository(ctx)
+        }.message shouldBe "A repository for AudioItem is already registered. Only one @LirpRepository per entity type is allowed."
     }
 
     test("close() deregisters repo from context") {
-        val repo = CustomerVolatileRepo(ctx)
-        ctx.registryFor(Customer::class.java).shouldNotBeNull()
+        val repo = AudioItemVolatileRepository(ctx)
+        ctx.registryFor(AudioItem::class.java).shouldNotBeNull()
 
         repo.close()
 
-        ctx.registryFor(Customer::class.java).shouldBeNull()
+        ctx.registryFor(AudioItem::class.java).shouldBeNull()
     }
 
     test("unannotated VolatileRepository does not auto-register") {
-        val unannotated = VolatileRepository<Int, Customer>("test")
+        val unannotated = VolatileRepository<Int, AudioItem>("test")
         try {
-            ctx.registryFor(Customer::class.java).shouldBeNull()
+            ctx.registryFor(AudioItem::class.java).shouldBeNull()
         } finally {
             unannotated.close()
         }
     }
 
     test("re-registration succeeds after first repo is closed") {
-        val repo1 = CustomerVolatileRepo(ctx)
-        ctx.registryFor(Customer::class.java).shouldNotBeNull()
+        val repo1 = AudioItemVolatileRepository(ctx)
+        ctx.registryFor(AudioItem::class.java).shouldNotBeNull()
 
         repo1.close()
-        ctx.registryFor(Customer::class.java).shouldBeNull()
+        ctx.registryFor(AudioItem::class.java).shouldBeNull()
 
-        val repo2 = CustomerVolatileRepo(ctx)
-        ctx.registryFor(Customer::class.java).shouldNotBeNull() shouldBe repo2
+        val repo2 = AudioItemVolatileRepository(ctx)
+        ctx.registryFor(AudioItem::class.java).shouldNotBeNull() shouldBe repo2
     }
 
     test("LirpContext.close() closes all registered repositories") {
-        val customerRepo = CustomerVolatileRepo(ctx)
-        val orderRepo = OrderVolatileRepo(ctx)
+        val audioItemRepo = AudioItemVolatileRepository(ctx)
+        val playlistRepo = AudioPlaylistVolatileRepository(ctx)
 
         ctx.registries().size shouldBe 2
 
         ctx.close()
 
-        customerRepo.isClosed shouldBe true
-        orderRepo.isClosed shouldBe true
+        audioItemRepo.isClosed shouldBe true
+        playlistRepo.isClosed shouldBe true
         ctx.registries().size shouldBe 0
     }
 
     test("LirpContext.close() is idempotent") {
-        CustomerVolatileRepo(ctx)
+        AudioItemVolatileRepository(ctx)
 
         ctx.close()
         ctx.close() // must not throw
     }
 
     test("LirpContext reset clears registry map without closing repositories") {
-        val repo = CustomerVolatileRepo(ctx)
+        val repo = AudioItemVolatileRepository(ctx)
 
         ctx.registries().size shouldBe 1
 
         ctx.reset()
 
         ctx.registries().isEmpty() shouldBe true
-        repo.create(1, "Alice")
+        repo.create(1, "Track Alpha")
         repo.contains(1) shouldBe true
     }
 
     test("LirpContext resetDefault clears registries from the default context") {
         LirpContext.resetDefault()
-        val repo = CustomerVolatileRepo()
+        val repo = AudioItemVolatileRepository()
 
         LirpContext.default.registries().size shouldBe 1
 

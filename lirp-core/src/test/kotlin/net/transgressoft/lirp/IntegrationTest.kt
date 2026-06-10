@@ -24,9 +24,9 @@ import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.PublisherConfig
 import net.transgressoft.lirp.event.StandardCrudEvent.Create
 import net.transgressoft.lirp.event.TestEntity
-import net.transgressoft.lirp.persistence.Customer
-import net.transgressoft.lirp.persistence.CustomerVolatileRepo
+import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
 import net.transgressoft.lirp.persistence.LirpContext
+import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.json.PolymorphicCustomer
 import net.transgressoft.lirp.persistence.json.StandardCustomerJsonFileRepository
 import net.transgressoft.lirp.testing.Stress
@@ -101,26 +101,26 @@ class IntegrationTest : DescribeSpec({
             val entityPoolSize = 100
 
             val ctx = LirpContext()
-            val repository = CustomerVolatileRepo(ctx)
-            val customerPool = (1..entityPoolSize).map { Customer(it, "Customer-$it") }
+            val repository = AudioItemVolatileRepository(ctx)
+            val audioItemPool = (1..entityPoolSize).map { MutableAudioItem(it, "Track-$it") }
 
             val jobs =
                 (1..coroutineCount).map { seed ->
                     reactive.scope.launch {
                         val random = kotlin.random.Random(seed)
                         repeat(opsPerCoroutine) {
-                            val customer = customerPool[random.nextInt(customerPool.size)]
+                            val audioItem = audioItemPool[random.nextInt(audioItemPool.size)]
                             when (random.nextInt(5)) {
-                                0 -> repository.create(customer.id, customer.name)
-                                1 -> repository.remove(customer)
+                                0 -> repository.create(audioItem.id, audioItem.title)
+                                1 -> repository.remove(audioItem)
                                 2 -> {
-                                    repository.remove(customer)
-                                    repository.create(customer.id, customer.name)
+                                    repository.remove(audioItem)
+                                    repository.create(audioItem.id, audioItem.title)
                                 }
                                 3 ->
-                                    customerPool.shuffled(random).take(10).forEach { c ->
-                                        repository.remove(c)
-                                        repository.create(c.id, c.name)
+                                    audioItemPool.shuffled(random).take(10).forEach { item ->
+                                        repository.remove(item)
+                                        repository.create(item.id, item.title)
                                     }
                                 4 -> repository.clear()
                             }

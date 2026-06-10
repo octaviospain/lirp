@@ -32,27 +32,27 @@ import io.kotest.matchers.types.shouldBeInstanceOf
 internal class AggregateRefDeclarationTest : FunSpec({
 
     test("returns non-null ReactiveEntityReference when declared via aggregate delegate") {
-        val order = Order(id = 1L, customerId = 42)
+        val playlist = BubbleUpAudioPlaylist(id = 1, audioItemId = 42)
 
-        order.customer.shouldNotBeNull()
+        playlist.audioItem.shouldNotBeNull()
     }
 
     test("delegate referenceId returns the correct ID value from the entity's ID field") {
-        val order = Order(id = 1L, customerId = 42)
+        val playlist = BubbleUpAudioPlaylist(id = 1, audioItemId = 42)
 
-        order.customer.referenceId shouldBe 42
+        playlist.audioItem.referenceId shouldBe 42
     }
 
-    test("delegate referenceId reflects updated customerId after field changes directly") {
-        val order = Order(id = 1L, customerId = 10)
+    test("delegate referenceId reflects updated audioItemId after field changes directly") {
+        val playlist = BubbleUpAudioPlaylist(id = 1, audioItemId = 10)
 
-        order.customerId = 99
-        order.customer.referenceId shouldBe 99
+        playlist.audioItemId = 99
+        playlist.audioItem.referenceId shouldBe 99
     }
 
     test("delegate is an instance of ReactiveEntityReference") {
-        val order = Order(id = 2L, customerId = 5)
+        val playlist = BubbleUpAudioPlaylist(id = 2, audioItemId = 5)
 
-        order.customer.shouldBeInstanceOf<ReactiveEntityReference<Int, Customer>>()
+        playlist.audioItem.shouldBeInstanceOf<ReactiveEntityReference<Int, AudioItem>>()
     }
 })

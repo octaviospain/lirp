@@ -14,16 +14,14 @@ import net.transgressoft.lirp.event.CrudEvent;
 import net.transgressoft.lirp.event.MutationEvent;
 import net.transgressoft.lirp.event.ReactiveScope;
 import net.transgressoft.lirp.event.ReactiveMutationEvent;
-import net.transgressoft.lirp.persistence.BubbleUpOrderVolatileRepo;
-import net.transgressoft.lirp.persistence.Customer;
-import net.transgressoft.lirp.persistence.CustomerVolatileRepo;
-import net.transgressoft.lirp.persistence.LirpContext;
 import net.transgressoft.lirp.persistence.AudioItem;
 import net.transgressoft.lirp.persistence.AudioItemVolatileRepository;
-import net.transgressoft.lirp.persistence.MutableAudioItem;
-import net.transgressoft.lirp.persistence.DefaultAudioPlaylist;
 import net.transgressoft.lirp.persistence.AudioPlaylistVolatileRepository;
-import net.transgressoft.lirp.persistence.OrderVolatileRepo;
+import net.transgressoft.lirp.persistence.BubbleUpAudioPlaylistRepo;
+import net.transgressoft.lirp.persistence.DefaultAudioPlaylist;
+import net.transgressoft.lirp.persistence.LirpContext;
+import net.transgressoft.lirp.persistence.MutableAudioItem;
+import net.transgressoft.lirp.persistence.MutableAudioPlaylist;
 import net.transgressoft.lirp.persistence.ReactiveEntityReference;
 import net.transgressoft.lirp.persistence.json.FlexibleJsonFileRepository;
 import net.transgressoft.lirp.persistence.json.primitives.ReactiveString;
@@ -157,26 +155,26 @@ class JavaInteroperabilityTest {
     class ReactiveEntityTests {
 
         @Test
-        @DisplayName("Entity subscribe delivers old and new name on mutation")
-        void entitySubscribeDeliversOldAndNewNameOnMutation() {
-            var customer = new Customer(1, "Alice");
+        @DisplayName("Entity subscribe delivers old and new title on mutation")
+        void entitySubscribeDeliversOldAndNewTitleOnMutation() {
+            var audioItem = new MutableAudioItem(1, "Track Alpha");
 
-            assertEquals(1, customer.getId());
-            assertEquals("Alice", customer.getName());
+            assertEquals(1, audioItem.getId());
+            assertEquals("Track Alpha", audioItem.getTitle());
 
-            var oldName = new String[1];
-            var newName = new String[1];
+            var oldTitle = new String[1];
+            var newTitle = new String[1];
 
-            var subscription = customer.subscribe(event -> {
-                oldName[0] = event.getOldEntity().getName();
-                newName[0] = event.getNewEntity().getName();
+            var subscription = audioItem.subscribe(event -> {
+                oldTitle[0] = event.getOldEntity().getTitle();
+                newTitle[0] = event.getNewEntity().getTitle();
             });
 
-            customer.updateName("John");
+            audioItem.setTitle("Track Beta");
             scheduler.advanceUntilIdle();
 
-            assertEquals("Alice", oldName[0]);
-            assertEquals("John", newName[0]);
+            assertEquals("Track Alpha", oldTitle[0]);
+            assertEquals("Track Beta", newTitle[0]);
 
             subscription.cancel();
         }
@@ -189,18 +187,18 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("Flow.Subscriber receives entity mutation events via onNext")
         void flowSubscriberReceivesEntityMutationEventsViaOnNext() {
-            var customer = new Customer(1, "Alice");
-            List<MutationEvent<Integer, Customer>> receivedEvents = new ArrayList<>();
+            var audioItem = new MutableAudioItem(1, "Track Alpha");
+            List<MutationEvent<Integer, AudioItem>> receivedEvents = new ArrayList<>();
             AtomicReference<Flow.Subscription> subscriptionRef = new AtomicReference<>();
 
-            Flow.Subscriber<MutationEvent<Integer, Customer>> subscriber = new Flow.Subscriber<>() {
+            Flow.Subscriber<MutationEvent<Integer, AudioItem>> subscriber = new Flow.Subscriber<>() {
                 @Override
                 public void onSubscribe(Flow.Subscription subscription) {
                     subscriptionRef.set(subscription);
                 }
 
                 @Override
-                public void onNext(MutationEvent<Integer, Customer> item) {
+                public void onNext(MutationEvent<Integer, AudioItem> item) {
                     receivedEvents.add(item);
                 }
 
@@ -215,31 +213,31 @@ class JavaInteroperabilityTest {
                 }
             };
 
-            customer.subscribe(subscriber);
-            customer.updateName("Bob");
+            audioItem.subscribe(subscriber);
+            audioItem.setTitle("Track Beta");
             scheduler.advanceUntilIdle();
 
             assertNotNull(subscriptionRef.get(), "onSubscribe must be called");
             assertEquals(1, receivedEvents.size());
-            assertEquals("Alice", receivedEvents.get(0).getOldEntity().getName());
-            assertEquals("Bob", receivedEvents.get(0).getNewEntity().getName());
+            assertEquals("Track Alpha", receivedEvents.get(0).getOldEntity().getTitle());
+            assertEquals("Track Beta", receivedEvents.get(0).getNewEntity().getTitle());
         }
 
         @Test
         @DisplayName("Flow.Subscriber receives repository CRUD events via onNext")
         void flowSubscriberReceivesRepositoryCrudEventsViaOnNext() {
-            var repository = new CustomerVolatileRepo();
-            List<CrudEvent<Integer, ? extends Customer>> receivedEvents = new ArrayList<>();
+            var repository = new AudioItemVolatileRepository();
+            List<CrudEvent<Integer, ? extends AudioItem>> receivedEvents = new ArrayList<>();
             AtomicReference<Flow.Subscription> subscriptionRef = new AtomicReference<>();
 
-            Flow.Subscriber<CrudEvent<Integer, ? extends Customer>> subscriber = new Flow.Subscriber<>() {
+            Flow.Subscriber<CrudEvent<Integer, ? extends AudioItem>> subscriber = new Flow.Subscriber<>() {
                 @Override
                 public void onSubscribe(Flow.Subscription subscription) {
                     subscriptionRef.set(subscription);
                 }
 
                 @Override
-                public void onNext(CrudEvent<Integer, ? extends Customer> item) {
+                public void onNext(CrudEvent<Integer, ? extends AudioItem> item) {
                     receivedEvents.add(item);
                 }
 
@@ -255,13 +253,13 @@ class JavaInteroperabilityTest {
             };
 
             repository.subscribe(subscriber);
-            repository.create(1, "Alice");
+            repository.create(1, "Track Alpha", "");
             scheduler.advanceUntilIdle();
 
             assertNotNull(subscriptionRef.get(), "onSubscribe must be called");
             assertEquals(1, receivedEvents.size());
             assertTrue(receivedEvents.get(0).isCreate());
-            assertEquals("Alice", receivedEvents.get(0).getEntities().get(1).getName());
+            assertEquals("Track Alpha", receivedEvents.get(0).getEntities().get(1).getTitle());
 
             repository.close();
         }
@@ -269,17 +267,17 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("Calling request() on subscription throws IllegalStateException")
         void callingRequestOnSubscriptionThrowsIllegalStateException() {
-            var customer = new Customer(1, "Alice");
+            var audioItem = new MutableAudioItem(1, "Track Alpha");
             AtomicReference<Flow.Subscription> subscriptionRef = new AtomicReference<>();
 
-            Flow.Subscriber<MutationEvent<Integer, Customer>> subscriber = new Flow.Subscriber<>() {
+            Flow.Subscriber<MutationEvent<Integer, AudioItem>> subscriber = new Flow.Subscriber<>() {
                 @Override
                 public void onSubscribe(Flow.Subscription subscription) {
                     subscriptionRef.set(subscription);
                 }
 
                 @Override
-                public void onNext(MutationEvent<Integer, Customer> item) {
+                public void onNext(MutationEvent<Integer, AudioItem> item) {
                     // Not expected in this test scenario
                 }
 
@@ -294,7 +292,7 @@ class JavaInteroperabilityTest {
                 }
             };
 
-            customer.subscribe(subscriber);
+            audioItem.subscribe(subscriber);
             assertNotNull(subscriptionRef.get());
             Flow.Subscription subscription = subscriptionRef.get();
             assertThrows(IllegalStateException.class, () -> subscription.request(1));
@@ -308,17 +306,17 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("Subscribing to closed entity throws IllegalStateException")
         void subscribingToClosedEntityThrowsIllegalStateException() {
-            var customer = new Customer(1, "Alice");
-            customer.close();
+            var audioItem = new MutableAudioItem(1, "Track Alpha");
+            audioItem.close();
 
-            assertTrue(customer.isClosed());
-            assertThrows(IllegalStateException.class, () -> customer.subscribe(event -> {}));
+            assertTrue(audioItem.isClosed());
+            assertThrows(IllegalStateException.class, () -> audioItem.subscribe(event -> {}));
         }
 
         @Test
         @DisplayName("Subscribing to closed repository throws IllegalStateException")
         void subscribingToClosedRepositoryThrowsIllegalStateException() {
-            var repository = new CustomerVolatileRepo();
+            var repository = new AudioItemVolatileRepository();
             repository.close();
 
             assertTrue(repository.isClosed());
@@ -333,28 +331,28 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("Entity closes properly via try-with-resources")
         void entityClosesProperlyViaTryWithResources() {
-            Customer[] customerRef = new Customer[1];
+            MutableAudioItem[] audioItemRef = new MutableAudioItem[1];
 
-            try (var customer = new Customer(1, "Alice")) {
-                customerRef[0] = customer;
-                var subscription = customer.subscribe(event -> {});
-                customer.updateName("Bob");
+            try (var audioItem = new MutableAudioItem(1, "Track Alpha")) {
+                audioItemRef[0] = audioItem;
+                var subscription = audioItem.subscribe(event -> {});
+                audioItem.setTitle("Track Beta");
                 scheduler.advanceUntilIdle();
                 subscription.cancel();
             }
 
-            assertTrue(customerRef[0].isClosed());
-            assertThrows(IllegalStateException.class, () -> customerRef[0].subscribe(event -> {}));
+            assertTrue(audioItemRef[0].isClosed());
+            assertThrows(IllegalStateException.class, () -> audioItemRef[0].subscribe(event -> {}));
         }
 
         @Test
         @DisplayName("Repository closes properly via try-with-resources")
         void repositoryClosesProperlyViaTryWithResources() {
-            CustomerVolatileRepo[] repoRef = new CustomerVolatileRepo[1];
+            AudioItemVolatileRepository[] repoRef = new AudioItemVolatileRepository[1];
 
-            try (var repository = new CustomerVolatileRepo()) {
+            try (var repository = new AudioItemVolatileRepository()) {
                 repoRef[0] = repository;
-                repository.create(1, "Alice");
+                repository.create(1, "Track Alpha", "");
                 scheduler.advanceUntilIdle();
             }
 
@@ -370,27 +368,27 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("search with Predicate returns only matching entities")
         void searchWithPredicateReturnsOnlyMatchingEntities() {
-            var repository = new CustomerVolatileRepo();
-            repository.create(1, "Alice");
-            repository.create(2, "Bob");
-            repository.create(3, "Charlie");
+            var repository = new AudioItemVolatileRepository();
+            repository.create(1, "Track Alpha", "");
+            repository.create(2, "Track Beta", "");
+            repository.create(3, "Track Charlie", "");
 
-            var result = repository.search(customer -> customer.getName().startsWith("A"));
+            var result = repository.search(item -> item.getTitle().startsWith("Track A"));
 
             assertEquals(1, result.size());
-            assertEquals("Alice", result.iterator().next().getName());
+            assertEquals("Track Alpha", result.iterator().next().getTitle());
             repository.close();
         }
 
         @Test
         @DisplayName("search with size limit returns at most the requested number")
         void searchWithSizeLimitReturnsAtMostTheRequestedNumber() {
-            var repository = new CustomerVolatileRepo();
-            repository.create(1, "Alice");
-            repository.create(2, "Bob");
-            repository.create(3, "Charlie");
+            var repository = new AudioItemVolatileRepository();
+            repository.create(1, "Track Alpha", "");
+            repository.create(2, "Track Beta", "");
+            repository.create(3, "Track Charlie", "");
 
-            var result = repository.search(2, customer -> true);
+            var result = repository.search(2, item -> true);
 
             assertEquals(2, result.size());
             repository.close();
@@ -399,58 +397,58 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("findFirst with Predicate returns a matching entity")
         void findFirstWithPredicateReturnsMatchingEntity() {
-            var repository = new CustomerVolatileRepo();
-            repository.create(1, "Alice");
-            repository.create(2, "Bob");
-            repository.create(3, "Charlie");
+            var repository = new AudioItemVolatileRepository();
+            repository.create(1, "Track Alpha", "");
+            repository.create(2, "Track Beta", "");
+            repository.create(3, "Track Charlie", "");
 
-            var result = repository.findFirst(customer -> customer.getName().startsWith("B"));
+            var result = repository.findFirst(item -> item.getTitle().startsWith("Track B"));
 
             assertTrue(result.isPresent());
-            assertEquals("Bob", result.get().getName());
+            assertEquals("Track Beta", result.get().getTitle());
             repository.close();
         }
 
         @Test
         @DisplayName("contains with Predicate detects existing and non-existing entities")
         void containsWithPredicateDetectsExistingAndNonExistingEntities() {
-            var repository = new CustomerVolatileRepo();
-            repository.create(1, "Alice");
-            repository.create(2, "Bob");
+            var repository = new AudioItemVolatileRepository();
+            repository.create(1, "Track Alpha", "");
+            repository.create(2, "Track Beta", "");
 
-            assertTrue(repository.contains(customer -> customer.getName().equals("Alice")));
-            assertFalse(repository.contains(customer -> customer.getName().equals("NonExistent")));
+            assertTrue(repository.contains(item -> item.getTitle().equals("Track Alpha")));
+            assertFalse(repository.contains(item -> item.getTitle().equals("NonExistent")));
             repository.close();
         }
 
         @Test
         @DisplayName("iterator returns all entities in the repository")
         void iteratorReturnsAllEntitiesInRepository() {
-            var repository = new CustomerVolatileRepo();
-            var alice = repository.create(1, "Alice");
-            var bob = repository.create(2, "Bob");
-            var charlie = repository.create(3, "Charlie");
+            var repository = new AudioItemVolatileRepository();
+            var alpha = repository.create(1, "Track Alpha", "");
+            var beta = repository.create(2, "Track Beta", "");
+            var charlie = repository.create(3, "Track Charlie", "");
 
-            var iterated = new ArrayList<Customer>();
-            for (var customer : repository) {
-                iterated.add(customer);
+            var iterated = new ArrayList<AudioItem>();
+            for (var item : repository) {
+                iterated.add(item);
             }
 
             assertEquals(3, iterated.size());
-            assertTrue(iterated.containsAll(List.of(alice, bob, charlie)));
+            assertTrue(iterated.containsAll(List.of(alpha, beta, charlie)));
             repository.close();
         }
 
         @Test
         @DisplayName("findByUniqueId returns the entity with the matching unique ID")
         void findByUniqueIdReturnsEntityWithMatchingUniqueId() {
-            var repository = new CustomerVolatileRepo();
-            var alice = repository.create(1, "Alice");
+            var repository = new AudioItemVolatileRepository();
+            var alpha = repository.create(1, "Track Alpha", "");
 
-            var result = repository.findByUniqueId(alice.getUniqueId());
+            var result = repository.findByUniqueId(alpha.getUniqueId());
 
             assertTrue(result.isPresent());
-            assertEquals(alice, result.get());
+            assertEquals(alpha, result.get());
             repository.close();
         }
     }
@@ -462,16 +460,16 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("Java Consumer subscriber exception does not prevent other subscribers from receiving events")
         void javaConsumerSubscriberExceptionDoesNotPreventOtherSubscribersFromReceivingEvents() {
-            var customer = new Customer(1, "Alice");
+            var audioItem = new MutableAudioItem(1, "Track Alpha");
 
             // Throwing Consumer — unconditional exception on every event
-            customer.subscribe(event -> { throw new RuntimeException("intentional Java exception"); });
+            audioItem.subscribe(event -> { throw new RuntimeException("intentional Java exception"); });
 
             var healthyCounter = new AtomicInteger(0);
-            customer.subscribe(event -> healthyCounter.incrementAndGet());
+            audioItem.subscribe(event -> healthyCounter.incrementAndGet());
 
-            customer.updateName("Bob");
-            customer.updateName("Charlie");
+            audioItem.setTitle("Track Beta");
+            audioItem.setTitle("Track Charlie");
             scheduler.advanceUntilIdle();
 
             assertEquals(2, healthyCounter.get());
@@ -483,14 +481,14 @@ class JavaInteroperabilityTest {
     class AggregateReferenceTests {
 
         LirpContext ctx;
-        CustomerVolatileRepo customerRepo;
-        OrderVolatileRepo orderRepo;
+        AudioItemVolatileRepository audioItemRepo;
+        AudioPlaylistVolatileRepository playlistRepo;
 
         @BeforeEach
         void setupRepos() {
             ctx = new LirpContext();
-            customerRepo = new CustomerVolatileRepo(ctx);
-            orderRepo = new OrderVolatileRepo(ctx);
+            audioItemRepo = new AudioItemVolatileRepository(ctx);
+            playlistRepo = new AudioPlaylistVolatileRepository(ctx);
         }
 
         @AfterEach
@@ -501,25 +499,27 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("Java can access aggregate ref via getter and call resolve()")
         void javaCanAccessAggregateRefViaGetterAndCallResolve() {
-            customerRepo.create(1, "Alice");
-            orderRepo.create(10L, 1);
+            var bubbleUpRepo = new BubbleUpAudioPlaylistRepo(ctx);
+            audioItemRepo.create(1, "Track Alpha", "");
+            bubbleUpRepo.create(10, 1);
             scheduler.advanceUntilIdle();
 
-            var order = orderRepo.findById(10L).get();
-            ReactiveEntityReference<Integer, Customer> ref = order.getCustomer();
+            var bubbleUp = bubbleUpRepo.findById(10).get();
+            ReactiveEntityReference<Integer, AudioItem> ref = bubbleUp.getAudioItem();
             assertNotNull(ref);
             assertTrue(ref.resolve().isPresent());
-            assertEquals("Alice", ref.resolve().get().getName());
+            assertEquals("Track Alpha", ref.resolve().get().getTitle());
         }
 
         @Test
         @DisplayName("Java resolve returns empty Optional when referenced entity not in repo")
         void javaResolveReturnsEmptyOptionalWhenReferencedEntityNotInRepo() {
-            orderRepo.create(10L, 99);
+            var bubbleUpRepo = new BubbleUpAudioPlaylistRepo(ctx);
+            bubbleUpRepo.create(10, 99);
             scheduler.advanceUntilIdle();
 
-            var order = orderRepo.findById(10L).get();
-            ReactiveEntityReference<Integer, Customer> ref = order.getCustomer();
+            var bubbleUp = bubbleUpRepo.findById(10).get();
+            ReactiveEntityReference<Integer, AudioItem> ref = bubbleUp.getAudioItem();
             assertNotNull(ref);
             assertFalse(ref.resolve().isPresent());
         }
@@ -527,24 +527,24 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("Java subscriber receives AggregateMutationEvent as MutationEvent subtype")
         void javaSubscriberReceivesAggregateMutationEventAsMutationEventSubtype() throws InterruptedException {
-            customerRepo.create(1, "Bob");
-            var bubbleUpOrderRepo = new BubbleUpOrderVolatileRepo(ctx);
-            bubbleUpOrderRepo.create(10L, 1);
+            var bubbleUpRepo = new BubbleUpAudioPlaylistRepo(ctx);
+            audioItemRepo.create(1, "Track Alpha", "");
+            bubbleUpRepo.create(10, 1);
             scheduler.advanceUntilIdle();
 
-            var order = bubbleUpOrderRepo.findById(10L).get();
+            var bubbleUp = bubbleUpRepo.findById(10).get();
 
             var latch = new CountDownLatch(1);
             var receivedAggregateEvent = new AtomicReference<MutationEvent<?, ?>>(null);
 
-            order.subscribe(event -> {
+            bubbleUp.subscribe(event -> {
                 if (event instanceof AggregateMutationEvent) {
                     receivedAggregateEvent.set(event);
                     latch.countDown();
                 }
             });
 
-            customerRepo.findById(1).get().updateName("Bob Updated");
+            ((MutableAudioItem) audioItemRepo.findById(1).get()).setTitle("Track Alpha Updated");
             scheduler.advanceUntilIdle();
 
             assertTrue(latch.await(2, SECONDS));
@@ -651,18 +651,18 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("subscribeToMutations Java Consumer overload receives ReactiveMutationEvent")
         void subscribeToMutations_Java_Consumer_receives_events() throws InterruptedException {
-            var customer = new Customer(1, "Alice");
+            var audioItem = new MutableAudioItem(1, "Track Alpha");
 
             var latch = new CountDownLatch(1);
             AtomicReference<ReactiveMutationEvent<?, ?>> receivedEvent = new AtomicReference<>(null);
 
-            CollectionChangeEventExtensionsKt.subscribeToMutations(customer,
-                (Consumer<ReactiveMutationEvent<Integer, Customer>>) event -> {
+            CollectionChangeEventExtensionsKt.subscribeToMutations(audioItem,
+                (Consumer<ReactiveMutationEvent<Integer, AudioItem>>) event -> {
                     receivedEvent.set(event);
                     latch.countDown();
                 });
 
-            customer.updateName("Bob");
+            audioItem.setTitle("Track Beta");
             scheduler.advanceUntilIdle();
 
             assertTrue(latch.await(2, SECONDS));
@@ -678,17 +678,17 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("create publishes CREATE event with the added entity")
         void createPublishesCreateEventWithAddedEntity() {
-            var repository = new CustomerVolatileRepo();
-            var eventEntities = new ArrayList<Customer>();
+            var repository = new AudioItemVolatileRepository();
+            var eventEntities = new ArrayList<AudioItem>();
 
             var subscription = repository.subscribe(
                 event -> eventEntities.addAll(event.getEntities().values()));
 
-            repository.create(1, "Alice");
+            repository.create(1, "Track Alpha", "");
             scheduler.advanceUntilIdle();
 
             assertEquals(1, eventEntities.size());
-            assertEquals("Alice", eventEntities.get(0).getName());
+            assertEquals("Track Alpha", eventEntities.get(0).getTitle());
 
             subscription.cancel();
             repository.close();
@@ -697,14 +697,14 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("remove deletes entity and publishes DELETE event")
         void removeDeletesEntityAndPublishesDeleteEvent() {
-            var repository = new CustomerVolatileRepo();
-            var alice = repository.create(1, "Alice");
-            repository.create(1, "Alice");
+            var repository = new AudioItemVolatileRepository();
+            var alpha = repository.create(1, "Track Alpha", "");
+            repository.create(1, "Track Alpha", "");
 
-            List<CrudEvent<Integer, ? extends Customer>> receivedEvents = new ArrayList<>();
+            List<CrudEvent<Integer, ? extends AudioItem>> receivedEvents = new ArrayList<>();
             var subscription = repository.subscribe(event -> receivedEvents.add(event));
 
-            repository.remove(alice);
+            repository.remove(alpha);
             scheduler.advanceUntilIdle();
 
             assertEquals(0, repository.size());
@@ -718,12 +718,12 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("removeAll deletes multiple entities at once")
         void removeAllDeletesMultipleEntitiesAtOnce() {
-            var repository = new CustomerVolatileRepo();
-            var alice = repository.create(1, "Alice");
-            var bob = repository.create(2, "Bob");
-            var charlie = repository.create(3, "Charlie");
+            var repository = new AudioItemVolatileRepository();
+            var alpha = repository.create(1, "Track Alpha", "");
+            var beta = repository.create(2, "Track Beta", "");
+            var charlie = repository.create(3, "Track Charlie", "");
 
-            repository.removeAll(List.of(alice, bob));
+            repository.removeAll(List.of(alpha, beta));
             scheduler.advanceUntilIdle();
 
             assertEquals(1, repository.size());
@@ -735,12 +735,12 @@ class JavaInteroperabilityTest {
         @Test
         @DisplayName("clear removes all entities and publishes DELETE event")
         void clearRemovesAllEntitiesAndPublishesDeleteEvent() {
-            var repository = new CustomerVolatileRepo();
-            repository.create(1, "Alice");
-            repository.create(2, "Bob");
-            repository.create(3, "Charlie");
+            var repository = new AudioItemVolatileRepository();
+            repository.create(1, "Track Alpha", "");
+            repository.create(2, "Track Beta", "");
+            repository.create(3, "Track Charlie", "");
 
-            List<CrudEvent<Integer, ? extends Customer>> receivedEvents = new ArrayList<>();
+            List<CrudEvent<Integer, ? extends AudioItem>> receivedEvents = new ArrayList<>();
             var subscription = repository.subscribe(event -> receivedEvents.add(event));
 
             repository.clear();

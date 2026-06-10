@@ -17,8 +17,8 @@
 
 package net.transgressoft.lirp.event
 
-import net.transgressoft.lirp.persistence.Customer
-import net.transgressoft.lirp.persistence.CustomerVolatileRepo
+import net.transgressoft.lirp.persistence.AudioItem
+import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
 import net.transgressoft.lirp.testing.ReactiveScopeSerialization
 import net.transgressoft.lirp.testing.Stress
 import io.kotest.core.spec.style.DescribeSpec
@@ -57,12 +57,12 @@ class ConcurrencyStressTest : DescribeSpec({
     describe("FlowEventPublisher under concurrent CrudEvent load") {
 
         it("delivers all CrudEvents to all subscribers without loss").config(timeout = 30.seconds) {
-            val repository = CustomerVolatileRepo()
+            val repository = AudioItemVolatileRepository()
 
             // Each subscriber collects events and counts down a latch per received event
-            val queue1 = ConcurrentLinkedQueue<CrudEvent<Int, Customer>>()
-            val queue2 = ConcurrentLinkedQueue<CrudEvent<Int, Customer>>()
-            val queue3 = ConcurrentLinkedQueue<CrudEvent<Int, Customer>>()
+            val queue1 = ConcurrentLinkedQueue<CrudEvent<Int, AudioItem>>()
+            val queue2 = ConcurrentLinkedQueue<CrudEvent<Int, AudioItem>>()
+            val queue3 = ConcurrentLinkedQueue<CrudEvent<Int, AudioItem>>()
 
             val latch1 = CountDownLatch(TOTAL_EVENTS)
             val latch2 = CountDownLatch(TOTAL_EVENTS)
@@ -91,7 +91,7 @@ class ConcurrencyStressTest : DescribeSpec({
                     launch(Dispatchers.Default) {
                         repeat(EVENTS_PER_WRITER) { eventIndex ->
                             val id = writerIndex * EVENTS_PER_WRITER + eventIndex
-                            repository.create(id, "customer-$id")
+                            repository.create(id, "track-$id")
                         }
                     }
                 }
@@ -187,7 +187,7 @@ class ConcurrencyStressTest : DescribeSpec({
     describe("FlowEventPublisher under interleaved CRUD and mutation load") {
 
         it("delivers all events under interleaved CRUD and mutation operations").config(timeout = 30.seconds) {
-            val repository = CustomerVolatileRepo()
+            val repository = AudioItemVolatileRepository()
 
             // Standalone mutation publisher, separate from repository publisher
             val mutationPublisher =
@@ -203,8 +203,8 @@ class ConcurrencyStressTest : DescribeSpec({
             val expectedMutationEvents = mutationWriterCount * EVENTS_PER_WRITER
 
             // Separate queues and latches per event type per subscriber
-            val crudQueue1 = ConcurrentLinkedQueue<CrudEvent<Int, Customer>>()
-            val crudQueue2 = ConcurrentLinkedQueue<CrudEvent<Int, Customer>>()
+            val crudQueue1 = ConcurrentLinkedQueue<CrudEvent<Int, AudioItem>>()
+            val crudQueue2 = ConcurrentLinkedQueue<CrudEvent<Int, AudioItem>>()
             val mutQueue1 = ConcurrentLinkedQueue<MutationEvent<String, TestEntity>>()
             val mutQueue2 = ConcurrentLinkedQueue<MutationEvent<String, TestEntity>>()
 
@@ -241,7 +241,7 @@ class ConcurrencyStressTest : DescribeSpec({
                     launch(Dispatchers.Default) {
                         repeat(EVENTS_PER_WRITER) { eventIndex ->
                             val id = writerIndex * EVENTS_PER_WRITER + eventIndex
-                            repository.create(id, "customer-$id")
+                            repository.create(id, "track-$id")
                         }
                     }
                 }

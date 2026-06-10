@@ -43,10 +43,10 @@ internal class LirpContextPublicApiTest : StringSpec({
     }
 
     "LirpContext registryFor(Class) returns registered registry" {
-        val delegate = VolatileRepository<Int, Customer>("Customers")
-        RegistryBase.registerRepository(Customer::class.java, delegate)
+        val delegate = VolatileRepository<Int, AudioItem>("AudioItems")
+        RegistryBase.registerRepository(AudioItem::class.java, delegate)
 
-        val registry = LirpContext.default.registryFor(Customer::class.java)
+        val registry = LirpContext.default.registryFor(AudioItem::class.java)
 
         registry.shouldNotBeNull()
         registry shouldBe delegate
@@ -55,26 +55,26 @@ internal class LirpContextPublicApiTest : StringSpec({
     "LirpContext registryFor(Class) returns null for unregistered class" {
         val freshContext = LirpContext()
 
-        val registry = freshContext.registryFor(Customer::class.java)
+        val registry = freshContext.registryFor(AudioItem::class.java)
 
         registry.shouldBeNull()
     }
 
     "LirpContext reified registryFor returns typed registry" {
-        val delegate = VolatileRepository<Int, Customer>("Customers")
-        RegistryBase.registerRepository(Customer::class.java, delegate)
+        val delegate = VolatileRepository<Int, AudioItem>("AudioItems")
+        RegistryBase.registerRepository(AudioItem::class.java, delegate)
 
-        val registry = LirpContext.default.registryFor<Customer>()
+        val registry = LirpContext.default.registryFor<AudioItem>()
 
         registry.shouldNotBeNull()
-        registry.shouldBeInstanceOf<Registry<*, Customer>>()
+        registry.shouldBeInstanceOf<Registry<*, AudioItem>>()
         registry shouldBe delegate
     }
 
     "LirpContext reified registryFor returns null for unregistered type" {
         val freshContext = LirpContext()
 
-        val registry = freshContext.registryFor<Customer>()
+        val registry = freshContext.registryFor<AudioItem>()
 
         registry.shouldBeNull()
     }
