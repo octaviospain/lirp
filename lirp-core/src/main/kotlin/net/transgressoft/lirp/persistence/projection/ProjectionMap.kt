@@ -15,10 +15,13 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>. *
  ******************************************************************************/
 
-package net.transgressoft.lirp.persistence
+package net.transgressoft.lirp.persistence.projection
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.CollectionChangeEvent
+import net.transgressoft.lirp.persistence.AggregateCollectionRef
+import net.transgressoft.lirp.persistence.MutableAggregateList
+import net.transgressoft.lirp.persistence.MutableAggregateSet
 import kotlin.reflect.KProperty
 
 /**
@@ -58,6 +61,8 @@ class ProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEnti
 ) : AbstractMap<PK, List<E>>() {
     private val core = ProjectionCore<K, PK, E>(keyExtractor)
 
+    private val initLock = Any()
+
     @Volatile
     private var initialized = false
 
@@ -74,9 +79,16 @@ class ProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEnti
             core.onChange = value
         }
 
+    /** Fires alongside [onChange] carrying only the keys changed by the latest delta. Single-subscriber. */
+    internal var onBucketsChanged: ((Set<PK>) -> Unit)?
+        get() = core.onBucketsChanged
+        set(value) {
+            core.onBucketsChanged = value
+        }
+
     private fun initialize() {
         if (initialized) return
-        synchronized(this) {
+        synchronized(initLock) {
             if (initialized) return
             val source = sourceRef()
             core.handleAdded(source.resolveAll().toList())
@@ -84,6 +96,13 @@ class ProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEnti
             initialized = true
         }
     }
+
+    /**
+     * Returns the current contents of the [key] bucket WITHOUT triggering lazy initialization.
+     * The value-transform decorator's `onBucketsChanged` hook calls this; that hook fires only after
+     * [initialize] has populated the core, so it must never re-enter [initialize] (which would recurse).
+     */
+    internal fun bucketSnapshot(key: PK): List<E>? = core.readOnlyView[key]
 
     @Suppress("UNCHECKED_CAST")
     private fun subscribeToSource(source: AggregateCollectionRef<K, E>) {

@@ -165,6 +165,174 @@ class SoftDeletableMutableAudioItem
     }
 
 // ---------------------------------------------------------------------------
+// Multi-key audio item — music-domain fixture with a Collection<String> genres property
+// ---------------------------------------------------------------------------
+
+/**
+ * Reactive audio item with a mutable [genres] property returning a [Set] of genre strings.
+ * Used in multi-key projection tests where a single entity is bucketed under each of its genres.
+ *
+ * Not declared `internal` so it is accessible from the lirp-fx and lirp-sql testFixtures source sets.
+ */
+class MutableMultiKeyAudioItem
+    @JvmOverloads
+    constructor(
+        override val id: Int,
+        title: String,
+        genres: Set<String> = emptySet()
+    ) : ReactiveEntityBase<Int, MutableMultiKeyAudioItem>(), IdentifiableEntity<Int>, Comparable<MutableMultiKeyAudioItem> {
+        override val uniqueId: String get() = "multi-key-audio-item-$id"
+
+        var title: String by reactiveProperty(title)
+        var genres: Set<String> by reactiveProperty(genres)
+
+        override fun compareTo(other: MutableMultiKeyAudioItem): Int = id.compareTo(other.id)
+
+        override fun clone(): MutableMultiKeyAudioItem = MutableMultiKeyAudioItem(id, title, genres)
+
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is MutableMultiKeyAudioItem) return false
+            return id == other.id && title == other.title && genres == other.genres
+        }
+
+        override fun hashCode(): Int {
+            var result = id.hashCode()
+            result = 31 * result + title.hashCode()
+            result = 31 * result + genres.hashCode()
+            return result
+        }
+
+        override fun toString(): String = "MutableMultiKeyAudioItem(id=$id, title='$title', genres=$genres)"
+    }
+
+/**
+ * Named [VolatileRepository] subclass for [MutableMultiKeyAudioItem] entities, enabling KSP-generated
+ * [LirpRegistryInfo] auto-registration. Provides a [create] helper for concise test setup.
+ */
+@LirpRepository
+class MultiKeyAudioItemVolatileRepository internal constructor(context: LirpContext) :
+    VolatileRepository<Int, MutableMultiKeyAudioItem>(context, "MultiKeyAudioItems") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Int, title: String, genres: Set<String> = emptySet()): MutableMultiKeyAudioItem =
+            MutableMultiKeyAudioItem(id, title, genres).also(::add)
+    }
+
+// ---------------------------------------------------------------------------
+// SoftDeletable multi-key audio item — for soft-delete + multi-key projection tests
+// ---------------------------------------------------------------------------
+
+/**
+ * Soft-deletable variant of [MutableMultiKeyAudioItem] that implements both [SoftDeletable]
+ * and [Comparable]. Used in multi-key projection tests to verify that soft-deleting an entity
+ * removes it from ALL its genre buckets and from the reverse index.
+ *
+ * Setting [deletedAt] to a non-null value emits a normal [CrudEvent.Update] through
+ * the repository, triggering multi-key projection removal across all buckets.
+ */
+class SoftDeletableMultiKeyAudioItem
+    @JvmOverloads
+    constructor(
+        override val id: Int,
+        title: String,
+        genres: Set<String> = emptySet()
+    ) : ReactiveEntityBase<Int, SoftDeletableMultiKeyAudioItem>(),
+        IdentifiableEntity<Int>,
+        SoftDeletable,
+        Comparable<SoftDeletableMultiKeyAudioItem> {
+        override val uniqueId: String get() = "soft-deletable-multi-key-audio-item-$id"
+
+        var title: String by reactiveProperty(title)
+        var genres: Set<String> by reactiveProperty(genres)
+
+        /** The instant at which this item was soft-deleted, or `null` if it is active. */
+        override var deletedAt: Instant? by reactiveProperty(null)
+
+        override fun compareTo(other: SoftDeletableMultiKeyAudioItem): Int = id.compareTo(other.id)
+
+        override fun clone(): SoftDeletableMultiKeyAudioItem =
+            SoftDeletableMultiKeyAudioItem(id, title, genres).also { it.deletedAt = deletedAt }
+
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is SoftDeletableMultiKeyAudioItem) return false
+            return id == other.id && title == other.title && genres == other.genres && deletedAt == other.deletedAt
+        }
+
+        override fun hashCode(): Int {
+            var result = id.hashCode()
+            result = 31 * result + title.hashCode()
+            result = 31 * result + genres.hashCode()
+            result = 31 * result + (deletedAt?.hashCode() ?: 0)
+            return result
+        }
+
+        override fun toString(): String =
+            "SoftDeletableMultiKeyAudioItem(id=$id, title='$title', genres=$genres, deletedAt=$deletedAt)"
+    }
+
+/**
+ * Named [VolatileRepository] for [SoftDeletableMultiKeyAudioItem] entities. Provides a [create]
+ * helper for concise test setup.
+ */
+@LirpRepository
+class SoftDeletableMultiKeyAudioItemRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Int, SoftDeletableMultiKeyAudioItem>(context, "SoftDeletableMultiKeyAudioItems") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Int, title: String, genres: Set<String> = emptySet()): SoftDeletableMultiKeyAudioItem =
+            SoftDeletableMultiKeyAudioItem(id, title, genres).also(::add)
+    }
+
+// ---------------------------------------------------------------------------
+// MultiKeyAudioPlaylist — aggregate container for MutableMultiKeyAudioItem
+// ---------------------------------------------------------------------------
+
+/**
+ * Simple playlist aggregate that holds [MutableMultiKeyAudioItem] entities via a
+ * [MutableAggregateList]. Used in multi-key aggregate-source projection tests to verify
+ * that [MultiKeyProjectionMap] correctly buckets entities under every genre key.
+ */
+class MultiKeyAudioPlaylist(
+    override val id: Int,
+    val name: String,
+    initialAudioItemIds: List<Int> = emptyList()
+) : ReactiveEntityBase<Int, MultiKeyAudioPlaylist>(), IdentifiableEntity<Int> {
+    override val uniqueId: String get() = "multi-key-audio-playlist-$id"
+
+    @Aggregate(onDelete = CascadeAction.DETACH)
+    val audioItems by mutableAggregateList<Int, MutableMultiKeyAudioItem>(initialAudioItemIds)
+
+    override fun clone(): MultiKeyAudioPlaylist =
+        MultiKeyAudioPlaylist(id, name, audioItems.referenceIds.toList())
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is MultiKeyAudioPlaylist) return false
+        return id == other.id && name == other.name && audioItems.referenceIds == other.audioItems.referenceIds
+    }
+
+    override fun hashCode(): Int = 31 * (31 * id.hashCode() + name.hashCode()) + audioItems.referenceIds.hashCode()
+
+    override fun toString(): String = "MultiKeyAudioPlaylist(id=$id, name='$name')"
+}
+
+/** Repository for [MultiKeyAudioPlaylist] entities. */
+@LirpRepository
+class MultiKeyAudioPlaylistRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Int, MultiKeyAudioPlaylist>(context, "MultiKeyAudioPlaylists") {
+        constructor() : this(LirpContext.default)
+
+        fun create(
+            id: Int,
+            name: String,
+            audioItemIds: List<Int> = emptyList()
+        ): MultiKeyAudioPlaylist =
+            MultiKeyAudioPlaylist(id, name, audioItemIds).also { add(it) }
+    }
+
+// ---------------------------------------------------------------------------
 // Playlist hierarchy
 // ---------------------------------------------------------------------------
 
