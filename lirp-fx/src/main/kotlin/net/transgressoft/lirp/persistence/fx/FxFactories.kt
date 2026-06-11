@@ -19,8 +19,10 @@ package net.transgressoft.lirp.persistence.fx
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.persistence.FxObservableCollection
+import net.transgressoft.lirp.persistence.Registry
 import net.transgressoft.lirp.persistence.mutableAggregateList
 import net.transgressoft.lirp.persistence.mutableAggregateSet
+import javafx.collections.ObservableMap
 
 /**
  * Creates a property delegate for a JavaFX-observable mutable ordered aggregate collection reference.
@@ -174,3 +176,32 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> fxProjec
     dispatchToFxThread: Boolean = true
 ): FxProjectionMap<K, PK, E> =
     FxProjectionMap(sourceRef, keyExtractor, dispatchToFxThread)
+
+/**
+ * Creates a read-only [ObservableMap] projection delegate that groups all entities from a [Registry]
+ * by a secondary key, with bucket mutations dispatched to the JavaFX Application Thread.
+ *
+ * The returned [RegistryFxProjectionMap] lazily initializes on the first [RegistryFxProjectionMap.getValue] or
+ * [RegistryFxProjectionMap.addListener] call, building its initial state from the registry's current contents and
+ * subscribing to incremental [net.transgressoft.lirp.event.CrudEvent] notifications. Soft-deleted entities are excluded.
+ *
+ * Usage:
+ * ```kotlin
+ * val itemsByAlbum: ObservableMap<String, List<AudioItem>> by registryFxProjectionMap(trackRepo) { it.albumName }
+ * ```
+ *
+ * @param K the entity ID type
+ * @param PK the projection key type, must be [Comparable]
+ * @param E the entity type
+ * @param registry the source registry to project
+ * @param keyExtractor grouping function that extracts the projection key from an entity
+ * @param dispatchToFxThread when `true` (default), dispatches notifications to the FX Application Thread;
+ *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
+ * @return a read-only observable projection map delegate incrementally updated from the registry
+ */
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryFxProjectionMap(
+    registry: Registry<K, E>,
+    keyExtractor: (E) -> PK,
+    dispatchToFxThread: Boolean = true
+): RegistryFxProjectionMap<K, PK, E> =
+    RegistryFxProjectionMap(registry, keyExtractor, dispatchToFxThread)

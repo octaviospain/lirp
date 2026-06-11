@@ -21,11 +21,13 @@ import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.entity.ReactiveEntity
 import net.transgressoft.lirp.entity.ReactiveEntityBase
+import net.transgressoft.lirp.entity.SoftDeletable
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.LirpEventSubscriber
 import net.transgressoft.lirp.event.LirpEventSubscriberBase
 import net.transgressoft.lirp.persistence.json.JsonFileRepository
 import java.io.File
+import java.time.Instant
 import java.util.concurrent.Flow
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.serialization.KSerializer
@@ -108,6 +110,58 @@ class MutableAudioItem
         }
 
         override fun toString(): String = "MutableAudioItem(id=$id, title='$title', albumName='$albumName')"
+    }
+
+// ---------------------------------------------------------------------------
+// SoftDeletable audio item — music-domain fixture implementing SoftDeletable
+// ---------------------------------------------------------------------------
+
+/**
+ * Audio item that supports soft deletion via a reactive [deletedAt] property.
+ *
+ * Implements both [AudioItem] and [SoftDeletable], allowing it to be stored in
+ * [AudioItemVolatileRepository] and used to exercise soft-delete-aware projections.
+ * Setting [deletedAt] to a non-null value emits a normal [CrudEvent.Update] through
+ * the repository, triggering projection removal.
+ *
+ * Not declared `internal` so it is accessible from all test source sets.
+ */
+class SoftDeletableMutableAudioItem
+    @JvmOverloads
+    constructor(
+        override val id: Int,
+        title: String,
+        albumName: String = ""
+    ) : ReactiveEntityBase<Int, AudioItem>(), AudioItem, SoftDeletable {
+        override val uniqueId: String get() = "soft-deletable-audio-item-$id"
+
+        override var title: String by reactiveProperty(title)
+        override var albumName: String by reactiveProperty(albumName)
+
+        /** The instant at which this item was soft-deleted, or `null` if it is active. */
+        override var deletedAt: Instant? by reactiveProperty(null)
+
+        override fun compareTo(other: AudioItem): Int = id.compareTo(other.id)
+
+        override fun clone(): SoftDeletableMutableAudioItem =
+            SoftDeletableMutableAudioItem(id, title, albumName).also { it.deletedAt = deletedAt }
+
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is SoftDeletableMutableAudioItem) return false
+            return id == other.id && title == other.title && albumName == other.albumName && deletedAt == other.deletedAt
+        }
+
+        override fun hashCode(): Int {
+            var result = id.hashCode()
+            result = 31 * result + title.hashCode()
+            result = 31 * result + albumName.hashCode()
+            result = 31 * result + (deletedAt?.hashCode() ?: 0)
+            return result
+        }
+
+        override fun toString(): String =
+            "SoftDeletableMutableAudioItem(id=$id, title='$title', albumName='$albumName', deletedAt=$deletedAt)"
     }
 
 // ---------------------------------------------------------------------------
