@@ -19,15 +19,13 @@ package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.CollectionChangeEvent
-import java.util.Collections
-import java.util.concurrent.ConcurrentSkipListMap
 import kotlin.reflect.KProperty
 
 /**
  * A read-only grouped view that derives a `Map<PK, List<E>>` from a source collection,
  * grouping entities by a secondary key via [keyExtractor].
  *
- * The projection uses a [ConcurrentSkipListMap] for natural key ordering with CME-free iteration,
+ * The projection uses a [java.util.concurrent.ConcurrentSkipListMap] for natural key ordering with CME-free iteration,
  * and fires an optional [onChange]
  * callback when the projection state changes. It has no JavaFX dependency and works with
  * any JVM target including Android and server-side applications.
@@ -41,7 +39,7 @@ import kotlin.reflect.KProperty
  * The map is read-only. All mutations flow through the source collection.
  *
  * **Thread safety:** Iterating [keys], [values], [entries], or calling [size], [containsKey],
- * and [get] is CME-free under concurrent mutation because the backing map is [ConcurrentSkipListMap].
+ * and [get] is CME-free under concurrent mutation because the backing map is [java.util.concurrent.ConcurrentSkipListMap].
  * Reads are weakly-consistent: entries added concurrently may or may not be visible mid-iteration,
  * but iteration always completes without error. Mutations via [onChange], [MutableAggregateList],
  * or [MutableAggregateSet] still flow through a single source-collection mutation thread;
@@ -49,7 +47,7 @@ import kotlin.reflect.KProperty
  * individual bucket — that contract is unchanged.
  *
  * @param K the entity ID type, must be [Comparable]
- * @param PK the projection key type, must be [Comparable] (used as the backing [ConcurrentSkipListMap] key)
+ * @param PK the projection key type, must be [Comparable] (used as the backing [java.util.concurrent.ConcurrentSkipListMap] key)
  * @param E the entity type
  * @param sourceRef deferred reference to the source collection (resolved on first access)
  * @param keyExtractor grouping function that extracts the projection key from an entity
@@ -58,8 +56,7 @@ class ProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEnti
     private val sourceRef: () -> AggregateCollectionRef<K, E>,
     private val keyExtractor: (E) -> PK
 ) : AbstractMap<PK, List<E>>() {
-    private val backingMap = ConcurrentSkipListMap<PK, List<E>>()
-    private val readOnlyView: Map<PK, List<E>> = Collections.unmodifiableMap(backingMap)
+    private val core = ProjectionCore<K, PK, E>(keyExtractor)
 
     @Volatile
     private var initialized = false
@@ -71,20 +68,22 @@ class ProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEnti
      * The callback fires on the same thread that performed the source mutation; subscribers
      * requiring a specific thread must marshal themselves. No cross-thread atomicity is provided.
      */
-    internal var onChange: ((Map<PK, List<E>>) -> Unit)? = null
+    internal var onChange: ((Map<PK, List<E>>) -> Unit)?
+        get() = core.onChange
+        set(value) {
+            core.onChange = value
+        }
 
     private fun initialize() {
         if (initialized) return
         synchronized(this) {
             if (initialized) return
             val source = sourceRef()
-            handleAdded(source.resolveAll().toList())
+            core.handleAdded(source.resolveAll().toList())
             subscribeToSource(source)
             initialized = true
         }
     }
-
-    private fun freezeBucket(elements: List<E>): List<E> = java.util.Collections.unmodifiableList(ArrayList(elements))
 
     @Suppress("UNCHECKED_CAST")
     private fun subscribeToSource(source: AggregateCollectionRef<K, E>) {
@@ -92,8 +91,8 @@ class ProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEnti
             if (event.type == CollectionChangeEvent.Type.CLEAR) {
                 rebuild(source)
             } else {
-                if (event.added.isNotEmpty()) handleAdded(event.added as List<E>)
-                if (event.removed.isNotEmpty()) handleRemoved(event.removed as List<E>)
+                if (event.added.isNotEmpty()) core.handleAdded(event.added as List<E>)
+                if (event.removed.isNotEmpty()) core.handleRemoved(event.removed as List<E>)
             }
         }
         when (source) {
@@ -103,87 +102,46 @@ class ProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEnti
     }
 
     private fun rebuild(source: AggregateCollectionRef<K, E>) {
-        backingMap.clear()
-        handleAdded(source.resolveAll().toList())
-    }
-
-    private fun handleAdded(elements: List<E>) {
-        var changed = false
-        for (element in elements) {
-            val key = keyExtractor(element)
-            backingMap[key] = freezeBucket((backingMap[key] ?: emptyList()) + element)
-            changed = true
-        }
-        if (changed) onChange?.invoke(readOnlyView)
-    }
-
-    private fun handleRemoved(elements: List<E>) {
-        var changed = false
-        for (element in elements) {
-            val key = keyExtractor(element)
-            val bucket = backingMap[key]
-            if (bucket != null && element in bucket) {
-                val filtered = bucket.filter { it != element }
-                if (filtered.isEmpty()) backingMap.remove(key)
-                else backingMap[key] = freezeBucket(filtered)
-                changed = true
-            } else {
-                changed = removeFromAnyBucket(element) || changed
-            }
-        }
-        if (changed) onChange?.invoke(readOnlyView)
-    }
-
-    private fun removeFromAnyBucket(element: E): Boolean {
-        for (entry in backingMap.entries) {
-            if (element in entry.value) {
-                val filtered = entry.value.filter { it != element }
-                // ConcurrentSkipListMap entry iterators return SimpleImmutableEntry instances whose setValue throws
-                // UnsupportedOperationException — go through the map directly instead.
-                if (filtered.isEmpty()) backingMap.remove(entry.key)
-                else backingMap[entry.key] = freezeBucket(filtered)
-                return true
-            }
-        }
-        return false
+        core.backingMap.clear()
+        core.handleAdded(source.resolveAll().toList())
     }
 
     // Map<PK, List<E>> delegation — enables direct read access (projection.size, projection["key"])
     override val size: Int get() {
         initialize()
-        return readOnlyView.size
+        return core.readOnlyView.size
     }
     override val entries: Set<Map.Entry<PK, List<E>>> get() {
         initialize()
-        return readOnlyView.entries
+        return core.readOnlyView.entries
     }
     override val keys: Set<PK> get() {
         initialize()
-        return readOnlyView.keys
+        return core.readOnlyView.keys
     }
     override val values: Collection<List<E>> get() {
         initialize()
-        return readOnlyView.values
+        return core.readOnlyView.values
     }
 
     override fun containsKey(key: PK): Boolean {
         initialize()
-        return readOnlyView.containsKey(key)
+        return core.readOnlyView.containsKey(key)
     }
 
     override fun containsValue(value: List<E>): Boolean {
         initialize()
-        return readOnlyView.containsValue(value)
+        return core.readOnlyView.containsValue(value)
     }
 
     override fun get(key: PK): List<E>? {
         initialize()
-        return readOnlyView[key]
+        return core.readOnlyView[key]
     }
 
     override fun isEmpty(): Boolean {
         initialize()
-        return readOnlyView.isEmpty()
+        return core.readOnlyView.isEmpty()
     }
 
     /**

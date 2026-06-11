@@ -47,3 +47,31 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> projecti
     sourceRef: () -> AggregateCollectionRef<K, E>,
     keyExtractor: (E) -> PK
 ): ProjectionMap<K, PK, E> = ProjectionMap(sourceRef, keyExtractor)
+
+/**
+ * Creates a read-only projection that groups all entities from a [Registry] by a secondary key.
+ *
+ * The returned [RegistryProjectionMap] lazily initializes on the first map access,
+ * building its initial state from the registry's current contents and subscribing to
+ * incremental [net.transgressoft.lirp.event.CrudEvent] notifications for ongoing maintenance.
+ * Soft-deleted entities (those implementing [net.transgressoft.lirp.entity.SoftDeletable] with a
+ * non-null `deletedAt`) are excluded from all buckets.
+ *
+ * Keys are maintained in natural sorted order via a [java.util.concurrent.ConcurrentSkipListMap].
+ *
+ * Usage:
+ * ```kotlin
+ * val itemsByAlbum by registryProjectionMap(trackRepo) { it.albumName }
+ * ```
+ *
+ * @param K the entity ID type, must be [Comparable]
+ * @param PK the projection key type, must be [Comparable]
+ * @param E the entity type
+ * @param registry the source registry to project
+ * @param keyExtractor trailing-lambda grouping function that extracts the projection key from an entity
+ * @return a [RegistryProjectionMap] delegate grouping registry entities by [keyExtractor]
+ */
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryProjectionMap(
+    registry: Registry<K, E>,
+    keyExtractor: (E) -> PK
+): RegistryProjectionMap<K, PK, E> = RegistryProjectionMap(registry, keyExtractor)
