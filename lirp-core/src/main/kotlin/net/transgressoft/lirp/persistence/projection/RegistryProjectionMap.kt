@@ -15,13 +15,14 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>. *
  ******************************************************************************/
 
-package net.transgressoft.lirp.persistence
+package net.transgressoft.lirp.persistence.projection
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.entity.SoftDeletable
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.StandardCrudEvent
+import net.transgressoft.lirp.persistence.Registry
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.reflect.KProperty
 
@@ -41,6 +42,10 @@ import kotlin.reflect.KProperty
  * Key-change re-bucketing on [CrudEvent.Update] is driven by an internal
  * `ConcurrentHashMap<K, PK>` reverse index (entity id → current bucket key), which
  * provides O(1) old-key lookup without relying on the event's old-state snapshot.
+ *
+ * **Lifecycle:** the projection holds a live registry subscription from first access until [close].
+ * Create it once per long-lived delegate, or call [close] when discarding a transient projection, to
+ * avoid leaking the subscription and the projection's callbacks.
  *
  * The map is read-only. All mutations flow through the registry.
  *
@@ -63,12 +68,14 @@ import kotlin.reflect.KProperty
 class RegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
     private val registry: Registry<K, E>,
     private val keyExtractor: (E) -> PK
-) : AbstractMap<PK, List<E>>() {
+) : AbstractMap<PK, List<E>>(), AutoCloseable {
 
     private val core = ProjectionCore<K, PK, E>(keyExtractor)
 
     /** Reverse index: entity id → current bucket key. Enables O(1) old-key lookup on Update. */
     private val reverseIndex = ConcurrentHashMap<K, PK>()
+
+    private val initLock = Any()
 
     @Volatile
     private var initialized = false
@@ -89,9 +96,16 @@ class RegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identifi
             core.onChange = value
         }
 
+    /** Fires alongside [onChange] carrying only the keys changed by the latest delta. Single-subscriber. */
+    internal var onBucketsChanged: ((Set<PK>) -> Unit)?
+        get() = core.onBucketsChanged
+        set(value) {
+            core.onBucketsChanged = value
+        }
+
     private fun initialize() {
         if (initialized) return
-        synchronized(this) {
+        synchronized(initLock) {
             if (initialized) return
             // Seed first so the initial snapshot is complete before any events are processed;
             // soft-deleted entities are excluded from all buckets.
@@ -171,6 +185,26 @@ class RegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identifi
 
     private fun isSoftDeleted(entity: E): Boolean =
         (entity as? SoftDeletable)?.deletedAt != null
+
+    /**
+     * Returns the current contents of the [key] bucket WITHOUT triggering lazy initialization.
+     * The value-transform decorator's `onBucketsChanged` hook calls this; that hook fires only after
+     * [initialize] has populated the core, so it must never re-enter [initialize] (which would recurse).
+     */
+    internal fun bucketSnapshot(key: PK): List<E>? = core.readOnlyView[key]
+
+    /**
+     * Cancels the registry subscription, releasing the projection's hold on the event stream so it and
+     * its callbacks become eligible for GC. Idempotent and safe to call before first access (no-op when
+     * the projection never initialized). After closing, the projection no longer receives updates.
+     */
+    override fun close() {
+        // Guarded by the same monitor as initialize() so a close racing a first access cannot
+        // observe a half-assigned subscription.
+        synchronized(initLock) {
+            if (::subscription.isInitialized) subscription.cancel()
+        }
+    }
 
     // AbstractMap read overrides — all call initialize() first and delegate to core.readOnlyView
 

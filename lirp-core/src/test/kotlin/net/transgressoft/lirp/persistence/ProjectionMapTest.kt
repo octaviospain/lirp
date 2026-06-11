@@ -17,6 +17,9 @@
 
 package net.transgressoft.lirp.persistence
 
+import net.transgressoft.lirp.persistence.projection.ProjectionMap
+import net.transgressoft.lirp.persistence.projection.multiKeyProjectionMap
+import net.transgressoft.lirp.persistence.projection.projectionMap
 import net.transgressoft.lirp.testing.Stress
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.core.annotation.DisplayName
@@ -42,11 +45,15 @@ internal class ProjectionMapTest : StringSpec({
     lateinit var ctx: LirpContext
     lateinit var trackRepo: AudioItemVolatileRepository
     lateinit var playlistRepo: AudioPlaylistVolatileRepository
+    lateinit var multiKeyRepo: MultiKeyAudioItemVolatileRepository
+    lateinit var mkPlaylistRepo: MultiKeyAudioPlaylistRepo
 
     beforeEach {
         ctx = LirpContext()
         trackRepo = AudioItemVolatileRepository(ctx)
         playlistRepo = AudioPlaylistVolatileRepository(ctx)
+        multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        mkPlaylistRepo = MultiKeyAudioPlaylistRepo(ctx)
     }
 
     afterEach {
@@ -354,6 +361,248 @@ internal class ProjectionMapTest : StringSpec({
             readerJob.join()
             executor.shutdownNow()
         }
+    }
+
+    "ProjectionMap with valueTransform produces Map<PK, V> with correct transformed values for each bucket" {
+        val t1 = trackRepo.create(1, "Jazz")
+        val t2 = trackRepo.create(2, "Jazz")
+        val t3 = trackRepo.create(3, "Rock")
+        val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id, t3.id)).also(playlistRepo::add)
+
+        val transformed =
+            projectionMap<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
+                "$pk:${items.size}"
+            }
+
+        transformed["Jazz"] shouldBe "Jazz:2"
+        transformed["Rock"] shouldBe "Rock:1"
+        transformed.size shouldBe 2
+    }
+
+    "ProjectionMap with valueTransform recomputes only the affected bucket on a delta" {
+        val t1 = trackRepo.create(1, "Jazz")
+        val t2 = trackRepo.create(2, "Rock")
+        val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id)).also(playlistRepo::add)
+
+        var jazzTransformCount = 0
+        var rockTransformCount = 0
+        val transformed =
+            projectionMap<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
+                if (pk == "Jazz") jazzTransformCount++ else rockTransformCount++
+                "$pk:${items.size}"
+            }
+
+        // Trigger initialization — both buckets computed once
+        transformed["Jazz"] shouldBe "Jazz:1"
+        transformed["Rock"] shouldBe "Rock:1"
+        val jazzCountAfterInit = jazzTransformCount
+        val rockCountAfterInit = rockTransformCount
+
+        // Add a Jazz track — only Jazz bucket should be recomputed
+        val t3 = trackRepo.create(3, "Jazz")
+        playlist.audioItems.add(t3)
+
+        transformed["Jazz"] shouldBe "Jazz:2"
+        // Jazz transform invoked one more time, Rock not re-invoked
+        jazzTransformCount shouldBe jazzCountAfterInit + 1
+        rockTransformCount shouldBe rockCountAfterInit
+    }
+
+    "ProjectionMap with valueTransform removes emptied bucket key from transformed view" {
+        val t1 = trackRepo.create(1, "Jazz")
+        val t2 = trackRepo.create(2, "Rock")
+        val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id)).also(playlistRepo::add)
+
+        val transformed =
+            projectionMap<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
+                "$pk:${items.size}"
+            }
+
+        transformed.containsKey("Rock") shouldBe true
+
+        playlist.audioItems.remove(t2)
+
+        transformed.containsKey("Rock") shouldBe false
+        transformed.size shouldBe 1
+        transformed["Jazz"] shouldBe "Jazz:1"
+    }
+
+    // -------------------------------------------------------------------------
+    // Multi-key projection (PROJ-04) — aggregate source
+    // -------------------------------------------------------------------------
+
+    "MultiKeyProjectionMap places entity in every genre bucket" {
+        val item1 = multiKeyRepo.create(1, "Track One", setOf("Rock", "Jazz"))
+        val item2 = multiKeyRepo.create(2, "Track Two", setOf("Jazz"))
+        val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id, item2.id))
+        mkPlaylistRepo.add(mkPlaylist)
+
+        val projection = multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
+
+        projection["Rock"]!!.size shouldBe 1
+        projection["Jazz"]!!.size shouldBe 2
+        projection["Rock"]!!.first().id shouldBe 1
+    }
+
+    "MultiKeyProjectionMap removes entity from all genre buckets when removed from source" {
+        val item1 = multiKeyRepo.create(1, "Track One", setOf("Rock", "Jazz"))
+        val item2 = multiKeyRepo.create(2, "Track Two", setOf("Jazz"))
+        val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id, item2.id))
+        mkPlaylistRepo.add(mkPlaylist)
+
+        val projection = multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
+        projection["Rock"]!!.size shouldBe 1
+        projection["Jazz"]!!.size shouldBe 2
+
+        // Remove the dual-genre item from the source
+        mkPlaylist.audioItems.remove(item1)
+
+        projection.containsKey("Rock") shouldBe false
+        projection["Jazz"]!!.size shouldBe 1
+        projection["Jazz"]!!.first().id shouldBe 2
+    }
+
+    "MultiKeyProjectionMap auto-clears and rebuilds when source is cleared" {
+        val item1 = multiKeyRepo.create(1, "Track One", setOf("Rock", "Jazz"))
+        val item2 = multiKeyRepo.create(2, "Track Two", setOf("Jazz"))
+        val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id, item2.id))
+        mkPlaylistRepo.add(mkPlaylist)
+
+        val projection = multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
+        projection.size shouldBe 2
+
+        mkPlaylist.audioItems.clear()
+
+        projection.isEmpty() shouldBe true
+    }
+
+    "MultiKeyProjectionMap places entity with empty genres in zero buckets" {
+        val item1 = multiKeyRepo.create(1, "No Genre Track", emptySet())
+        val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id))
+        mkPlaylistRepo.add(mkPlaylist)
+
+        val projection = multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
+
+        projection.isEmpty() shouldBe true
+    }
+
+    "MultiKeyProjectionMap exposes correct read-only accessors" {
+        val item1 = multiKeyRepo.create(1, "Track One", setOf("Rock", "Jazz"))
+        val item2 = multiKeyRepo.create(2, "Track Two", setOf("Jazz"))
+        val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id, item2.id))
+        mkPlaylistRepo.add(mkPlaylist)
+
+        val projection = multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
+
+        projection.size shouldBe 2
+        projection.containsKey("Rock") shouldBe true
+        projection.containsKey("Pop") shouldBe false
+        projection.containsValue(projection["Jazz"]!!) shouldBe true
+        projection.keys.toSet() shouldBe setOf("Rock", "Jazz")
+        projection.values.sumOf { it.size } shouldBe 3 // Rock:1 + Jazz:2
+        projection.entries.size shouldBe 2
+    }
+
+    "multiKeyProjectionMap with valueTransform produces Map<PK, V> with transformed bucket values" {
+        val item1 = multiKeyRepo.create(1, "Track One", setOf("Rock", "Jazz"))
+        val item2 = multiKeyRepo.create(2, "Track Two", setOf("Jazz"))
+        val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id, item2.id))
+        mkPlaylistRepo.add(mkPlaylist)
+
+        val transformed =
+            multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem, String>(
+                { mkPlaylist.audioItems },
+                { it.genres }
+            ) { pk, items ->
+                "$pk:${items.size}"
+            }
+
+        transformed["Rock"] shouldBe "Rock:1"
+        transformed["Jazz"] shouldBe "Jazz:2"
+        transformed.size shouldBe 2
+        transformed.containsKey("Rock") shouldBe true
+        transformed.containsKey("Pop") shouldBe false
+        transformed.containsValue("Rock:1") shouldBe true
+        transformed.isEmpty() shouldBe false
+        transformed.keys.toSet() shouldBe setOf("Rock", "Jazz")
+        transformed.values.toSet() shouldBe setOf("Rock:1", "Jazz:2")
+    }
+
+    "multiKeyProjectionMap with valueTransform removes emptied genre bucket from transformed view" {
+        val item1 = multiKeyRepo.create(1, "Track One", setOf("Rock", "Jazz"))
+        val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id))
+        mkPlaylistRepo.add(mkPlaylist)
+
+        val transformed =
+            multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem, String>(
+                { mkPlaylist.audioItems },
+                { it.genres }
+            ) { pk, items ->
+                "$pk:${items.size}"
+            }
+
+        transformed.containsKey("Rock") shouldBe true
+        transformed.containsKey("Jazz") shouldBe true
+
+        mkPlaylist.audioItems.remove(item1)
+
+        transformed.containsKey("Rock") shouldBe false
+        transformed.containsKey("Jazz") shouldBe false
+        transformed.isEmpty() shouldBe true
+    }
+
+    "MultiKeyProjectionMap reconciles key-set delta when an already-bucketed entity is re-added" {
+        val item = multiKeyRepo.create(1, "Track One", setOf("Rock", "Jazz"))
+        val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item.id))
+        mkPlaylistRepo.add(mkPlaylist)
+
+        val projection = multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
+        projection["Rock"]!!.size shouldBe 1
+        projection["Jazz"]!!.size shouldBe 1
+
+        // Change the entity's key set in place, then re-add it to the (list-semantics) source so the added
+        // callback delivers an already-indexed id → routes through applyKeyDelta with {Rock,Jazz}→{Rock,Indie}.
+        item.genres = setOf("Rock", "Indie")
+        mkPlaylist.audioItems.add(item)
+
+        // Rock retained, Jazz removed (reverse index cleaned, bucket gone), Indie added.
+        projection["Rock"]!!.any { it.id == item.id } shouldBe true
+        projection.containsKey("Jazz") shouldBe false
+        projection["Indie"]!!.size shouldBe 1
+        projection["Indie"]!!.first().id shouldBe item.id
+    }
+
+    "MultiKeyProjectionMap re-add reconcile replaces unchanged-key content and does not orphan the entity" {
+        val item = multiKeyRepo.create(1, "Old Title", setOf("Rock", "Jazz"))
+        val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item.id))
+        mkPlaylistRepo.add(mkPlaylist)
+
+        val projection = multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
+        projection["Rock"]!!.first().title shouldBe "Old Title"
+
+        // Mutate a non-key field while keeping a key (Rock) unchanged so the unchanged-bucket branch
+        // routes through replaceInBucketSilent with a real change; Jazz is dropped from the key set.
+        item.title = "New Title"
+        item.genres = setOf("Rock")
+        mkPlaylist.audioItems.add(item)
+
+        projection["Rock"]!!.size shouldBe 1
+        projection["Rock"]!!.first().title shouldBe "New Title"
+        projection.containsKey("Jazz") shouldBe false
+    }
+
+    "MultiKeyProjectionMap re-add reconcile to empty key set removes the entity from all buckets" {
+        val item = multiKeyRepo.create(1, "Track One", setOf("Rock", "Jazz"))
+        val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item.id))
+        mkPlaylistRepo.add(mkPlaylist)
+
+        val projection = multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
+        projection.size shouldBe 2
+
+        item.genres = emptySet()
+        mkPlaylist.audioItems.add(item)
+
+        projection.isEmpty() shouldBe true
     }
 
     "ProjectionMap iterates without ConcurrentModificationException under concurrent reader and writer stress"

@@ -18,6 +18,9 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.event.StandardCrudEvent
+import net.transgressoft.lirp.persistence.projection.RegistryProjectionMap
+import net.transgressoft.lirp.persistence.projection.registryMultiKeyProjectionMap
+import net.transgressoft.lirp.persistence.projection.registryProjectionMap
 import net.transgressoft.lirp.testing.ReactiveScopeSerialization
 import net.transgressoft.lirp.testing.Stress
 import net.transgressoft.lirp.testing.reactiveScope
@@ -340,6 +343,230 @@ internal class RegistryProjectionMapTest : StringSpec({
         }
     }
 
+    "registryProjectionMap with valueTransform produces Map<PK, V> with correct transformed values for each bucket" {
+        trackRepo.create(1, "Jazz Intro", "Jazz")
+        trackRepo.create(2, "Jazz Outro", "Jazz")
+        trackRepo.create(3, "Rock Anthem", "Rock")
+
+        val transformed =
+            registryProjectionMap<Int, String, AudioItem, String>(trackRepo, { it.albumName }) { pk, items ->
+                "$pk:${items.size}"
+            }
+
+        transformed["Jazz"] shouldBe "Jazz:2"
+        transformed["Rock"] shouldBe "Rock:1"
+        transformed.size shouldBe 2
+    }
+
+    "registryProjectionMap with valueTransform recomputes only the affected bucket on a delta" {
+        trackRepo.create(1, "Track A", "Jazz")
+        trackRepo.create(2, "Track B", "Rock")
+
+        var jazzTransformCount = 0
+        var rockTransformCount = 0
+        val transformed =
+            registryProjectionMap<Int, String, AudioItem, String>(trackRepo, { it.albumName }) { pk, items ->
+                if (pk == "Jazz") jazzTransformCount++ else rockTransformCount++
+                "$pk:${items.size}"
+            }
+
+        // Trigger initialization
+        transformed["Jazz"] shouldBe "Jazz:1"
+        transformed["Rock"] shouldBe "Rock:1"
+        val jazzCountAfterInit = jazzTransformCount
+        val rockCountAfterInit = rockTransformCount
+
+        // Add a Jazz track via registry event — only Jazz bucket should be recomputed
+        trackRepo.create(3, "Track C", "Jazz")
+        reactive.advance()
+
+        transformed["Jazz"] shouldBe "Jazz:2"
+        jazzTransformCount shouldBe jazzCountAfterInit + 1
+        rockTransformCount shouldBe rockCountAfterInit
+    }
+
+    "registryProjectionMap with valueTransform removes emptied bucket key from transformed view on Delete" {
+        trackRepo.create(1, "Track A", "Jazz")
+        val trackRock = trackRepo.create(2, "Track B", "Rock")
+
+        val transformed =
+            registryProjectionMap<Int, String, AudioItem, String>(trackRepo, { it.albumName }) { pk, items ->
+                "$pk:${items.size}"
+            }
+
+        transformed.containsKey("Rock") shouldBe true
+
+        trackRepo.remove(trackRock)
+        reactive.advance()
+
+        transformed.containsKey("Rock") shouldBe false
+        transformed.size shouldBe 1
+        transformed["Jazz"] shouldBe "Jazz:1"
+    }
+
+    "close stops the projection from reflecting subsequent registry mutations" {
+        trackRepo.create(1, "Track A", "Jazz")
+        val projection = registryProjectionMap(trackRepo) { it.albumName }
+        // Force lazy init so the subscription is live before closing.
+        projection["Jazz"]!!.size shouldBe 1
+
+        projection.close()
+
+        // Mutations after close must not reach the cancelled subscription.
+        trackRepo.create(2, "Track B", "Jazz")
+        reactive.advance()
+        val updatedTrackC = trackRepo.create(3, "Track C", "Rock")
+        reactive.advance()
+        trackRepo.remove(updatedTrackC)
+        reactive.advance()
+
+        projection["Jazz"]!!.size shouldBe 1
+        projection.containsKey("Rock") shouldBe false
+    }
+
+    "close before first access is a no-op and does not throw" {
+        val projection = registryProjectionMap(trackRepo) { it.albumName }
+
+        shouldNotThrowAny { projection.close() }
+    }
+
+    "registryProjectionMap with valueTransform exposes close that stops reflecting registry mutations" {
+        trackRepo.create(1, "Track A", "Jazz")
+        val transformed =
+            registryProjectionMap<Int, String, AudioItem, String>(trackRepo, { it.albumName }) { pk, items ->
+                "$pk:${items.size}"
+            }
+        transformed["Jazz"] shouldBe "Jazz:1"
+
+        transformed.close()
+
+        trackRepo.create(2, "Track B", "Jazz")
+        reactive.advance()
+        trackRepo.create(3, "Rock Anthem", "Rock")
+        reactive.advance()
+
+        transformed["Jazz"] shouldBe "Jazz:1"
+        transformed.containsKey("Rock") shouldBe false
+    }
+
+    "registryMultiKeyProjectionMap with valueTransform exposes close that stops reflecting registry mutations" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        multiKeyRepo.create(1, "Track A", setOf("Rock", "Jazz"))
+        val transformed =
+            registryMultiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem, String>(multiKeyRepo, { it.genres }) { pk, items ->
+                "$pk:${items.size}"
+            }
+        transformed["Rock"] shouldBe "Rock:1"
+
+        transformed.close()
+
+        multiKeyRepo.create(2, "Track B", setOf("Indie"))
+        reactive.advance()
+
+        transformed.containsKey("Indie") shouldBe false
+    }
+
+    "MultiKeyRegistryProjectionMap close stops the projection from reflecting subsequent mutations" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        multiKeyRepo.create(1, "Track A", setOf("Rock", "Jazz"))
+        val projection = registryMultiKeyProjectionMap(multiKeyRepo) { it.genres }
+        // Force lazy init so the subscription is live before closing.
+        projection["Rock"]!!.size shouldBe 1
+
+        projection.close()
+
+        multiKeyRepo.create(2, "Track B", setOf("Indie"))
+        reactive.advance()
+
+        projection.containsKey("Indie") shouldBe false
+        projection["Rock"]!!.size shouldBe 1
+    }
+
+    "MultiKeyRegistryProjectionMap close before first access is a no-op and does not throw" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        val projection = registryMultiKeyProjectionMap(multiKeyRepo) { it.genres }
+
+        shouldNotThrowAny { projection.close() }
+    }
+
+    "MultiKeyRegistryProjectionMap leaves unchanged keys with identical content untouched on a key-set shrink Update" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        val item = multiKeyRepo.create(1, "Track A", setOf("Rock", "Jazz", "Indie"))
+        reactive.advance()
+
+        val projection = registryMultiKeyProjectionMap(multiKeyRepo) { it.genres }
+        projection["Rock"]!!.size shouldBe 1
+        projection["Jazz"]!!.size shouldBe 1
+        projection["Indie"]!!.size shouldBe 1
+
+        // Shrink {Rock, Jazz, Indie} → {Rock}: Jazz and Indie removed, Rock unchanged with identical content.
+        // The unchanged-Rock branch routes through replaceInBucketSilent and hits its no-op (already-equal)
+        // return because the entity object is the same instance with no content change.
+        val oldSnapshot = item.clone()
+        item.genres = setOf("Rock")
+        multiKeyRepo.emitAsync(StandardCrudEvent.Update(item, oldSnapshot))
+        reactive.advance()
+
+        projection["Rock"]!!.size shouldBe 1
+        projection.containsKey("Jazz") shouldBe false
+        projection.containsKey("Indie") shouldBe false
+        projection.size shouldBe 1
+    }
+
+    "MultiKeyRegistryProjectionMap replaces content in unchanged keys while shrinking the key set on Update" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        val item = multiKeyRepo.create(1, "Old Title", setOf("Rock", "Jazz"))
+        reactive.advance()
+
+        val projection = registryMultiKeyProjectionMap(multiKeyRepo) { it.genres }
+        projection["Rock"]!!.first().title shouldBe "Old Title"
+
+        // Change a non-key field AND shrink the key set: Rock is unchanged (replace fires), Jazz removed.
+        val oldSnapshot = item.clone()
+        item.title = "New Title"
+        item.genres = setOf("Rock")
+        multiKeyRepo.emitAsync(StandardCrudEvent.Update(item, oldSnapshot))
+        reactive.advance()
+
+        projection["Rock"]!!.size shouldBe 1
+        projection["Rock"]!!.first().title shouldBe "New Title"
+        projection.containsKey("Jazz") shouldBe false
+    }
+
+    "registryMultiKeyProjectionMap with valueTransform recomputes each affected key once per key-set update delta" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        val item = multiKeyRepo.create(1, "Track A", setOf("Rock", "Jazz"))
+        reactive.advance()
+
+        val transformCounts = mutableMapOf<String, Int>()
+        val transformed =
+            registryMultiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem, String>(
+                multiKeyRepo,
+                { it.genres }
+            ) { pk, items ->
+                transformCounts[pk] = (transformCounts[pk] ?: 0) + 1
+                "$pk:${items.size}"
+            }
+
+        // Force initialization — Rock and Jazz computed once each.
+        transformed["Rock"] shouldBe "Rock:1"
+        transformed["Jazz"] shouldBe "Jazz:1"
+        val countsAfterInit = transformCounts.toMap()
+
+        // Single key-set update {Rock, Jazz} → {Rock, Indie}: Indie added, Jazz removed, Rock unchanged.
+        val oldSnapshot = item.clone()
+        item.genres = setOf("Rock", "Indie")
+        multiKeyRepo.emitAsync(StandardCrudEvent.Update(item, oldSnapshot))
+        reactive.advance()
+
+        transformed["Indie"] shouldBe "Indie:1"
+        transformed.containsKey("Jazz") shouldBe false
+        // Indie recomputed exactly once for this delta; Rock unchanged (no recompute since its bucket content
+        // did not change); Jazz removed (no recompute over an empty bucket).
+        transformCounts["Indie"] shouldBe 1
+        transformCounts["Rock"] shouldBe countsAfterInit["Rock"]
+    }
+
     "iterates without ConcurrentModificationException under concurrent add and remove stress"
         .config(tags = setOf(Stress)) {
             extension(ReactiveScopeSerialization)
@@ -365,6 +592,209 @@ internal class RegistryProjectionMapTest : StringSpec({
                             val item = MutableAudioItem(seedSize + i + 1, "Extra-$i", "Album-${i % 5}")
                             trackRepo.add(item)
                             trackRepo.remove(item)
+                        }
+                    }
+
+                val readerJob =
+                    launch(Dispatchers.Default) {
+                        repeat(readerIterations) {
+                            projection.keys.toList()
+                            projection.entries.forEach { it.value.size }
+                        }
+                    }
+
+                writerJob.join()
+                readerJob.join()
+            }
+        }
+
+    // -------------------------------------------------------------------------
+    // Multi-key projection (PROJ-04) — registry source
+    // -------------------------------------------------------------------------
+
+    "MultiKeyRegistryProjectionMap places entity in every genre bucket on Create" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        multiKeyRepo.create(1, "Double-Genre Track", setOf("Rock", "Jazz"))
+
+        val projection = registryMultiKeyProjectionMap(multiKeyRepo) { it.genres }
+
+        projection.size shouldBe 2
+        projection["Rock"]!!.size shouldBe 1
+        projection["Jazz"]!!.size shouldBe 1
+        projection["Rock"]!!.first().id shouldBe 1
+        projection["Jazz"]!!.first().id shouldBe 1
+    }
+
+    "MultiKeyRegistryProjectionMap adds new genre bucket and removes stale bucket on key-set Update" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        val item = multiKeyRepo.create(1, "Track A", setOf("Rock", "Jazz"))
+        val anotherItem = multiKeyRepo.create(2, "Track B", setOf("Rock"))
+        reactive.advance()
+
+        val projection = registryMultiKeyProjectionMap(multiKeyRepo) { it.genres }
+        // Initial state: Rock=[item, anotherItem], Jazz=[item]
+        projection["Rock"]!!.size shouldBe 2
+        projection["Jazz"]!!.size shouldBe 1
+
+        // Update item's genres from {Rock, Jazz} to {Rock, Indie}
+        val oldSnapshot = item.clone()
+        item.genres = setOf("Rock", "Indie")
+        multiKeyRepo.emitAsync(StandardCrudEvent.Update(item, oldSnapshot))
+        reactive.advance()
+
+        // Indie added, Jazz removed, Rock still present
+        projection["Indie"]!!.size shouldBe 1
+        projection.containsKey("Jazz") shouldBe false
+        projection["Rock"]!!.size shouldBe 2 // item and anotherItem still in Rock
+        projection["Rock"]!!.any { it.id == item.id } shouldBe true
+    }
+
+    "MultiKeyRegistryProjectionMap places entity in zero buckets when keyExtractor returns empty set" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        multiKeyRepo.create(1, "No-Genre Track", emptySet())
+        reactive.advance()
+
+        val projection = registryMultiKeyProjectionMap(multiKeyRepo) { it.genres }
+
+        projection.isEmpty() shouldBe true
+    }
+
+    "MultiKeyRegistryProjectionMap removes entity from all buckets on Update to empty genre set" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        val item = multiKeyRepo.create(1, "Track", setOf("Rock", "Jazz"))
+        reactive.advance()
+
+        val projection = registryMultiKeyProjectionMap(multiKeyRepo) { it.genres }
+        projection["Rock"]!!.size shouldBe 1
+        projection["Jazz"]!!.size shouldBe 1
+
+        // Update to empty genres
+        val oldSnapshot = item.clone()
+        item.genres = emptySet()
+        multiKeyRepo.emitAsync(StandardCrudEvent.Update(item, oldSnapshot))
+        reactive.advance()
+
+        projection.isEmpty() shouldBe true
+    }
+
+    "MultiKeyRegistryProjectionMap deduplicates repeated genres before bucketing" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+
+        val projection = registryMultiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem>(multiKeyRepo) { it.genres }
+        projection.size shouldBe 0
+
+        val item = multiKeyRepo.create(1, "Track", setOf("Rock", "Jazz"))
+        reactive.advance()
+
+        // Emit an Update that has a collection with duplicate genres
+        val oldSnapshot = item.clone()
+        // Simulate keyExtractor receiving a list with duplicates by creating a custom projection
+        // We test duplicate-key dedup via the factory directly: the factory's keyExtractor returns a list with dupes
+        val dupeProjection =
+            registryMultiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem>(multiKeyRepo) { _ ->
+                listOf("Rock", "Rock", "Jazz", "Jazz") // duplicates
+            }
+
+        dupeProjection["Rock"]!!.size shouldBe 1 // entity appears once in Rock bucket
+        dupeProjection["Jazz"]!!.size shouldBe 1 // entity appears once in Jazz bucket
+        dupeProjection.size shouldBe 2
+    }
+
+    "MultiKeyRegistryProjectionMap removes soft-deleted entity from ALL genre buckets" {
+        val softRepo = SoftDeletableMultiKeyAudioItemRepo(ctx)
+        val item = softRepo.create(1, "Multi-Genre Track", setOf("Rock", "Jazz", "Indie"))
+        reactive.advance()
+
+        val projection = registryMultiKeyProjectionMap(softRepo) { it.genres }
+        projection["Rock"]!!.size shouldBe 1
+        projection["Jazz"]!!.size shouldBe 1
+        projection["Indie"]!!.size shouldBe 1
+
+        // Soft-delete the entity
+        val activeSnapshot = item.clone()
+        item.deletedAt = java.time.Instant.now()
+        softRepo.emitAsync(StandardCrudEvent.Update(item, activeSnapshot))
+        reactive.advance()
+
+        projection.isEmpty() shouldBe true
+        projection.containsKey("Rock") shouldBe false
+        projection.containsKey("Jazz") shouldBe false
+        projection.containsKey("Indie") shouldBe false
+    }
+
+    "registryMultiKeyProjectionMap with valueTransform buckets by genre and transforms each bucket" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        multiKeyRepo.create(1, "Track A", setOf("Rock", "Jazz"))
+        multiKeyRepo.create(2, "Track B", setOf("Jazz"))
+        reactive.advance()
+
+        val transformed =
+            registryMultiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem, String>(
+                multiKeyRepo,
+                { it.genres }
+            ) { pk, items ->
+                "$pk:${items.size}"
+            }
+
+        transformed["Rock"] shouldBe "Rock:1"
+        transformed["Jazz"] shouldBe "Jazz:2"
+        transformed.size shouldBe 2
+        transformed.containsKey("Rock") shouldBe true
+        transformed.containsKey("Pop") shouldBe false
+        transformed.containsValue("Rock:1") shouldBe true
+        transformed.isEmpty() shouldBe false
+        transformed.keys.toSet() shouldBe setOf("Rock", "Jazz")
+        transformed.values.toSet() shouldBe setOf("Rock:1", "Jazz:2")
+    }
+
+    "registryMultiKeyProjectionMap with valueTransform removes emptied genre bucket from transformed view on Delete" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        val item = multiKeyRepo.create(1, "Track A", setOf("Rock"))
+        reactive.advance()
+
+        val transformed =
+            registryMultiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem, String>(
+                multiKeyRepo,
+                { it.genres }
+            ) { pk, items ->
+                "$pk:${items.size}"
+            }
+
+        transformed.containsKey("Rock") shouldBe true
+
+        multiKeyRepo.remove(item)
+        reactive.advance()
+
+        transformed.containsKey("Rock") shouldBe false
+        transformed.isEmpty() shouldBe true
+    }
+
+    "MultiKeyRegistryProjectionMap iterates without ConcurrentModificationException under concurrent key-set churn stress"
+        .config(tags = setOf(Stress)) {
+            extension(ReactiveScopeSerialization)
+
+            val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+            val seedSize = 50
+            val mutations = 2000
+            val readerIterations = 500
+
+            val seedItems =
+                (1..seedSize).map { i ->
+                    multiKeyRepo.create(i, "Track-$i", setOf("Genre-${i % 3}"))
+                }
+
+            val projection = registryMultiKeyProjectionMap(multiKeyRepo) { it.genres }
+            // Trigger init before writers start
+            projection.size shouldBe 3
+
+            shouldNotThrowAny {
+                val writerJob =
+                    launch(Dispatchers.Default) {
+                        repeat(mutations) { i ->
+                            // Cycle genres to cause key-set churn across Genre-0, Genre-1, Genre-2
+                            val item = MutableMultiKeyAudioItem(seedSize + i + 1, "Extra-$i", setOf("Genre-${i % 3}"))
+                            multiKeyRepo.add(item)
+                            multiKeyRepo.remove(item)
                         }
                     }
 
