@@ -17,7 +17,7 @@
 
 package net.transgressoft.lirp.testing
 
-import net.transgressoft.lirp.persistence.Customer
+import net.transgressoft.lirp.persistence.MutableAudioItem
 import io.kotest.property.Arb
 import io.kotest.property.arbitrary.arbitrary
 import io.kotest.property.arbitrary.positiveInt
@@ -28,13 +28,13 @@ import io.kotest.property.arbitrary.stringPattern
 // persistence/json/JsonTestFixtures.kt) stay alongside their domain helpers.
 
 /**
- * Builds a [Customer] with a random positive id (up to 500,000) and a 5+5 lowercase letter
- * `initialName`. Pass [id] explicitly to pin the customer to a known key.
+ * Builds a [MutableAudioItem] with a random positive id (up to 500,000) and a randomly generated
+ * `title` using a 5+5 lowercase letter pattern. Pass [id] explicitly to pin the item to a known key.
  */
-internal fun arbitraryCustomer(id: Int = -1) =
+internal fun arbitraryAudioItem(id: Int = -1) =
     arbitrary {
-        Customer(
+        MutableAudioItem(
             id = if (id == -1) Arb.positiveInt(500_000).bind() else id,
-            initialName = Arb.stringPattern("[a-z]{5} [a-z]{5}").bind()
+            title = Arb.stringPattern("[a-z]{5} [a-z]{5}").bind()
         )
     }

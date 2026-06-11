@@ -20,7 +20,8 @@ package net.transgressoft.lirp.entity
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.MutationEvent.Type.MUTATE
 import net.transgressoft.lirp.event.ReactiveMutationEvent
-import net.transgressoft.lirp.persistence.Customer
+import net.transgressoft.lirp.persistence.AudioItem
+import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
@@ -244,117 +245,117 @@ class ReactiveEntityLifecycleTest : StringSpec({
     }
 
     "ReactiveEntityBase emitAsync throws IllegalStateException when entity is closed" {
-        val customer = Customer(1, "Alice")
-        val sub = customer.subscribe { }
-        customer.close()
+        val audioItem = MutableAudioItem(1, "Track Alpha")
+        val sub = audioItem.subscribe { }
+        audioItem.close()
 
         shouldThrow<IllegalStateException> {
-            customer.emitAsync(ReactiveMutationEvent(customer, customer))
-        }.message shouldContain "Customer"
+            audioItem.emitAsync(ReactiveMutationEvent(audioItem, audioItem))
+        }.message shouldContain "MutableAudioItem"
 
         sub.cancel()
     }
 
     "ReactiveEntityBase subscribe with vararg eventTypes throws IllegalArgumentException when MUTATE is absent" {
-        val customer = Customer(1, "Alice")
+        val audioItem = MutableAudioItem(1, "Track Alpha")
 
         shouldThrow<IllegalArgumentException> {
-            customer.subscribe(*emptyArray<MutationEvent.Type>(), action = Consumer { _ -> })
+            audioItem.subscribe(*emptyArray<MutationEvent.Type>(), action = Consumer { _ -> })
         }
 
-        customer.close()
+        audioItem.close()
     }
 
     "ReactiveEntityBase subscribe with MUTATE type succeeds and delivers events" {
-        val customer = Customer(1, "Alice")
-        val received = mutableListOf<MutationEvent<Int, Customer>>()
+        val audioItem = MutableAudioItem(1, "Track Alpha")
+        val received = mutableListOf<MutationEvent<Int, AudioItem>>()
 
-        val subscription = customer.subscribe(MUTATE) { event -> received.add(event) }
+        val subscription = audioItem.subscribe(MUTATE) { event -> received.add(event) }
 
-        customer.updateName("Bob")
+        audioItem.title = "Track Beta"
         reactive.advance()
 
         received.size shouldBe 1
         subscription.cancel()
-        customer.close()
+        audioItem.close()
     }
 
     "disableEvents suppresses mutation events from reactiveProperty setters" {
-        val customer = Customer(1, "Alice")
-        val received = mutableListOf<MutationEvent<Int, Customer>>()
-        val subscription = customer.subscribe { event -> received.add(event) }
+        val audioItem = MutableAudioItem(1, "Track Alpha")
+        val received = mutableListOf<MutationEvent<Int, AudioItem>>()
+        val subscription = audioItem.subscribe { event -> received.add(event) }
 
-        customer.suppressEvents()
-        customer.updateName("Bob")
+        audioItem.suppressEvents()
+        audioItem.title = "Track Beta"
         reactive.advance()
 
         received.size shouldBe 0
-        customer.name shouldBe "Bob"
+        audioItem.title shouldBe "Track Beta"
 
-        customer.restoreEvents()
-        customer.updateName("Charlie")
+        audioItem.restoreEvents()
+        audioItem.title = "Track Charlie"
         reactive.advance()
 
         received.size shouldBe 1
-        received[0].newEntity.name shouldBe "Charlie"
+        received[0].newEntity.title shouldBe "Track Charlie"
 
         subscription.cancel()
-        customer.close()
+        audioItem.close()
     }
 
     "withEventsDisabled suppresses events and restores emission afterward" {
-        val customer = Customer(1, "Alice")
-        val received = mutableListOf<MutationEvent<Int, Customer>>()
-        val subscription = customer.subscribe { event -> received.add(event) }
+        val audioItem = MutableAudioItem(1, "Track Alpha")
+        val received = mutableListOf<MutationEvent<Int, AudioItem>>()
+        val subscription = audioItem.subscribe { event -> received.add(event) }
 
-        customer.silently {
-            customer.updateName("Silent")
+        audioItem.silently {
+            audioItem.title = "Silent Track"
         }
         reactive.advance()
         received.size shouldBe 0
-        customer.name shouldBe "Silent"
+        audioItem.title shouldBe "Silent Track"
 
-        customer.updateName("Loud")
+        audioItem.title = "Loud Track"
         reactive.advance()
         received.size shouldBe 1
 
         subscription.cancel()
-        customer.close()
+        audioItem.close()
     }
 
     "withEventsDisabled restores state even if action throws" {
-        val customer = Customer(1, "Alice")
-        val received = mutableListOf<MutationEvent<Int, Customer>>()
-        val subscription = customer.subscribe { event -> received.add(event) }
+        val audioItem = MutableAudioItem(1, "Track Alpha")
+        val received = mutableListOf<MutationEvent<Int, AudioItem>>()
+        val subscription = audioItem.subscribe { event -> received.add(event) }
 
         shouldThrow<RuntimeException> {
-            customer.silently {
-                customer.updateName("BeforeError")
+            audioItem.silently {
+                audioItem.title = "BeforeError"
                 throw RuntimeException("test error")
             }
         }
 
-        customer.updateName("AfterError")
+        audioItem.title = "AfterError"
         reactive.advance()
         received.size shouldBe 1
 
         subscription.cancel()
-        customer.close()
+        audioItem.close()
     }
 
     "disableEvents suppresses mutateAndPublish block emission" {
-        val customer = Customer(1, "Alice")
-        val received = mutableListOf<MutationEvent<Int, Customer>>()
-        val subscription = customer.subscribe { event -> received.add(event) }
+        val audioItem = MutableAudioItem(1, "Track Alpha")
+        val received = mutableListOf<MutationEvent<Int, AudioItem>>()
+        val subscription = audioItem.subscribe { event -> received.add(event) }
 
-        customer.suppressEvents()
-        customer.bulkUpdate("Silent")
+        audioItem.suppressEvents()
+        audioItem.bulkUpdate("Silent Track")
         reactive.advance()
 
         received.size shouldBe 0
-        customer.name shouldBe "Silent"
+        audioItem.title shouldBe "Silent Track"
 
         subscription.cancel()
-        customer.close()
+        audioItem.close()
     }
 })

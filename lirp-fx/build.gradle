@@ -1,12 +1,9 @@
-apply plugin: 'com.google.devtools.ksp'
+plugins {
+    id 'com.google.devtools.ksp'
+    id 'java-test-fixtures'
+}
 
 description = 'LIRP FX - JavaFX Observable Collection Bridges'
-
-// Gradle 9 changed `project(':x')` inside `dependencies { ... }` to return a Dependency, not a
-// Project, so accessing `.sourceSets` from there raises "unknown property" under 9.5. Use
-// `rootProject.project(':lirp-core')` (a real Project lookup) and force evaluation order so
-// the source set output is available when this script reads it (#144).
-evaluationDependsOn(':lirp-core')
 
 ktlint {
     filter {
@@ -34,35 +31,41 @@ dependencies {
     testImplementation "org.openjfx:javafx-graphics:21:${fxPlatform}"
     testImplementation 'org.testfx:openjfx-monocle:21.0.2'
 
-    testImplementation files(rootProject.project(':lirp-core').sourceSets.test.output)
+    testImplementation testFixtures(project(':lirp-core'))
     testImplementation libs.coroutines.test
     testImplementation libs.serialization.json
+
+    testFixturesImplementation "org.openjfx:javafx-base:21:${fxPlatform}"
+    testFixturesImplementation "org.openjfx:javafx-graphics:21:${fxPlatform}"
+    testFixturesImplementation 'org.testfx:openjfx-monocle:21.0.2'
 
     kspTest project(path: ':lirp-ksp')
 }
 
 tasks.withType(Test).configureEach {
-    def fxJars = configurations.testRuntimeClasspath.files
-            .findAll { it.name.contains('javafx') }
-            .collect { it.absolutePath }
-    def monocleJar = configurations.testRuntimeClasspath.files
-            .find { it.name.contains('monocle') }
-    if (monocleJar == null) {
-        throw new GradleException("Monocle JAR not found in testRuntimeClasspath")
+    doFirst {
+        def fxJars = configurations.testRuntimeClasspath.files
+                .findAll { it.name.contains('javafx') }
+                .collect { it.absolutePath }
+        def monocleJar = configurations.testRuntimeClasspath.files
+                .find { it.name.contains('monocle') }
+        if (monocleJar == null) {
+            throw new GradleException("Monocle JAR not found in testRuntimeClasspath")
+        }
+        def fxModulePath = fxJars.join(File.pathSeparator)
+        jvmArgs "--module-path=${fxModulePath}",
+                '--add-modules=javafx.graphics',
+                "--patch-module=javafx.graphics=${monocleJar.absolutePath}",
+                '--add-reads=javafx.graphics=ALL-UNNAMED',
+                '--add-opens=javafx.graphics/com.sun.glass.ui=ALL-UNNAMED',
+                '--add-opens=javafx.graphics/com.sun.glass.ui.monocle=ALL-UNNAMED',
+                '--add-opens=javafx.graphics/com.sun.javafx.tk=ALL-UNNAMED',
+                '--add-opens=javafx.graphics/com.sun.javafx.tk.quantum=ALL-UNNAMED',
+                '--add-exports=javafx.graphics/com.sun.javafx.application=ALL-UNNAMED',
+                '--add-exports=javafx.graphics/com.sun.javafx.util=ALL-UNNAMED',
+                '--add-exports=javafx.graphics/com.sun.glass.ui=ALL-UNNAMED',
+                '--add-exports=javafx.graphics/com.sun.glass.ui.monocle=ALL-UNNAMED'
     }
-    def fxModulePath = fxJars.join(File.pathSeparator)
-    jvmArgs "--module-path=${fxModulePath}",
-            '--add-modules=javafx.graphics',
-            "--patch-module=javafx.graphics=${monocleJar.absolutePath}",
-            '--add-reads=javafx.graphics=ALL-UNNAMED',
-            '--add-opens=javafx.graphics/com.sun.glass.ui=ALL-UNNAMED',
-            '--add-opens=javafx.graphics/com.sun.glass.ui.monocle=ALL-UNNAMED',
-            '--add-opens=javafx.graphics/com.sun.javafx.tk=ALL-UNNAMED',
-            '--add-opens=javafx.graphics/com.sun.javafx.tk.quantum=ALL-UNNAMED',
-            '--add-exports=javafx.graphics/com.sun.javafx.application=ALL-UNNAMED',
-            '--add-exports=javafx.graphics/com.sun.javafx.util=ALL-UNNAMED',
-            '--add-exports=javafx.graphics/com.sun.glass.ui=ALL-UNNAMED',
-            '--add-exports=javafx.graphics/com.sun.glass.ui.monocle=ALL-UNNAMED'
 
     systemProperty 'kotest.framework.config.fqn', 'net.transgressoft.lirp.persistence.fx.FxKotestProjectConfig'
     def excludeTags = project.findProperty('kotest.tags.exclude') as String

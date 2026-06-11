@@ -2,7 +2,7 @@ package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.CrudEvent.Type.READ
-import net.transgressoft.lirp.testing.arbitraryCustomer
+import net.transgressoft.lirp.testing.arbitraryAudioItem
 import net.transgressoft.lirp.testing.reactiveScope
 import net.transgressoft.lirp.testing.record
 import io.kotest.assertions.throwables.shouldThrow
@@ -69,18 +69,18 @@ class IndexedProductVolatileRepo : VolatileRepository<Int, IndexedProduct>("Inde
 internal class SearchPerformanceTest : StringSpec({
 
     lateinit var ctx: LirpContext
-    lateinit var repository: CustomerVolatileRepo
+    lateinit var repository: AudioItemVolatileRepository
 
     val reactive = reactiveScope()
 
     beforeTest {
         ctx = LirpContext()
         repository =
-            CustomerVolatileRepo(ctx).apply {
+            AudioItemVolatileRepository(ctx).apply {
                 activateEvents(READ)
             }
-        val customers = Arb.set(arbitraryCustomer(), 10..10).next()
-        customers.forEach { repository.create(it.id, it.name) }
+        val audioItems = Arb.set(arbitraryAudioItem(), 10..10).next()
+        audioItems.forEach { repository.create(it.id, it.title) }
     }
 
     afterTest {
@@ -115,7 +115,7 @@ internal class SearchPerformanceTest : StringSpec({
     }
 
     "lazySearch on empty repository returns empty Sequence" {
-        val emptyRepository = VolatileRepository<Int, Customer>("EmptyRepo")
+        val emptyRepository = VolatileRepository<Int, AudioItem>("EmptyRepo")
 
         val result = emptyRepository.lazySearch { true }.toSet()
 

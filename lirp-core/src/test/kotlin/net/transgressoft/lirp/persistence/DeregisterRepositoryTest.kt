@@ -42,65 +42,65 @@ internal class DeregisterRepositoryTest : StringSpec({
     }
 
     "deregisterRepository() removes a registered delegate from LirpContext.default" {
-        val delegate = VolatileRepository<Int, Customer>("Customers")
-        RegistryBase.registerRepository(Customer::class.java, delegate)
+        val delegate = VolatileRepository<Int, AudioItem>("AudioItems")
+        RegistryBase.registerRepository(AudioItem::class.java, delegate)
 
-        LirpContext.default.registryFor(Customer::class.java).shouldNotBeNull()
+        LirpContext.default.registryFor(AudioItem::class.java).shouldNotBeNull()
 
-        RegistryBase.deregisterRepository(Customer::class.java)
+        RegistryBase.deregisterRepository(AudioItem::class.java)
 
-        LirpContext.default.registryFor(Customer::class.java).shouldBeNull()
+        LirpContext.default.registryFor(AudioItem::class.java).shouldBeNull()
     }
 
     "deregisterRepository() for an unregistered entity class completes without exception" {
         shouldNotThrowAny {
-            RegistryBase.deregisterRepository(Customer::class.java)
+            RegistryBase.deregisterRepository(AudioItem::class.java)
         }
     }
 
     "deregisterRepository() then registerRepository() with a new delegate succeeds" {
-        val delegate1 = VolatileRepository<Int, Customer>("Customers1")
-        RegistryBase.registerRepository(Customer::class.java, delegate1)
+        val delegate1 = VolatileRepository<Int, AudioItem>("AudioItems1")
+        RegistryBase.registerRepository(AudioItem::class.java, delegate1)
 
-        RegistryBase.deregisterRepository(Customer::class.java)
+        RegistryBase.deregisterRepository(AudioItem::class.java)
 
-        val delegate2 = VolatileRepository<Int, Customer>("Customers2")
-        RegistryBase.registerRepository(Customer::class.java, delegate2)
+        val delegate2 = VolatileRepository<Int, AudioItem>("AudioItems2")
+        RegistryBase.registerRepository(AudioItem::class.java, delegate2)
 
-        LirpContext.default.registryFor(Customer::class.java) shouldBe delegate2
+        LirpContext.default.registryFor(AudioItem::class.java) shouldBe delegate2
     }
 
     "deregisterRepository() does not close the repository or its publisher" {
-        val delegate = VolatileRepository<Int, Customer>("Customers")
-        RegistryBase.registerRepository(Customer::class.java, delegate)
+        val delegate = VolatileRepository<Int, AudioItem>("AudioItems")
+        RegistryBase.registerRepository(AudioItem::class.java, delegate)
 
-        RegistryBase.deregisterRepository(Customer::class.java)
+        RegistryBase.deregisterRepository(AudioItem::class.java)
 
-        val customer = Customer(1, "Alice")
-        delegate.add(customer)
+        val audioItem = MutableAudioItem(1, "Track Alpha")
+        delegate.add(audioItem)
         delegate.contains(1) shouldBe true
         delegate.size() shouldBe 1
     }
 
     "concurrent register and deregister from multiple coroutines does not corrupt registriesMap" {
         val iterations = 100
-        val delegates = mutableListOf<VolatileRepository<Int, Customer>>()
+        val delegates = mutableListOf<VolatileRepository<Int, AudioItem>>()
         withContext(Dispatchers.Default) {
             (1..iterations).map { i ->
                 launch {
-                    val delegate = VolatileRepository<Int, Customer>("Customers-$i")
+                    val delegate = VolatileRepository<Int, AudioItem>("AudioItems-$i")
                     synchronized(delegates) { delegates.add(delegate) }
                     try {
-                        RegistryBase.registerRepository(Customer::class.java, delegate)
+                        RegistryBase.registerRepository(AudioItem::class.java, delegate)
                     } catch (_: IllegalStateException) {
                         // Expected when another coroutine already registered a different instance
                     }
-                    RegistryBase.deregisterRepository(Customer::class.java)
+                    RegistryBase.deregisterRepository(AudioItem::class.java)
                 }
             }.forEach { it.join() }
         }
 
-        LirpContext.default.registryFor(Customer::class.java).shouldBeNull()
+        LirpContext.default.registryFor(AudioItem::class.java).shouldBeNull()
         delegates.forEach { it.close() }
     }
 })

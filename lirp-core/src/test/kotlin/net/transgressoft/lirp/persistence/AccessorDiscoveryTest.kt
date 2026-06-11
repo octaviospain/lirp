@@ -119,18 +119,18 @@ internal class PlainEntity(override val id: Int) : ReactiveEntityBase<Int, Plain
 }
 
 /**
- * Entity with an [AggregateRefDelegate] backing field — KSP would generate an accessor for this
- * class in real usage, but the test calls [RegistryBase.failFastIfDelegatePresent] directly to
- * simulate the case where the accessor is absent.
+ * Entity with an [AggregateRefDelegate] backing field referencing [AudioItem] — KSP would generate an
+ * accessor for this class in real usage, but the test calls [RegistryBase.failFastIfDelegatePresent]
+ * directly to simulate the case where the accessor is absent.
  */
 @LirpRepository
-class EntityWithDelegate(override val id: Int, val customerId: Int) : ReactiveEntityBase<Int, EntityWithDelegate>() {
+class EntityWithDelegate(override val id: Int, val audioItemId: Int) : ReactiveEntityBase<Int, EntityWithDelegate>() {
     override val uniqueId: String get() = "delegate-$id"
 
     @Aggregate
-    val customer by aggregate<Int, Customer> { customerId }
+    val audioItem by aggregate<Int, AudioItem> { audioItemId }
 
-    override fun clone() = EntityWithDelegate(id, customerId)
+    override fun clone() = EntityWithDelegate(id, audioItemId)
 }
 
 /**
@@ -142,7 +142,7 @@ class EntityWithCollectionDelegate(override val id: Int, val itemIds: List<Int>)
     override val uniqueId: String get() = "coll-delegate-$id"
 
     @Aggregate
-    val items by aggregateList<Int, Customer>(itemIds)
+    val items by aggregateList<Int, AudioItem>(itemIds)
 
     override fun clone() = EntityWithCollectionDelegate(id, itemIds)
 }

@@ -1,5 +1,6 @@
 plugins {
     id 'com.google.devtools.ksp'
+    id 'java-test-fixtures'
 }
 
 description = 'LIRP Core'
@@ -21,6 +22,15 @@ dependencies {
 
     ksp project(path: ':lirp-ksp')
     kspTest project(path: ':lirp-ksp')
+    kspTestFixtures project(path: ':lirp-ksp')
+
+    testFixturesImplementation project(path: ':lirp-api')
+    testFixturesImplementation libs.kotlin.stdlib
+    testFixturesImplementation libs.bundles.kotest
+    testFixturesImplementation libs.coroutines.test
+    testFixturesImplementation libs.serialization.json
+
+    testImplementation testFixtures(project(':lirp-core'))
 
     testImplementation platform(libs.junit.bom)
     testImplementation libs.logback.core

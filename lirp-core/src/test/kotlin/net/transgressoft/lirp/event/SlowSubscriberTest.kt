@@ -17,7 +17,7 @@
 
 package net.transgressoft.lirp.event
 
-import net.transgressoft.lirp.persistence.CustomerVolatileRepo
+import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
 import net.transgressoft.lirp.testing.ReactiveScopeSerialization
 import net.transgressoft.lirp.testing.Stress
 import io.kotest.core.spec.style.DescribeSpec
@@ -214,7 +214,7 @@ class SlowSubscriberTest : DescribeSpec({
             val fastCounter = AtomicInteger(0)
             val slowCounter = AtomicInteger(0)
 
-            val repository = CustomerVolatileRepo()
+            val repository = AudioItemVolatileRepository()
 
             val fastSub = repository.subscribe { fastCounter.incrementAndGet() }
             val slowSub =
@@ -226,7 +226,7 @@ class SlowSubscriberTest : DescribeSpec({
             // create() triggers CrudEvent emission via trySend — non-blocking
             val start = System.currentTimeMillis()
             repeat(EVENT_COUNT) { i ->
-                repository.create(i, "customer-$i")
+                repository.create(i, "track-$i")
             }
             val emissionMs = System.currentTimeMillis() - start
 
@@ -248,7 +248,7 @@ class SlowSubscriberTest : DescribeSpec({
             val fastLatch = CountDownLatch(EVENT_COUNT)
             val slowLatch = CountDownLatch(EVENT_COUNT)
 
-            val repository = CustomerVolatileRepo()
+            val repository = AudioItemVolatileRepository()
 
             val fastSub = repository.subscribe { fastLatch.countDown() }
             val slowSub =
@@ -260,7 +260,7 @@ class SlowSubscriberTest : DescribeSpec({
             val pacedIntervalMs = PACED_INTERVAL_MS
             dedicatedScope.launch {
                 repeat(EVENT_COUNT) { i ->
-                    repository.create(i, "customer-$i")
+                    repository.create(i, "track-$i")
                     delay(pacedIntervalMs.milliseconds)
                 }
             }.join()

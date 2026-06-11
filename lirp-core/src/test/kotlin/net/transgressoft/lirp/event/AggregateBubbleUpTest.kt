@@ -17,15 +17,17 @@
 
 package net.transgressoft.lirp.event
 
-import net.transgressoft.lirp.persistence.BubbleUpOrderVolatileRepo
-import net.transgressoft.lirp.persistence.Customer
-import net.transgressoft.lirp.persistence.CustomerVolatileRepo
-import net.transgressoft.lirp.persistence.EntityAVolatileRepo
-import net.transgressoft.lirp.persistence.EntityBVolatileRepo
-import net.transgressoft.lirp.persistence.EntityCVolatileRepo
+import net.transgressoft.lirp.persistence.AudioItem
+import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
+import net.transgressoft.lirp.persistence.AudioPlaylistVolatileRepository
+import net.transgressoft.lirp.persistence.BubbleAudioLibraryRepo
+import net.transgressoft.lirp.persistence.BubbleAudioPlaylistRepo
+import net.transgressoft.lirp.persistence.BubbleAudioTrackRepo
+import net.transgressoft.lirp.persistence.BubbleUpAudioPlaylistRepo
+import net.transgressoft.lirp.persistence.DefaultAudioPlaylist
 import net.transgressoft.lirp.persistence.LirpContext
-import net.transgressoft.lirp.persistence.MutableRefOrderVolatileRepo
-import net.transgressoft.lirp.persistence.OrderVolatileRepo
+import net.transgressoft.lirp.persistence.MutableAudioItem
+import net.transgressoft.lirp.persistence.MutableRefPlaylistRepo
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.nondeterministic.continually
 import io.kotest.assertions.nondeterministic.eventually
@@ -61,150 +63,151 @@ internal class AggregateBubbleUpTest : FunSpec({
         ctx.close()
     }
 
-    test("BubbleUpOrder receives AggregateMutationEvent when referenced Customer mutates") {
-        val customerRepo = CustomerVolatileRepo(ctx)
-        val customer = customerRepo.create(id = 1, name = "Alice")
+    test("BubbleUpAudioPlaylist receives AggregateMutationEvent when referenced audio item mutates") {
+        val audioItemRepo = AudioItemVolatileRepository(ctx)
+        val audioItem = audioItemRepo.create(id = 1, title = "Track A") as MutableAudioItem
 
-        val orderRepo = BubbleUpOrderVolatileRepo(ctx)
-        val order = orderRepo.create(id = 100L, customerId = 1)
+        val playlistRepo = BubbleUpAudioPlaylistRepo(ctx)
+        val playlist = playlistRepo.create(id = 100, audioItemId = 1)
 
         val receivedEvent = AtomicReference<MutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
 
-        order.subscribe { event ->
+        playlist.subscribe { event ->
             receivedEvent.set(event)
             latch.countDown()
         }
 
-        customer.updateName("Alice Updated")
+        audioItem.title = "Track A Updated"
 
         latch.await(2, TimeUnit.SECONDS) shouldBe true
         receivedEvent.get().shouldBeInstanceOf<AggregateMutationEvent<*, *>>()
     }
 
     test("AggregateMutationEvent refName matches the declared reference property name") {
-        val customerRepo = CustomerVolatileRepo(ctx)
-        val customer = customerRepo.create(id = 1, name = "Alice")
+        val audioItemRepo = AudioItemVolatileRepository(ctx)
+        val audioItem = audioItemRepo.create(id = 1, title = "Track A") as MutableAudioItem
 
-        val orderRepo = BubbleUpOrderVolatileRepo(ctx)
-        val order = orderRepo.create(id = 100L, customerId = 1)
+        val playlistRepo = BubbleUpAudioPlaylistRepo(ctx)
+        val playlist = playlistRepo.create(id = 100, audioItemId = 1)
 
         val receivedEvent = AtomicReference<AggregateMutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
 
-        order.subscribe { event ->
+        playlist.subscribe { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 receivedEvent.set(event)
                 latch.countDown()
             }
         }
 
-        customer.updateName("Alice Updated")
+        audioItem.title = "Track A Updated"
 
         latch.await(2, TimeUnit.SECONDS) shouldBe true
-        receivedEvent.get().refName shouldBe "customer"
+        receivedEvent.get().refName shouldBe "audioItem"
     }
 
-    test("AggregateMutationEvent childEvent contains the original MutationEvent from the referenced Customer") {
-        val customerRepo = CustomerVolatileRepo(ctx)
-        val customer = customerRepo.create(id = 1, name = "Alice")
+    test("AggregateMutationEvent childEvent contains the original MutationEvent from the referenced audio item") {
+        val audioItemRepo = AudioItemVolatileRepository(ctx)
+        val audioItem = audioItemRepo.create(id = 1, title = "Track A") as MutableAudioItem
 
-        val orderRepo = BubbleUpOrderVolatileRepo(ctx)
-        val order = orderRepo.create(id = 100L, customerId = 1)
+        val playlistRepo = BubbleUpAudioPlaylistRepo(ctx)
+        val playlist = playlistRepo.create(id = 100, audioItemId = 1)
 
         val receivedEvent = AtomicReference<AggregateMutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
 
-        order.subscribe { event ->
+        playlist.subscribe { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 receivedEvent.set(event)
                 latch.countDown()
             }
         }
 
-        customer.updateName("Alice Updated")
+        audioItem.title = "Track A Updated"
 
         latch.await(2, TimeUnit.SECONDS) shouldBe true
         val aggregateEvent = receivedEvent.get()
-        aggregateEvent.childEvent.shouldBeInstanceOf<ReactiveMutationEvent<Int, Customer>>()
-        val childMutation = aggregateEvent.childEvent as ReactiveMutationEvent<Int, Customer>
-        childMutation.newEntity.name shouldBe "Alice Updated"
-        childMutation.oldEntity.name shouldBe "Alice"
+        aggregateEvent.childEvent.shouldBeInstanceOf<ReactiveMutationEvent<Int, AudioItem>>()
+        val childMutation = aggregateEvent.childEvent as ReactiveMutationEvent<Int, AudioItem>
+        childMutation.newEntity.title shouldBe "Track A Updated"
+        childMutation.oldEntity.title shouldBe "Track A"
     }
 
-    test("Order with bubbleUp=false does NOT receive events when referenced Customer mutates") {
-        val customerRepo = CustomerVolatileRepo(ctx)
-        val customer = customerRepo.create(id = 1, name = "Alice")
+    test("Audio playlist with bubbleUp=false does NOT receive events when referenced audio item mutates") {
+        val audioItemRepo = AudioItemVolatileRepository(ctx)
+        val audioItem = audioItemRepo.create(id = 1, title = "Track A") as MutableAudioItem
 
-        val orderRepo = OrderVolatileRepo(ctx)
-        val order = orderRepo.create(id = 100L, customerId = 1)
+        val playlistRepo = AudioPlaylistVolatileRepository(ctx)
+        val playlist = DefaultAudioPlaylist(100, "My Playlist", listOf(1))
+        playlistRepo.add(playlist)
 
         val receivedEventCount = java.util.concurrent.atomic.AtomicInteger(0)
 
-        order.subscribe { receivedEventCount.incrementAndGet() }
+        playlist.subscribe { receivedEventCount.incrementAndGet() }
 
-        customer.updateName("Alice Updated")
+        audioItem.title = "Track A Updated"
 
         // Wait briefly to confirm no event arrives
         continually(300.milliseconds) { receivedEventCount.get() shouldBe 0 }
     }
 
-    test("Bubble-up re-wires to new entity after reference ID change via mutateAndPublish") {
-        val customerRepo = CustomerVolatileRepo(ctx)
-        val customer1 = customerRepo.create(id = 1, name = "Alice")
-        val customer2 = customerRepo.create(id = 2, name = "Bob")
+    test("Bubble-up re-wires to new audio item after reference ID change via mutateAndPublish") {
+        val audioItemRepo = AudioItemVolatileRepository(ctx)
+        val audioItem1 = audioItemRepo.create(id = 1, title = "Track A") as MutableAudioItem
+        val audioItem2 = audioItemRepo.create(id = 2, title = "Track B") as MutableAudioItem
 
-        val orderRepo = MutableRefOrderVolatileRepo(ctx)
-        val order = orderRepo.create(id = 100L, customerId = 1)
+        val playlistRepo = MutableRefPlaylistRepo(ctx)
+        val playlist = playlistRepo.create(id = 100, audioItemId = 1)
 
         val latch1 = CountDownLatch(1)
         val receivedCount = java.util.concurrent.atomic.AtomicInteger(0)
 
-        order.subscribe { event ->
+        playlist.subscribe { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 receivedCount.incrementAndGet()
                 latch1.countDown()
             }
         }
 
-        // Verify initial wiring: customer1 mutation arrives
-        customer1.updateName("Alice Updated")
+        // Verify initial wiring: audioItem1 mutation arrives
+        audioItem1.title = "Track A Updated"
         latch1.await(2, TimeUnit.SECONDS) shouldBe true
         receivedCount.get() shouldBe 1
 
-        // Change reference to customer2, then trigger re-wire via resolve()
-        order.changeCustomer(2)
-        order.customer.resolve()
+        // Change reference to audioItem2, then trigger re-wire via resolve()
+        playlist.changeItem(2)
+        playlist.audioItem.resolve()
 
         val latch2 = CountDownLatch(1)
-        order.subscribe { event ->
+        playlist.subscribe { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 latch2.countDown()
             }
         }
 
-        // Mutate customer2 — should arrive (re-wired)
-        customer2.updateName("Bob Updated")
+        // Mutate audioItem2 — should arrive (re-wired)
+        audioItem2.title = "Track B Updated"
         latch2.await(2, TimeUnit.SECONDS) shouldBe true
 
-        // Mutate customer1 — should NOT produce further aggregate events
+        // Mutate audioItem1 — should NOT produce further aggregate events
         val countBeforeOldMutation = receivedCount.get()
-        customer1.updateName("Alice Again")
-        // No additional events from old customer1 subscription
+        audioItem1.title = "Track A Again"
+        // No additional events from old audioItem1 subscription
         continually(300.milliseconds) { receivedCount.get() shouldBe countBeforeOldMutation }
     }
 
-    test("Bubble-up stays on old entity when new reference ID does not resolve") {
-        val customerRepo = CustomerVolatileRepo(ctx)
-        val customer1 = customerRepo.create(id = 1, name = "Alice")
+    test("Bubble-up stays on old audio item when new reference ID does not resolve") {
+        val audioItemRepo = AudioItemVolatileRepository(ctx)
+        val audioItem1 = audioItemRepo.create(id = 1, title = "Track A") as MutableAudioItem
 
-        val orderRepo = MutableRefOrderVolatileRepo(ctx)
-        val order = orderRepo.create(id = 100L, customerId = 1)
+        val playlistRepo = MutableRefPlaylistRepo(ctx)
+        val playlist = playlistRepo.create(id = 100, audioItemId = 1)
 
         val eventCount = java.util.concurrent.atomic.AtomicInteger(0)
         val latch = CountDownLatch(1)
 
-        order.subscribe { event ->
+        playlist.subscribe { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 eventCount.incrementAndGet()
                 latch.countDown()
@@ -212,89 +215,89 @@ internal class AggregateBubbleUpTest : FunSpec({
         }
 
         // Verify initial wiring
-        customer1.updateName("Alice Updated")
+        audioItem1.title = "Track A Updated"
         latch.await(2, TimeUnit.SECONDS) shouldBe true
 
         // Change to non-existent ID — re-wire should fail, old subscription preserved
-        order.changeCustomer(999)
-        order.customer.resolve() // triggers re-wire attempt — should fail
+        playlist.changeItem(999)
+        playlist.audioItem.resolve() // triggers re-wire attempt — should fail
 
-        // Old subscription to customer1 still active
+        // Old subscription to audioItem1 still active
         val countBefore = eventCount.get()
-        customer1.updateName("Alice Again")
+        audioItem1.title = "Track A Again"
         eventually(5.seconds) { eventCount.get() shouldBe countBefore + 1 }
     }
 
     test("Bubble-up re-wires after initially unresolvable new ID becomes available") {
-        val customerRepo = CustomerVolatileRepo(ctx)
-        val customer1 = customerRepo.create(id = 1, name = "Alice")
+        val audioItemRepo = AudioItemVolatileRepository(ctx)
+        audioItemRepo.create(id = 1, title = "Track A")
 
-        val orderRepo = MutableRefOrderVolatileRepo(ctx)
-        val order = orderRepo.create(id = 100L, customerId = 1)
+        val playlistRepo = MutableRefPlaylistRepo(ctx)
+        val playlist = playlistRepo.create(id = 100, audioItemId = 1)
 
         // Change to ID 2 — not yet in repo
-        order.changeCustomer(2)
-        order.customer.resolve() // re-wire fails, old sub (or none if customer1 was initial) stays
+        playlist.changeItem(2)
+        playlist.audioItem.resolve() // re-wire fails, old sub (or none if audioItem1 was initial) stays
 
-        // Add customer2
-        val customer2 = customerRepo.create(id = 2, name = "Bob")
+        // Add audioItem2
+        val audioItem2 = audioItemRepo.create(id = 2, title = "Track B") as MutableAudioItem
 
         // Trigger re-wire again — now succeeds
-        order.customer.resolve()
+        playlist.audioItem.resolve()
 
         val eventCount = java.util.concurrent.atomic.AtomicInteger(0)
         val latch = CountDownLatch(1)
 
-        order.subscribe { event ->
+        playlist.subscribe { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 eventCount.incrementAndGet()
                 latch.countDown()
             }
         }
 
-        // Mutate customer2 — should arrive after successful re-wire
-        customer2.updateName("Bob Updated")
+        // Mutate audioItem2 — should arrive after successful re-wire
+        audioItem2.title = "Track B Updated"
         latch.await(2, TimeUnit.SECONDS) shouldBe true
         eventCount.get() shouldBe 1
     }
 
-    test("Bubble-up propagation is single-level only: EntityA mutation notifies EntityB but NOT EntityC") {
-        val repoA = EntityAVolatileRepo(ctx)
-        val repoB = EntityBVolatileRepo(ctx)
-        val repoC = EntityCVolatileRepo(ctx)
+    test("Bubble-up propagation is single-level only: BubbleAudioTrack mutation notifies BubbleAudioPlaylist but NOT BubbleAudioLibrary") {
+        val repoA = BubbleAudioTrackRepo(ctx)
+        val repoB = BubbleAudioPlaylistRepo(ctx)
+        val repoC = BubbleAudioLibraryRepo(ctx)
 
-        val entityA = repoA.create(id = 1, value = "original")
-        val entityB = repoB.create(id = 10, entityAId = 1)
-        val entityC = repoC.create(id = 100, entityBId = 10)
+        val track = repoA.create(id = 1, trackName = "original")
+        val audioPlaylist = repoB.create(id = 10, trackId = 1)
+        val audioLibrary = repoC.create(id = 100, playlistId = 10)
 
         val bReceivedLatch = CountDownLatch(1)
         val cReceivedCount = java.util.concurrent.atomic.AtomicInteger(0)
 
-        // EntityB should receive bubble-up from EntityA
-        entityB.subscribe { event ->
+        // BubbleAudioPlaylist should receive bubble-up from BubbleAudioTrack
+        audioPlaylist.subscribe { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 bReceivedLatch.countDown()
             }
         }
 
-        // EntityC should NOT receive any events — bubble-up is single-level
-        entityC.subscribe { cReceivedCount.incrementAndGet() }
+        // BubbleAudioLibrary should NOT receive any events — bubble-up is single-level
+        audioLibrary.subscribe { cReceivedCount.incrementAndGet() }
 
-        entityA.updateValue("mutated")
+        track.updateTrackName("mutated")
 
         bReceivedLatch.await(2, TimeUnit.SECONDS) shouldBe true
         continually(300.milliseconds) { cReceivedCount.get() shouldBe 0 }
     }
 
-    test("BubbleUpOrder added before its Customer exists completes wireBubbleUp without throwing") {
-        val customerRepo = CustomerVolatileRepo(ctx)
-        val bubbleUpOrderRepo = BubbleUpOrderVolatileRepo(ctx)
+    test("BubbleUpAudioPlaylist added before its audio item exists completes wireBubbleUp without throwing") {
+        val audioItemRepo = AudioItemVolatileRepository(ctx)
+        val bubbleUpPlaylistRepo = BubbleUpAudioPlaylistRepo(ctx)
 
-        val order = bubbleUpOrderRepo.create(id = 1L, customerId = 999)
+        val playlist = bubbleUpPlaylistRepo.create(id = 1, audioItemId = 999)
 
-        order.customer.resolve().isPresent shouldBe false
+        playlist.audioItem.resolve().isPresent shouldBe false
 
-        customerRepo.create(id = 999, name = "LateCustomer")
-        order.customer.resolve().isPresent shouldBe true
+        audioItemRepo.create(id = 999, title = "Late Track")
+        playlist.audioItem.resolve().isPresent shouldBe true
     }
 })

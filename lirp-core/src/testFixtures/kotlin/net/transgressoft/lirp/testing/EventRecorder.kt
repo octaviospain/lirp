@@ -40,7 +40,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
  *     recorder.count shouldBe 3
  *     recorder.events.map { it.entities.keys.first() } shouldContainExactly listOf(1, 2, 3)
  */
-internal class EventRecorder<E : Any> {
+class EventRecorder<E : Any> {
 
     private val captured = ConcurrentLinkedQueue<E>()
 
@@ -72,7 +72,7 @@ internal class EventRecorder<E : Any> {
  * unnecessary because the wired [net.transgressoft.lirp.event.ReactiveScope] is replaced
  * between specs by [ReactiveScopeExtension].
  */
-internal fun <ET : EventType, E : LirpEvent<ET>> LirpEventPublisher<ET, E>.record(
+fun <ET : EventType, E : LirpEvent<ET>> LirpEventPublisher<ET, E>.record(
     vararg types: ET
 ): EventRecorder<E> {
     val recorder = EventRecorder<E>()

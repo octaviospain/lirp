@@ -18,7 +18,7 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.event.AggregateMutationEvent
-import net.transgressoft.lirp.persistence.json.BubbleUpOrderJsonFileRepository
+import net.transgressoft.lirp.persistence.json.BubbleUpAudioPlaylistJsonFileRepository
 import net.transgressoft.lirp.persistence.json.JsonFileRepository
 import net.transgressoft.lirp.persistence.json.MutableAudioPlaylistJsonFileRepository
 import net.transgressoft.lirp.persistence.json.lirpSerializer
@@ -53,59 +53,59 @@ internal class RegisterRepositoryTest : StringSpec({
     }
 
     "registers delegate RegistryBase in LirpContext.default keyed by entity class" {
-        val delegate = VolatileRepository<Int, Customer>("Customers")
+        val delegate = VolatileRepository<Int, AudioItem>("AudioItems")
 
-        RegistryBase.registerRepository(Customer::class.java, delegate)
+        RegistryBase.registerRepository(AudioItem::class.java, delegate)
 
-        LirpContext.default.registryFor(Customer::class.java) shouldBe delegate
+        LirpContext.default.registryFor(AudioItem::class.java) shouldBe delegate
     }
 
     "registerRepository() called twice with the same instance is idempotent" {
-        val delegate = VolatileRepository<Int, Customer>("Customers")
+        val delegate = VolatileRepository<Int, AudioItem>("AudioItems")
 
-        RegistryBase.registerRepository(Customer::class.java, delegate)
-        RegistryBase.registerRepository(Customer::class.java, delegate)
+        RegistryBase.registerRepository(AudioItem::class.java, delegate)
+        RegistryBase.registerRepository(AudioItem::class.java, delegate)
 
-        LirpContext.default.registryFor(Customer::class.java) shouldBe delegate
+        LirpContext.default.registryFor(AudioItem::class.java) shouldBe delegate
     }
 
     "registerRepository() with a different instance for same entity class throws ISE" {
-        val delegate1 = VolatileRepository<Int, Customer>("Customers1")
-        val delegate2 = VolatileRepository<Int, Customer>("Customers2")
+        val delegate1 = VolatileRepository<Int, AudioItem>("AudioItems1")
+        val delegate2 = VolatileRepository<Int, AudioItem>("AudioItems2")
 
-        RegistryBase.registerRepository(Customer::class.java, delegate1)
+        RegistryBase.registerRepository(AudioItem::class.java, delegate1)
 
         shouldThrow<IllegalStateException> {
-            RegistryBase.registerRepository(Customer::class.java, delegate2)
-        }.message shouldBe "A repository for Customer is already registered. Only one @LirpRepository per entity type is allowed."
+            RegistryBase.registerRepository(AudioItem::class.java, delegate2)
+        }.message shouldBe "A repository for AudioItem is already registered. Only one @LirpRepository per entity type is allowed."
     }
 
     "registerRepository() with a non-RegistryBase Registry instance throws IAE" {
-        val nonRegistryBase = mockk<Repository<Int, Customer>>()
+        val nonRegistryBase = mockk<Repository<Int, AudioItem>>()
 
         shouldThrow<IllegalArgumentException> {
-            RegistryBase.registerRepository(Customer::class.java, nonRegistryBase)
+            RegistryBase.registerRepository(AudioItem::class.java, nonRegistryBase)
         }.message shouldContain "Only RegistryBase instances can be registered"
     }
 
     "close() on delegate deregisters from LirpContext.default" {
-        val delegate = VolatileRepository<Int, Customer>("Customers")
+        val delegate = VolatileRepository<Int, AudioItem>("AudioItems")
 
-        RegistryBase.registerRepository(Customer::class.java, delegate)
-        LirpContext.default.registryFor(Customer::class.java) shouldBe delegate
+        RegistryBase.registerRepository(AudioItem::class.java, delegate)
+        LirpContext.default.registryFor(AudioItem::class.java) shouldBe delegate
 
         delegate.close()
 
-        LirpContext.default.registryFor(Customer::class.java) shouldBe null
+        LirpContext.default.registryFor(AudioItem::class.java) shouldBe null
     }
 
     "registerRepository() with a delegate from a non-default context throws IAE" {
         val customContext = LirpContext()
-        val delegate = VolatileRepository<Int, Customer>(customContext, "Customers")
+        val delegate = VolatileRepository<Int, AudioItem>(customContext, "AudioItems")
 
         try {
             shouldThrow<IllegalArgumentException> {
-                RegistryBase.registerRepository(Customer::class.java, delegate)
+                RegistryBase.registerRepository(AudioItem::class.java, delegate)
             }.message shouldContain "registerRepository() only supports RegistryBase instances created in LirpContext.default"
         } finally {
             delegate.close()
@@ -113,17 +113,17 @@ internal class RegisterRepositoryTest : StringSpec({
     }
 
     "registerRepository() succeeds after close() and re-registration" {
-        val delegate1 = VolatileRepository<Int, Customer>("Customers")
+        val delegate1 = VolatileRepository<Int, AudioItem>("AudioItems")
 
-        RegistryBase.registerRepository(Customer::class.java, delegate1)
+        RegistryBase.registerRepository(AudioItem::class.java, delegate1)
         delegate1.close()
 
-        LirpContext.default.registryFor(Customer::class.java) shouldBe null
+        LirpContext.default.registryFor(AudioItem::class.java) shouldBe null
 
-        val delegate2 = VolatileRepository<Int, Customer>("Customers2")
-        RegistryBase.registerRepository(Customer::class.java, delegate2)
+        val delegate2 = VolatileRepository<Int, AudioItem>("AudioItems2")
+        RegistryBase.registerRepository(AudioItem::class.java, delegate2)
 
-        LirpContext.default.registryFor(Customer::class.java) shouldBe delegate2
+        LirpContext.default.registryFor(AudioItem::class.java) shouldBe delegate2
     }
 
     "registerRepository() rebinds collection aggregate refs of entities loaded before registration" {
@@ -137,7 +137,7 @@ internal class RegisterRepositoryTest : StringSpec({
         // (mirroring the music-commons FXPlaylistHierarchy pattern).
         val playlistFile = tempfile("playlist-late-register", ".json").also { it.deleteOnExit() }
 
-        // Phase 1: write self-referencing playlists via the auto-registered repo so the
+        // Write self-referencing playlists via the auto-registered repo so the
         // serialized JSON encodes the parent->child relationship.
         val authoringRepo = MutableAudioPlaylistJsonFileRepository(LirpContext.default, playlistFile, serializationDelayMs = 5L)
         val child = authoringRepo.create(20, "Child")
@@ -147,7 +147,7 @@ internal class RegisterRepositoryTest : StringSpec({
         authoringRepo.close()
         LirpContext.resetDefault()
 
-        // Phase 2: load via PLAIN JsonFileRepository (no @LirpRepository annotation, so no
+        // Load via PLAIN JsonFileRepository (no @LirpRepository annotation, so no
         // auto-registration of the playlist registry), then manually call registerRepository()
         // afterwards. This is exactly the pattern music-commons FXPlaylistHierarchy uses.
         @Suppress("UNCHECKED_CAST")
@@ -174,52 +174,51 @@ internal class RegisterRepositoryTest : StringSpec({
         // verifying both that resolve() succeeds AND that the bubble-up subscription fires.
         // Without re-running wireRefBubbleUp() inside registerRepository(), parent subscribers
         // would not receive AggregateMutationEvent from the late-registered child.
-        val orderFile = tempfile("order-scalar-late-register", ".json").also { it.deleteOnExit() }
+        val playlistFile = tempfile("playlist-scalar-late-register", ".json").also { it.deleteOnExit() }
 
-        // Phase 1: write a customer + order via auto-registered repos so the JSON encodes
-        // the customerId scalar ref.
-        val authoringCustomers = CustomerVolatileRepo(LirpContext.default)
-        val authoringOrders = BubbleUpOrderJsonFileRepository(LirpContext.default, orderFile, 5L)
-        authoringCustomers.create(1, "Alice")
-        authoringOrders.create(10L, 1)
+        // Write an audio item + bubble-up playlist via auto-registered repos so the JSON
+        // encodes the audioItemId scalar ref.
+        val authoringItems = AudioItemVolatileRepository(LirpContext.default)
+        val authoringPlaylists = BubbleUpAudioPlaylistJsonFileRepository(LirpContext.default, playlistFile, 5L)
+        authoringItems.create(1, "Track Alpha")
+        authoringPlaylists.create(10, 1)
         reactive.advance()
-        authoringOrders.close()
-        authoringCustomers.close()
+        authoringPlaylists.close()
+        authoringItems.close()
         LirpContext.resetDefault()
 
-        // Phase 2: reload orders WITHOUT registering the Customer registry first.
-        // BubbleUpOrderJsonFileRepository auto-registers BubbleUpOrder, but Customer remains
-        // absent — each loaded order's customer scalar ref delegate is left unbound, and
+        // Reload playlists WITHOUT registering the AudioItem registry first.
+        // BubbleUpAudioPlaylistJsonFileRepository auto-registers BubbleUpAudioPlaylist, but AudioItem
+        // remains absent — each loaded playlist's audioItem scalar ref delegate is left unbound, and
         // wireRefBubbleUp() ran with bubbleUpParent set but no resolvable child, so no
         // bubble-up subscription was created.
-        val orderRepo = BubbleUpOrderJsonFileRepository(LirpContext.default, orderFile, 5L)
-        val loadedOrder = orderRepo.findById(10L).get()
-        loadedOrder.customer.resolve().isPresent shouldBe false
+        val playlistRepo = BubbleUpAudioPlaylistJsonFileRepository(LirpContext.default, playlistFile, 5L)
+        val loadedPlaylist = playlistRepo.findById(10).get()
+        loadedPlaylist.audioItem.resolve().isPresent shouldBe false
 
-        // Phase 3: late-register Customer via registerRepository(). The rebinding pass must
-        // walk all registries (including orderRepo), rebind scalar refs whose target class is
+        // Late-register AudioItem via registerRepository(). The rebinding pass must
+        // walk all registries (including playlistRepo), rebind scalar refs whose target class is
         // now resolvable, AND re-wire bubble-up subscriptions for `bubbleUp = true` refs.
-        val lateCustomers = VolatileRepository<Int, Customer>(LirpContext.default, "CustomersLate")
-        val customer = Customer(1, "Alice").also(lateCustomers::add)
-        RegistryBase.registerRepository(Customer::class.java, lateCustomers)
+        val lateItems = VolatileRepository<Int, AudioItem>(LirpContext.default, "AudioItemsLate")
+        val audioItem = MutableAudioItem(1, "Track Alpha").also { lateItems.add(it) }
+        RegistryBase.registerRepository(AudioItem::class.java, lateItems)
 
-        // resolve() now returns the customer — confirms the scalar bind branch works.
-        loadedOrder.customer.resolve().isPresent shouldBe true
-        loadedOrder.customer.resolve().get().name shouldBe "Alice"
+        // resolve() now returns the audio item — confirms the scalar bind branch works.
+        loadedPlaylist.audioItem.resolve().isPresent shouldBe true
+        loadedPlaylist.audioItem.resolve().get().title shouldBe "Track Alpha"
 
-        // Bubble-up must fire: a mutation on the customer should reach the order's subscribers
-        // as an AggregateMutationEvent. This would NOT happen if rebindReferencesTo() only
-        // re-ran bindEntityRefs() and skipped wireRefBubbleUp().
+        // Bubble-up must fire: a mutation on the audio item should reach the playlist's subscribers
+        // as an AggregateMutationEvent.
         val bubbleUpReceived = AtomicBoolean(false)
-        loadedOrder.subscribe { event ->
+        loadedPlaylist.subscribe { event ->
             if (event is AggregateMutationEvent<*, *>) bubbleUpReceived.set(true)
         }
-        customer.updateName("Alice Updated")
+        audioItem.title = "Track Alpha Updated"
         reactive.advance()
 
         bubbleUpReceived.get() shouldBe true
 
-        orderRepo.close()
-        lateCustomers.close()
+        playlistRepo.close()
+        lateItems.close()
     }
 })

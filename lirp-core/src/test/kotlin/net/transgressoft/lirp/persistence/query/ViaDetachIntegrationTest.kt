@@ -18,8 +18,8 @@
 package net.transgressoft.lirp.persistence.query
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
-import net.transgressoft.lirp.persistence.BubbleUpOrder
-import net.transgressoft.lirp.persistence.Customer
+import net.transgressoft.lirp.persistence.AudioItem
+import net.transgressoft.lirp.persistence.BubbleUpAudioPlaylist
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.RegistryBase
 import net.transgressoft.lirp.persistence.VolatileRepository
@@ -220,17 +220,17 @@ internal class ViaDetachIntegrationTest : FunSpec({
     }
 
     test("viaAccessorFor returns descriptors that point at the same entity class the query uses") {
-        // Sanity check via Plan 04's viaAccessorFor seam: the KSP-generated accessor for
-        // BubbleUpOrder declares its single-ref `customer` as targeting Customer::class.java.
-        // That is the same Customer class instance the user constructs a Registry<Int, Customer>
-        // around when writing `BubbleUpOrder::customerId via customers where { … }`. DETACH
-        // lifecycle lives on the Customer Registry and is therefore the same source of truth
-        // for both the accessor metadata and the Via* AST node.
-        val accessor = RegistryBase.viaAccessorFor(BubbleUpOrder::class.java)
+        // Sanity check: the KSP-generated accessor for BubbleUpAudioPlaylist declares its
+        // single-ref `audioItem` as targeting AudioItem::class.java. That is the same AudioItem
+        // class instance the user constructs a Registry<Int, AudioItem> around when writing
+        // `BubbleUpAudioPlaylist::audioItemId via audioItems where { … }`. DETACH lifecycle
+        // lives on the AudioItem Registry and is therefore the same source of truth for both
+        // the accessor metadata and the Via* AST node.
+        val accessor = RegistryBase.viaAccessorFor(BubbleUpAudioPlaylist::class.java)
         accessor.shouldNotBeNull()
         accessor.singleEntries.size shouldBe 1
-        accessor.singleEntries[0].refName shouldBe "customer"
-        accessor.singleEntries[0].referencedClass shouldBe Customer::class.java
+        accessor.singleEntries[0].refName shouldBe "audioItem"
+        accessor.singleEntries[0].referencedClass shouldBe AudioItem::class.java
     }
 })
 

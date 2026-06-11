@@ -17,7 +17,7 @@
 
 package net.transgressoft.lirp.event
 
-import net.transgressoft.lirp.persistence.CustomerVolatileRepo
+import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
 import net.transgressoft.lirp.testing.ReactiveScopeSerialization
 import net.transgressoft.lirp.testing.Stress
 import io.kotest.core.spec.style.DescribeSpec
@@ -51,7 +51,7 @@ class HighConcurrencyStressTest : DescribeSpec({
     describe("FlowEventPublisher with 250 simultaneous subscribers") {
 
         it("delivers all CrudEvents to 250 subscribers without loss").config(timeout = 60.seconds) {
-            val repository = CustomerVolatileRepo()
+            val repository = AudioItemVolatileRepository()
 
             // Each of the 250 subscribers gets its own queue and latch
             val subscribers =
@@ -77,7 +77,7 @@ class HighConcurrencyStressTest : DescribeSpec({
                     launch(Dispatchers.Default) {
                         repeat(EVENTS_PER_WRITER) { eventIndex ->
                             val id = writerIndex * EVENTS_PER_WRITER + eventIndex
-                            repository.create(id, "customer-$id")
+                            repository.create(id, "track-$id")
                         }
                     }
                 }

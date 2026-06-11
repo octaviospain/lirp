@@ -19,8 +19,7 @@ package net.transgressoft.lirp.persistence.json
 
 import net.transgressoft.lirp.event.AggregateMutationEvent
 import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
-import net.transgressoft.lirp.persistence.BubbleUpOrder
-import net.transgressoft.lirp.persistence.CustomerVolatileRepo
+import net.transgressoft.lirp.persistence.BubbleUpAudioPlaylist
 import net.transgressoft.lirp.persistence.DefaultAudioPlaylist
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpRepository
@@ -59,67 +58,67 @@ class AggregateJsonPersistenceTest : FunSpec({
 
     test("serializes entity with aggregate ref as ID-only, no resolved object") {
         val ctx = LirpContext()
-        val orderFile = tempfile("order-repo", ".json").also { it.deleteOnExit() }
-        val customerRepo = CustomerVolatileRepo(ctx)
-        val orderRepo = BubbleUpOrderJsonFileRepository(ctx, orderFile)
+        val playlistFile = tempfile("playlist-repo", ".json").also { it.deleteOnExit() }
+        val audioItemRepo = AudioItemVolatileRepository(ctx)
+        val playlistRepo = BubbleUpAudioPlaylistJsonFileRepository(ctx, playlistFile)
 
-        customerRepo.create(1, "Alice")
-        orderRepo.create(10L, 1)
+        audioItemRepo.create(1, "Track A")
+        playlistRepo.create(10, 1)
 
         reactive.advance()
 
-        val json = orderFile.readText()
+        val json = playlistFile.readText()
         // Only the raw ID field should be present, not the delegate or resolved object
-        json shouldContain "\"customerId\": 1"
-        json shouldNotContain "\"customer\""
+        json shouldContain "\"audioItemId\": 1"
+        json shouldNotContain "\"audioItem\""
 
         ctx.close()
     }
 
     test("loaded entity can resolve aggregate ref after child repo is populated") {
         val ctx1 = LirpContext()
-        val orderFile = tempfile("order-repo-reload", ".json").also { it.deleteOnExit() }
-        val customerRepo = CustomerVolatileRepo(ctx1)
-        val orderRepo = BubbleUpOrderJsonFileRepository(ctx1, orderFile)
+        val playlistFile = tempfile("playlist-repo-reload", ".json").also { it.deleteOnExit() }
+        val audioItemRepo = AudioItemVolatileRepository(ctx1)
+        val playlistRepo = BubbleUpAudioPlaylistJsonFileRepository(ctx1, playlistFile)
 
-        customerRepo.create(1, "Bob")
-        orderRepo.create(10L, 1)
+        audioItemRepo.create(1, "Track B")
+        playlistRepo.create(10, 1)
 
         reactive.advance()
         ctx1.close()
 
         // Reload from disk — the new repo must re-wire refs so resolve() works
         val ctx2 = LirpContext()
-        val customerRepo2 = CustomerVolatileRepo(ctx2)
-        // Add customer to the repo BEFORE creating order repo so binding finds it at init time
-        customerRepo2.create(1, "Bob")
-        val orderRepo2 = BubbleUpOrderJsonFileRepository(ctx2, orderFile)
+        val audioItemRepo2 = AudioItemVolatileRepository(ctx2)
+        // Add audio item to the repo BEFORE creating playlist repo so binding finds it at init time
+        audioItemRepo2.create(1, "Track B")
+        val playlistRepo2 = BubbleUpAudioPlaylistJsonFileRepository(ctx2, playlistFile)
 
         reactive.advance()
 
-        val reloadedOrder = orderRepo2.findById(10L).get()
-        reloadedOrder.customer.resolve() shouldBePresent { it.name shouldBe "Bob" }
+        val reloadedPlaylist = playlistRepo2.findById(10).get()
+        reloadedPlaylist.audioItem.resolve() shouldBePresent { it.title shouldBe "Track B" }
 
         ctx2.close()
     }
 
     test("Bubble-up event from child entity triggers JsonFileRepository persistence write") {
         val ctx = LirpContext()
-        val orderFile = tempfile("order-repo-bubbleup", ".json").also { it.deleteOnExit() }
-        val customerRepo = CustomerVolatileRepo(ctx)
-        val orderRepo = BubbleUpOrderJsonFileRepository(ctx, orderFile, 50)
+        val playlistFile = tempfile("playlist-repo-bubbleup", ".json").also { it.deleteOnExit() }
+        val audioItemRepo = AudioItemVolatileRepository(ctx)
+        val playlistRepo = BubbleUpAudioPlaylistJsonFileRepository(ctx, playlistFile, 50)
 
-        val customer = customerRepo.create(1, "Carol")
-        val order = orderRepo.create(10L, 1)
+        val audioItem = audioItemRepo.create(1, "Track C") as MutableAudioItem
+        val playlist = playlistRepo.create(10, 1)
 
         reactive.advance()
 
-        val initialJson = orderFile.readText()
+        val initialJson = playlistFile.readText()
         val persistenceLatch = CountDownLatch(1)
         val bubbleUpReceived = AtomicBoolean(false)
 
-        // Subscribe to the order to detect that a bubble-up event was emitted
-        order.subscribe { event ->
+        // Subscribe to the playlist to detect that a bubble-up event was emitted
+        playlist.subscribe { event ->
             if (event is AggregateMutationEvent) {
                 bubbleUpReceived.set(true)
                 persistenceLatch.countDown()
@@ -127,7 +126,7 @@ class AggregateJsonPersistenceTest : FunSpec({
         }
 
         // Mutate the child — this should trigger bubble-up on the parent and mark the repo dirty
-        customer.updateName("Carol Updated")
+        audioItem.title = "Track C Updated"
         reactive.advance()
 
         // Wait for debounce + write
@@ -136,8 +135,8 @@ class AggregateJsonPersistenceTest : FunSpec({
 
         // The repo should have been written because AggregateMutationEvent flows through subscribeEntity
         // (entity.changes emits all events including bubble-up) — triggering markDirtyAndTrigger
-        val updatedJson = orderFile.readText()
-        // The JSON content itself may not change since the order's own fields didn't change,
+        val updatedJson = playlistFile.readText()
+        // The JSON content itself may not change since the playlist's own fields didn't change,
         // but the dirty flag should have been triggered and a write should have occurred
         // We verify by checking the write occurred (file was touched after mutation)
         updatedJson shouldBe initialJson
@@ -147,34 +146,34 @@ class AggregateJsonPersistenceTest : FunSpec({
 
     test("After reload, bubble-up re-wiring works when entity is re-added to repo") {
         val ctx1 = LirpContext()
-        val orderFile = tempfile("order-repo-rewire", ".json").also { it.deleteOnExit() }
-        val customerRepo = CustomerVolatileRepo(ctx1)
-        val orderRepo = BubbleUpOrderJsonFileRepository(ctx1, orderFile, 50)
+        val playlistFile = tempfile("playlist-repo-rewire", ".json").also { it.deleteOnExit() }
+        val audioItemRepo = AudioItemVolatileRepository(ctx1)
+        val playlistRepo = BubbleUpAudioPlaylistJsonFileRepository(ctx1, playlistFile, 50)
 
-        customerRepo.create(1, "Dave")
-        orderRepo.create(10L, 1)
+        audioItemRepo.create(1, "Track D")
+        playlistRepo.create(10, 1)
 
         reactive.advance()
         ctx1.close()
 
-        // Reload — register customer repo and populate BEFORE creating order repo
+        // Reload — register audio item repo and populate BEFORE creating playlist repo
         // so that wireRefBubbleUp can resolve the child entity and subscribe to it
         val ctx2 = LirpContext()
-        val customerRepo2 = CustomerVolatileRepo(ctx2)
-        customerRepo2.create(1, "Dave")
-        val orderRepo2 = BubbleUpOrderJsonFileRepository(ctx2, orderFile, 50)
+        val audioItemRepo2 = AudioItemVolatileRepository(ctx2)
+        audioItemRepo2.create(1, "Track D")
+        val playlistRepo2 = BubbleUpAudioPlaylistJsonFileRepository(ctx2, playlistFile, 50)
 
         reactive.advance()
 
-        val reloadedOrder = orderRepo2.findById(10L).get()
+        val reloadedPlaylist = playlistRepo2.findById(10).get()
         val bubbleUpLatch = CountDownLatch(1)
 
-        reloadedOrder.subscribe { event ->
+        reloadedPlaylist.subscribe { event ->
             if (event is AggregateMutationEvent) bubbleUpLatch.countDown()
         }
 
-        // Mutate child: bubble-up should flow to the reloaded order's subscribers
-        customerRepo2.findById(1).get().updateName("Dave Updated")
+        // Mutate child: bubble-up should flow to the reloaded playlist's subscribers
+        (audioItemRepo2.findById(1).get() as MutableAudioItem).title = "Track D Updated"
         reactive.advance()
 
         bubbleUpLatch.await(2, TimeUnit.SECONDS) shouldBe true
@@ -308,24 +307,24 @@ class MutableAudioPlaylistJsonFileRepository internal constructor(
 }
 
 /**
- * Test-scoped [JsonFileRepository] for [BubbleUpOrder] entities.
+ * Test-scoped [JsonFileRepository] for [BubbleUpAudioPlaylist] entities.
  *
  * Annotated with [@LirpRepository][LirpRepository] so the KSP processor generates
- * [BubbleUpOrderJsonFileRepository_LirpRegistryInfo], which triggers auto-registration in
- * the provided context at construction time.
+ * [BubbleUpAudioPlaylistJsonFileRepository_LirpRegistryInfo], which triggers auto-registration
+ * in the provided context at construction time.
  */
 @LirpRepository
-class BubbleUpOrderJsonFileRepository internal constructor(
+class BubbleUpAudioPlaylistJsonFileRepository internal constructor(
     context: LirpContext,
     file: File,
     serializationDelayMs: Long = 300L
-) : JsonFileRepository<Long, BubbleUpOrder>(
+) : JsonFileRepository<Int, BubbleUpAudioPlaylist>(
         context,
         file,
-        MapSerializer(Long.serializer(), BubbleUpOrder.serializer()),
+        MapSerializer(Int.serializer(), BubbleUpAudioPlaylist.serializer()),
         serializationDelay = serializationDelayMs.milliseconds
     ) {
     constructor(file: File, serializationDelayMs: Long = 300L) : this(LirpContext.default, file, serializationDelayMs)
 
-    fun create(id: Long, customerId: Int): BubbleUpOrder = BubbleUpOrder(id, customerId).also { add(it) }
+    fun create(id: Int, audioItemId: Int): BubbleUpAudioPlaylist = BubbleUpAudioPlaylist(id, audioItemId).also { add(it) }
 }

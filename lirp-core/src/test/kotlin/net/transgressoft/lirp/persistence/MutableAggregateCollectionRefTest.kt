@@ -370,4 +370,47 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         group.playlists shouldHaveSize 2
         group.playlists.toSet() shouldContainExactly setOf(p1, p2)
     }
+
+    "removeAll on mutable aggregate set removes matching elements and emits one MutationEvent" {
+        val p1 = DefaultAudioPlaylist(1, "P1").also(playlistRepo::add)
+        val p2 = DefaultAudioPlaylist(2, "P2").also(playlistRepo::add)
+        DefaultAudioPlaylist(3, "P3").also(playlistRepo::add)
+        val group =
+            DefaultAudioPlaylist(100, "Group", initialPlaylistIds = setOf(1, 2, 3))
+                .also(playlistRepo::add)
+        val events = Collections.synchronizedList(mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>())
+        group.subscribe { events.add(it) }
+
+        val result = group.playlists.removeAll(listOf(p1, p2))
+        reactive.advance()
+
+        result shouldBe true
+        group.playlists shouldHaveSize 1
+        events shouldHaveSize 1
+    }
+
+    "removeAll on mutable aggregate set returns false and emits no event when no elements match" {
+        val unrelated = DefaultAudioPlaylist(99, "Unrelated").also(playlistRepo::add)
+        val group = DefaultAudioPlaylist(100, "Group", initialPlaylistIds = setOf(1)).also(playlistRepo::add)
+        val events = Collections.synchronizedList(mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>())
+        group.subscribe { events.add(it) }
+
+        val result = group.playlists.removeAll(listOf(unrelated))
+        reactive.advance()
+
+        result shouldBe false
+        events shouldHaveSize 0
+    }
+
+    "addAll on mutable aggregate set returns false and emits no event when collection is empty" {
+        val group = DefaultAudioPlaylist(100, "Group").also(playlistRepo::add)
+        val events = Collections.synchronizedList(mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>())
+        group.subscribe { events.add(it) }
+
+        val result = group.playlists.addAll(emptyList())
+        reactive.advance()
+
+        result shouldBe false
+        events shouldHaveSize 0
+    }
 })

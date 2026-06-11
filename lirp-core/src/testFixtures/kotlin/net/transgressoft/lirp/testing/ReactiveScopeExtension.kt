@@ -34,7 +34,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 // Process-wide mutex shared by both extensions in this file. Serializes every spec that
 // touches [ReactiveScope] against every other spec doing the same, regardless of whether
 // it swaps the scope or relies on production defaults.
-internal val reactiveScopeMutex = Mutex()
+val reactiveScopeMutex = Mutex()
 
 /**
  * Kotest [SpecExtension] that wires a [TestDispatcher] into the process-wide [ReactiveScope]

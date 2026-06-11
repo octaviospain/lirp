@@ -127,7 +127,7 @@ tasks.register('regenerateVerificationMetadata', Exec) {
 }
 
 allprojects {
-    tasks.cyclonedxDirectBom {
+    tasks.named('cyclonedxDirectBom').configure {
         includeConfigs = ['runtimeClasspath']
         skipConfigs = ['compileClasspath', 'testCompileClasspath', 'testRuntimeClasspath']
     }
@@ -145,6 +145,18 @@ allprojects {
                 details.because 'OSV GHSA-72hv-8253-57qq'
             }
         }
+    }
+}
+
+// The cyclonedx plugin attaches each project's BOM output to its outgoing `cyclonedxDirectBom`
+// configuration lazily, inside the task's realization action. When `build` shares a Gradle
+// invocation with `cyclonedxBom`, that outgoing variant is observed during task-graph assembly
+// before the direct task is realized, and the later artifact attachment throws "Cannot mutate the
+// artifacts of configuration after it was consumed as a variant". Realizing the direct tasks once
+// every project is evaluated attaches the artifacts up front, before any variant is observed.
+gradle.projectsEvaluated {
+    allprojects { p ->
+        p.tasks.named('cyclonedxDirectBom').get()
     }
 }
 
