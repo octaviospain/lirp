@@ -182,6 +182,59 @@ internal class RegistryProjectionMapTest : StringSpec({
         projection["Jazz"]!!.none { it.id == t1.id } shouldBe true
     }
 
+    "restores entity to bucket on Update when deletedAt is cleared" {
+        val t1 =
+            SoftDeletableMutableAudioItem(1, "Track A", "Jazz").also {
+                trackRepo.add(it)
+            }
+        reactive.advance()
+
+        val projection = registryProjectionMap(trackRepo) { it.albumName }
+        projection["Jazz"]!!.size shouldBe 1
+
+        // Soft-delete removes it from its bucket and drops it from the reverse index
+        val activeSnapshot = t1.clone()
+        t1.deletedAt = Instant.now()
+        trackRepo.emitAsync(StandardCrudEvent.Update(t1, activeSnapshot))
+        reactive.advance()
+        projection.containsKey("Jazz") shouldBe false
+
+        // Clearing deletedAt on a later Update restores it (oldKey is absent → treated as an add)
+        val deletedSnapshot = t1.clone()
+        t1.deletedAt = null
+        trackRepo.emitAsync(StandardCrudEvent.Update(t1, deletedSnapshot))
+        reactive.advance()
+
+        projection["Jazz"]!!.size shouldBe 1
+        projection["Jazz"]!!.first().id shouldBe t1.id
+    }
+
+    "exposes read-only accessors consistent with bucket state" {
+        trackRepo.create(1, "Track A", "Jazz")
+        trackRepo.create(2, "Track B", "Rock")
+        val projection = registryProjectionMap(trackRepo) { it.albumName }
+
+        projection.isEmpty() shouldBe false
+        projection.containsKey("Jazz") shouldBe true
+        projection.containsKey("Pop") shouldBe false
+        projection.containsValue(projection["Jazz"]!!) shouldBe true
+        projection.entries.size shouldBe 2
+        projection.values.sumOf { it.size } shouldBe 2
+    }
+
+    "ignores Delete for an entity that was never bucketed" {
+        trackRepo.create(1, "Track A", "Jazz")
+        val projection = registryProjectionMap(trackRepo) { it.albumName }
+        projection["Jazz"]!!.size shouldBe 1
+
+        // Entity absent from the reverse index falls back to a full-scan removal that finds nothing.
+        trackRepo.emitAsync(StandardCrudEvent.Delete(MutableAudioItem(99, "Ghost", "Rock")))
+        reactive.advance()
+
+        projection["Jazz"]!!.size shouldBe 1
+        projection.containsKey("Rock") shouldBe false
+    }
+
     "fires onChange after Create" {
         val projection = registryProjectionMap(trackRepo) { it.albumName }
         projection.size shouldBe 0

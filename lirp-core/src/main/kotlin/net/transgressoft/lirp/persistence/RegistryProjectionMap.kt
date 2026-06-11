@@ -96,10 +96,7 @@ class RegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identifi
             // Seed first so the initial snapshot is complete before any events are processed;
             // soft-deleted entities are excluded from all buckets.
             for (entity in registry) {
-                if (isSoftDeleted(entity)) continue
-                val key = keyExtractor(entity)
-                core.handleAdded(listOf(entity))
-                reverseIndex[entity.id] = key
+                if (!isSoftDeleted(entity)) addToBucket(entity)
             }
             // Subscribe after the seed is complete to avoid double-applying events that arrive
             // during iteration.
@@ -115,56 +112,61 @@ class RegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identifi
 
     private fun handleCrudEvent(event: CrudEvent<K, E>) {
         when (event) {
-            is StandardCrudEvent.Create ->
-                event.entities.values.forEach { entity ->
-                    if (!isSoftDeleted(entity)) {
-                        core.handleAdded(listOf(entity))
-                        reverseIndex[entity.id] = keyExtractor(entity)
-                    }
-                }
-            is StandardCrudEvent.Delete ->
-                event.entities.values.forEach { entity ->
-                    val oldKey = reverseIndex[entity.id]
-                    if (oldKey != null) {
-                        core.handleRemovedFromBucket(entity, oldKey)
-                    } else {
-                        core.handleRemoved(listOf(entity))
-                    }
-                    reverseIndex.remove(entity.id)
-                }
-            is StandardCrudEvent.Update ->
-                event.entities.forEach { (id, newEntity) ->
-                    val oldKey = reverseIndex[id]
-                    if (isSoftDeleted(newEntity)) {
-                        // Soft-delete: treat as removal. Remove by ID because the entity object
-                        // may differ from the one stored in the bucket.
-                        if (oldKey != null) core.handleRemovedByIdFromBucket(id, oldKey)
-                        reverseIndex.remove(id)
-                    } else {
-                        val newKey = keyExtractor(newEntity)
-                        when {
-                            oldKey == null -> {
-                                // Restore from soft-delete or first-time create arriving as update
-                                core.handleAdded(listOf(newEntity))
-                                reverseIndex[id] = newKey
-                            }
-                            oldKey != newKey -> {
-                                // Key changed: remove from the old bucket by ID (the new entity
-                                // object carries the new key value, so equality-based lookup would miss)
-                                // and add to the new bucket.
-                                core.handleRemovedByIdFromBucket(id, oldKey)
-                                core.handleAdded(listOf(newEntity))
-                                reverseIndex[id] = newKey
-                            }
-                            else -> {
-                                // Same key, non-key content changed
-                                core.handleReplaceInBucket(newEntity, newKey)
-                            }
-                        }
-                    }
-                }
+            is StandardCrudEvent.Create -> event.entities.values.forEach(::onCreated)
+            is StandardCrudEvent.Delete -> event.entities.values.forEach(::onDeleted)
+            is StandardCrudEvent.Update -> event.entities.forEach { (id, entity) -> onUpdated(id, entity) }
             else -> { /* CONFLICT, RECOVERY_FAILED — not subscribed */ }
         }
+    }
+
+    private fun onCreated(entity: E) {
+        if (!isSoftDeleted(entity)) addToBucket(entity)
+    }
+
+    private fun onDeleted(entity: E) {
+        val oldKey = reverseIndex.remove(entity.id)
+        // A Delete carries the stored object, so equality-based removal is safe. Fall back to a
+        // full scan only when the entity was never indexed (e.g. it was soft-deleted at seed time).
+        if (oldKey != null) core.handleRemovedFromBucket(entity, oldKey) else core.handleRemoved(listOf(entity))
+    }
+
+    private fun onUpdated(id: K, entity: E) {
+        if (isSoftDeleted(entity)) {
+            removeSoftDeleted(id)
+            return
+        }
+        val oldKey = reverseIndex[id]
+        val newKey = keyExtractor(entity)
+        when {
+            // Not currently bucketed: a restore from soft-delete, or a create arriving as an update.
+            oldKey == null -> addToBucket(entity)
+            // Bucket key changed: move the entity from its old bucket to the new one.
+            oldKey != newKey -> reBucket(id, entity, oldKey)
+            // Same bucket key, only non-key content changed.
+            else -> core.handleReplaceInBucket(entity, newKey)
+        }
+    }
+
+    /** Adds [entity] to its bucket and records its current key in the reverse index. */
+    private fun addToBucket(entity: E) {
+        core.handleAdded(listOf(entity))
+        reverseIndex[entity.id] = keyExtractor(entity)
+    }
+
+    /** Moves [entity] out of its [oldKey] bucket and into the bucket for its current key. */
+    private fun reBucket(id: K, entity: E, oldKey: PK) {
+        // Remove by id: the updated entity carries the new key value, so equality-based lookup
+        // against the old bucket would miss.
+        core.handleRemovedByIdFromBucket(id, oldKey)
+        addToBucket(entity)
+    }
+
+    /**
+     * Removes a soft-deleted entity from its bucket. Removal is by id because the updated entity
+     * carries the new `deletedAt` value and would not compare equal to the stored instance.
+     */
+    private fun removeSoftDeleted(id: K) {
+        reverseIndex.remove(id)?.let { oldKey -> core.handleRemovedByIdFromBucket(id, oldKey) }
     }
 
     private fun isSoftDeleted(entity: E): Boolean =

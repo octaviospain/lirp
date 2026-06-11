@@ -102,8 +102,7 @@ class RegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identi
             for (entity in registry) {
                 if (isSoftDeleted(entity)) continue
                 val key = keyExtractor(entity)
-                val updated = freezeBucket((innerObservableMap[key] ?: emptyList()) + entity)
-                innerObservableMap[key] = updated
+                addToBucket(key, entity)
                 reverseIndex[entity.id] = key
             }
             subscription =
@@ -118,98 +117,83 @@ class RegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identi
 
     private fun handleCrudEvent(event: CrudEvent<K, E>) {
         when (event) {
-            is StandardCrudEvent.Create ->
-                event.entities.values.forEach { entity ->
-                    if (!isSoftDeleted(entity)) {
-                        val key = keyExtractor(entity)
-                        mutateMap {
-                            val current = innerObservableMap[key] ?: emptyList()
-                            if (entity !in current) {
-                                innerObservableMap[key] = freezeBucket(current + entity)
-                            }
-                            reverseIndex[entity.id] = key
-                        }
-                    }
-                }
-            is StandardCrudEvent.Delete ->
-                event.entities.values.forEach { entity ->
-                    mutateMap {
-                        // Read and write reverseIndex on the same dispatch thread to avoid stale-read races
-                        // when multiple events for the same entity are processed concurrently.
-                        val key = reverseIndex[entity.id]
-                        if (key != null) {
-                            val current = innerObservableMap[key]
-                            if (current != null) {
-                                val filtered = current.filter { it.id != entity.id }
-                                if (filtered.isEmpty()) innerObservableMap.remove(key)
-                                else innerObservableMap[key] = freezeBucket(filtered)
-                            }
-                        } else {
-                            removeFromAnyBucket(entity)
-                        }
-                        reverseIndex.remove(entity.id)
-                    }
-                }
-            is StandardCrudEvent.Update ->
-                event.entities.forEach { (id, newEntity) ->
-                    mutateMap {
-                        // Read oldKey inside the lambda so it is co-located with all reverseIndex
-                        // writes, preventing stale reads when events for the same entity interleave.
-                        val oldKey = reverseIndex[id]
-                        if (isSoftDeleted(newEntity)) {
-                            // Soft-delete: remove the entity from its bucket
-                            if (oldKey != null) {
-                                val current = innerObservableMap[oldKey]
-                                if (current != null) {
-                                    val filtered = current.filter { it.id != id }
-                                    if (filtered.isEmpty()) innerObservableMap.remove(oldKey)
-                                    else innerObservableMap[oldKey] = freezeBucket(filtered)
-                                }
-                            } else {
-                                removeFromAnyBucket(newEntity)
-                            }
-                            reverseIndex.remove(id)
-                        } else {
-                            val newKey = keyExtractor(newEntity)
-                            when {
-                                oldKey == null -> {
-                                    // Restore from soft-delete or first-time create via Update
-                                    val current = innerObservableMap[newKey] ?: emptyList()
-                                    if (newEntity !in current) {
-                                        innerObservableMap[newKey] = freezeBucket(current + newEntity)
-                                    }
-                                    reverseIndex[id] = newKey
-                                }
-                                oldKey != newKey -> {
-                                    // Key changed: remove from old bucket, add to new bucket
-                                    val oldBucket = innerObservableMap[oldKey]
-                                    if (oldBucket != null) {
-                                        val filtered = oldBucket.filter { it.id != id }
-                                        if (filtered.isEmpty()) innerObservableMap.remove(oldKey)
-                                        else innerObservableMap[oldKey] = freezeBucket(filtered)
-                                    }
-                                    val newBucket = innerObservableMap[newKey] ?: emptyList()
-                                    innerObservableMap[newKey] = freezeBucket(newBucket + newEntity)
-                                    reverseIndex[id] = newKey
-                                }
-                                else -> {
-                                    // Same key, content changed: replace entity in bucket.
-                                    // Remove before re-inserting so the ObservableMap fires a change
-                                    // notification even when the old and new List values compare equal —
-                                    // JavaFX's ObservableMapWrapper skips callObservers when oldValue.equals(newValue).
-                                    val bucket = innerObservableMap[newKey]
-                                    if (bucket != null) {
-                                        val updated = bucket.map { if (it.id == id) newEntity else it }
-                                        innerObservableMap.remove(newKey)
-                                        innerObservableMap[newKey] = freezeBucket(updated)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            is StandardCrudEvent.Create -> event.entities.values.forEach(::onCreated)
+            is StandardCrudEvent.Delete -> event.entities.values.forEach(::onDeleted)
+            is StandardCrudEvent.Update -> event.entities.forEach { (id, entity) -> onUpdated(id, entity) }
             else -> { /* CONFLICT, RECOVERY_FAILED — not subscribed */ }
         }
+    }
+
+    private fun onCreated(entity: E) {
+        if (isSoftDeleted(entity)) return
+        val key = keyExtractor(entity)
+        mutateMap {
+            addToBucket(key, entity)
+            reverseIndex[entity.id] = key
+        }
+    }
+
+    private fun onDeleted(entity: E) {
+        mutateMap {
+            // Read and write reverseIndex on the same dispatch thread so concurrent events for the
+            // same entity cannot observe a stale key.
+            val key = reverseIndex.remove(entity.id)
+            if (key != null) removeFromBucket(key, entity.id) else removeFromAnyBucket(entity)
+        }
+    }
+
+    private fun onUpdated(id: K, newEntity: E) {
+        mutateMap {
+            // Read oldKey inside the lambda, co-located with all reverseIndex writes, so interleaving
+            // events for the same entity cannot observe a stale key.
+            val oldKey = reverseIndex[id]
+            if (isSoftDeleted(newEntity)) {
+                if (oldKey != null) removeFromBucket(oldKey, id) else removeFromAnyBucket(newEntity)
+                reverseIndex.remove(id)
+                return@mutateMap
+            }
+            val newKey = keyExtractor(newEntity)
+            when {
+                // Not currently bucketed: a restore from soft-delete, or a create arriving as an update.
+                oldKey == null -> addToBucket(newKey, newEntity)
+                // Bucket key changed: move the entity from its old bucket to the new one.
+                oldKey != newKey -> {
+                    removeFromBucket(oldKey, id)
+                    addToBucket(newKey, newEntity)
+                }
+                // Same bucket key, only non-key content changed.
+                else -> replaceInBucket(newKey, id, newEntity)
+            }
+            reverseIndex[id] = newKey
+        }
+    }
+
+    /** Adds [entity] to the [key] bucket if not already present. Must run on the dispatch thread. */
+    private fun addToBucket(key: PK, entity: E) {
+        val current = innerObservableMap[key] ?: emptyList()
+        if (entity !in current) innerObservableMap[key] = freezeBucket(current + entity)
+    }
+
+    /**
+     * Removes the entity with [id] from the [key] bucket, dropping the key when the bucket empties.
+     * Must run on the dispatch thread.
+     */
+    private fun removeFromBucket(key: PK, id: K) {
+        val current = innerObservableMap[key] ?: return
+        val filtered = current.filter { it.id != id }
+        if (filtered.isEmpty()) innerObservableMap.remove(key)
+        else innerObservableMap[key] = freezeBucket(filtered)
+    }
+
+    /** Replaces the entity with [id] in the [key] bucket with [entity]. Must run on the dispatch thread. */
+    private fun replaceInBucket(key: PK, id: K, entity: E) {
+        val bucket = innerObservableMap[key] ?: return
+        val updated = bucket.map { if (it.id == id) entity else it }
+        // Remove before re-inserting so the ObservableMap fires a change notification even when the
+        // old and new List values compare equal — JavaFX's ObservableMapWrapper skips callObservers
+        // when oldValue.equals(newValue).
+        innerObservableMap.remove(key)
+        innerObservableMap[key] = freezeBucket(updated)
     }
 
     private fun removeFromAnyBucket(entity: E) {

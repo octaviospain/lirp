@@ -22,12 +22,16 @@ import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.MutableAudioItem
+import net.transgressoft.lirp.persistence.SoftDeletableMutableAudioItem
 import net.transgressoft.lirp.testing.reactiveScope
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import javafx.application.Platform
+import javafx.beans.InvalidationListener
 import javafx.collections.MapChangeListener
+import java.time.Instant
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -237,6 +241,72 @@ class RegistryFxProjectionMapTest : StringSpec({
         pulseCount.get() shouldBe 1
     }
 
+    "excludes soft-deleted entities during lazy seed" {
+        SoftDeletableMutableAudioItem(1, "Deleted Track", "Jazz").also {
+            it.deletedAt = Instant.now()
+            trackRepo.add(it)
+        }
+        reactive.advance()
+        trackRepo.create(2, "Active Track", "Jazz")
+        reactive.advance()
+
+        val projection = RegistryFxProjectionMap(trackRepo, AudioItem::albumName, false)
+        projection.addListener(MapChangeListener { })
+
+        projection["Jazz"]!!.size shouldBe 1
+        projection["Jazz"]!!.none { it.id == 1 } shouldBe true
+    }
+
+    "removes entity from bucket on Update when deletedAt is set" {
+        val t1 =
+            SoftDeletableMutableAudioItem(1, "Track A", "Jazz").also {
+                trackRepo.add(it)
+            }
+        reactive.advance()
+        trackRepo.create(2, "Track B", "Jazz")
+        reactive.advance()
+
+        val projection = RegistryFxProjectionMap(trackRepo, AudioItem::albumName, false)
+        projection.addListener(MapChangeListener { })
+        projection["Jazz"]!!.size shouldBe 2
+
+        val activeSnapshot = t1.clone()
+        t1.deletedAt = Instant.now()
+        trackRepo.emitAsync(StandardCrudEvent.Update(t1, activeSnapshot))
+        reactive.advance()
+
+        projection["Jazz"]!!.size shouldBe 1
+        projection["Jazz"]!!.none { it.id == 1 } shouldBe true
+    }
+
+    "restores entity to bucket on Update when deletedAt is cleared" {
+        val t1 =
+            SoftDeletableMutableAudioItem(1, "Track A", "Jazz").also {
+                trackRepo.add(it)
+            }
+        reactive.advance()
+
+        val projection = RegistryFxProjectionMap(trackRepo, AudioItem::albumName, false)
+        projection.addListener(MapChangeListener { })
+        projection["Jazz"]!!.size shouldBe 1
+
+        // Soft-delete removes it from its bucket
+        val activeSnapshot = t1.clone()
+        t1.deletedAt = Instant.now()
+        trackRepo.emitAsync(StandardCrudEvent.Update(t1, activeSnapshot))
+        reactive.advance()
+        projection.containsKey("Jazz") shouldBe false
+
+        // Clearing deletedAt on a later Update restores it
+        val deletedSnapshot = t1.clone()
+        t1.deletedAt = null
+        trackRepo.emitAsync(StandardCrudEvent.Update(t1, deletedSnapshot))
+        reactive.advance()
+
+        projection["Jazz"]!!.size shouldBe 1
+        projection["Jazz"]!!.first().id shouldBe 1
+    }
+
     "keys are in natural sorted order" {
         trackRepo.create(1, "T1", "Zebra")
         trackRepo.create(2, "T2", "Alpha")
@@ -245,5 +315,65 @@ class RegistryFxProjectionMapTest : StringSpec({
         val projection = RegistryFxProjectionMap(trackRepo, AudioItem::albumName, false)
 
         projection.keys.toList() shouldBe listOf("Alpha", "Middle", "Zebra")
+    }
+
+    "exposes read-only accessors consistent with bucket state" {
+        trackRepo.create(1, "Track A", "Jazz")
+        trackRepo.create(2, "Track B", "Rock")
+        val projection = RegistryFxProjectionMap(trackRepo, AudioItem::albumName, false)
+        projection.addListener(MapChangeListener { })
+
+        projection.isEmpty() shouldBe false
+        projection.containsKey("Jazz") shouldBe true
+        projection.containsKey("Pop") shouldBe false
+        val jazzBucket = projection["Jazz"]!!
+        projection.containsValue(jazzBucket) shouldBe true
+        projection.entries.size shouldBe 2
+        projection.values.sumOf { it.size } shouldBe 2
+        projection.keys shouldBe setOf("Jazz", "Rock")
+    }
+
+    "mutation methods throw because the projection is read-only" {
+        val projection = RegistryFxProjectionMap(trackRepo, AudioItem::albumName, false)
+        projection.addListener(MapChangeListener { })
+
+        shouldThrow<UnsupportedOperationException> { projection.put("X", emptyList()) }
+        shouldThrow<UnsupportedOperationException> { projection.remove("X") }
+        shouldThrow<UnsupportedOperationException> { projection.putAll(mapOf("X" to emptyList())) }
+        shouldThrow<UnsupportedOperationException> { projection.clear() }
+    }
+
+    "registers and removes map and invalidation listeners" {
+        val projection = RegistryFxProjectionMap(trackRepo, AudioItem::albumName, false)
+        var invalidations = 0
+        val invalidationListener = InvalidationListener { invalidations++ }
+        val mapListener = MapChangeListener<String, List<AudioItem>> { }
+
+        projection.addListener(invalidationListener)
+        projection.addListener(mapListener)
+        trackRepo.create(1, "Track A", "Jazz")
+        reactive.advance()
+        invalidations shouldBe 1
+
+        projection.removeListener(invalidationListener)
+        projection.removeListener(mapListener)
+        trackRepo.create(2, "Track B", "Rock")
+        reactive.advance()
+        invalidations shouldBe 1
+    }
+
+    "ignores Delete for an entity that was never bucketed" {
+        trackRepo.create(1, "Track A", "Jazz")
+        val projection = RegistryFxProjectionMap(trackRepo, AudioItem::albumName, false)
+        projection.addListener(MapChangeListener { })
+        projection["Jazz"]!!.size shouldBe 1
+
+        // An entity whose id is absent from the reverse index exercises the full-scan fallback,
+        // which finds no matching bucket and leaves the projection unchanged.
+        trackRepo.emitAsync(StandardCrudEvent.Delete(MutableAudioItem(99, "Ghost", "Rock")))
+        reactive.advance()
+
+        projection["Jazz"]!!.size shouldBe 1
+        projection.containsKey("Rock") shouldBe false
     }
 })
