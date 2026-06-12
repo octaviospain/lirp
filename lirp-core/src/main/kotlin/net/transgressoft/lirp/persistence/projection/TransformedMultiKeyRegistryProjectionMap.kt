@@ -26,7 +26,7 @@ import java.util.concurrent.ConcurrentHashMap
  * transform is re-run only for buckets whose contents actually changed in a given delta, not for
  * the entire map.
  *
- * This decorator wraps a [MultiKeyRegistryProjectionMap] and registers on its `onBucketsChanged`
+ * This decorator wraps a [MultiKeyRegistryProjectionMap] and registers on its `addOnBucketsChangedListener`
  * signal to maintain an internal `ConcurrentHashMap<PK, V>` transform cache. When a bucket is
  * emptied and its key is removed from the backing map, the corresponding key is also removed from
  * this view — the transform is never called over an empty list.
@@ -36,10 +36,9 @@ import java.util.concurrent.ConcurrentHashMap
  * [ConcurrentHashMap]). This inherits the weakly-consistent contract of the underlying
  * [java.util.concurrent.ConcurrentSkipListMap] iteration.
  *
- * **Single-subscriber:** The `onBucketsChanged` slot on the backing [MultiKeyRegistryProjectionMap]
- * is owned by this decorator. Registering another `onBucketsChanged` on the same backing map after
- * constructing a [TransformedMultiKeyRegistryProjectionMap] will overwrite this decorator's
- * registration, breaking incremental updates.
+ * **Multi-subscriber:** This decorator registers one listener via `addOnBucketsChangedListener` on
+ * the backing [MultiKeyRegistryProjectionMap]. Additional listeners registered on the same backing
+ * map are independent and will each receive their own notifications — no registration clobbers another.
  *
  * @param K the entity ID type, must be [Comparable]
  * @param PK the projection key type, must be [Comparable]
@@ -52,12 +51,7 @@ import java.util.concurrent.ConcurrentHashMap
 internal class TransformedMultiKeyRegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V>(
     private val backing: MultiKeyRegistryProjectionMap<K, PK, E>,
     private val valueTransform: (PK, List<E>) -> V
-) : AbstractMap<PK, V>(), CloseableProjectionMap<PK, V> {
-
-    /** Releases the backing registry projection's subscription. Idempotent. */
-    override fun close() {
-        backing.close()
-    }
+) : AbstractMap<PK, V>(), AutoCloseable by backing, CloseableProjectionMap<PK, V> {
 
     private val transformCache = ConcurrentHashMap<PK, V>()
 
@@ -70,7 +64,7 @@ internal class TransformedMultiKeyRegistryProjectionMap<K : Comparable<K>, PK : 
     private var seedingThread: Thread? = null
 
     init {
-        backing.onBucketsChanged = { changedKeys ->
+        backing.addOnBucketsChangedListener { changedKeys ->
             // The backing map fires this synchronously, on the seeding thread, while building its
             // initial state. Reading the backing map then would re-enter its lazy initialization and
             // recurse, so the same-thread synchronous re-entry short-circuits — the seed loop already

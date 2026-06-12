@@ -15,7 +15,7 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>. *
  ******************************************************************************/
 
-package net.transgressoft.lirp.persistence.fx
+package net.transgressoft.lirp.persistence.fx.projection
 
 import net.transgressoft.lirp.event.StandardCrudEvent
 import net.transgressoft.lirp.persistence.AudioItem
@@ -23,6 +23,7 @@ import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.SoftDeletableMutableAudioItem
+import net.transgressoft.lirp.persistence.fx.FxToolkitInit
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
@@ -35,6 +36,13 @@ import java.time.Instant
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+
+/**
+ * Value object used by transform tests: holds a projection key and the sorted list of track titles
+ * in that bucket, so a title change produces a structurally different [RegistryAlbumBucket] and
+ * triggers a [MapChangeListener] notification.
+ */
+data class RegistryAlbumBucket(val key: String, val titles: List<String>)
 
 /**
  * Tests for [RegistryFxProjectionMap], verifying lazy seeding from a pre-populated registry,
@@ -165,9 +173,9 @@ class RegistryFxProjectionMapTest : StringSpec({
         trackRepo.emitAsync(StandardCrudEvent.Update(item, oldSnapshot))
         reactive.advance()
 
-        // Two changes expected: a remove (wasRemoved) and a re-add (wasAdded) for the same key,
-        // because JavaFX's ObservableMapWrapper skips callObservers when old and new List values
-        // compare equal — so we remove+re-insert to guarantee listener notification.
+        // Two changes expected: flush removes the old bucket entry then re-inserts the updated one,
+        // guaranteeing MapChangeListener fires even when the entity was mutated on the same object
+        // reference (where an equality-only check would produce no notification).
         changes.size shouldBe 2
         changes.any { it.wasRemoved() } shouldBe true
         changes.any { it.wasAdded() } shouldBe true
@@ -375,5 +383,197 @@ class RegistryFxProjectionMapTest : StringSpec({
 
         projection["Jazz"]!!.size shouldBe 1
         projection.containsKey("Rock") shouldBe false
+    }
+
+    "TransformedRegistryFxProjectionMap maps registry buckets to value via valueTransform" {
+        trackRepo.create(1, "Track A", "Jazz")
+        trackRepo.create(2, "Track B", "Jazz")
+        trackRepo.create(3, "Track C", "Rock")
+
+        val projection =
+            TransformedRegistryFxProjectionMap(
+                trackRepo,
+                AudioItem::albumName,
+                { pk, items -> RegistryAlbumBucket(pk, items.map { it.title }.sorted()) },
+                false
+            )
+        projection.addListener(MapChangeListener { })
+
+        projection["Jazz"] shouldBe RegistryAlbumBucket("Jazz", listOf("Track A", "Track B"))
+        projection["Rock"] shouldBe RegistryAlbumBucket("Rock", listOf("Track C"))
+        projection.size shouldBe 2
+    }
+
+    "TransformedRegistryFxProjectionMap fires exactly one MapChangeListener pulse per registry Create" {
+        val pulseCount = AtomicInteger(0)
+        val projection =
+            TransformedRegistryFxProjectionMap(
+                trackRepo,
+                AudioItem::albumName,
+                { pk, items -> RegistryAlbumBucket(pk, items.map { it.title }) },
+                false
+            )
+        projection.addListener(MapChangeListener { pulseCount.incrementAndGet() })
+
+        trackRepo.create(1, "Track A", "Jazz")
+        reactive.advance()
+        pulseCount.get() shouldBe 1
+
+        pulseCount.set(0)
+        trackRepo.create(2, "Track B", "Jazz")
+        reactive.advance()
+        pulseCount.get() shouldBe 1
+    }
+
+    "TransformedRegistryFxProjectionMap valueTransform runs off FX Application Thread" {
+        val transformedOnFxThread = mutableListOf<Boolean>()
+        val projection =
+            TransformedRegistryFxProjectionMap(
+                trackRepo,
+                AudioItem::albumName,
+                { pk, items ->
+                    transformedOnFxThread.add(Platform.isFxApplicationThread())
+                    RegistryAlbumBucket(pk, items.map { it.title })
+                },
+                false
+            )
+        projection.addListener(MapChangeListener { })
+
+        trackRepo.create(1, "Track A", "Jazz")
+        reactive.advance()
+
+        transformedOnFxThread.isNotEmpty() shouldBe true
+        transformedOnFxThread.all { !it } shouldBe true
+    }
+
+    "TransformedRegistryFxProjectionMap removes key from map when last entity in bucket is deleted" {
+        val item = trackRepo.create(1, "Track A", "Jazz")
+        val projection =
+            TransformedRegistryFxProjectionMap(
+                trackRepo,
+                AudioItem::albumName,
+                { pk, items -> RegistryAlbumBucket(pk, items.map { it.title }) },
+                false
+            )
+        projection.addListener(MapChangeListener { })
+
+        projection.containsKey("Jazz") shouldBe true
+
+        trackRepo.emitAsync(StandardCrudEvent.Delete(item))
+        reactive.advance()
+
+        projection.containsKey("Jazz") shouldBe false
+        projection.isEmpty() shouldBe true
+    }
+
+    "TransformedRegistryFxProjectionMap recomputes transform on in-place field update with same key" {
+        val item = trackRepo.create(1, "Track A", "Jazz") as MutableAudioItem
+        val projection =
+            TransformedRegistryFxProjectionMap(
+                trackRepo,
+                AudioItem::albumName,
+                { pk, items -> RegistryAlbumBucket(pk, items.map { it.title }.sorted()) },
+                false
+            )
+        projection.addListener(MapChangeListener { })
+        projection["Jazz"] shouldBe RegistryAlbumBucket("Jazz", listOf("Track A"))
+
+        val oldSnapshot = item.clone()
+        item.title = "Renamed Track"
+        trackRepo.emitAsync(StandardCrudEvent.Update(item, oldSnapshot))
+        reactive.advance()
+
+        projection["Jazz"] shouldBe RegistryAlbumBucket("Jazz", listOf("Renamed Track"))
+    }
+
+    "TransformedRegistryFxProjectionMap re-buckets entity when key changes on Update" {
+        val item = trackRepo.create(1, "Track A", "Jazz") as MutableAudioItem
+        val projection =
+            TransformedRegistryFxProjectionMap(
+                trackRepo,
+                AudioItem::albumName,
+                { pk, items -> RegistryAlbumBucket(pk, items.map { it.title }) },
+                false
+            )
+        projection.addListener(MapChangeListener { })
+        projection.containsKey("Jazz") shouldBe true
+
+        val oldSnapshot = item.clone()
+        item.albumName = "Rock"
+        trackRepo.emitAsync(StandardCrudEvent.Update(item, oldSnapshot))
+        reactive.advance()
+
+        projection.containsKey("Jazz") shouldBe false
+        projection.containsKey("Rock") shouldBe true
+        projection["Rock"] shouldBe RegistryAlbumBucket("Rock", listOf("Track A"))
+    }
+
+    "TransformedRegistryFxProjectionMap exposes read-only accessors entries, keys, values, containsValue" {
+        trackRepo.create(1, "Track A", "Jazz")
+        trackRepo.create(2, "Track B", "Rock")
+
+        val projection =
+            TransformedRegistryFxProjectionMap(
+                trackRepo,
+                AudioItem::albumName,
+                { pk, items -> RegistryAlbumBucket(pk, items.map { it.title }) },
+                false
+            )
+        projection.addListener(MapChangeListener { })
+
+        projection.keys.containsAll(setOf("Jazz", "Rock")) shouldBe true
+        projection.values.any { it.key == "Jazz" } shouldBe true
+        projection.containsValue(RegistryAlbumBucket("Rock", listOf("Track B"))) shouldBe true
+        projection.entries.size shouldBe 2
+    }
+
+    "TransformedRegistryFxProjectionMap mutation methods throw UnsupportedOperationException" {
+        val projection =
+            TransformedRegistryFxProjectionMap(
+                trackRepo,
+                AudioItem::albumName,
+                { pk, items -> RegistryAlbumBucket(pk, items.map { it.title }) },
+                false
+            )
+        shouldThrow<UnsupportedOperationException> { projection.put("Jazz", RegistryAlbumBucket("Jazz", emptyList())) }
+        shouldThrow<UnsupportedOperationException> { projection.remove("Jazz") }
+        shouldThrow<UnsupportedOperationException> { projection.putAll(emptyMap()) }
+        shouldThrow<UnsupportedOperationException> { projection.clear() }
+    }
+
+    "RegistryFxProjectionMap close releases core subscription and update subscription" {
+        trackRepo.create(1, "Track A", "Jazz")
+        val projection = RegistryFxProjectionMap(trackRepo, AudioItem::albumName, false)
+        projection.addListener(MapChangeListener { })
+
+        projection["Jazz"]!!.size shouldBe 1
+
+        // After close, new creates must not reach the projection.
+        projection.close()
+        trackRepo.create(2, "Track B", "Rock")
+        reactive.advance()
+
+        projection.containsKey("Rock") shouldBe false
+        projection.size shouldBe 1
+    }
+
+    "TransformedRegistryFxProjectionMap close releases subscriptions and stops updates" {
+        trackRepo.create(1, "Track A", "Jazz")
+        val projection =
+            TransformedRegistryFxProjectionMap(
+                trackRepo,
+                AudioItem::albumName,
+                { pk, items -> RegistryAlbumBucket(pk, items.map { it.title }) },
+                false
+            )
+        projection.addListener(MapChangeListener { })
+        projection.containsKey("Jazz") shouldBe true
+
+        projection.close()
+        trackRepo.create(2, "Track B", "Rock")
+        reactive.advance()
+
+        projection.containsKey("Rock") shouldBe false
+        projection.size shouldBe 1
     }
 })

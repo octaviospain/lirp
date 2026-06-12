@@ -20,13 +20,14 @@ package net.transgressoft.lirp.persistence.projection
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import java.util.Collections
 import java.util.concurrent.ConcurrentSkipListMap
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * Shared bucket engine for projection maps.
  *
- * Holds the backing [ConcurrentSkipListMap] and the [onChange] callback, and provides all
- * bucket-mutation operations used by both aggregate-source and registry-source projections.
- * This class is a pure composition target: it is not abstract and has no supertype.
+ * Holds the backing [ConcurrentSkipListMap] and multi-subscriber listener registries, and
+ * provides all bucket-mutation operations used by both aggregate-source and registry-source
+ * projections. This class is a pure composition target: it is not abstract and has no supertype.
  *
  * No reverse-index or entity-id logic lives here; callers are responsible for tracking
  * which bucket key an entity belongs to across updates.
@@ -48,26 +49,37 @@ internal class ProjectionCore<K : Comparable<K>, PK : Comparable<PK>, E : Identi
     val backingMap = ConcurrentSkipListMap<PK, List<E>>()
     val readOnlyView: Map<PK, List<E>> = Collections.unmodifiableMap(backingMap)
 
-    /**
-     * Optional callback invoked after each projection change with the current map state.
-     * Fires after every incremental update that results in at least one addition, removal, or replacement.
-     *
-     * The callback fires on the same thread that performed the mutation; subscribers requiring a
-     * specific thread must marshal themselves.
-     */
-    var onChange: ((Map<PK, List<E>>) -> Unit)? = null
+    private val onChangeListeners = CopyOnWriteArrayList<(Map<PK, List<E>>) -> Unit>()
+    private val onBucketsChangedListeners = CopyOnWriteArrayList<(Set<PK>) -> Unit>()
 
     /**
-     * Optional callback invoked alongside [onChange] after each non-noop bucket mutation.
-     * Carries only the set of projection keys whose buckets were actually modified in the current
-     * operation — enabling listeners to recompute only affected entries rather than scanning
-     * the whole map.
-     *
-     * Fires on the same thread that performed the mutation. Single-subscriber: the last assignment
-     * wins. Early-return paths (no-op replace, nothing-removed) fire neither [onChange] nor this
-     * callback.
+     * Registers [listener] to be invoked after each projection change with the current map state.
+     * Multiple listeners are supported; each is called in registration order on the mutating thread.
+     * The returned [AutoCloseable] deregisters this listener when closed.
      */
-    var onBucketsChanged: ((changedKeys: Set<PK>) -> Unit)? = null
+    fun addOnChangeListener(listener: (Map<PK, List<E>>) -> Unit): AutoCloseable {
+        onChangeListeners.add(listener)
+        return AutoCloseable { onChangeListeners.remove(listener) }
+    }
+
+    /**
+     * Registers [listener] to be invoked alongside onChange listeners after each non-noop bucket
+     * mutation. Carries only the set of projection keys whose buckets were actually modified.
+     * Multiple listeners are supported; each is called in registration order on the mutating thread.
+     * The returned [AutoCloseable] deregisters this listener when closed.
+     */
+    fun addOnBucketsChangedListener(listener: (Set<PK>) -> Unit): AutoCloseable {
+        onBucketsChangedListeners.add(listener)
+        return AutoCloseable { onBucketsChangedListeners.remove(listener) }
+    }
+
+    private fun fireOnChange() {
+        for (listener in onChangeListeners) listener(readOnlyView)
+    }
+
+    private fun fireOnBucketsChanged(changedKeys: Set<PK>) {
+        for (listener in onBucketsChangedListeners) listener(changedKeys)
+    }
 
     /**
      * Returns an unmodifiable frozen snapshot of [elements] suitable for storage as a bucket value.
@@ -76,7 +88,7 @@ internal class ProjectionCore<K : Comparable<K>, PK : Comparable<PK>, E : Identi
 
     /**
      * Inserts each element in [elements] into its bucket as determined by [keyExtractor], creating
-     * the bucket if absent. Fires [onChange] and [onBucketsChanged] when at least one element was added.
+     * the bucket if absent. Fires onChange and onBucketsChanged listeners when at least one element was added.
      */
     fun handleAdded(elements: List<E>) {
         val changedKeys = mutableSetOf<PK>()
@@ -86,15 +98,15 @@ internal class ProjectionCore<K : Comparable<K>, PK : Comparable<PK>, E : Identi
             changedKeys += key
         }
         if (changedKeys.isNotEmpty()) {
-            onChange?.invoke(readOnlyView)
-            onBucketsChanged?.invoke(changedKeys)
+            fireOnChange()
+            fireOnBucketsChanged(changedKeys)
         }
     }
 
     /**
      * Removes each element in [elements] from its bucket. When the primary bucket lookup by
      * [keyExtractor] misses (e.g. the key field changed before removal), falls back to
-     * [removeFromAnyBucket]. Fires [onChange] and [onBucketsChanged] when at least one element was removed.
+     * [removeFromAnyBucket]. Fires onChange and onBucketsChanged listeners when at least one element was removed.
      */
     fun handleRemoved(elements: List<E>) {
         val changedKeys = mutableSetOf<PK>()
@@ -112,8 +124,8 @@ internal class ProjectionCore<K : Comparable<K>, PK : Comparable<PK>, E : Identi
             }
         }
         if (changedKeys.isNotEmpty()) {
-            onChange?.invoke(readOnlyView)
-            onBucketsChanged?.invoke(changedKeys)
+            fireOnChange()
+            fireOnBucketsChanged(changedKeys)
         }
     }
 
@@ -144,7 +156,7 @@ internal class ProjectionCore<K : Comparable<K>, PK : Comparable<PK>, E : Identi
 
     /**
      * Removes [element] from the bucket at [key]. If the element is not found in that bucket,
-     * falls back to [removeFromAnyBucket]. Fires [onChange] and [onBucketsChanged] when at least
+     * falls back to [removeFromAnyBucket]. Fires onChange and onBucketsChanged listeners when at least
      * one element was removed.
      */
     fun handleRemovedFromBucket(element: E, key: PK) {
@@ -153,13 +165,13 @@ internal class ProjectionCore<K : Comparable<K>, PK : Comparable<PK>, E : Identi
             val filtered = bucket.filter { it != element }
             if (filtered.isEmpty()) backingMap.remove(key)
             else backingMap[key] = freezeBucket(filtered)
-            onChange?.invoke(readOnlyView)
-            onBucketsChanged?.invoke(setOf(key))
+            fireOnChange()
+            fireOnBucketsChanged(setOf(key))
         } else {
             val removedKey = removeFromAnyBucket(element)
             if (removedKey != null) {
-                onChange?.invoke(readOnlyView)
-                onBucketsChanged?.invoke(setOf(removedKey))
+                fireOnChange()
+                fireOnBucketsChanged(setOf(removedKey))
             }
         }
     }
@@ -167,34 +179,34 @@ internal class ProjectionCore<K : Comparable<K>, PK : Comparable<PK>, E : Identi
     /**
      * Removes the entity with the given [entityId] from the bucket at [key], using an ID-based
      * lookup rather than object equality. Used when the entity object may have already changed
-     * (e.g., key field mutation) so equality-based lookups would miss. Fires [onChange] and
-     * [onBucketsChanged] when removed.
+     * (e.g., key field mutation) so equality-based lookups would miss. Fires onChange and
+     * onBucketsChanged listeners when removed.
      */
     fun handleRemovedByIdFromBucket(entityId: K, key: PK) {
         val bucket = backingMap[key] ?: return
         val filtered = bucket.filter { it.id != entityId }
         if (filtered.size == bucket.size) return // nothing removed
         if (filtered.isEmpty()) backingMap.remove(key) else backingMap[key] = freezeBucket(filtered)
-        onChange?.invoke(readOnlyView)
-        onBucketsChanged?.invoke(setOf(key))
+        fireOnChange()
+        fireOnBucketsChanged(setOf(key))
     }
 
     /**
      * Replaces the entity with the same [id][IdentifiableEntity.id] as [newEntity] in the bucket
      * at [key]. No-op when the bucket is absent, the entity is not in the bucket, or the entity
-     * is already equal to [newEntity]. Fires [onChange] and [onBucketsChanged] when the replacement occurs.
+     * is already equal to [newEntity]. Fires onChange and onBucketsChanged listeners when the replacement occurs.
      */
     fun handleReplaceInBucket(newEntity: E, key: PK) {
         val bucket = backingMap[key] ?: return
         val oldEntity = bucket.firstOrNull { it.id == newEntity.id } ?: return
         if (oldEntity == newEntity) return
         backingMap[key] = freezeBucket(bucket.map { if (it.id == newEntity.id) newEntity else it })
-        onChange?.invoke(readOnlyView)
-        onBucketsChanged?.invoke(setOf(key))
+        fireOnChange()
+        fireOnBucketsChanged(setOf(key))
     }
 
     /**
-     * Inserts [element] into the bucket at [key] without firing any callback, creating the bucket if
+     * Inserts [element] into the bucket at [key] without firing any listener, creating the bucket if
      * absent. Returns [key]. Silent primitive for multi-key callers that mutate several buckets for one
      * logical delta and emit a single notification via [fireBucketsChanged].
      */
@@ -204,7 +216,7 @@ internal class ProjectionCore<K : Comparable<K>, PK : Comparable<PK>, E : Identi
     }
 
     /**
-     * Removes the entity with [entityId] from the bucket at [key] without firing any callback.
+     * Removes the entity with [entityId] from the bucket at [key] without firing any listener.
      * Returns [key] when an element was removed, or `null` on no-op.
      */
     fun removeByIdFromBucketSilent(entityId: K, key: PK): PK? {
@@ -216,7 +228,7 @@ internal class ProjectionCore<K : Comparable<K>, PK : Comparable<PK>, E : Identi
     }
 
     /**
-     * Removes [element] (by equality) from the bucket at [key] without firing any callback.
+     * Removes [element] (by equality) from the bucket at [key] without firing any listener.
      * Returns [key] when an element was removed, or `null` on no-op.
      */
     fun removeFromBucketSilent(element: E, key: PK): PK? {
@@ -228,7 +240,7 @@ internal class ProjectionCore<K : Comparable<K>, PK : Comparable<PK>, E : Identi
     }
 
     /**
-     * Replaces the entity sharing [newEntity]'s id in the bucket at [key] without firing any callback.
+     * Replaces the entity sharing [newEntity]'s id in the bucket at [key] without firing any listener.
      * Returns [key] when a replacement occurred, or `null` on no-op (bucket/entity absent or already equal).
      */
     fun replaceInBucketSilent(newEntity: E, key: PK): PK? {
@@ -240,13 +252,14 @@ internal class ProjectionCore<K : Comparable<K>, PK : Comparable<PK>, E : Identi
     }
 
     /**
-     * Fires [onChange] then [onBucketsChanged] once with [changedKeys] when the set is non-empty.
-     * Multi-key callers accumulate affected keys across several silent bucket ops and emit one delta.
+     * Fires all onChange listeners then all onBucketsChanged listeners once with [changedKeys] when
+     * the set is non-empty. Multi-key callers accumulate affected keys across several silent bucket
+     * ops and emit one delta.
      */
     fun fireBucketsChanged(changedKeys: Set<PK>) {
         if (changedKeys.isNotEmpty()) {
-            onChange?.invoke(readOnlyView)
-            onBucketsChanged?.invoke(changedKeys)
+            fireOnChange()
+            fireOnBucketsChanged(changedKeys)
         }
     }
 }

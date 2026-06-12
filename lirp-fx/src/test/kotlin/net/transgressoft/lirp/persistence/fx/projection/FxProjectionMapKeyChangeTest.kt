@@ -15,9 +15,12 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>. *
  ******************************************************************************/
 
-package net.transgressoft.lirp.persistence.fx
+package net.transgressoft.lirp.persistence.fx.projection
 
 import net.transgressoft.lirp.persistence.AudioItem
+import net.transgressoft.lirp.persistence.fx.FxAudioItem
+import net.transgressoft.lirp.persistence.fx.FxToolkitInit
+import net.transgressoft.lirp.persistence.fx.fxAggregateList
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe

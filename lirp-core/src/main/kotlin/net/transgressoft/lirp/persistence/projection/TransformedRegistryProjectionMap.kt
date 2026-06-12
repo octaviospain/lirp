@@ -25,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap
  * applying a [valueTransform] to each bucket in the backing projection. The transform is re-run
  * only for buckets whose contents actually changed in a given delta, not for the entire map.
  *
- * This decorator wraps a [RegistryProjectionMap] and registers on its `onBucketsChanged` signal to
+ * This decorator wraps a [RegistryProjectionMap] and registers on its `addOnBucketsChangedListener` signal to
  * maintain an internal `ConcurrentHashMap<PK, V>` transform cache. When a bucket is emptied
  * and its key is removed from the backing map, the corresponding key is also removed from this
  * view — the transform is never called over an empty list.
@@ -36,13 +36,12 @@ import java.util.concurrent.ConcurrentHashMap
  * the underlying iterator represents a weakly consistent view. This inherits the same
  * weakly-consistent contract of the backing map's [java.util.concurrent.ConcurrentSkipListMap] iteration.
  *
- * **Single-subscriber:** The `onBucketsChanged` slot on the backing [RegistryProjectionMap] is
- * owned by this decorator. Registering another `onBucketsChanged` on the same backing map after
- * constructing a [TransformedRegistryProjectionMap] will overwrite this decorator's registration,
- * breaking incremental updates.
+ * **Multi-subscriber:** This decorator registers one listener via `addOnBucketsChangedListener` on
+ * the backing [RegistryProjectionMap]. Additional listeners registered on the same backing map are
+ * independent and will each receive their own notifications — no registration clobbers another.
  *
  * The initial transform cache is built lazily on the first map access. The backing map fires
- * `onBucketsChanged` synchronously during its own initial seed on the seeding thread; that same-thread
+ * `addOnBucketsChangedListener` synchronously during its own initial seed on the seeding thread; that same-thread
  * re-entry is short-circuited (the seed loop captures those keys directly), while cross-thread events
  * recompute under the cache lock from a non-initializing bucket snapshot.
  *
@@ -57,12 +56,7 @@ import java.util.concurrent.ConcurrentHashMap
 internal class TransformedRegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V>(
     private val backing: RegistryProjectionMap<K, PK, E>,
     private val valueTransform: (PK, List<E>) -> V
-) : AbstractMap<PK, V>(), CloseableProjectionMap<PK, V> {
-
-    /** Releases the backing registry projection's subscription. Idempotent. */
-    override fun close() {
-        backing.close()
-    }
+) : AbstractMap<PK, V>(), AutoCloseable by backing, CloseableProjectionMap<PK, V> {
 
     private val transformCache = ConcurrentHashMap<PK, V>()
 
@@ -75,7 +69,7 @@ internal class TransformedRegistryProjectionMap<K : Comparable<K>, PK : Comparab
     private var seedingThread: Thread? = null
 
     init {
-        backing.onBucketsChanged = { changedKeys ->
+        backing.addOnBucketsChangedListener { changedKeys ->
             // The backing map fires this synchronously, on the seeding thread, while building its
             // initial state. Reading the backing map then would re-enter its lazy initialization and
             // recurse, so the same-thread synchronous re-entry short-circuits — the seed loop already

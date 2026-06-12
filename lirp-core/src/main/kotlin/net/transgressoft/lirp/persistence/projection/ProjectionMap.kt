@@ -29,8 +29,8 @@ import kotlin.reflect.KProperty
  * grouping entities by a secondary key via [keyExtractor].
  *
  * The projection uses a [java.util.concurrent.ConcurrentSkipListMap] for natural key ordering with CME-free iteration,
- * and fires an optional [onChange]
- * callback when the projection state changes. It has no JavaFX dependency and works with
+ * and supports multiple onChange and onBucketsChanged listeners via [addOnChangeListener] and
+ * [addOnBucketsChangedListener]. It has no JavaFX dependency and works with
  * any JVM target including Android and server-side applications.
  *
  * The projection initializes lazily on the first [getValue] (Kotlin `by` delegation) or map
@@ -44,7 +44,7 @@ import kotlin.reflect.KProperty
  * **Thread safety:** Iterating [keys], [values], [entries], or calling [size], [containsKey],
  * and [get] is CME-free under concurrent mutation because the backing map is [java.util.concurrent.ConcurrentSkipListMap].
  * Reads are weakly-consistent: entries added concurrently may or may not be visible mid-iteration,
- * but iteration always completes without error. Mutations via [onChange], [MutableAggregateList],
+ * but iteration always completes without error. Mutations via [addOnChangeListener], [MutableAggregateList],
  * or [MutableAggregateSet] still flow through a single source-collection mutation thread;
  * the class does not provide cross-thread atomicity for compound read-modify-write of an
  * individual bucket — that contract is unchanged.
@@ -59,7 +59,7 @@ class ProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEnti
     private val sourceRef: () -> AggregateCollectionRef<K, E>,
     private val keyExtractor: (E) -> PK
 ) : AbstractMap<PK, List<E>>() {
-    private val core = ProjectionCore<K, PK, E>(keyExtractor)
+    private val core = ProjectionCore(keyExtractor)
 
     private val initLock = Any()
 
@@ -67,24 +67,27 @@ class ProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEnti
     private var initialized = false
 
     /**
-     * Optional callback invoked after each projection change with the current map state.
-     * Fires after every incremental update that results in at least one addition or removal.
+     * Registers [listener] to be invoked after each projection change with the current map state.
+     * Multiple listeners may be registered; each fires on the mutating thread in registration order.
+     * The returned [AutoCloseable] deregisters this listener when closed.
      *
-     * The callback fires on the same thread that performed the source mutation; subscribers
-     * requiring a specific thread must marshal themselves. No cross-thread atomicity is provided.
+     * This is the primary seam for adapter layers (such as the FX decorator) that need to
+     * observe and react to projection changes from a separate module.
      */
-    internal var onChange: ((Map<PK, List<E>>) -> Unit)?
-        get() = core.onChange
-        set(value) {
-            core.onChange = value
-        }
+    fun addOnChangeListener(listener: (Map<PK, List<E>>) -> Unit): AutoCloseable =
+        core.addOnChangeListener(listener)
 
-    /** Fires alongside [onChange] carrying only the keys changed by the latest delta. Single-subscriber. */
-    internal var onBucketsChanged: ((Set<PK>) -> Unit)?
-        get() = core.onBucketsChanged
-        set(value) {
-            core.onBucketsChanged = value
-        }
+    /**
+     * Registers [listener] to be invoked alongside onChange listeners after each non-noop bucket
+     * mutation, carrying only the keys changed by the latest delta. Multiple listeners may be
+     * registered; each fires on the mutating thread in registration order.
+     * The returned [AutoCloseable] deregisters this listener when closed.
+     *
+     * Adapter layers use this hook to coalesce bucket-level changes into a single notification
+     * batch without needing to diff the full map state.
+     */
+    fun addOnBucketsChangedListener(listener: (Set<PK>) -> Unit): AutoCloseable =
+        core.addOnBucketsChangedListener(listener)
 
     private fun initialize() {
         if (initialized) return
@@ -99,10 +102,12 @@ class ProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEnti
 
     /**
      * Returns the current contents of the [key] bucket WITHOUT triggering lazy initialization.
-     * The value-transform decorator's `onBucketsChanged` hook calls this; that hook fires only after
-     * [initialize] has populated the core, so it must never re-enter [initialize] (which would recurse).
+     *
+     * Adapter layers (such as the FX decorator) call this from their [addOnBucketsChangedListener] hook to
+     * read the latest bucket contents after each delta. The hook fires only after initialization has
+     * populated the core, so this method must never re-enter [initialize] (which would recurse).
      */
-    internal fun bucketSnapshot(key: PK): List<E>? = core.readOnlyView[key]
+    fun bucketSnapshot(key: PK): List<E>? = core.readOnlyView[key]
 
     @Suppress("UNCHECKED_CAST")
     private fun subscribeToSource(source: AggregateCollectionRef<K, E>) {

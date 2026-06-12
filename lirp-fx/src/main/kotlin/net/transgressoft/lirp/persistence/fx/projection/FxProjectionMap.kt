@@ -15,11 +15,15 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>. *
  ******************************************************************************/
 
-package net.transgressoft.lirp.persistence.fx
+package net.transgressoft.lirp.persistence.fx.projection
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.ReactiveScope
+import net.transgressoft.lirp.persistence.AggregateCollectionRef
 import net.transgressoft.lirp.persistence.FxObservableCollection
+import net.transgressoft.lirp.persistence.fx.FxAggregateList
+import net.transgressoft.lirp.persistence.fx.FxAggregateSet
+import net.transgressoft.lirp.persistence.projection.ProjectionMap
 import javafx.application.Platform
 import javafx.beans.InvalidationListener
 import javafx.collections.FXCollections
@@ -29,15 +33,13 @@ import javafx.collections.ObservableMap
 import javafx.collections.SetChangeListener
 import java.util.Collections
 import java.util.concurrent.ConcurrentSkipListMap
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.reflect.KProperty
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 
 /**
- * This is the JavaFX counterpart of [net.transgressoft.lirp.persistence.ProjectionMap] from `lirp-core`,
- * extending it with a JavaFX [ObservableMap] interface and reactive listener support.
- *
  * A read-only [ObservableMap] that derives a grouped view from an existing
  * [FxObservableCollection] source (either an [FxAggregateList] or [FxAggregateSet]).
  *
@@ -46,13 +48,12 @@ import kotlinx.coroutines.launch
  * [ConcurrentSkipListMap] (wrapped by [FXCollections.observableMap]), so keys are always
  * iterated in natural sorted order with CME-free iteration under concurrent reads.
  *
- * The projection initializes lazily: the source subscription and initial state build happen
- * on the first [getValue] call (Kotlin `by` delegation) or on the first [addListener] call,
- * not at construction time. This keeps construction cheap even if the source is not yet fully populated.
+ * A hold on a core [ProjectionMap] wires the `onBucketsChanged` seam to the pending-flush
+ * coalescer. All bucket changes produced by a single source event are collected into a pending
+ * key set and flushed to the [ObservableMap] in exactly one [Platform.runLater] call
+ * (dispatch mode) or one [ReactiveScope.flowScope] channel action (non-dispatch mode).
  *
- * Changes to the source collection are propagated incrementally via a [ListChangeListener]
- * (for list sources) or [SetChangeListener] (for set sources). Each add or remove fires a
- * targeted [MapChangeListener.Change] on the affected bucket key only.
+ * The projection initializes lazily on the first [getValue] or [addListener] call.
  *
  * This class implements [ObservableMap] directly — callers can add [MapChangeListener] or
  * [javafx.beans.InvalidationListener] and read map state (`size`, `get`, `keys`) directly on
@@ -61,20 +62,12 @@ import kotlinx.coroutines.launch
  *
  * When [dispatchToFxThread] is `true` (the default), map change notifications are dispatched
  * to the JavaFX Application Thread via [Platform.runLater] when fired from a background thread.
- * This is the recommended mode for thread-safe access — all mutations are marshaled to the
- * single FX Application Thread.
- *
- * When `false`, notifications and mutations are serialized through a Channel-based sequential
- * processor on [ReactiveScope.flowScope], ensuring no concurrent map access.
+ * When `false`, notifications are serialized through a Channel-based sequential processor on
+ * [ReactiveScope.flowScope].
  *
  * **Thread safety:** Iteration of [keys], [values], [entries], plus [size], [containsKey],
  * and [get] never throws [ConcurrentModificationException], because the underlying
- * [ConcurrentSkipListMap] iterators are weakly-consistent — readers observe a snapshot of
- * map state at the point of access, and entries added concurrently may or may not be visible
- * mid-iteration. The CSLM swap is orthogonal to the dispatch model: both the [Platform.runLater]
- * path and the [ReactiveScope.flowScope] [Channel] path continue to serialize [ListChangeListener]
- * and [SetChangeListener] notifications exactly as documented above; the choice of backing map
- * does not change either dispatch contract.
+ * [ConcurrentSkipListMap] iterators are weakly-consistent.
  *
  * @param K the entity ID type, must be [Comparable]
  * @param PK the projection key type, must be [Comparable] (used as the backing [ConcurrentSkipListMap] key)
@@ -90,14 +83,36 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
 ) : ObservableMap<PK, List<E>> {
     private val innerObservableMap: ObservableMap<PK, List<E>> = FXCollections.observableMap(ConcurrentSkipListMap<PK, List<E>>())
 
+    // Thread-safe bucket state updated by source-collection listeners;
+    // the pending-flush coalescer reads from this map and mirrors it into innerObservableMap.
+    private val backingMap = ConcurrentSkipListMap<PK, List<E>>()
+
     @Volatile
     private var initialized = false
+
+    private val initLock = Any()
 
     private val mutationChannel: Channel<() -> Unit>? =
         if (!dispatchToFxThread) Channel(Channel.UNLIMITED) else null
 
     private val initBarrier: CompletableDeferred<Unit>? =
         if (!dispatchToFxThread) CompletableDeferred() else null
+
+    // Pending-flush coalescer — collects changed keys on the source-listener thread and
+    // mirrors them into innerObservableMap in a single flush on the target thread.
+    private val pendingKeys = Collections.synchronizedSet(LinkedHashSet<PK>())
+    private val flushScheduled = AtomicBoolean(false)
+
+    // Held core map wiring onBucketsChanged to the pending-flush coalescer. The slot is
+    // set in initialize() so only post-init deltas from registry-bound aggregate sources
+    // arrive through the core engine's hook. Direct FxObservableCollection mutations are
+    // handled via the FxAggregateList/FxAggregateSet listener subscriptions below.
+    @Suppress("UNCHECKED_CAST")
+    private val core: ProjectionMap<K, PK, E> =
+        ProjectionMap(
+            { sourceRef() as AggregateCollectionRef<K, E> },
+            keyExtractor
+        )
 
     init {
         mutationChannel?.let { channel ->
@@ -112,8 +127,12 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
 
     private fun initialize() {
         if (initialized) return
-        synchronized(this) {
+        synchronized(initLock) {
             if (initialized) return
+            // Wire the coalescer onto the core engine's onBucketsChanged hook.
+            // This activates single-pulse batching for registry-bound aggregate sources.
+            core.addOnBucketsChangedListener(::scheduleFlush)
+
             when (val source = sourceRef()) {
                 is FxAggregateList<*, *> -> subscribeToList(source)
                 is FxAggregateSet<*, *> -> subscribeToSet(source)
@@ -128,95 +147,120 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
         }
     }
 
-    // Safe: FxProjectionMap<PK, K, E> is constructed with a source typed as FxAggregateList<K, E> or FxAggregateSet<K, E>.
-    // The wildcard erasure at the call site is a consequence of the sealed-source pattern; the concrete type matches K, E.
+    // Safe: FxProjectionMap is constructed with a source typed as FxAggregateList<K, E>.
     @Suppress("UNCHECKED_CAST")
     private fun subscribeToList(source: FxAggregateList<*, *>) {
         val typedSource = source as FxAggregateList<K, E>
         typedSource.addListener(
             ListChangeListener { change ->
+                val changedKeys = mutableSetOf<PK>()
                 while (change.next()) {
-                    if (change.wasAdded()) handleAdded(change.addedSubList as List<E>)
-                    if (change.wasRemoved()) handleRemoved(change.removed as List<E>)
+                    if (change.wasAdded()) changedKeys += handleAdded(change.addedSubList as List<E>)
+                    if (change.wasRemoved()) changedKeys += handleRemoved(change.removed as List<E>)
                 }
+                if (changedKeys.isNotEmpty()) scheduleFlush(changedKeys)
             }
         )
         val initialElements = typedSource.toList().ifEmpty { typedSource.innerProxy.resolveAll().toList() }
         populateInitialState(initialElements)
     }
 
-    // Safe: same as subscribeToList — the source FxAggregateSet<*, *> was constructed with matching K, E type parameters.
+    // Safe: FxProjectionMap is constructed with a source typed as FxAggregateSet<K, E>.
     @Suppress("UNCHECKED_CAST")
     private fun subscribeToSet(source: FxAggregateSet<*, *>) {
         val typedSource = source as FxAggregateSet<K, E>
         typedSource.addListener(
             SetChangeListener { change ->
-                if (change.wasAdded()) handleAdded(listOf(change.elementAdded as E))
-                if (change.wasRemoved()) handleRemoved(listOf(change.elementRemoved as E))
+                val changedKeys = mutableSetOf<PK>()
+                if (change.wasAdded()) changedKeys += handleAdded(listOf(change.elementAdded as E))
+                if (change.wasRemoved()) changedKeys += handleRemoved(listOf(change.elementRemoved as E))
+                if (changedKeys.isNotEmpty()) scheduleFlush(changedKeys)
             }
         )
         val initialElements = typedSource.toList().ifEmpty { typedSource.innerProxy.resolveAll().toList() }
         populateInitialState(initialElements)
     }
 
-    private fun freezeBucket(elements: List<E>): List<E> = java.util.Collections.unmodifiableList(ArrayList(elements))
+    private fun freezeBucket(elements: List<E>): List<E> = Collections.unmodifiableList(ArrayList(elements))
 
-    // Writes directly to innerObservableMap without mutateMap dispatch — called during
-    // initialize() so the initial state is available synchronously before initialized=true.
     private fun populateInitialState(elements: List<E>) {
         for (element in elements) {
             val key = keyExtractor(element)
-            val updated = freezeBucket((innerObservableMap[key] ?: emptyList()) + element)
-            innerObservableMap[key] = updated
+            backingMap[key] = freezeBucket((backingMap[key] ?: emptyList()) + element)
+        }
+        for ((key, bucket) in backingMap) {
+            innerObservableMap[key] = bucket
         }
     }
 
-    private fun handleAdded(elements: List<E>) {
+    /** Adds [elements] to [backingMap] and returns the set of affected keys. */
+    private fun handleAdded(elements: List<E>): Set<PK> {
+        val changedKeys = mutableSetOf<PK>()
         for (element in elements) {
             val key = keyExtractor(element)
-            mutateMap {
-                val current = innerObservableMap[key] ?: emptyList()
-                if (element !in current) {
-                    innerObservableMap[key] = freezeBucket(current + element)
-                }
+            val current = backingMap[key] ?: emptyList()
+            if (element !in current) {
+                backingMap[key] = freezeBucket(current + element)
+                changedKeys += key
             }
         }
+        return changedKeys
     }
 
-    private fun handleRemoved(elements: List<E>) {
+    /** Removes [elements] from [backingMap] and returns the set of affected keys. */
+    private fun handleRemoved(elements: List<E>): Set<PK> {
+        val changedKeys = mutableSetOf<PK>()
         for (element in elements) {
             val key = keyExtractor(element)
-            mutateMap {
-                val current = innerObservableMap[key]
-                if (current != null && element in current) {
-                    val filtered = current.filter { it != element }
-                    if (filtered.isEmpty()) innerObservableMap.remove(key)
-                    else innerObservableMap[key] = freezeBucket(filtered)
-                } else {
-                    removeFromAnyBucket(element)
-                }
+            val current = backingMap[key]
+            if (current != null && element in current) {
+                val filtered = current.filter { it != element }
+                if (filtered.isEmpty()) backingMap.remove(key)
+                else backingMap[key] = freezeBucket(filtered)
+                changedKeys += key
+            } else {
+                removeFromAnyBucket(element)?.let { changedKeys += it }
             }
         }
+        return changedKeys
     }
 
-    private fun removeFromAnyBucket(element: E) {
-        for (entry in innerObservableMap.entries) {
+    private fun removeFromAnyBucket(element: E): PK? {
+        for (entry in backingMap.entries) {
             if (element in entry.value) {
                 val filtered = entry.value.filter { it != element }
-                // Use map put/remove rather than entry.setValue so the ObservableMap wrapper fires change listeners.
-                if (filtered.isEmpty()) innerObservableMap.remove(entry.key)
-                else innerObservableMap[entry.key] = freezeBucket(filtered)
-                return
+                if (filtered.isEmpty()) backingMap.remove(entry.key)
+                else backingMap[entry.key] = freezeBucket(filtered)
+                return entry.key
             }
+        }
+        return null
+    }
+
+    /**
+     * Accumulates [changedKeys] into the pending set and schedules a single flush if none is
+     * already pending. The flush executes on the FX Application Thread ([Platform.runLater])
+     * or on [ReactiveScope.flowScope] ([mutationChannel]), depending on [dispatchToFxThread].
+     */
+    fun scheduleFlush(changedKeys: Set<PK>) {
+        synchronized(pendingKeys) { pendingKeys.addAll(changedKeys) }
+        if (flushScheduled.compareAndSet(false, true)) {
+            if (dispatchToFxThread) Platform.runLater(::flush)
+            else mutationChannel!!.trySend(::flush)
         }
     }
 
-    private fun mutateMap(action: () -> Unit) {
-        if (dispatchToFxThread) {
-            if (Platform.isFxApplicationThread()) action()
-            else Platform.runLater(action)
-        } else {
-            mutationChannel!!.trySend(action)
+    private fun flush() {
+        val keys: Set<PK>
+        synchronized(pendingKeys) {
+            keys = LinkedHashSet(pendingKeys)
+            pendingKeys.clear()
+        }
+        flushScheduled.set(false)
+        for (key in keys) {
+            val bucket = backingMap[key]
+            if (bucket == null) innerObservableMap.remove(key)
+            else innerObservableMap[key] = bucket
         }
     }
 
