@@ -114,7 +114,7 @@ class TransformedFxMultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>,
 
     // Per-entity mutation subscriptions. Indexed by entity id. Each subscription calls
     // core.reconcile(entity) when a key-relevant property change is detected. Cleared on close().
-    val entitySubscriptions = ConcurrentHashMap<K, LirpEventSubscription<*, *, *>>()
+    internal val entitySubscriptions = ConcurrentHashMap<K, LirpEventSubscription<*, *, *>>()
 
     // Reverse index: entity id → set of projection keys (PK) whose bucket currently holds it.
     // Updated incrementally from changedKeys in scheduleFlush, so unsubscription decisions are

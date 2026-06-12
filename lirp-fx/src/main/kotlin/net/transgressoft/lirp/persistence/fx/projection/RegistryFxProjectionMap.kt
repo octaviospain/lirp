@@ -96,8 +96,11 @@ class RegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identi
     // pendingUpdateKeys: keys arriving via the Update subscription for in-place entity mutations.
     //   Flushed with remove-then-put to guarantee MapChangeListener fires even when the bucket
     //   list's equals() returns true (same object reference, same content).
-    private val pendingBucketKeys = Collections.synchronizedSet(LinkedHashSet<PK>())
-    private val pendingUpdateKeys = Collections.synchronizedSet(LinkedHashSet<PK>())
+    // All three are guarded by pendingLock so that staging keys + gating the flush, and draining +
+    // resetting the gate, are each atomic with respect to one another across the producer and FX threads.
+    private val pendingLock = Any()
+    private val pendingBucketKeys = LinkedHashSet<PK>()
+    private val pendingUpdateKeys = LinkedHashSet<PK>()
     private val flushScheduled = AtomicBoolean(false)
 
     private val core: RegistryProjectionMap<K, PK, E> = RegistryProjectionMap(registry, keyExtractor)
@@ -169,8 +172,12 @@ class RegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identi
      * [ReactiveScope.flowScope] ([mutationChannel]), depending on [dispatchToFxThread].
      */
     fun scheduleFlush(changedKeys: Set<PK>) {
-        synchronized(pendingBucketKeys) { pendingBucketKeys.addAll(changedKeys) }
-        scheduleFlushInternal()
+        val shouldSchedule: Boolean
+        synchronized(pendingLock) {
+            pendingBucketKeys.addAll(changedKeys)
+            shouldSchedule = flushScheduled.compareAndSet(false, true)
+        }
+        if (shouldSchedule) dispatchFlush()
     }
 
     /**
@@ -182,29 +189,33 @@ class RegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identi
      * fires a change notification regardless of the previous value's equality.
      */
     private fun scheduleUpdateFlush(keys: Set<PK>) {
-        synchronized(pendingUpdateKeys) { pendingUpdateKeys.addAll(keys) }
-        scheduleFlushInternal()
+        val shouldSchedule: Boolean
+        synchronized(pendingLock) {
+            pendingUpdateKeys.addAll(keys)
+            shouldSchedule = flushScheduled.compareAndSet(false, true)
+        }
+        if (shouldSchedule) dispatchFlush()
     }
 
-    private fun scheduleFlushInternal() {
-        if (flushScheduled.compareAndSet(false, true)) {
-            if (dispatchToFxThread) Platform.runLater(::flush)
-            else mutationChannel!!.trySend(::flush)
-        }
+    private fun dispatchFlush() {
+        if (dispatchToFxThread) Platform.runLater(::flush)
+        else mutationChannel!!.trySend(::flush)
     }
 
     private fun flush() {
         val bucketKeys: Set<PK>
         val updateKeys: Set<PK>
-        synchronized(pendingBucketKeys) {
+        // Drain both pending sets and reset the gate under one lock, atomically with the staging in
+        // scheduleFlush / scheduleUpdateFlush. Resetting the gate outside this lock would strand any
+        // keys a producer adds between the drain and the reset, since its compareAndSet would fail
+        // while flushScheduled is still true and no new flush would be scheduled.
+        synchronized(pendingLock) {
             bucketKeys = LinkedHashSet(pendingBucketKeys)
             pendingBucketKeys.clear()
-        }
-        synchronized(pendingUpdateKeys) {
             updateKeys = LinkedHashSet(pendingUpdateKeys)
             pendingUpdateKeys.clear()
+            flushScheduled.set(false)
         }
-        flushScheduled.set(false)
 
         // Apply bucket changes (creates, deletes, re-buckets) with standard put-or-remove.
         for (key in bucketKeys) {

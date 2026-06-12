@@ -104,7 +104,7 @@ class FxMultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E>(
 
     // Per-entity mutation subscriptions. Indexed by entity id. Each subscription calls
     // core.reconcile(entity) when a key-relevant property change is detected. Cleared on close().
-    val entitySubscriptions = ConcurrentHashMap<K, LirpEventSubscription<*, *, *>>()
+    internal val entitySubscriptions = ConcurrentHashMap<K, LirpEventSubscription<*, *, *>>()
 
     // Reverse index: entity id → set of projection keys (PK) whose bucket currently holds it.
     // Updated incrementally from changedKeys in scheduleFlush, so unsubscription decisions are
@@ -201,9 +201,17 @@ class FxMultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E>(
      * [dispatchToFxThread].
      */
     fun scheduleFlush(changedKeys: Set<PK>) {
-        synchronized(pendingKeys) { pendingKeys.addAll(changedKeys) }
+        // Accumulate keys and gate the flush atomically: if the drain-and-reset in flush() is in
+        // progress on another thread, the addAll must be paired with the compareAndSet under the
+        // same lock, otherwise keys staged after flush() drains but before it resets the gate are
+        // stranded — compareAndSet(false, true) fails while flushScheduled is still true.
+        val shouldSchedule: Boolean
+        synchronized(pendingKeys) {
+            pendingKeys.addAll(changedKeys)
+            shouldSchedule = flushScheduled.compareAndSet(false, true)
+        }
         reconcileSubscriptions(changedKeys)
-        if (flushScheduled.compareAndSet(false, true)) {
+        if (shouldSchedule) {
             if (dispatchToFxThread) Platform.runLater(::flush)
             else mutationChannel!!.trySend(::flush)
         }
@@ -241,11 +249,13 @@ class FxMultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E>(
 
     private fun flush() {
         val keys: Set<PK>
+        // Drain the pending set and reset the gate atomically with scheduleFlush's staging so a
+        // concurrent producer either lands its keys in this drain or successfully reschedules.
         synchronized(pendingKeys) {
             keys = LinkedHashSet(pendingKeys)
             pendingKeys.clear()
+            flushScheduled.set(false)
         }
-        flushScheduled.set(false)
         for (key in keys) {
             val bucket = core.bucketSnapshot(key)
             if (bucket == null) innerObservableMap.remove(key)

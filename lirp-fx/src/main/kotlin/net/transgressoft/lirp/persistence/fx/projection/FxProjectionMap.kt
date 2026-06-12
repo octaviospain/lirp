@@ -243,8 +243,15 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
      * or on [ReactiveScope.flowScope] ([mutationChannel]), depending on [dispatchToFxThread].
      */
     fun scheduleFlush(changedKeys: Set<PK>) {
-        synchronized(pendingKeys) { pendingKeys.addAll(changedKeys) }
-        if (flushScheduled.compareAndSet(false, true)) {
+        // Accumulate keys and gate the flush atomically: pairing the addAll with the compareAndSet
+        // under the same lock prevents keys staged after flush() drains but before it resets the
+        // gate from being stranded while flushScheduled is still true.
+        val shouldSchedule: Boolean
+        synchronized(pendingKeys) {
+            pendingKeys.addAll(changedKeys)
+            shouldSchedule = flushScheduled.compareAndSet(false, true)
+        }
+        if (shouldSchedule) {
             if (dispatchToFxThread) Platform.runLater(::flush)
             else mutationChannel!!.trySend(::flush)
         }
@@ -252,11 +259,12 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
 
     private fun flush() {
         val keys: Set<PK>
+        // Drain and reset the gate atomically with scheduleFlush's staging.
         synchronized(pendingKeys) {
             keys = LinkedHashSet(pendingKeys)
             pendingKeys.clear()
+            flushScheduled.set(false)
         }
-        flushScheduled.set(false)
         for (key in keys) {
             val bucket = backingMap[key]
             if (bucket == null) innerObservableMap.remove(key)

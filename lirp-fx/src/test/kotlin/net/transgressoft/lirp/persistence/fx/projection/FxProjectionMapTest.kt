@@ -585,6 +585,39 @@ class FxProjectionMapTest : StringSpec({
         transformThreads.all { !it } shouldBe true
     }
 
+    "TransformedFxProjectionMap runs valueTransform off FX thread while dispatching the pulse on the FX thread when dispatchToFxThread is true" {
+        val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
+        val transformOnFxThread = mutableListOf<Boolean>()
+        val listenerOnFxThread = mutableListOf<Boolean>()
+        val projection =
+            TransformedFxProjectionMap(
+                { source },
+                { it.albumName },
+                { pk, items ->
+                    transformOnFxThread.add(Platform.isFxApplicationThread())
+                    FxAlbumBucket(pk, items.map { it.title })
+                },
+                true
+            )
+        val pulseLatch = CountDownLatch(1)
+        projection.addListener(
+            MapChangeListener {
+                listenerOnFxThread.add(Platform.isFxApplicationThread())
+                pulseLatch.countDown()
+            }
+        )
+
+        source.add(0, FxAudioItem(1, "Track A", "Jazz"))
+        pulseLatch.await(5, TimeUnit.SECONDS) shouldBe true
+
+        // The transform is precomputed on the source-event thread (off the FX thread),
+        // while only the final map mirror — and therefore the listener — runs on the FX thread.
+        transformOnFxThread.isNotEmpty() shouldBe true
+        transformOnFxThread.all { !it } shouldBe true
+        listenerOnFxThread.isNotEmpty() shouldBe true
+        listenerOnFxThread.all { it } shouldBe true
+    }
+
     "FxProjectionMap iterates without ConcurrentModificationException under concurrent reader and writer stress"
         .config(tags = setOf(Stress)) {
             val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
