@@ -20,7 +20,7 @@ package net.transgressoft.lirp.persistence.sql
 import net.transgressoft.lirp.persistence.RegistryBase
 import net.transgressoft.lirp.persistence.fx.FxToolkitInit
 import net.transgressoft.lirp.persistence.fx.fxAggregateList
-import net.transgressoft.lirp.persistence.fx.fxProjectionMap
+import net.transgressoft.lirp.persistence.fx.projection.fxProjectionMap
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe

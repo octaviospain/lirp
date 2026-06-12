@@ -1,4 +1,4 @@
-package net.transgressoft.lirp.persistence.fx;
+package net.transgressoft.lirp.persistence.fx.projection;
 
 import javafx.collections.MapChangeListener;
 import kotlinx.coroutines.CoroutineScopeKt;
@@ -6,6 +6,11 @@ import kotlinx.coroutines.Dispatchers;
 import kotlinx.coroutines.SupervisorKt;
 import net.transgressoft.lirp.event.ReactiveScope;
 import net.transgressoft.lirp.persistence.AudioItem;
+import net.transgressoft.lirp.persistence.fx.FxAggregateList;
+import net.transgressoft.lirp.persistence.fx.FxAggregateSet;
+import net.transgressoft.lirp.persistence.fx.FxAudioItem;
+import net.transgressoft.lirp.persistence.fx.FxProperties;
+import net.transgressoft.lirp.persistence.fx.FxToolkitInit;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -18,7 +23,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Java interoperability tests verifying that {@link FxProperties#fxProjectionMap} static factory
+ * Java interoperability tests verifying that {@link FxProjections#fxProjectionMap} static factory
  * method is accessible from Java and that the resulting projection correctly groups entities
  * and fires {@link MapChangeListener} notifications for both list and set sources.
  */
@@ -41,12 +46,12 @@ class FxProjectionMapJavaInteropTest {
     }
 
     @Test
-    @DisplayName("FxProperties.fxProjectionMap creates projection from list source in Java")
+    @DisplayName("FxProjections.fxProjectionMap creates projection from list source in Java")
     void projectionMapFromListSource() {
         FxAggregateList<Integer, AudioItem> source = FxProperties.fxAggregateList(List.of(), false);
 
         FxProjectionMap<Integer, String, AudioItem> audioItemsByAlbum =
-            FxProperties.fxProjectionMap(() -> source, AudioItem::getAlbumName, false);
+            FxProjections.fxProjectionMap(() -> source, AudioItem::getAlbumName, false);
 
         assertTrue(audioItemsByAlbum.isEmpty(), "Map is empty before any items are added");
 
@@ -66,13 +71,13 @@ class FxProjectionMapJavaInteropTest {
     }
 
     @Test
-    @DisplayName("FxProperties.fxProjectionMap fires MapChangeListener from Java")
+    @DisplayName("FxProjections.fxProjectionMap fires MapChangeListener from Java")
     @SuppressWarnings("unchecked")
     void projectionMapFiresMapChangeListener() {
         FxAggregateList<Integer, AudioItem> source = FxProperties.fxAggregateList(List.of(), false);
 
         FxProjectionMap<Integer, String, AudioItem> projection =
-            FxProperties.fxProjectionMap(() -> source, AudioItem::getAlbumName, false);
+            FxProjections.fxProjectionMap(() -> source, AudioItem::getAlbumName, false);
 
         AtomicBoolean listenerFired = new AtomicBoolean(false);
         AtomicReference<String> addedKey = new AtomicReference<>();
@@ -92,12 +97,12 @@ class FxProjectionMapJavaInteropTest {
     }
 
     @Test
-    @DisplayName("FxProperties.fxProjectionMap creates projection from set source in Java")
+    @DisplayName("FxProjections.fxProjectionMap creates projection from set source in Java")
     void projectionMapFromSetSource() {
         FxAggregateSet<Integer, AudioItem> source = FxProperties.fxAggregateSet(Set.of(), false);
 
         FxProjectionMap<Integer, String, AudioItem> projection =
-            FxProperties.fxProjectionMap(() -> source, AudioItem::getAlbumName, false);
+            FxProjections.fxProjectionMap(() -> source, AudioItem::getAlbumName, false);
 
         assertTrue(projection.isEmpty(), "Map is empty before any items are added");
 

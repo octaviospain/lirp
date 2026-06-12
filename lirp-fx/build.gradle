@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
+
 plugins {
     id 'com.google.devtools.ksp'
     id 'java-test-fixtures'
@@ -8,6 +10,12 @@ description = 'LIRP FX - JavaFX Observable Collection Bridges'
 ktlint {
     filter {
         exclude { it.file.path.contains("/generated/") }
+    }
+}
+
+tasks.withType(KotlinJvmCompile).configureEach {
+    compilerOptions {
+        freeCompilerArgs.add('-opt-in=net.transgressoft.lirp.InternalLirpApi')
     }
 }
 

@@ -18,18 +18,16 @@
 package net.transgressoft.lirp.persistence.fx
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
-import net.transgressoft.lirp.persistence.FxObservableCollection
 import net.transgressoft.lirp.persistence.mutableAggregateList
 import net.transgressoft.lirp.persistence.mutableAggregateSet
 
 /**
- * Java-friendly static factory methods for all lirp-fx delegate types.
+ * Java-friendly static factory methods for lirp-fx scalar and collection delegate types.
  *
  * Kotlin callers prefer the top-level `fxString()`, `fxInteger()`, `fxAggregateList()` etc. functions.
  * Java callers use this object's `@JvmStatic` methods to avoid Kotlin top-level function call syntax.
  *
- * Method names mirror the top-level Kotlin factories with the `fx` prefix, so both Kotlin and Java
- * callers use a consistent naming convention: `FxProperties.fxString(...)`, `FxProperties.fxDouble(...)`.
+ * Projection-map factories are in [net.transgressoft.lirp.persistence.fx.projection.FxProjections].
  */
 object FxProperties {
 
@@ -90,23 +88,4 @@ object FxProperties {
         initialIds: Set<K> = emptySet(),
         dispatchToFxThread: Boolean = true
     ): FxAggregateSet<K, E> = FxAggregateSet(mutableAggregateSet(initialIds), dispatchToFxThread)
-
-    /**
-     * Creates an [FxProjectionMap] that groups entities from any [FxObservableCollection]
-     * source by a projection key.
-     *
-     * @param K the entity ID type
-     * @param PK the projection key type
-     * @param E the entity type
-     * @param sourceRef lambda returning the source collection
-     * @param keyExtractor function extracting the projection key from an entity
-     * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
-     */
-    @JvmStatic
-    @JvmOverloads
-    fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> fxProjectionMap(
-        sourceRef: () -> FxObservableCollection<K, E>,
-        keyExtractor: (E) -> PK,
-        dispatchToFxThread: Boolean = true
-    ): FxProjectionMap<K, PK, E> = FxProjectionMap(sourceRef, keyExtractor, dispatchToFxThread)
 }

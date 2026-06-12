@@ -17,6 +17,7 @@
 
 package net.transgressoft.lirp.persistence.projection
 
+import net.transgressoft.lirp.InternalLirpApi
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.CollectionChangeEvent
 import net.transgressoft.lirp.persistence.AggregateCollectionRef
@@ -86,21 +87,27 @@ class MultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identifi
     private var initialized = false
 
     /**
-     * Optional callback invoked after each projection change with the current map state.
-     * Fires after every incremental update that results in at least one addition or removal.
+     * Registers [listener] to be invoked after each projection change with the current map state.
+     * Multiple listeners may be registered; each fires on the mutating thread in registration order.
+     * The returned [AutoCloseable] deregisters this listener when closed.
+     *
+     * This is the primary seam for adapter layers (such as the FX decorator) that need to
+     * observe and react to projection changes from a separate module.
      */
-    internal var onChange: ((Map<PK, List<E>>) -> Unit)?
-        get() = core.onChange
-        set(value) {
-            core.onChange = value
-        }
+    fun addOnChangeListener(listener: (Map<PK, List<E>>) -> Unit): AutoCloseable =
+        core.addOnChangeListener(listener)
 
-    /** Fires alongside [onChange] carrying only the keys changed by the latest delta. Single-subscriber. */
-    internal var onBucketsChanged: ((Set<PK>) -> Unit)?
-        get() = core.onBucketsChanged
-        set(value) {
-            core.onBucketsChanged = value
-        }
+    /**
+     * Registers [listener] to be invoked alongside onChange listeners after each non-noop bucket
+     * mutation, carrying only the keys changed by the latest delta. Multiple listeners may be
+     * registered; each fires on the mutating thread in registration order.
+     * The returned [AutoCloseable] deregisters this listener when closed.
+     *
+     * Adapter layers use this hook to coalesce bucket-level changes into a single notification
+     * batch without needing to diff the full map state.
+     */
+    fun addOnBucketsChangedListener(listener: (Set<PK>) -> Unit): AutoCloseable =
+        core.addOnBucketsChangedListener(listener)
 
     private fun initialize() {
         if (initialized) return
@@ -115,10 +122,12 @@ class MultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identifi
 
     /**
      * Returns the current contents of the [key] bucket WITHOUT triggering lazy initialization.
-     * The value-transform decorator's `onBucketsChanged` hook calls this; that hook fires only after
-     * [initialize] has populated the core, so it must never re-enter [initialize] (which would recurse).
+     *
+     * Adapter layers (such as the FX decorator) call this from their [addOnBucketsChangedListener] hook to
+     * read the latest bucket contents after each delta. The hook fires only after initialization has
+     * populated the core, so this method must never re-enter [initialize] (which would recurse).
      */
-    internal fun bucketSnapshot(key: PK): List<E>? = core.readOnlyView[key]
+    fun bucketSnapshot(key: PK): List<E>? = core.readOnlyView[key]
 
     @Suppress("UNCHECKED_CAST")
     private fun subscribeToSource(source: AggregateCollectionRef<K, E>) {
@@ -154,7 +163,7 @@ class MultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identifi
         val newKeys = keyExtractor(entity).toSet() // deduplicate
         val oldKeys = reverseIndex[entity.id]
         if (oldKeys != null) {
-            // WR-02: a re-add of an already-indexed entity reconciles as a key-set delta instead of
+            // A re-add of an already-indexed entity reconciles as a key-set delta instead of
             // overwriting the index and orphaning the entity in previously-recorded buckets.
             applyKeyDelta(entity, oldKeys, newKeys)
             return
@@ -163,7 +172,34 @@ class MultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identifi
         val changed = mutableSetOf<PK>()
         for (key in newKeys) changed += core.addToBucketSilent(entity, key)
         reverseIndex[entity.id] = newKeys
-        core.fireBucketsChanged(changed) // WR-01: one batched delta per logical add
+        core.fireBucketsChanged(changed)
+    }
+
+    /**
+     * Recomputes an already-bucketed entity's key-set membership after an in-place mutation of its
+     * key-bearing property and fires exactly one batched buckets-changed signal.
+     *
+     * The method reads the entity's current bucket keys from the reverse index, computes the new key
+     * set via [keyExtractor], and delegates to [applyKeyDelta] which performs add-before-remove to
+     * guarantee the entity is never transiently absent from all buckets mid-move.
+     *
+     * This is a no-op for entities not currently present in this projection (i.e., those that were
+     * never added or were subsequently removed). In that case the method returns immediately without
+     * modifying any bucket state or firing any notification.
+     *
+     * This method is an internal adapter SPI: it exists because the core projection is
+     * reactivity-agnostic (entity bound is [IdentifiableEntity], not `ReactiveEntity`), so the FX
+     * layer — which holds the per-entity mutation subscription — must call back into the core to
+     * trigger re-bucketing when a key-bearing property changes. Misuse (calling with a stale or
+     * externally-modified entity) can violate bucket invariants.
+     *
+     * @param entity the entity whose bucket membership must be recomputed
+     */
+    @InternalLirpApi
+    fun reconcile(entity: E) {
+        val oldKeys = reverseIndex[entity.id] ?: return // entity not bucketed — no-op
+        val newKeys = keyExtractor(entity).toSet()
+        applyKeyDelta(entity, oldKeys, newKeys)
     }
 
     /**
@@ -190,7 +226,7 @@ class MultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identifi
         val keys = reverseIndex.remove(entity.id) ?: return
         val changed = mutableSetOf<PK>()
         for (key in keys) core.removeFromBucketSilent(entity, key)?.let { changed += it }
-        core.fireBucketsChanged(changed) // WR-01: one batched delta per logical removal
+        core.fireBucketsChanged(changed)
     }
 
     // AbstractMap read overrides — all call initialize() first and delegate to core.readOnlyView

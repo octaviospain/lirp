@@ -206,7 +206,7 @@ internal class ProjectionMapTest : StringSpec({
 
         var callbackFiredCount = 0
         var lastMapSnapshot: Map<String, List<AudioItem>>? = null
-        projection.onChange = { currentMap ->
+        projection.addOnChangeListener { currentMap ->
             callbackFiredCount++
             lastMapSnapshot = currentMap
         }
@@ -228,11 +228,51 @@ internal class ProjectionMapTest : StringSpec({
         projection["Jazz"]!!.size shouldBe 1
 
         var callbackFiredCount = 0
-        projection.onChange = { callbackFiredCount++ }
+        projection.addOnChangeListener { callbackFiredCount++ }
 
         playlist.audioItems.remove(t1)
 
         callbackFiredCount shouldBe 1
+    }
+
+    "ProjectionMap two independent addOnBucketsChangedListener registrations both fire for one mutation" {
+        val t1 = trackRepo.create(1, "Jazz")
+        val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id)).also(playlistRepo::add)
+        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+
+        projection["Jazz"]!!.size shouldBe 1
+
+        var firstFired = 0
+        var secondFired = 0
+        projection.addOnBucketsChangedListener { firstFired++ }
+        projection.addOnBucketsChangedListener { secondFired++ }
+
+        val t2 = trackRepo.create(2, "Rock")
+        playlist.audioItems.add(t2)
+
+        firstFired shouldBe 1
+        secondFired shouldBe 1
+    }
+
+    "ProjectionMap closing one addOnBucketsChangedListener registration leaves the other active" {
+        val t1 = trackRepo.create(1, "Jazz")
+        val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id)).also(playlistRepo::add)
+        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+
+        projection["Jazz"]!!.size shouldBe 1
+
+        var firstFired = 0
+        var secondFired = 0
+        val firstReg = projection.addOnBucketsChangedListener { firstFired++ }
+        projection.addOnBucketsChangedListener { secondFired++ }
+
+        firstReg.close()
+
+        val t2 = trackRepo.create(2, "Rock")
+        playlist.audioItems.add(t2)
+
+        firstFired shouldBe 0
+        secondFired shouldBe 1
     }
 
     "ProjectionMap with MutableAggregateSet auto-updates on add and remove" {
@@ -297,7 +337,7 @@ internal class ProjectionMapTest : StringSpec({
         projection.size shouldBe 2
 
         var callbackFiredCount = 0
-        projection.onChange = { callbackFiredCount++ }
+        projection.addOnChangeListener { callbackFiredCount++ }
 
         parent.playlists.remove(p1)
 
@@ -313,7 +353,7 @@ internal class ProjectionMapTest : StringSpec({
         projection.size shouldBe 1
 
         var lastSnapshot: Map<String, List<MutableAudioPlaylist>>? = null
-        projection.onChange = { lastSnapshot = it }
+        projection.addOnChangeListener { lastSnapshot = it }
 
         val p2 = DefaultAudioPlaylist(2, "Rock Playlist").also(playlistRepo::add)
         parent.playlists.add(p2)

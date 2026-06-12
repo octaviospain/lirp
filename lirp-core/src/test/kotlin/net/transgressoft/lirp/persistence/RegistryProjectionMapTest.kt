@@ -243,7 +243,7 @@ internal class RegistryProjectionMapTest : StringSpec({
         projection.size shouldBe 0
 
         var callbackSnapshot: Map<String, List<AudioItem>>? = null
-        projection.onChange = { callbackSnapshot = it }
+        projection.addOnChangeListener { callbackSnapshot = it }
 
         trackRepo.create(1, "Track A", "Blues")
         reactive.advance()
@@ -262,7 +262,7 @@ internal class RegistryProjectionMapTest : StringSpec({
         projection.size shouldBe 1
 
         var callbackCount = 0
-        projection.onChange = { callbackCount++ }
+        projection.addOnChangeListener { callbackCount++ }
 
         trackRepo.remove(t2)
         reactive.advance()
@@ -278,7 +278,7 @@ internal class RegistryProjectionMapTest : StringSpec({
         projection.size shouldBe 1
 
         var callbackCount = 0
-        projection.onChange = { callbackCount++ }
+        projection.addOnChangeListener { callbackCount++ }
 
         // Create a fresh entity object with same id but updated title — distinct object
         // reference so handleReplaceInBucket detects an actual change

@@ -36,7 +36,7 @@ import kotlin.reflect.KProperty
  *
  * The projection uses a [java.util.concurrent.ConcurrentSkipListMap] (via [ProjectionCore]) for natural
  * key ordering with CME-free iteration. Bucketing logic is driven by a
- * `ConcurrentHashMap<K, Set<PK>>` reverse index (entity id â current set of bucket keys)
+ * `ConcurrentHashMap<K, Set<PK>>` reverse index (entity id → current set of bucket keys)
  * enabling O(1) old-key-set lookup on Update events without relying on old-state snapshots.
  *
  * **Add-before-remove ordering:** On a key-set update, new buckets are populated
@@ -76,13 +76,13 @@ class MultiKeyRegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : 
     private val keyExtractor: (E) -> Collection<PK>
 ) : AbstractMap<PK, List<E>>(), AutoCloseable {
 
-    // Bucket engine â stores one List<E> per PK bucket key in a ConcurrentSkipListMap.
+    // Bucket engine — stores one List<E> per PK bucket key in a ConcurrentSkipListMap.
     // All per-key bucket ops are driven explicitly through the silent batch primitives; the
     // ProjectionCore keyExtractor is never invoked.
     private val core = ProjectionCore<K, PK, E> { error("ProjectionCore keyExtractor must not be called in MultiKeyRegistryProjectionMap") }
 
     /**
-     * Reverse index: entity id â the current set of bucket keys it occupies.
+     * Reverse index: entity id → the current set of bucket keys it occupies.
      * Using `ConcurrentHashMap` keeps this index isolated from the
      * [java.util.concurrent.ConcurrentSkipListMap] used for bucket storage in [ProjectionCore].
      */
@@ -97,21 +97,27 @@ class MultiKeyRegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : 
     private lateinit var subscription: LirpEventSubscription<*, *, *>
 
     /**
-     * Optional callback invoked after each projection change with the current map state.
-     * Fires after every incremental update that results in at least one addition, removal, or replacement.
+     * Registers [listener] to be invoked after each projection change with the current map state.
+     * Multiple listeners may be registered; each fires on the mutating thread in registration order.
+     * The returned [AutoCloseable] deregisters this listener when closed.
+     *
+     * This is the primary seam for adapter layers (such as the FX decorator) that need to
+     * observe and react to projection changes from a separate module.
      */
-    internal var onChange: ((Map<PK, List<E>>) -> Unit)?
-        get() = core.onChange
-        set(value) {
-            core.onChange = value
-        }
+    fun addOnChangeListener(listener: (Map<PK, List<E>>) -> Unit): AutoCloseable =
+        core.addOnChangeListener(listener)
 
-    /** Fires alongside [onChange] carrying only the keys changed by the latest delta. Single-subscriber. */
-    internal var onBucketsChanged: ((Set<PK>) -> Unit)?
-        get() = core.onBucketsChanged
-        set(value) {
-            core.onBucketsChanged = value
-        }
+    /**
+     * Registers [listener] to be invoked alongside onChange listeners after each non-noop bucket
+     * mutation, carrying only the keys changed by the latest delta. Multiple listeners may be
+     * registered; each fires on the mutating thread in registration order.
+     * The returned [AutoCloseable] deregisters this listener when closed.
+     *
+     * Adapter layers use this hook to coalesce bucket-level changes into a single notification
+     * batch without needing to diff the full map state.
+     */
+    fun addOnBucketsChangedListener(listener: (Set<PK>) -> Unit): AutoCloseable =
+        core.addOnBucketsChangedListener(listener)
 
     private fun initialize() {
         if (initialized) return
@@ -135,7 +141,7 @@ class MultiKeyRegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : 
             is StandardCrudEvent.Create -> event.entities.values.forEach(::onCreated)
             is StandardCrudEvent.Delete -> event.entities.values.forEach(::onDeleted)
             is StandardCrudEvent.Update -> event.entities.forEach { (id, entity) -> onUpdated(id, entity) }
-            else -> { /* CONFLICT, RECOVERY_FAILED â not subscribed */ }
+            else -> { /* CONFLICT, RECOVERY_FAILED — not subscribed */ }
         }
     }
 
@@ -198,10 +204,12 @@ class MultiKeyRegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : 
 
     /**
      * Returns the current contents of the [key] bucket WITHOUT triggering lazy initialization.
-     * The value-transform decorator's `onBucketsChanged` hook calls this; that hook fires only after
-     * [initialize] has populated the core, so it must never re-enter [initialize] (which would recurse).
+     *
+     * Adapter layers (such as the FX decorator) call this from their [addOnBucketsChangedListener] hook to
+     * read the latest bucket contents after each delta. The hook fires only after initialization has
+     * populated the core, so this method must never re-enter [initialize] (which would recurse).
      */
-    internal fun bucketSnapshot(key: PK): List<E>? = core.readOnlyView[key]
+    fun bucketSnapshot(key: PK): List<E>? = core.readOnlyView[key]
 
     /**
      * Cancels the registry subscription, releasing the projection's hold on the event stream so it and
@@ -216,7 +224,7 @@ class MultiKeyRegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : 
         }
     }
 
-    // AbstractMap read overrides â all call initialize() first and delegate to core.readOnlyView
+    // AbstractMap read overrides — all call initialize() first and delegate to core.readOnlyView
 
     override val size: Int get() {
         initialize()
