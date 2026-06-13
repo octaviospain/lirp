@@ -4,6 +4,7 @@ import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
 import net.transgressoft.lirp.event.EventType
 import net.transgressoft.lirp.event.LirpEventSubscriberBase
 import net.transgressoft.lirp.event.MutationEvent
+import net.transgressoft.lirp.event.PropertyChanged
 import net.transgressoft.lirp.persistence.ReactivePrimitive
 import io.kotest.assertions.assertSoftly
 import io.kotest.assertions.nondeterministic.eventually
@@ -13,7 +14,6 @@ import io.kotest.matchers.date.shouldBeAfter
 import io.kotest.matchers.equals.shouldBeEqual
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
-import io.kotest.matchers.shouldNotBe
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.uuid.ExperimentalUuidApi
 
@@ -56,7 +56,7 @@ class ReactivePrimitiveTest : StringSpec({
                         MutationEvent<String, ReactivePrimitive<V>>
                     >("subscriber") {
                     init {
-                        addOnNextEventAction(MutationEvent.Type.MUTATE, UPDATE) { event ->
+                        addOnNextEventAction(MutationEvent.Type.PROPERTY_CHANGED, UPDATE) { event ->
                             receivedEvents[event.type] = event
                         }
                     }
@@ -64,7 +64,7 @@ class ReactivePrimitiveTest : StringSpec({
 
             subject.subscribe(subscriber)
 
-            val oldClone = initialClone(subject)
+            val oldValue = subject.value
             val lastDateModified = subject.lastDateModified
 
             subject.value = mutatedValue
@@ -72,14 +72,13 @@ class ReactivePrimitiveTest : StringSpec({
             eventually(100.milliseconds) {
                 subject.lastDateModified shouldBeAfter lastDateModified
                 subject.value shouldBe mutatedValue
-                subject shouldNotBe oldClone
-                subject.hashCode() shouldNotBe oldClone.hashCode()
 
-                assertSoftly(receivedEvents[UPDATE]) {
-                    it?.let {
-                        this?.newEntity shouldBe subject
-                        this?.oldEntity shouldBe oldClone
-                    }
+                val propertyChanged =
+                    receivedEvents[MutationEvent.Type.PROPERTY_CHANGED].shouldNotBeNull() as PropertyChanged<*, *, *>
+                assertSoftly {
+                    propertyChanged.entity shouldBe subject
+                    propertyChanged.newValue shouldBe mutatedValue
+                    propertyChanged.oldValue shouldBe oldValue
                 }
             }
 

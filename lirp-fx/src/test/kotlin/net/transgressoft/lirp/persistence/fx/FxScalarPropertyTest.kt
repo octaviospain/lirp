@@ -77,7 +77,7 @@ class FxScalarPropertyTest : StringSpec({
         val prop = LirpStringProperty("hello")
         var valueSeenInsideCallback: String? = null
 
-        prop.bindMutationCallback { mutationBlock ->
+        prop.bindMutationCallback { _, _, mutationBlock ->
             // Capture old value before super.set() is called
             valueSeenInsideCallback = prop.get()
             mutationBlock()
@@ -185,7 +185,7 @@ class FxScalarPropertyTest : StringSpec({
     "LirpLongProperty set() invokes mutation callback before storing value" {
         val prop = LirpLongProperty(1L)
         var valueSeenInsideCallback: Long = -1L
-        prop.bindMutationCallback { mutationBlock ->
+        prop.bindMutationCallback { _, _, mutationBlock ->
             valueSeenInsideCallback = prop.get()
             mutationBlock()
         }
@@ -214,7 +214,7 @@ class FxScalarPropertyTest : StringSpec({
     "LirpFloatProperty set() invokes mutation callback before storing value" {
         val prop = LirpFloatProperty(1.0f)
         var valueSeenInsideCallback: Float = -1.0f
-        prop.bindMutationCallback { mutationBlock ->
+        prop.bindMutationCallback { _, _, mutationBlock ->
             valueSeenInsideCallback = prop.get()
             mutationBlock()
         }
@@ -226,7 +226,7 @@ class FxScalarPropertyTest : StringSpec({
     "LirpDoubleProperty set() invokes mutation callback before storing value" {
         val prop = LirpDoubleProperty(1.0)
         var valueSeenInsideCallback: Double = -1.0
-        prop.bindMutationCallback { mutationBlock ->
+        prop.bindMutationCallback { _, _, mutationBlock ->
             valueSeenInsideCallback = prop.get()
             mutationBlock()
         }
@@ -247,7 +247,7 @@ class FxScalarPropertyTest : StringSpec({
     "LirpBooleanProperty set() invokes mutation callback before storing value" {
         val prop = LirpBooleanProperty(false)
         var valueSeenInsideCallback: Boolean? = null
-        prop.bindMutationCallback { mutationBlock ->
+        prop.bindMutationCallback { _, _, mutationBlock ->
             valueSeenInsideCallback = prop.get()
             mutationBlock()
         }

@@ -11,6 +11,8 @@ Thank you for your interest in contributing to lirp! This document provides guid
 - [Pull Requests](#pull-requests)
 - [Running Tests](#running-tests)
 - [Style Guidelines](#style-guidelines)
+- [Public API Compatibility (ABI)](#public-api-compatibility-abi)
+- [Supply Chain Security](#supply-chain-security)
 
 ## Code of Conduct
 
@@ -204,6 +206,76 @@ To automatically fix formatting issues:
 ```bash
 ./gradlew ktlintFormat
 ```
+
+## Public API Compatibility (ABI)
+
+Every published module's binary API surface is gated by the JetBrains
+[binary-compatibility-validator](https://github.com/Kotlin/binary-compatibility-validator).
+Each gated module commits a golden `api/<module>.api` dump describing its public/protected
+ABI. `apiCheck` runs as part of `gradle check` and **fails the build whenever the compiled
+surface diverges from the committed dump**. The policy is fail-on-any-change: every public-API
+change must be a deliberate, reviewed `apiDump` commit rather than a silent
+`NoSuchMethodError`/`AbstractMethodError` for downstream consumers.
+
+### Layout
+
+- **Gated modules** (each owns `api/<module>.api`): `lirp-api`, `lirp-core`, `lirp-sql-api`,
+  `lirp-sql`, `lirp-fx`, `lirp-ksp` — the modules published to Maven Central.
+- **Ignored** (in the root `build.gradle` `apiValidation { ignoredProjects }`): `lirp-benchmark`
+  (never published) and `lirp-gradle-plugin` (its contract is the plugin id + extension, not a
+  binary library API).
+- **`@InternalLirpApi`** is registered as a `nonPublicMarkers` entry, so symbols annotated with
+  it are excluded from the dumps even though they are `public` for cross-module use.
+
+### Tasks
+
+```bash
+gradle apiCheck   # compare the compiled surface against the committed api/*.api dumps (wired into `check`)
+gradle apiDump    # regenerate the api/*.api dumps from the current compiled surface
+```
+
+### When to regenerate the `.api` files
+
+Re-run `apiDump` and commit the diff **whenever you intentionally change a public or protected
+symbol of a gated module**:
+
+- adding / removing / renaming a public or protected class, function, property, or constructor
+- changing a public signature — parameters, return/property type, nullability, generic bounds, visibility
+- adding or removing entries on a public `enum`
+- a change to KSP-generated public symbols (e.g. a new `@PersistenceMapping` entity adds a
+  `*_LirpTableDef` / accessor to the surface)
+
+Run a clean compile first so KSP-generated symbols are present, then dump and re-check:
+
+```bash
+gradle clean
+gradle apiDump
+gradle apiCheck   # confirm green against the regenerated baseline
+```
+
+Review the `api/*.api` diff like any other source change — it is the human-readable record of
+what your change does to the binary contract. A **removal or incompatible change is a breaking
+change**: bump the major version and add a migration note to `CHANGELOG.md` (mirror the format of
+the existing *Migration from 2.x to 3.0* section, which documents the v3.0.0 event-API break).
+
+### When NOT to regenerate
+
+If `apiCheck` fails and you did **not** intend an API change, do not run `apiDump` — investigate
+first. An unexpected diff usually means an accidental visibility leak (a helper that should be
+`internal` or `@InternalLirpApi`) or an unintended signature change. Fix the source, not the
+baseline. Regenerating to make the gate green would erase the warning it exists to raise.
+
+### Adding a new published module
+
+Wire the module into the root `subprojects { mavenPublishing }` publishing block and run
+`gradle apiDump` — a new `api/<module>.api` appears. If a module should not be gated (because it
+is not published), add it to `ignoredProjects` in the root `apiValidation {}` block instead.
+
+### Dependency note
+
+The binary-compatibility-validator plugin is a build-classpath dependency, so its artifacts are
+pinned in `gradle/verification-metadata.xml`. If you bump its version, regenerate the verification
+metadata as described below.
 
 ## Supply Chain Security
 

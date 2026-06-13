@@ -28,8 +28,8 @@ import kotlin.reflect.KProperty
  *
  * When registered in a [net.transgressoft.lirp.entity.ReactiveEntityBase] subclass and wired by
  * [net.transgressoft.lirp.persistence.RegistryBase], each call to [set] emits a
- * [net.transgressoft.lirp.event.ReactiveMutationEvent]
- * using the clone-before-mutation pattern — the entity is cloned before `super.set()` executes.
+ * [net.transgressoft.lirp.event.PropertyChanged] event carrying the old and new string values.
+ * The old value is captured synchronously before `super.set()` executes to prevent aliasing.
  * Use [fxString] to create instances as property delegates.
  *
  * @param initialValue the initial string value; defaults to an empty string
@@ -44,9 +44,9 @@ class LirpStringProperty(initialValue: String = "", val dispatchToFxThread: Bool
     LirpDelegate,
     FxScalarPropertyDelegate {
 
-    private val mutationCallback = AtomicReference<((() -> Unit) -> Unit)?>(null)
+    private val mutationCallback = AtomicReference<((Any?, Any?, () -> Unit) -> Unit)?>(null)
 
-    override fun bindMutationCallback(callback: (() -> Unit) -> Unit) {
+    override fun bindMutationCallback(callback: (oldValue: Any?, newValue: Any?, mutationBlock: () -> Unit) -> Unit) {
         check(mutationCallback.compareAndSet(null, callback)) {
             "Mutation callback already bound. FxScalarPropertyDelegate supports a single binding."
         }
@@ -60,7 +60,8 @@ class LirpStringProperty(initialValue: String = "", val dispatchToFxThread: Bool
         if (get() == newValue) return
         val callback = mutationCallback.get()
         if (callback != null) {
-            callback { super.set(newValue) }
+            val oldValue = get() // capture before super.set() — reading after would alias the new value
+            callback(oldValue, newValue) { super.set(newValue) }
         } else {
             super.set(newValue)
         }

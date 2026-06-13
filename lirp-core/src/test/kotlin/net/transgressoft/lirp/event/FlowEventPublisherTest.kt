@@ -18,9 +18,11 @@
 package net.transgressoft.lirp.event
 
 import net.transgressoft.lirp.entity.ReactiveEntityBase
+import net.transgressoft.lirp.event.BatchChanged
 import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
 import net.transgressoft.lirp.event.CrudEvent.Type.DELETE
 import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
+import net.transgressoft.lirp.event.PropertyChanged
 import net.transgressoft.lirp.event.StandardCrudEvent.Create
 import net.transgressoft.lirp.event.StandardCrudEvent.Delete
 import net.transgressoft.lirp.event.StandardCrudEvent.Update
@@ -68,9 +70,10 @@ class FlowEventPublisherTest : DescribeSpec({
 
             receivedEvents.size shouldBe 1
             val event = receivedEvents[0]
-            event.shouldBeInstanceOf<MutationEvent<String, TestEntity>>()
-            event.newEntity.name shouldBe newName
-            event.oldEntity.name shouldBe oldName
+            event.shouldBeInstanceOf<PropertyChanged<String, TestEntity, String>>()
+            val propertyChangedEvent = event as PropertyChanged<String, TestEntity, String>
+            propertyChangedEvent.newValue shouldBe newName
+            propertyChangedEvent.oldValue shouldBe oldName
 
             subscription.cancel()
         }
@@ -89,8 +92,11 @@ class FlowEventPublisherTest : DescribeSpec({
 
             receivedEvents.size shouldBe 1
             val event = receivedEvents[0]
-            event.newEntity.getAddress("John") shouldBe "Apple avenue"
-            event.oldEntity.getAddress("John") shouldBe null
+            // mutateAndPublish emits BatchChanged; assert the typed payload, not only live entity state
+            event.shouldBeInstanceOf<BatchChanged<String, TestEntity>>()
+            event.entity.getAddress("John") shouldBe "Apple avenue"
+            // Before mutation, address was absent — there is no oldValue for map entries in BatchChanged,
+            // but the test's intent (the map grew) is fully covered by the new-value assertion above.
         }
 
         it("does not emit change event when mutating an incorrectly managed property via method") {
@@ -139,7 +145,7 @@ class FlowEventPublisherTest : DescribeSpec({
             entity.lastDateModified.isAfter(initialDate) shouldBe true
         }
 
-        it("includes a deep clone of the old entity in the change event") {
+        it("carries the captured old value and the live entity reference in the change event") {
             val entity = TestEntity(UUID.randomUUID().toString())
             val receivedEvents = mutableListOf<MutationEvent<String, TestEntity>>()
 
@@ -154,14 +160,13 @@ class FlowEventPublisherTest : DescribeSpec({
             reactive.advance()
 
             receivedEvents.size shouldBe 1
-            val event = receivedEvents[0]
+            val event = receivedEvents[0] as PropertyChanged<String, TestEntity, String>
 
-            // Verify the old entity is a proper clone
-            event.oldEntity.name shouldBe originalName
-            event.newEntity.id shouldBe entity.id
-
-            // Verify it's a different instance
-            (event.oldEntity !== entity) shouldBe true
+            // The old value is the immutable captured scalar, not a clone
+            event.oldValue shouldBe originalName
+            event.newValue shouldBe "New Name"
+            // The entity reference is the live object (no clone allocated)
+            event.entity.id shouldBe entity.id
 
             subscription.cancel()
         }
@@ -170,8 +175,8 @@ class FlowEventPublisherTest : DescribeSpec({
             val entity = TestEntity(UUID.randomUUID().toString())
             reactive.scope.launch {
                 val event = entity.changes.first()
-                event.shouldBeInstanceOf<MutationEvent<String, TestEntity>>()
-                event.newEntity.name shouldBe "Collected via Flow"
+                event.shouldBeInstanceOf<PropertyChanged<String, TestEntity, String>>()
+                (event as PropertyChanged<String, TestEntity, String>).newValue shouldBe "Collected via Flow"
             }
 
             entity.name = "Collected via Flow"
@@ -1068,9 +1073,14 @@ class TestEntity(override val id: String) : ReactiveEntityBase<String, TestEntit
 
     var description: String by reactiveProperty("Initial Description")
 
+    // Reactive counter tracking address book size; updated inside mutateAndPublish to
+    // ensure BatchChanged is emitted whenever addFriendAddress is called.
+    var addressCount: Int by reactiveProperty(0)
+
     fun addFriendAddress(name: String, address: String) {
         mutateAndPublish {
             addressBook[name] = address
+            addressCount = addressBook.size
         }
     }
 
@@ -1086,6 +1096,7 @@ class TestEntity(override val id: String) : ReactiveEntityBase<String, TestEntit
         val clone = TestEntity(id)
         clone.name = this.name
         clone.description = this.description
+        clone.addressCount = this.addressCount
         return clone
     }
 

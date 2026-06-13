@@ -20,6 +20,7 @@ package net.transgressoft.lirp.entity
 import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.LirpEventPublisher
 import net.transgressoft.lirp.event.MutationEvent
+import net.transgressoft.lirp.event.PropertyChanged
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
@@ -91,7 +92,7 @@ class ReactiveEntityLazyInitTest : StringSpec({
         reactive.advance()
 
         receivedEvents.size shouldBe 1
-        receivedEvents[0].newEntity.value shouldBe "after-subscription"
+        (receivedEvents[0] as PropertyChanged<String, LazyTestEntity, String>).newValue shouldBe "after-subscription"
 
         subscription.cancel()
     }

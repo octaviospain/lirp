@@ -48,9 +48,8 @@ import net.transgressoft.lirp.entity.ReactiveEntity
  * }
  * ```
  *
- * The [newEntity] and [oldEntity] properties inherited from [MutationEvent] represent the **parent**
- * entity's state at the time the bubble-up event was emitted, not the child entity's state.
- * The original child event is accessible via [childEvent].
+ * The [entity] property represents the **parent** entity at the time the bubble-up event was emitted.
+ * The parent's own fields do not change during a child mutation — to inspect what changed, use [childEvent].
  *
  * @param K the type of the parent entity's ID, which must be [Comparable]
  * @param R the type of the parent entity

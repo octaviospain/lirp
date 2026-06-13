@@ -10,12 +10,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The 3.0.0 line expands the projection API from a single aggregate-source, single-key,
 identity-only map into a full matrix: aggregate **and** registry sources, single-key **and**
 multi-key extractors, identity **and** value-transform outputs — for both the core and the
-JavaFX layers. It also reorganises projection code into dedicated `projection` subpackages and
-replaces the assignable change-callback slots with an additive, clobber-safe listener API.
+JavaFX layers. It also reorganises projection code into dedicated `projection` subpackages,
+replaces the assignable change-callback slots with an additive, clobber-safe listener API,
+and replaces the entity-clone–carrying mutation event with a typed, scalar-capturing event
+hierarchy.
 These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-from-2x-to-30) below.
 
 ### Added
 
+- **Typed mutation events** — `PropertyChanged<K, R, V>` and `BatchChanged<K, R>` are now the
+  primary event types emitted when reactive properties change. Both carry immutable value scalars
+  (`oldValue`, `newValue`, `property`, `versionAtMutation`, `oldIndexKey`, `newIndexKey`) captured
+  synchronously at assignment time, guaranteeing deferred subscribers observe the correct values
+  even when the entity is mutated again before the subscriber drains. `FieldChange<R, V>` is the
+  per-field change carrier inside `BatchChanged`. The `MutationEvent.Type` enum gains
+  `PROPERTY_CHANGED` (302) and `BATCH_CHANGED` (303).
 - **Registry-source projections** — `RegistryProjectionMap` (core) and `RegistryFxProjectionMap`
   (FX) project a `Registry`'s entities into buckets, complementing the existing aggregate-source
   projections. Registry-backed projections are `AutoCloseable` so their registry subscription can
@@ -58,6 +67,16 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
 
 ### Removed
 
+- **Entity-clone fields on mutation events** — `ReactiveMutationEvent.oldEntity` /
+  `ReactiveMutationEvent.newEntity` have been removed. The two-arg constructor
+  `ReactiveMutationEvent(oldEntity, newEntity)` is replaced by a single-arg form
+  `ReactiveMutationEvent(entity)`. Subscribers that previously read `event.oldEntity` /
+  `event.newEntity` must switch to `event as PropertyChanged<K, R, V>` and read `oldValue` /
+  `newValue` directly.
+- **`FxScalarPropertyDelegate.bindMutationCallback(Function1)`** — the single-argument form
+  `callback: (() -> Unit) -> Unit` is replaced by the three-argument form
+  `callback: (Any?, Any?, () -> Unit) -> Unit` that receives the captured `oldValue` and `newValue`.
+  Custom `FxScalarPropertyDelegate` implementations must update their override signatures.
 - **Assignable change-callback slots** — the `onChange` and `onBucketsChanged` mutable properties on
   the projection maps were removed in favour of the additive `addOnChangeListener` /
   `addOnBucketsChangedListener` methods. A consumer can observe projection changes but can no longer
@@ -110,3 +129,59 @@ bucketReg.close()
 ```
 
 Multiple listeners now coexist; registering a second listener no longer overwrites the first.
+
+### Event API
+
+Subscribers that inspected `event.oldEntity` / `event.newEntity` must pattern-match on the
+concrete event type and read the captured value scalars instead:
+
+```kotlin
+// 2.x — entity clones on every mutation
+entity.subscribe { event ->
+    val before = event.oldEntity.title  // a full clone of the entity
+    val after  = event.newEntity.title
+}
+
+// 3.0.0 — typed event with immutable captured scalars (no clone)
+entity.subscribe { event ->
+    when (event) {
+        is PropertyChanged<*, *, *> -> {
+            val pc = event as PropertyChanged<Int, MyEntity, String>
+            val before = pc.oldValue   // captured at assignment time
+            val after  = pc.newValue
+            val prop   = pc.property.name
+        }
+        is BatchChanged<*, *> -> {
+            val bc = event as BatchChanged<Int, MyEntity>
+            bc.changes.forEach { change ->
+                println("${change.property.name}: ${change.oldValue} -> ${change.newValue}")
+            }
+        }
+        else -> { /* ReactiveMutationEvent or AggregateMutationEvent */ }
+    }
+}
+```
+
+`ReactiveMutationEvent` retains its single-entity form and `type = MUTATE (301)` for code paths
+that do not need the per-property detail. `subscribeToMutations` now delivers `MutationEvent<K,R>`
+(all direct mutation events) instead of the narrower `ReactiveMutationEvent<K,R>`.
+
+**Custom `FxScalarPropertyDelegate` implementations** must update `bindMutationCallback`:
+
+```kotlin
+// 2.x
+override fun bindMutationCallback(callback: (() -> Unit) -> Unit) { … }
+
+// 3.0.0
+override fun bindMutationCallback(callback: (Any?, Any?, () -> Unit) -> Unit) { … }
+//                                            ^^^  ^^^  captured old/new values
+```
+
+**`CrudEvent.Type.UPDATE` subscribers — `oldEntities` is a post-mutation snapshot.** When a
+`SqlRepository` re-publishes an entity mutation as a `StandardCrudEvent.Update`, the `oldEntities`
+map holds a clone of the entity taken at re-publish time — i.e. the *current, already-mutated*
+state, not the pre-mutation value. Because the per-mutation clone was removed from the hot path,
+there is no pre-mutation snapshot to carry here. If you need the actual before/after of a specific
+field, subscribe to the entity's `PropertyChanged` / `BatchChanged` events (which carry
+`oldValue` / `newValue` captured at assignment time) rather than diffing the repository-level
+`Update` event's `oldEntities` against `entities`.

@@ -26,10 +26,9 @@ import net.transgressoft.lirp.entity.ReactiveEntity
  * or a mutable aggregate collection changes, and bubble-up propagation is enabled for that
  * reference (`@Aggregate(bubbleUp = true)`).
  *
- * The [newEntity] and [oldEntity] represent the **parent** entity's state at the time the
- * bubble-up event was emitted. Because the parent's own fields do not change during a child
- * mutation or collection change, both properties hold the same parent entity reference.
- * Subscribers should inspect [childEvent] to determine the nature of the change:
+ * The [entity] represents the **parent** entity at the time the bubble-up event was emitted.
+ * Because the parent's own fields do not change during a child mutation or collection change,
+ * subscribers should inspect [childEvent] to determine the nature of the change:
  *
  * ```kotlin
  * invoice.subscribe { event ->
@@ -45,15 +44,13 @@ import net.transgressoft.lirp.entity.ReactiveEntity
  *
  * @param K the type of the parent entity's ID, which must be [Comparable]
  * @param R the type of the parent entity
- * @property newEntity the parent entity reference (same as [oldEntity] — parent fields do not change)
- * @property oldEntity the parent entity reference (same as [newEntity])
+ * @property entity the parent entity reference
  * @property refName the property name of the [@Aggregate][net.transgressoft.lirp.persistence.Aggregate]
  *   annotated property that triggered the bubble-up propagation
  * @property childEvent the original event emitted by the referenced child entity or collection
  */
 data class StandardAggregateMutationEvent<K, R>(
-    override val newEntity: R,
-    override val oldEntity: R,
+    override val entity: R,
     override val refName: String,
     override val childEvent: LirpEvent<*>,
     override val type: MutationEvent.Type = MutationEvent.Type.MUTATE

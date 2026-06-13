@@ -1,0 +1,67 @@
+public final class net/transgressoft/lirp/persistence/sql/ConnectionUrlSanitizer {
+	public static final field INSTANCE Lnet/transgressoft/lirp/persistence/sql/ConnectionUrlSanitizer;
+	public final fun sanitize (Ljava/lang/String;)Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/persistence/sql/ExposedTable {
+	public fun <init> (Lorg/jetbrains/exposed/v1/core/Table;Ljava/util/Map;Lorg/jetbrains/exposed/v1/core/Column;)V
+	public synthetic fun <init> (Lorg/jetbrains/exposed/v1/core/Table;Ljava/util/Map;Lorg/jetbrains/exposed/v1/core/Column;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lorg/jetbrains/exposed/v1/core/Table;
+	public final fun component2 ()Ljava/util/Map;
+	public final fun component3 ()Lorg/jetbrains/exposed/v1/core/Column;
+	public final fun copy (Lorg/jetbrains/exposed/v1/core/Table;Ljava/util/Map;Lorg/jetbrains/exposed/v1/core/Column;)Lnet/transgressoft/lirp/persistence/sql/ExposedTable;
+	public static synthetic fun copy$default (Lnet/transgressoft/lirp/persistence/sql/ExposedTable;Lorg/jetbrains/exposed/v1/core/Table;Ljava/util/Map;Lorg/jetbrains/exposed/v1/core/Column;ILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/sql/ExposedTable;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getColumnsByName ()Ljava/util/Map;
+	public final fun getTable ()Lorg/jetbrains/exposed/v1/core/Table;
+	public final fun getVersionCol ()Lorg/jetbrains/exposed/v1/core/Column;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/persistence/sql/ExposedTableInterpreter {
+	public fun <init> ()V
+	public final fun interpret (Lnet/transgressoft/lirp/persistence/LirpTableDef;)Lnet/transgressoft/lirp/persistence/sql/ExposedTable;
+}
+
+public class net/transgressoft/lirp/persistence/sql/SqlRepository : net/transgressoft/lirp/persistence/PersistentRepositoryBase {
+	public static final field Companion Lnet/transgressoft/lirp/persistence/sql/SqlRepository$Companion;
+	public static final field MAX_RECOVERY_ATTEMPTS I
+	public static final field STALE_IDS_CAP I
+	public fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;)V
+	public fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;I)V
+	public fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ILjava/lang/String;)V
+	public fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ILjava/lang/String;Z)V
+	public synthetic fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ILjava/lang/String;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;Z)V
+	public synthetic fun <init> (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ZZ)V
+	public synthetic fun <init> (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun close ()V
+	protected fun extractVersion (Lnet/transgressoft/lirp/entity/ReactiveEntity;)Ljava/lang/Long;
+	public final fun installEntityForeignKeys ()V
+	public final fun installJunctionForeignKeys ()V
+	protected fun loadFromStore ()Ljava/util/Map;
+	protected fun onEntityMutated (Lnet/transgressoft/lirp/event/MutationEvent;)V
+	protected fun writePending (Ljava/util/List;Ljava/util/List;Ljava/util/List;Z)V
+}
+
+public final class net/transgressoft/lirp/persistence/sql/SqlRepository$Companion {
+}
+
+public final class net/transgressoft/lirp/persistence/sql/SqliteRepository {
+	public static final field INSTANCE Lnet/transgressoft/lirp/persistence/sql/SqliteRepository;
+	public static final fun fileBacked (Ljava/nio/file/Path;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;)Lnet/transgressoft/lirp/persistence/sql/SqlRepository;
+	public static final fun fileBacked (Ljava/nio/file/Path;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;Z)Lnet/transgressoft/lirp/persistence/sql/SqlRepository;
+	public static synthetic fun fileBacked$default (Ljava/nio/file/Path;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/sql/SqlRepository;
+	public static final fun inMemory (Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;)Lnet/transgressoft/lirp/persistence/sql/SqlRepository;
+	public static final fun inMemory (Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;Z)Lnet/transgressoft/lirp/persistence/sql/SqlRepository;
+	public static synthetic fun inMemory$default (Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/sql/SqlRepository;
+}
+
+public final class net/transgressoft/lirp/persistence/sql/UuidJdbcSupportKt {
+	public static final fun bindUuid (Ljava/sql/PreparedStatement;ILjava/util/UUID;Ljava/sql/Connection;)V
+	public static final fun readUuid (Ljava/sql/ResultSet;ILjava/sql/Connection;)Ljava/util/UUID;
+	public static final fun readUuid (Ljava/sql/ResultSet;Ljava/lang/String;Ljava/sql/Connection;)Ljava/util/UUID;
+}
+

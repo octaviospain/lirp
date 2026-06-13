@@ -19,6 +19,7 @@ package net.transgressoft.lirp.entity
 
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.MutationEvent.Type.MUTATE
+import net.transgressoft.lirp.event.PropertyChanged
 import net.transgressoft.lirp.event.ReactiveMutationEvent
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.MutableAudioItem
@@ -122,7 +123,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
         entity.close()
 
         shouldThrow<IllegalStateException> {
-            entity.emitAsync(ReactiveMutationEvent(entity, entity))
+            entity.emitAsync(ReactiveMutationEvent(entity))
         }
 
         subscription.cancel()
@@ -180,7 +181,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
         reactive.advance()
 
         receivedEvents.size shouldBe 1
-        receivedEvents[0].newEntity.value shouldBe "reactivated"
+        (receivedEvents[0] as PropertyChanged<String, LazyTestEntity, String>).newValue shouldBe "reactivated"
 
         sub2.cancel()
     }
@@ -250,7 +251,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
         audioItem.close()
 
         shouldThrow<IllegalStateException> {
-            audioItem.emitAsync(ReactiveMutationEvent(audioItem, audioItem))
+            audioItem.emitAsync(ReactiveMutationEvent(audioItem))
         }.message shouldContain "MutableAudioItem"
 
         sub.cancel()
@@ -297,7 +298,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
         reactive.advance()
 
         received.size shouldBe 1
-        received[0].newEntity.title shouldBe "Track Charlie"
+        (received[0] as PropertyChanged<Int, AudioItem, String>).newValue shouldBe "Track Charlie"
 
         subscription.cancel()
         audioItem.close()

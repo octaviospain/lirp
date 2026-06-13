@@ -170,9 +170,10 @@ internal class CloseRaceRepo :
     override fun loadFromStore(): Map<Int, StressEntity> = emptyMap()
 
     override fun onEntityMutated(event: MutationEvent<Int, StressEntity>) {
-        val newMap = mapOf(event.newEntity.id to event.newEntity)
-        val oldMap = mapOf(event.oldEntity.id to event.oldEntity)
-        publisher.emitAsync(StandardCrudEvent.Update(newMap, oldMap))
+        // Only the entity id matters for the race-condition test; use the live entity for both
+        // maps since the test verifies publish-after-close safety, not event content correctness.
+        val entityMap = mapOf(event.entity.id to event.entity)
+        publisher.emitAsync(StandardCrudEvent.Update(entityMap, entityMap))
     }
 
     override fun writePending(

@@ -19,6 +19,7 @@ package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.event.MutationEvent
+import net.transgressoft.lirp.event.PropertyChanged
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -67,7 +68,7 @@ class ReactivePropertyDelegateTest : StringSpec({
 
         entity.name shouldBe "loudly-changed"
         received.size shouldBe 1
-        received[0].newEntity.name shouldBe "loudly-changed"
+        (received[0] as PropertyChanged<String, DelegateProbeEntity, String>).newValue shouldBe "loudly-changed"
         (entity.lastDateModified > timestampBefore) shouldBe true
 
         subscription.cancel()

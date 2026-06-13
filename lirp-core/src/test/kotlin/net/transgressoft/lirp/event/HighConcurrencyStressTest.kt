@@ -129,8 +129,7 @@ class HighConcurrencyStressTest : DescribeSpec({
                         repeat(EVENTS_PER_WRITER) { eventIndex ->
                             val newEntity = TestEntity("entity-$writerIndex-$eventIndex")
                             newEntity.name = "Name-$writerIndex-$eventIndex"
-                            val oldEntity = TestEntity("entity-$writerIndex-$eventIndex")
-                            publisher.emitAsync(ReactiveMutationEvent(newEntity, oldEntity))
+                            publisher.emitAsync(ReactiveMutationEvent(newEntity))
                         }
                     }
                 }

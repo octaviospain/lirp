@@ -1,0 +1,454 @@
+public abstract interface annotation class net/transgressoft/lirp/InternalLirpApi : java/lang/annotation/Annotation {
+}
+
+public final class net/transgressoft/lirp/entity/CascadeAction : java/lang/Enum {
+	public static final field CASCADE Lnet/transgressoft/lirp/entity/CascadeAction;
+	public static final field DETACH Lnet/transgressoft/lirp/entity/CascadeAction;
+	public static final field NONE Lnet/transgressoft/lirp/entity/CascadeAction;
+	public static final field RESTRICT Lnet/transgressoft/lirp/entity/CascadeAction;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lnet/transgressoft/lirp/entity/CascadeAction;
+	public static fun values ()[Lnet/transgressoft/lirp/entity/CascadeAction;
+}
+
+public abstract interface class net/transgressoft/lirp/entity/IdentifiableEntity : java/lang/Cloneable, net/transgressoft/lirp/entity/LirpEntity {
+	public synthetic fun clone ()Ljava/lang/Object;
+	public abstract fun clone ()Lnet/transgressoft/lirp/entity/IdentifiableEntity;
+	public abstract fun getId ()Ljava/lang/Comparable;
+	public abstract fun getUniqueId ()Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/entity/IdentifiableEntityKt {
+	public static final fun toIds (Ljava/util/List;)Ljava/util/List;
+	public static final fun toIds (Ljava/util/Set;)Ljava/util/Set;
+}
+
+public abstract interface class net/transgressoft/lirp/entity/LirpEntity {
+}
+
+public abstract interface class net/transgressoft/lirp/entity/ReactiveEntity : java/lang/AutoCloseable, java/util/concurrent/Flow$Publisher, net/transgressoft/lirp/entity/IdentifiableEntity {
+	public synthetic fun clone ()Ljava/lang/Object;
+	public synthetic fun clone ()Lnet/transgressoft/lirp/entity/IdentifiableEntity;
+	public abstract fun clone ()Lnet/transgressoft/lirp/entity/ReactiveEntity;
+	public abstract fun close ()V
+	public abstract fun emitAsync (Lnet/transgressoft/lirp/event/MutationEvent;)V
+	public abstract fun getChanges ()Lkotlinx/coroutines/flow/SharedFlow;
+	public abstract fun getLastDateModified ()Ljava/time/LocalDateTime;
+	public abstract fun isClosed ()Z
+	public fun subscribe (Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public abstract fun subscribe (Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public abstract fun subscribe ([Lnet/transgressoft/lirp/event/MutationEvent$Type;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public abstract fun withEventsDisabled (Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
+}
+
+public final class net/transgressoft/lirp/entity/ReactiveEntity$DefaultImpls {
+	public static fun subscribe (Lnet/transgressoft/lirp/entity/ReactiveEntity;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+}
+
+public abstract interface class net/transgressoft/lirp/entity/SoftDeletable {
+	public abstract fun getDeletedAt ()Ljava/time/Instant;
+}
+
+public abstract interface class net/transgressoft/lirp/event/AggregateMutationEvent : net/transgressoft/lirp/event/MutationEvent {
+	public abstract fun getChildEvent ()Lnet/transgressoft/lirp/event/LirpEvent;
+	public abstract fun getRefName ()Ljava/lang/String;
+}
+
+public abstract interface class net/transgressoft/lirp/event/CollectionChangeEvent : net/transgressoft/lirp/event/LirpEvent {
+	public abstract fun getAdded ()Ljava/util/List;
+	public abstract fun getRemoved ()Ljava/util/List;
+}
+
+public final class net/transgressoft/lirp/event/CollectionChangeEvent$Type : java/lang/Enum, net/transgressoft/lirp/event/EventType {
+	public static final field ADD Lnet/transgressoft/lirp/event/CollectionChangeEvent$Type;
+	public static final field CLEAR Lnet/transgressoft/lirp/event/CollectionChangeEvent$Type;
+	public static final field REMOVE Lnet/transgressoft/lirp/event/CollectionChangeEvent$Type;
+	public static final field REPLACE Lnet/transgressoft/lirp/event/CollectionChangeEvent$Type;
+	public fun getCode ()I
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lnet/transgressoft/lirp/event/CollectionChangeEvent$Type;
+	public static fun values ()[Lnet/transgressoft/lirp/event/CollectionChangeEvent$Type;
+}
+
+public abstract interface class net/transgressoft/lirp/event/CrudEvent : net/transgressoft/lirp/event/LirpEvent {
+	public abstract fun getEntities ()Ljava/util/Map;
+	public abstract fun getOldEntities ()Ljava/util/Map;
+	public fun isConflict ()Z
+	public fun isCreate ()Z
+	public fun isDelete ()Z
+	public fun isRead ()Z
+	public fun isUpdate ()Z
+}
+
+public final class net/transgressoft/lirp/event/CrudEvent$DefaultImpls {
+	public static fun isConflict (Lnet/transgressoft/lirp/event/CrudEvent;)Z
+	public static fun isCreate (Lnet/transgressoft/lirp/event/CrudEvent;)Z
+	public static fun isDelete (Lnet/transgressoft/lirp/event/CrudEvent;)Z
+	public static fun isRead (Lnet/transgressoft/lirp/event/CrudEvent;)Z
+	public static fun isUpdate (Lnet/transgressoft/lirp/event/CrudEvent;)Z
+}
+
+public final class net/transgressoft/lirp/event/CrudEvent$Type : java/lang/Enum, net/transgressoft/lirp/event/EventType {
+	public static final field CONFLICT Lnet/transgressoft/lirp/event/CrudEvent$Type;
+	public static final field CREATE Lnet/transgressoft/lirp/event/CrudEvent$Type;
+	public static final field DELETE Lnet/transgressoft/lirp/event/CrudEvent$Type;
+	public static final field READ Lnet/transgressoft/lirp/event/CrudEvent$Type;
+	public static final field RECOVERY_FAILED Lnet/transgressoft/lirp/event/CrudEvent$Type;
+	public static final field UPDATE Lnet/transgressoft/lirp/event/CrudEvent$Type;
+	public fun getCode ()I
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public fun toString ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lnet/transgressoft/lirp/event/CrudEvent$Type;
+	public static fun values ()[Lnet/transgressoft/lirp/event/CrudEvent$Type;
+}
+
+public abstract interface class net/transgressoft/lirp/event/EventType {
+	public abstract fun getCode ()I
+}
+
+public abstract interface class net/transgressoft/lirp/event/LirpEvent {
+	public abstract fun getType ()Lnet/transgressoft/lirp/event/EventType;
+}
+
+public abstract interface class net/transgressoft/lirp/event/LirpEventPublisher : java/lang/AutoCloseable, java/util/concurrent/Flow$Publisher {
+	public abstract fun activateEvents ([Lnet/transgressoft/lirp/event/EventType;)V
+	public abstract fun close ()V
+	public abstract fun disableEvents ([Lnet/transgressoft/lirp/event/EventType;)V
+	public abstract fun emitAsync (Lnet/transgressoft/lirp/event/LirpEvent;)V
+	public abstract fun getChanges ()Lkotlinx/coroutines/flow/SharedFlow;
+	public abstract fun getSubscriberCount ()I
+	public abstract fun isClosed ()Z
+	public abstract fun isEventActive (Lnet/transgressoft/lirp/event/EventType;)Z
+	public fun subscribe (Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public abstract fun subscribe (Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public abstract fun subscribe ([Lnet/transgressoft/lirp/event/EventType;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+}
+
+public final class net/transgressoft/lirp/event/LirpEventPublisher$DefaultImpls {
+	public static fun subscribe (Lnet/transgressoft/lirp/event/LirpEventPublisher;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+}
+
+public abstract interface class net/transgressoft/lirp/event/LirpEventSubscriber : java/util/concurrent/Flow$Subscriber {
+	public abstract fun addOnCompleteEventAction (Ljava/lang/Runnable;)V
+	public abstract fun addOnErrorEventAction (Ljava/util/function/Consumer;)V
+	public abstract fun addOnNextEventAction ([Lnet/transgressoft/lirp/event/EventType;Ljava/util/function/Consumer;)V
+	public abstract fun addOnSubscribeEventAction (Ljava/util/function/Consumer;)V
+	public abstract fun clearSubscriptionActions ()V
+}
+
+public abstract interface class net/transgressoft/lirp/event/LirpEventSubscription : java/util/concurrent/Flow$Subscription {
+	public abstract fun getSource ()Lnet/transgressoft/lirp/event/LirpEventPublisher;
+}
+
+public abstract interface class net/transgressoft/lirp/event/MutationEvent : net/transgressoft/lirp/event/LirpEvent {
+	public abstract fun getEntity ()Lnet/transgressoft/lirp/entity/ReactiveEntity;
+}
+
+public final class net/transgressoft/lirp/event/MutationEvent$Type : java/lang/Enum, net/transgressoft/lirp/event/EventType {
+	public static final field BATCH_CHANGED Lnet/transgressoft/lirp/event/MutationEvent$Type;
+	public static final field MUTATE Lnet/transgressoft/lirp/event/MutationEvent$Type;
+	public static final field PROPERTY_CHANGED Lnet/transgressoft/lirp/event/MutationEvent$Type;
+	public fun getCode ()I
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lnet/transgressoft/lirp/event/MutationEvent$Type;
+	public static fun values ()[Lnet/transgressoft/lirp/event/MutationEvent$Type;
+}
+
+public abstract interface annotation class net/transgressoft/lirp/persistence/Aggregate : java/lang/annotation/Annotation {
+	public abstract fun bubbleUp ()Z
+	public abstract fun onDelete ()Lnet/transgressoft/lirp/entity/CascadeAction;
+}
+
+public abstract interface class net/transgressoft/lirp/persistence/AggregateCollectionRef {
+	public abstract fun getReferenceIds ()Ljava/util/Collection;
+	public abstract fun resolveAll ()Ljava/util/Collection;
+}
+
+public abstract interface class net/transgressoft/lirp/persistence/ColumnConverter {
+	public abstract fun fromSql (Ljava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getSqlType ()Lnet/transgressoft/lirp/persistence/ColumnType;
+	public abstract fun toSql (Ljava/lang/Object;)Ljava/lang/Object;
+}
+
+public final class net/transgressoft/lirp/persistence/ColumnDef {
+	public fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/persistence/ColumnType;ZZZLjava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/persistence/ColumnType;ZZZLjava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lnet/transgressoft/lirp/persistence/ColumnType;
+	public final fun component3 ()Z
+	public final fun component4 ()Z
+	public final fun component5 ()Z
+	public final fun component6 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Lnet/transgressoft/lirp/persistence/ColumnType;ZZZLjava/lang/String;)Lnet/transgressoft/lirp/persistence/ColumnDef;
+	public static synthetic fun copy$default (Lnet/transgressoft/lirp/persistence/ColumnDef;Ljava/lang/String;Lnet/transgressoft/lirp/persistence/ColumnType;ZZZLjava/lang/String;ILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/ColumnDef;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDefaultExpression ()Ljava/lang/String;
+	public final fun getName ()Ljava/lang/String;
+	public final fun getNullable ()Z
+	public final fun getPrimaryKey ()Z
+	public final fun getType ()Lnet/transgressoft/lirp/persistence/ColumnType;
+	public fun hashCode ()I
+	public final fun isVersion ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract class net/transgressoft/lirp/persistence/ColumnType {
+}
+
+public final class net/transgressoft/lirp/persistence/ColumnType$BooleanType : net/transgressoft/lirp/persistence/ColumnType {
+	public static final field INSTANCE Lnet/transgressoft/lirp/persistence/ColumnType$BooleanType;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/persistence/ColumnType$DateTimeType : net/transgressoft/lirp/persistence/ColumnType {
+	public static final field INSTANCE Lnet/transgressoft/lirp/persistence/ColumnType$DateTimeType;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/persistence/ColumnType$DateType : net/transgressoft/lirp/persistence/ColumnType {
+	public static final field INSTANCE Lnet/transgressoft/lirp/persistence/ColumnType$DateType;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/persistence/ColumnType$DecimalType : net/transgressoft/lirp/persistence/ColumnType {
+	public fun <init> (II)V
+	public final fun component1 ()I
+	public final fun component2 ()I
+	public final fun copy (II)Lnet/transgressoft/lirp/persistence/ColumnType$DecimalType;
+	public static synthetic fun copy$default (Lnet/transgressoft/lirp/persistence/ColumnType$DecimalType;IIILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/ColumnType$DecimalType;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getPrecision ()I
+	public final fun getScale ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/persistence/ColumnType$DoubleType : net/transgressoft/lirp/persistence/ColumnType {
+	public static final field INSTANCE Lnet/transgressoft/lirp/persistence/ColumnType$DoubleType;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/persistence/ColumnType$EnumType : net/transgressoft/lirp/persistence/ColumnType {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lnet/transgressoft/lirp/persistence/ColumnType$EnumType;
+	public static synthetic fun copy$default (Lnet/transgressoft/lirp/persistence/ColumnType$EnumType;Ljava/lang/String;ILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/ColumnType$EnumType;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEnumClassFqn ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/persistence/ColumnType$FloatType : net/transgressoft/lirp/persistence/ColumnType {
+	public static final field INSTANCE Lnet/transgressoft/lirp/persistence/ColumnType$FloatType;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/persistence/ColumnType$IntType : net/transgressoft/lirp/persistence/ColumnType {
+	public static final field INSTANCE Lnet/transgressoft/lirp/persistence/ColumnType$IntType;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/persistence/ColumnType$LongType : net/transgressoft/lirp/persistence/ColumnType {
+	public static final field INSTANCE Lnet/transgressoft/lirp/persistence/ColumnType$LongType;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/persistence/ColumnType$TextType : net/transgressoft/lirp/persistence/ColumnType {
+	public static final field INSTANCE Lnet/transgressoft/lirp/persistence/ColumnType$TextType;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/persistence/ColumnType$UuidType : net/transgressoft/lirp/persistence/ColumnType {
+	public static final field INSTANCE Lnet/transgressoft/lirp/persistence/ColumnType$UuidType;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/persistence/ColumnType$VarcharType : net/transgressoft/lirp/persistence/ColumnType {
+	public fun <init> (I)V
+	public final fun component1 ()I
+	public final fun copy (I)Lnet/transgressoft/lirp/persistence/ColumnType$VarcharType;
+	public static synthetic fun copy$default (Lnet/transgressoft/lirp/persistence/ColumnType$VarcharType;IILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/ColumnType$VarcharType;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getLength ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface annotation class net/transgressoft/lirp/persistence/ElementCollection : java/lang/annotation/Annotation {
+	public abstract fun elementConverter ()Ljava/lang/Class;
+}
+
+public abstract interface annotation class net/transgressoft/lirp/persistence/Embeddable : java/lang/annotation/Annotation {
+}
+
+public abstract interface annotation class net/transgressoft/lirp/persistence/Embedded : java/lang/annotation/Annotation {
+	public abstract fun prefix ()Ljava/lang/String;
+}
+
+public abstract interface annotation class net/transgressoft/lirp/persistence/Indexed : java/lang/annotation/Annotation {
+	public abstract fun name ()Ljava/lang/String;
+	public abstract fun sorted ()Z
+}
+
+public final class net/transgressoft/lirp/persistence/LirpDeserializationException : java/lang/RuntimeException {
+	public fun <init> (Ljava/lang/String;Ljava/lang/Throwable;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+}
+
+public abstract interface class net/transgressoft/lirp/persistence/LirpRawInitializer {
+	public abstract fun getEntries ()Ljava/util/List;
+}
+
+public abstract interface class net/transgressoft/lirp/persistence/LirpRegistryInfo {
+	public abstract fun getEntityClass ()Ljava/lang/Class;
+}
+
+public abstract interface annotation class net/transgressoft/lirp/persistence/LirpRepository : java/lang/annotation/Annotation {
+}
+
+public abstract interface class net/transgressoft/lirp/persistence/LirpTableDef {
+	public abstract fun getColumns ()Ljava/util/List;
+	public abstract fun getTableName ()Ljava/lang/String;
+}
+
+public abstract interface class net/transgressoft/lirp/persistence/MutableAggregateCollectionRef : java/util/Collection, kotlin/jvm/internal/markers/KMutableCollection, net/transgressoft/lirp/persistence/AggregateCollectionRef {
+	public synthetic fun add (Ljava/lang/Object;)Z
+	public abstract fun add (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
+	public abstract fun clear ()V
+	public abstract fun iterator ()Ljava/util/Iterator;
+	public fun remove (Ljava/lang/Object;)Z
+	public abstract fun remove (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
+}
+
+public final class net/transgressoft/lirp/persistence/OptimisticLockException : java/lang/RuntimeException {
+	public fun <init> (Ljava/lang/String;Ljava/lang/Object;JLjava/lang/Long;Ljava/lang/Throwable;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Object;JLjava/lang/Long;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getActualVersion ()Ljava/lang/Long;
+	public final fun getEntityId ()Ljava/lang/Object;
+	public final fun getExpectedVersion ()J
+}
+
+public abstract interface annotation class net/transgressoft/lirp/persistence/PersistenceCreator : java/lang/annotation/Annotation {
+}
+
+public abstract interface annotation class net/transgressoft/lirp/persistence/PersistenceIgnore : java/lang/annotation/Annotation {
+}
+
+public abstract interface annotation class net/transgressoft/lirp/persistence/PersistenceMapping : java/lang/annotation/Annotation {
+	public abstract fun name ()Ljava/lang/String;
+}
+
+public abstract interface annotation class net/transgressoft/lirp/persistence/PersistenceProperty : java/lang/annotation/Annotation {
+	public abstract fun converter ()Ljava/lang/Class;
+	public abstract fun length ()I
+	public abstract fun name ()Ljava/lang/String;
+	public abstract fun precision ()I
+	public abstract fun scale ()I
+	public abstract fun type ()Ljava/lang/String;
+}
+
+public abstract interface class net/transgressoft/lirp/persistence/PersistentRepository : java/io/Closeable, net/transgressoft/lirp/persistence/Repository {
+	public abstract fun load ()V
+}
+
+public final class net/transgressoft/lirp/persistence/PersistentRepository$DefaultImpls {
+	public static fun minus (Lnet/transgressoft/lirp/persistence/PersistentRepository;Ljava/util/Collection;)Z
+	public static fun minus (Lnet/transgressoft/lirp/persistence/PersistentRepository;Lnet/transgressoft/lirp/entity/ReactiveEntity;)Z
+	public static fun subscribe (Lnet/transgressoft/lirp/persistence/PersistentRepository;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+}
+
+public final class net/transgressoft/lirp/persistence/RawInitEntry {
+	public fun <init> (Ljava/lang/String;Lkotlin/jvm/functions/Function2;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lkotlin/jvm/functions/Function2;
+	public final fun copy (Ljava/lang/String;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/persistence/RawInitEntry;
+	public static synthetic fun copy$default (Lnet/transgressoft/lirp/persistence/RawInitEntry;Ljava/lang/String;Lkotlin/jvm/functions/Function2;ILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/RawInitEntry;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getName ()Ljava/lang/String;
+	public final fun getSilentSetter ()Lkotlin/jvm/functions/Function2;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class net/transgressoft/lirp/persistence/ReactiveEntityReference {
+	public abstract fun getReferenceId ()Ljava/lang/Comparable;
+	public abstract fun resolve ()Ljava/util/Optional;
+}
+
+public abstract interface class net/transgressoft/lirp/persistence/ReactivePrimitive : net/transgressoft/lirp/entity/ReactiveEntity {
+	public abstract fun getValue ()Ljava/lang/Object;
+	public abstract fun setValue (Ljava/lang/Object;)V
+}
+
+public final class net/transgressoft/lirp/persistence/ReactivePrimitive$DefaultImpls {
+	public static fun subscribe (Lnet/transgressoft/lirp/persistence/ReactivePrimitive;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+}
+
+public abstract interface class net/transgressoft/lirp/persistence/Registry : java/lang/Iterable, kotlin/jvm/internal/markers/KMappedMarker, net/transgressoft/lirp/event/LirpEventPublisher {
+	public abstract fun contains (Ljava/lang/Comparable;)Z
+	public abstract fun contains (Ljava/util/function/Predicate;)Z
+	public abstract fun findById (Ljava/lang/Comparable;)Ljava/util/Optional;
+	public abstract fun findByIndex (Ljava/lang/String;Ljava/lang/Object;)Ljava/util/Set;
+	public abstract fun findByUniqueId (Ljava/lang/String;)Ljava/util/Optional;
+	public abstract fun findFirst (Ljava/util/function/Predicate;)Ljava/util/Optional;
+	public abstract fun findFirstByIndex (Ljava/lang/String;Ljava/lang/Object;)Ljava/util/Optional;
+	public abstract fun isEmpty ()Z
+	public abstract fun lazySearch (Ljava/util/function/Predicate;)Lkotlin/sequences/Sequence;
+	public abstract fun search (ILjava/util/function/Predicate;)Ljava/util/Set;
+	public abstract fun search (Ljava/util/function/Predicate;)Ljava/util/Set;
+	public abstract fun searchStream (Ljava/util/function/Predicate;)Ljava/util/stream/Stream;
+	public abstract fun size ()I
+}
+
+public final class net/transgressoft/lirp/persistence/Registry$DefaultImpls {
+	public static fun subscribe (Lnet/transgressoft/lirp/persistence/Registry;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+}
+
+public abstract interface class net/transgressoft/lirp/persistence/Repository : net/transgressoft/lirp/persistence/Registry {
+	public abstract fun add (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
+	public abstract fun clear ()V
+	public fun minus (Ljava/util/Collection;)Z
+	public fun minus (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
+	public abstract fun remove (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
+	public abstract fun removeAll (Ljava/util/Collection;)Z
+}
+
+public final class net/transgressoft/lirp/persistence/Repository$DefaultImpls {
+	public static fun minus (Lnet/transgressoft/lirp/persistence/Repository;Ljava/util/Collection;)Z
+	public static fun minus (Lnet/transgressoft/lirp/persistence/Repository;Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
+	public static fun subscribe (Lnet/transgressoft/lirp/persistence/Repository;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+}
+
+public abstract interface annotation class net/transgressoft/lirp/persistence/Version : java/lang/annotation/Annotation {
+}
+
+public abstract interface class net/transgressoft/lirp/persistence/json/JsonRepository : net/transgressoft/lirp/persistence/PersistentRepository {
+	public abstract fun getJsonFile ()Ljava/io/File;
+	public abstract fun setJsonFile (Ljava/io/File;)V
+}
+
+public final class net/transgressoft/lirp/persistence/json/JsonRepository$DefaultImpls {
+	public static fun minus (Lnet/transgressoft/lirp/persistence/json/JsonRepository;Ljava/util/Collection;)Z
+	public static fun minus (Lnet/transgressoft/lirp/persistence/json/JsonRepository;Lnet/transgressoft/lirp/entity/ReactiveEntity;)Z
+	public static fun subscribe (Lnet/transgressoft/lirp/persistence/json/JsonRepository;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+}
+

@@ -53,7 +53,7 @@ internal class LirpAccessorValidationProcessorTest : StringSpec({
             import kotlin.reflect.KProperty
 
             class StubStringProperty(private var value: String? = null) : FxScalarPropertyDelegate {
-                override fun bindMutationCallback(callback: (() -> Unit) -> Unit) {}
+                override fun bindMutationCallback(callback: (Any?, Any?, () -> Unit) -> Unit) {}
                 fun get(): String? = value
                 fun set(v: String?) { value = v }
                 operator fun getValue(thisRef: Any?, property: KProperty<*>): StubStringProperty = this

@@ -128,10 +128,10 @@ internal class AggregateBubbleUpTest : FunSpec({
 
         latch.await(2, TimeUnit.SECONDS) shouldBe true
         val aggregateEvent = receivedEvent.get()
-        aggregateEvent.childEvent.shouldBeInstanceOf<ReactiveMutationEvent<Int, AudioItem>>()
-        val childMutation = aggregateEvent.childEvent as ReactiveMutationEvent<Int, AudioItem>
-        childMutation.newEntity.title shouldBe "Track A Updated"
-        childMutation.oldEntity.title shouldBe "Track A"
+        aggregateEvent.childEvent.shouldBeInstanceOf<PropertyChanged<Int, AudioItem, String>>()
+        val childMutation = aggregateEvent.childEvent as PropertyChanged<Int, AudioItem, String>
+        childMutation.newValue shouldBe "Track A Updated"
+        childMutation.oldValue shouldBe "Track A"
     }
 
     test("Audio playlist with bubbleUp=false does NOT receive events when referenced audio item mutates") {

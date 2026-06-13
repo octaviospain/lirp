@@ -180,11 +180,9 @@ class FxMultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E>(
     private fun subscribeEntity(entity: E) {
         val subscription =
             entity.subscribe { event ->
-                val oldKeys = keyExtractor(event.oldEntity).toSet()
-                val newKeys = keyExtractor(event.newEntity).toSet()
-                if (oldKeys != newKeys) {
-                    core.reconcile(event.newEntity)
-                }
+                // Delegate re-bucketing to reconcile, which computes the key delta from its own
+                // reverse-index (the tracked pre-mutation membership) and the current entity state.
+                core.reconcile(event.entity)
             }
         entitySubscriptions[entity.id] = subscription
     }

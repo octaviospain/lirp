@@ -27,8 +27,9 @@ import kotlin.reflect.KProperty
  * JavaFX [SimpleDoubleProperty] delegate that participates in lirp's reactive mutation event system.
  *
  * When registered in a [net.transgressoft.lirp.entity.ReactiveEntityBase] subclass and wired by
- * RegistryBase, each call to [set] emits a [net.transgressoft.lirp.event.ReactiveMutationEvent]
- * using the clone-before-mutation pattern. Use [fxDouble] to create instances as property delegates.
+ * RegistryBase, each call to [set] emits a [net.transgressoft.lirp.event.PropertyChanged] event
+ * carrying the old and new double values. The old value is captured before `super.set()` executes.
+ * Use [fxDouble] to create instances as property delegates.
  *
  * @param initialValue the initial double value; defaults to `0.0`
  * @param dispatchToFxThread when `true` (default), RegistryBase may dispatch notifications to the
@@ -42,9 +43,9 @@ class LirpDoubleProperty(initialValue: Double = 0.0, val dispatchToFxThread: Boo
     LirpDelegate,
     FxScalarPropertyDelegate {
 
-    private val mutationCallback = AtomicReference<((() -> Unit) -> Unit)?>(null)
+    private val mutationCallback = AtomicReference<((Any?, Any?, () -> Unit) -> Unit)?>(null)
 
-    override fun bindMutationCallback(callback: (() -> Unit) -> Unit) {
+    override fun bindMutationCallback(callback: (oldValue: Any?, newValue: Any?, mutationBlock: () -> Unit) -> Unit) {
         check(mutationCallback.compareAndSet(null, callback)) {
             "Mutation callback already bound. FxScalarPropertyDelegate supports a single binding."
         }
@@ -58,7 +59,8 @@ class LirpDoubleProperty(initialValue: Double = 0.0, val dispatchToFxThread: Boo
         if (get() == value) return
         val callback = mutationCallback.get()
         if (callback != null) {
-            callback { super.set(value) }
+            val oldValue = get() // capture before super.set() — reading after would alias the new value
+            callback(oldValue, value) { super.set(value) }
         } else {
             super.set(value)
         }

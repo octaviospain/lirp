@@ -26,6 +26,7 @@ import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.delay
 
 /**
  * Polling config for cross-dialect persistence assertions. A mutation is persisted asynchronously
@@ -38,6 +39,19 @@ private val persistedRowPoll =
         duration = 30.seconds
         interval = 200.milliseconds
     }
+
+/**
+ * Warm-up pause that lets a freshly constructed or freshly populated repository's per-entity
+ * persistence subscription start collecting before the first reactive mutation.
+ *
+ * Each entity is subscribed on a launched collector coroutine; until that coroutine reaches its
+ * `collect`, the entity's event publisher has a registered subscriber count but no active collector.
+ * A mutation emitted in that window is delivered to a `replay = 0` flow with no live collector and is
+ * dropped — the update never reaches the debounced SQL flush, so a later read polls forever and the
+ * assertion times out. Pausing before the first mutation closes the window. Mirrors the SharedFlow
+ * collector-warmup convention documented in CONTRIBUTING.md.
+ */
+private suspend fun awaitSubscriptionReady() = delay(50.milliseconds)
 
 /**
  * Joint cross-dialect canary asserting that the three KSP robustness fixes from issue #207
@@ -101,6 +115,7 @@ internal class CombinedKspRobustnessIT : FunSpec({
                         notes = "n0"
                     }
                 )
+                awaitSubscriptionReady()
                 repo.findById("e2").shouldBePresent {
                     it.notes = "n1"
                     it.year = 2024
@@ -132,6 +147,7 @@ internal class CombinedKspRobustnessIT : FunSpec({
                 repo.close()
 
                 val repo2 = SqlRepository(ds, CombinedKspFixtureEntity_LirpTableDef)
+                awaitSubscriptionReady()
                 repo2.findById("e3").shouldBePresent {
                     it.nullableYear shouldBe null
                     it.nullableYear = 999
@@ -143,6 +159,7 @@ internal class CombinedKspRobustnessIT : FunSpec({
                 repo2.close()
 
                 val repo4 = SqlRepository(ds, CombinedKspFixtureEntity_LirpTableDef)
+                awaitSubscriptionReady()
                 repo4.findById("e3").shouldBePresent {
                     it.nullableYear = null
                 }
@@ -170,6 +187,7 @@ internal class CombinedKspRobustnessIT : FunSpec({
                 repo.close()
 
                 val reloaded = SqlRepository(ds, CombinedKspFixtureEntity_LirpTableDef)
+                awaitSubscriptionReady()
                 reloaded.findById("e4").shouldBePresent {
                     // First sanity check: the pre-flush setCacheValue(42) did not survive — the
                     // private field is excluded from persistence.

@@ -21,6 +21,7 @@ import net.transgressoft.lirp.entity.LazyTestEntity
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.MutationEvent
+import net.transgressoft.lirp.event.PropertyChanged
 import net.transgressoft.lirp.event.PublisherConfig
 import net.transgressoft.lirp.event.StandardCrudEvent.Create
 import net.transgressoft.lirp.event.TestEntity
@@ -271,7 +272,8 @@ class IntegrationTest : DescribeSpec({
             finalValue.removePrefix("value-").toInt() shouldBe (1..mutationCount).toList().find { "value-$it" == finalValue }
 
             receivedEvents.forEach { event ->
-                (event.oldEntity.value != event.newEntity.value) shouldBe true
+                val pc = event as PropertyChanged<String, LazyTestEntity, String>
+                (pc.oldValue != pc.newValue) shouldBe true
             }
 
             // Verify entity still functions after the storm
@@ -305,7 +307,7 @@ class IntegrationTest : DescribeSpec({
                 reactive.advance()
 
                 cycleEvents.size shouldBeGreaterThan 0
-                cycleEvents.last().newEntity.value shouldBe "cycle-$cycle-mutation-${mutationsPerCycle - 1}"
+                (cycleEvents.last() as PropertyChanged<String, LazyTestEntity, String>).newValue shouldBe "cycle-$cycle-mutation-${mutationsPerCycle - 1}"
 
                 subscriptions.forEach { it.cancel() }
                 reactive.advance()
@@ -319,7 +321,7 @@ class IntegrationTest : DescribeSpec({
             reactive.advance()
 
             finalEvents.size shouldBe 1
-            finalEvents[0].newEntity.value shouldBe "final-check"
+            (finalEvents[0] as PropertyChanged<String, LazyTestEntity, String>).newValue shouldBe "final-check"
 
             finalSubscription.cancel()
         }

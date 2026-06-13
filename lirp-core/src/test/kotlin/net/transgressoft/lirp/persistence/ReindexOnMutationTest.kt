@@ -18,6 +18,8 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.ReactiveEntityBase
+import net.transgressoft.lirp.event.MutationEvent
+import net.transgressoft.lirp.event.PropertyChanged
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
@@ -25,6 +27,7 @@ import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * Reactive test entity with a mutable hash-indexed [label] and a mutable sorted-indexed [score].
@@ -43,6 +46,14 @@ class ReactiveIndexEntity(
     var score: Int by reactiveProperty(initialScore)
 
     override val uniqueId: String get() = "reactive-index-$id"
+
+    // Changes both the String-hash-indexed label and the Int-sorted-indexed score in one batch,
+    // emitting a single BatchChanged that touches two @Indexed properties of different value types.
+    fun relabelAndRescore(newLabel: String, newScore: Int) =
+        mutateAndPublish {
+            label = newLabel
+            score = newScore
+        }
 
     override fun clone(): ReactiveIndexEntity = ReactiveIndexEntity(id, label, score)
 }
@@ -93,9 +104,22 @@ private class OrderProbeRepo : ReactiveIndexRepo() {
 
     @Volatile var observedInOldBucket: Boolean? = null
 
-    override fun onEntityMutated(event: net.transgressoft.lirp.event.MutationEvent<Int, ReactiveIndexEntity>) {
-        observedInNewBucket = findByIndex("label", "after").any { it.id == event.newEntity.id }
-        observedInOldBucket = findByIndex("label", "before").any { it.id == event.newEntity.id }
+    override fun onEntityMutated(event: MutationEvent<Int, ReactiveIndexEntity>) {
+        observedInNewBucket = findByIndex("label", "after").any { it.id == event.entity.id }
+        observedInOldBucket = findByIndex("label", "before").any { it.id == event.entity.id }
+    }
+}
+
+// Subclass that records the captured newIndexKey from each PropertyChanged event received by the hook.
+// The captured key is an immutable scalar frozen at assignment time; a live read of entity.label at
+// drain time would yield the most-recent value and would mis-report the key for earlier mutations.
+private class CapturedKeyProbeRepo : ReactiveIndexRepo() {
+    val capturedNewIndexKeys: CopyOnWriteArrayList<Any?> = CopyOnWriteArrayList()
+
+    override fun onEntityMutated(event: MutationEvent<Int, ReactiveIndexEntity>) {
+        if (event is PropertyChanged<*, *, *>) {
+            capturedNewIndexKeys.add(event.newIndexKey)
+        }
     }
 }
 
@@ -189,6 +213,60 @@ internal class ReindexOnMutationTest : StringSpec({
             repo.findByIndex("score", 10) shouldNotContain e1
             repo.findByIndex("score", 20) shouldContain e1
             repo.findByIndex("score", 20) shouldContain e2
+        } finally {
+            repo.close()
+        }
+    }
+
+    "[RegistryBase] reindexes multiple @Indexed properties of different types changed in one batch" {
+        // A single mutateAndPublish batch changes both the String-hash-indexed label and the
+        // Int-sorted-indexed score. The per-field reindex must scope each old-key removal to its
+        // own index — applying the String label key to the Int sorted index would otherwise throw
+        // ClassCastException in the sorted-index comparator, or leave a stale bucket entry behind.
+        val repo = ReactiveIndexRepo()
+        try {
+            val entity = ReactiveIndexEntity(300, "lo", 1)
+            repo.add(entity)
+
+            repo.findByIndex("label", "lo") shouldContain entity
+            repo.findByIndex("score", 1) shouldContain entity
+
+            entity.relabelAndRescore("hi", 99)
+
+            repo.findByIndex("label", "lo") shouldNotContain entity
+            repo.findByIndex("label", "hi") shouldContain entity
+            repo.findByIndex("score", 1) shouldNotContain entity
+            repo.findByIndex("score", 99) shouldContain entity
+        } finally {
+            repo.close()
+        }
+    }
+
+    "[RegistryBase] captured newIndexKey re-buckets correctly under interleaved-mutation/deferred-drain" {
+        // Verifies that PropertyChanged carries an immutable newIndexKey captured at assignment time,
+        // not a lazy read of the live entity. If newIndexKey were read lazily from event.entity.label
+        // at drain time, both events would report the final value "third" — a drift. The captured
+        // scalar freezes each event's intended destination bucket at the moment of mutation.
+        val repo = CapturedKeyProbeRepo()
+        try {
+            val entity = ReactiveIndexEntity(200, "first", 1)
+            repo.add(entity)
+
+            // Two rapid mutations — the subscriber (onEntityMutated) is invoked via the coroutine
+            // dispatcher; with UnconfinedTestDispatcher events drain synchronously after each setter.
+            entity.label = "second"
+            entity.label = "third"
+
+            // The captured newIndexKey for the first event is "second", not "third".
+            // If the implementation were lazily reading entity.label, both keys would be "third".
+            repo.capturedNewIndexKeys.size shouldBe 2
+            repo.capturedNewIndexKeys[0] shouldBe "second"
+            repo.capturedNewIndexKeys[1] shouldBe "third"
+
+            // After both mutations, the entity must be in the "third" bucket only.
+            repo.findByIndex("label", "first") shouldNotContain entity
+            repo.findByIndex("label", "second") shouldNotContain entity
+            repo.findByIndex("label", "third") shouldContain entity
         } finally {
             repo.close()
         }

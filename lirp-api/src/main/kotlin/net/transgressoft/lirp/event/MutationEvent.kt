@@ -20,13 +20,24 @@ package net.transgressoft.lirp.event
 import net.transgressoft.lirp.entity.ReactiveEntity
 
 /**
- * Represents a [LirpEvent] that tracks a change from a [ReactiveEntity] by keeping both
- * the current state and the previous state.
+ * Represents a [LirpEvent] that tracks a mutation on a [ReactiveEntity].
  *
- * This event type is particularly useful for update operations where understanding
- * what changed between states is important for subscribers. It allows subscribers
- * to react to specific field changes or state transitions rather than just the
- * final state.
+ * The base interface carries only the mutated entity and the event type. Typed subtypes
+ * ([net.transgressoft.lirp.event.PropertyChanged], [net.transgressoft.lirp.event.BatchChanged])
+ * carry the specific property-level changes and immutable captured context scalars needed for
+ * deferred consumption.
+ *
+ * Subscribers that need to inspect individual property changes should pattern-match on the
+ * concrete subtype:
+ * ```kotlin
+ * entity.subscribe { event ->
+ *     when (event) {
+ *         is PropertyChanged<*, *, *> -> println("${event.property.name}: ${event.oldValue} -> ${event.newValue}")
+ *         is BatchChanged<*, *> -> event.changes.forEach { println("${it.property.name}: ${it.oldValue} -> ${it.newValue}") }
+ *         else -> println("Mutation on ${event.entity}")
+ *     }
+ * }
+ * ```
  *
  * @param K the type of the [ReactiveEntity] objects' id, which must be [Comparable]
  * @param R the type of the [ReactiveEntity] objects
@@ -34,9 +45,10 @@ import net.transgressoft.lirp.entity.ReactiveEntity
 interface MutationEvent<K, R : ReactiveEntity<K, R>> : LirpEvent<MutationEvent.Type> where K: Comparable<K> {
 
     enum class Type(override val code: Int): EventType {
-        MUTATE(301)
+        MUTATE(301),
+        PROPERTY_CHANGED(302),
+        BATCH_CHANGED(303)
     }
 
-    val newEntity: R
-    val oldEntity: R
+    val entity: R
 }

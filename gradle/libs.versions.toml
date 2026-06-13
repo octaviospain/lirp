@@ -1,6 +1,7 @@
 [versions]
 kotlin = "2.4.0"
 ksp = "2.3.9"
+bcv = "0.18.1"
 coroutines = "1.11.0"
 serialization = "1.11.0"
 kotest = "6.1.11"
@@ -94,3 +95,4 @@ logback = [
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+bcv = { id = "org.jetbrains.kotlinx.binary-compatibility-validator", version.ref = "bcv" }
