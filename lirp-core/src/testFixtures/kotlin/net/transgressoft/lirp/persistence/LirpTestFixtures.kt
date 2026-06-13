@@ -84,6 +84,9 @@ class MutableAudioItem
         /** Publishes a single mutation that atomically sets [title] to [newTitle]. */
         fun bulkUpdate(newTitle: String) = mutateAndPublish { title = newTitle }
 
+        /** Publishes a single mutation that atomically sets [albumName] to [newAlbumName]. */
+        fun bulkAlbumUpdate(newAlbumName: String) = mutateAndPublish { albumName = newAlbumName }
+
         /** Silently disables event emission for subsequent property assignments. */
         fun suppressEvents() = disableEvents()
 
