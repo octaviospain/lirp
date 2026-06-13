@@ -28,8 +28,10 @@ import kotlin.reflect.KProperty
  *
  * Supports nullable type parameters, making it suitable for optional object-typed properties.
  * When registered in a [net.transgressoft.lirp.entity.ReactiveEntityBase] subclass and wired by
- * RegistryBase, each call to [set] emits a [net.transgressoft.lirp.event.ReactiveMutationEvent]
- * using the clone-before-mutation pattern. Use [fxObject] to create instances as property delegates.
+ * RegistryBase, each call to [set] emits a [net.transgressoft.lirp.event.PropertyChanged] event
+ * carrying the old and new values. The old value is captured before `super.set()` executes.
+ * Identity comparison (`===`) is used for the no-change guard to handle nullable references correctly.
+ * Use [fxObject] to create instances as property delegates.
  *
  * @param T the type of the wrapped object; nullable (`T?`) is supported
  * @param initialValue the initial value; defaults to `null`
@@ -44,9 +46,9 @@ class LirpObjectProperty<T>(initialValue: T? = null, val dispatchToFxThread: Boo
     LirpDelegate,
     FxScalarPropertyDelegate {
 
-    private val mutationCallback = AtomicReference<((() -> Unit) -> Unit)?>(null)
+    private val mutationCallback = AtomicReference<((Any?, Any?, () -> Unit) -> Unit)?>(null)
 
-    override fun bindMutationCallback(callback: (() -> Unit) -> Unit) {
+    override fun bindMutationCallback(callback: (oldValue: Any?, newValue: Any?, mutationBlock: () -> Unit) -> Unit) {
         check(mutationCallback.compareAndSet(null, callback)) {
             "Mutation callback already bound. FxScalarPropertyDelegate supports a single binding."
         }
@@ -60,7 +62,8 @@ class LirpObjectProperty<T>(initialValue: T? = null, val dispatchToFxThread: Boo
         if (get() === newValue) return
         val callback = mutationCallback.get()
         if (callback != null) {
-            callback { super.set(newValue) }
+            val oldValue = get() // capture before super.set() — reading after would alias the new value
+            callback(oldValue, newValue) { super.set(newValue) }
         } else {
             super.set(newValue)
         }

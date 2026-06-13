@@ -50,49 +50,49 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
             import kotlin.reflect.KProperty
 
             class StubStringProperty(private var value: String? = null) : FxScalarPropertyDelegate {
-                override fun bindMutationCallback(callback: (() -> Unit) -> Unit) {}
+                override fun bindMutationCallback(callback: (Any?, Any?, () -> Unit) -> Unit) {}
                 fun get(): String? = value
                 fun set(v: String?) { value = v }
                 operator fun getValue(thisRef: Any?, property: KProperty<*>): StubStringProperty = this
             }
 
             class StubIntegerProperty(private var value: Int = 0) : FxScalarPropertyDelegate {
-                override fun bindMutationCallback(callback: (() -> Unit) -> Unit) {}
+                override fun bindMutationCallback(callback: (Any?, Any?, () -> Unit) -> Unit) {}
                 fun get(): Int = value
                 fun set(v: Int) { value = v }
                 operator fun getValue(thisRef: Any?, property: KProperty<*>): StubIntegerProperty = this
             }
 
             class StubDoubleProperty(private var value: Double = 0.0) : FxScalarPropertyDelegate {
-                override fun bindMutationCallback(callback: (() -> Unit) -> Unit) {}
+                override fun bindMutationCallback(callback: (Any?, Any?, () -> Unit) -> Unit) {}
                 fun get(): Double = value
                 fun set(v: Double) { value = v }
                 operator fun getValue(thisRef: Any?, property: KProperty<*>): StubDoubleProperty = this
             }
 
             class StubFloatProperty(private var value: Float = 0.0f) : FxScalarPropertyDelegate {
-                override fun bindMutationCallback(callback: (() -> Unit) -> Unit) {}
+                override fun bindMutationCallback(callback: (Any?, Any?, () -> Unit) -> Unit) {}
                 fun get(): Float = value
                 fun set(v: Float) { value = v }
                 operator fun getValue(thisRef: Any?, property: KProperty<*>): StubFloatProperty = this
             }
 
             class StubLongProperty(private var value: Long = 0L) : FxScalarPropertyDelegate {
-                override fun bindMutationCallback(callback: (() -> Unit) -> Unit) {}
+                override fun bindMutationCallback(callback: (Any?, Any?, () -> Unit) -> Unit) {}
                 fun get(): Long = value
                 fun set(v: Long) { value = v }
                 operator fun getValue(thisRef: Any?, property: KProperty<*>): StubLongProperty = this
             }
 
             class StubBooleanProperty(private var value: Boolean = false) : FxScalarPropertyDelegate {
-                override fun bindMutationCallback(callback: (() -> Unit) -> Unit) {}
+                override fun bindMutationCallback(callback: (Any?, Any?, () -> Unit) -> Unit) {}
                 fun get(): Boolean = value
                 fun set(v: Boolean) { value = v }
                 operator fun getValue(thisRef: Any?, property: KProperty<*>): StubBooleanProperty = this
             }
 
             class StubObjectProperty<T>(private var value: T? = null) : FxScalarPropertyDelegate {
-                override fun bindMutationCallback(callback: (() -> Unit) -> Unit) {}
+                override fun bindMutationCallback(callback: (Any?, Any?, () -> Unit) -> Unit) {}
                 fun get(): T? = value
                 fun set(v: T?) { value = v }
                 operator fun getValue(thisRef: Any?, property: KProperty<*>): StubObjectProperty<T> = this

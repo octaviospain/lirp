@@ -19,7 +19,8 @@ package net.transgressoft.lirp.entity
 
 import net.transgressoft.lirp.event.AggregateMutationEvent
 import net.transgressoft.lirp.event.CollectionChangeEvent
-import net.transgressoft.lirp.event.ReactiveMutationEvent
+import net.transgressoft.lirp.event.MutationEvent
+import net.transgressoft.lirp.event.PropertyChanged
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
 import net.transgressoft.lirp.persistence.AudioPlaylistVolatileRepository
@@ -135,10 +136,10 @@ class SubscriptionExtensionsTest : StringSpec({
         receivedItems[0].id shouldBe 1
     }
 
-    "subscribeToMutations receives ReactiveMutationEvent for property change" {
+    "subscribeToMutations receives PropertyChanged event for property change" {
         val playlist = DefaultAudioPlaylist(1, "Original Name").also(playlistRepo::add)
 
-        val receivedEvent = AtomicReference<ReactiveMutationEvent<*, *>>(null)
+        val receivedEvent = AtomicReference<MutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
 
         playlist.subscribeToMutations { event ->
@@ -149,7 +150,7 @@ class SubscriptionExtensionsTest : StringSpec({
         playlist.name = "New Name"
 
         latch.await(2, TimeUnit.SECONDS) shouldBe true
-        receivedEvent.get().shouldBeInstanceOf<ReactiveMutationEvent<*, *>>()
+        receivedEvent.get().shouldBeInstanceOf<PropertyChanged<*, *, *>>()
     }
 
     "subscribeToMutations does not receive AggregateMutationEvent from collection mutation" {
@@ -187,7 +188,7 @@ class SubscriptionExtensionsTest : StringSpec({
 
         latch.await(2, TimeUnit.SECONDS) shouldBe true
         receivedEvents.size shouldBe 2
-        receivedEvents.any { it is ReactiveMutationEvent<*, *> } shouldBe true
+        receivedEvents.any { it is PropertyChanged<*, *, *> } shouldBe true
         receivedEvents.any { it is AggregateMutationEvent<*, *> } shouldBe true
     }
 })

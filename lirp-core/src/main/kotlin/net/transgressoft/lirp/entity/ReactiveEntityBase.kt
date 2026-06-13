@@ -17,18 +17,25 @@
 
 package net.transgressoft.lirp.entity
 
+import net.transgressoft.lirp.event.BatchChanged
 import net.transgressoft.lirp.event.CollectionChangeEvent
+import net.transgressoft.lirp.event.FieldChange
 import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.LirpEvent
 import net.transgressoft.lirp.event.LirpEventPublisher
 import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.MutationEvent
+import net.transgressoft.lirp.event.MutationEvent.Type.BATCH_CHANGED
 import net.transgressoft.lirp.event.MutationEvent.Type.MUTATE
-import net.transgressoft.lirp.event.ReactiveMutationEvent
+import net.transgressoft.lirp.event.MutationEvent.Type.PROPERTY_CHANGED
+import net.transgressoft.lirp.event.PropertyChanged
 import net.transgressoft.lirp.event.StandardAggregateMutationEvent
 import net.transgressoft.lirp.persistence.AggregateRefDelegate
 import net.transgressoft.lirp.persistence.FxObservableCollection
+import net.transgressoft.lirp.persistence.IndexEntry
+import net.transgressoft.lirp.persistence.KspAccessorLoader
 import net.transgressoft.lirp.persistence.LirpDelegate
+import net.transgressoft.lirp.persistence.LirpIndexAccessor
 import net.transgressoft.lirp.persistence.LirpRefAccessor
 import net.transgressoft.lirp.persistence.ReactivePropertyDelegate
 import net.transgressoft.lirp.persistence.ReactivePropertyDelegateWithAccessors
@@ -38,6 +45,7 @@ import java.util.concurrent.Flow
 import java.util.concurrent.atomic.AtomicReference
 import java.util.function.Consumer
 import kotlin.properties.ReadWriteProperty
+import kotlin.reflect.KProperty
 import kotlin.reflect.KProperty1
 import kotlin.reflect.full.memberProperties
 import kotlin.reflect.jvm.isAccessible
@@ -48,13 +56,13 @@ import kotlinx.coroutines.flow.SharedFlow
  * about property changes through a reactive flow-based pattern.
  *
  * This class implements the [ReactiveEntity] interface and manages subscriptions using Kotlin Flows.
- * When properties of the entity change, all subscribers are automatically notified with both the updated
- * entity state and the previous state.
+ * When a reactive property changes, subscribers are notified with a typed [PropertyChanged] event
+ * carrying the old and new values — no entity clone is performed on the setter hot path.
  *
  * The event publisher is lazily initialized on first subscription, minimizing overhead for unobserved entities.
  *
  * Observable properties are declared with the [reactiveProperty] delegate factory. Assigning a new value
- * to a delegate-backed property emits a [ReactiveMutationEvent] automatically — no boilerplate setters needed:
+ * to a delegate-backed property emits a [PropertyChanged] event automatically — no boilerplate setters needed:
  * ```
  * var name: String by reactiveProperty("default")
  * ```
@@ -62,7 +70,8 @@ import kotlinx.coroutines.flow.SharedFlow
  * ```
  * @Transient override var name: String? by reactiveProperty({ _name }, { _name = it })
  * ```
- * The block-level [mutateAndPublish] overload remains available for multi-field atomic mutations.
+ * The block-level [mutateAndPublish] overload remains available for multi-field atomic mutations;
+ * it emits a single [BatchChanged] event with per-field [FieldChange] entries.
  *
  * Lifecycle states:
  * - **Created**: No publisher allocated; zero overhead.
@@ -108,6 +117,25 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     private var _refAccessorLoaded = false
 
     /**
+     * Cached KSP-generated [LirpIndexAccessor] entries for this entity's class, discovered lazily
+     * on first [emitPropertyChanged] call. Empty list when no accessor was found.
+     */
+    @Volatile
+    private var _indexEntries: List<IndexEntry<R>>? = null
+
+    /** Guards double-checked locking for [_indexEntries] initialization. */
+    @Volatile
+    private var _indexEntriesLoaded = false
+
+    /**
+     * Per-call accumulator for [mutateAndPublish]. Thread-local and re-entrant: each thread holds its
+     * own accumulator while a block is in progress, and nested blocks save and restore the enclosing
+     * accumulator so an inner block cannot drop the outer one. Captures per-field changes so a single
+     * [BatchChanged] can be emitted when each block exits.
+     */
+    private val _batchAccumulator = ThreadLocal<MutableList<FieldChange<R, *>>?>()
+
+    /**
      * The lazily initialized publisher. Only created when the first subscriber registers.
      * Uses AtomicReference for lock-free visibility and CAS-based initialization.
      */
@@ -128,7 +156,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
                 check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
 
                 val newPublisher = publisherFactory(this::class.java.simpleName)
-                newPublisher.activateEvents(MUTATE)
+                newPublisher.activateEvents(MUTATE, PROPERTY_CHANGED, BATCH_CHANGED)
                 if (publisherRef.compareAndSet(current, newPublisher)) {
                     return newPublisher
                 }
@@ -153,7 +181,8 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     /**
      * The timestamp when this entity was last modified.
      *
-     * Automatically updated whenever a property is changed via [mutateAndPublish].
+     * Automatically updated whenever a property is changed via [mutateAndPublish] or
+     * a reactive property delegate.
      * Public setter enables KSP-generated `SqlTableDef.fromRow()` to restore the persisted timestamp
      * when loading entities from a database.
      */
@@ -215,6 +244,25 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
         }
     }
 
+    /**
+     * Lazily loads the KSP-generated [LirpIndexAccessor] entries for this entity's concrete class.
+     * Returns an empty list when no accessor was found (entity has no [@Indexed][net.transgressoft.lirp.persistence.Indexed]
+     * properties or KSP was not applied).
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun loadIndexEntries(): List<IndexEntry<R>> {
+        if (_indexEntriesLoaded) return _indexEntries ?: emptyList()
+        synchronized(this) {
+            if (_indexEntriesLoaded) return _indexEntries ?: emptyList()
+            _indexEntries =
+                KspAccessorLoader.load<LirpIndexAccessor<R>>(this.javaClass, KspAccessorLoader.INDEX_ACCESSOR_SUFFIX)
+                    ?.entries
+                    ?: emptyList()
+            _indexEntriesLoaded = true
+            return _indexEntries ?: emptyList()
+        }
+    }
+
     override fun emitAsync(event: MutationEvent<K, R>) {
         check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
         publisher.emitAsync(event)
@@ -240,8 +288,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
         check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
         val aggregateEvent =
             StandardAggregateMutationEvent(
-                newEntity = this as R,
-                oldEntity = this as R,
+                entity = this as R,
                 refName = refName,
                 childEvent = childEvent
             )
@@ -266,8 +313,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
         if (!shouldEmit) return
         val aggregateEvent =
             StandardAggregateMutationEvent(
-                newEntity = this as R,
-                oldEntity = this as R,
+                entity = this as R,
                 refName = refName,
                 childEvent = childEvent
             )
@@ -275,35 +321,116 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     }
 
     /**
-     * Emits a [ReactiveMutationEvent] around the supplied [mutationBlock], which is expected to
-     * perform the actual backing-field write for the mutated property.
+     * Emits a [PropertyChanged] event for a single reactive property assignment.
      *
-     * Called by reactive property and FxScalar delegates that share the same clone-before-mutation
-     * control flow: capture the entity state before [mutationBlock] runs, execute the mutation,
-     * stamp [lastDateModified], then emit if subscribers are present.
+     * Called by reactive property delegates with the old and new values they already hold —
+     * no entity clone is performed. If a [mutateAndPublish] block is in progress, the change is
+     * accumulated for batching rather than emitted immediately.
      *
-     * Respects the [eventsDisabled] flag — when events are suppressed (e.g., during [clone]),
-     * the mutation still executes but no event is published.
+     * The [mutationBlock] is always executed first; the event is built from the values captured
+     * before and after, then emitted. For `@Indexed` properties, the old and new index keys are
+     * captured as immutable scalars to guard against drift under deferred subscriber consumption.
      *
-     * @param mutationBlock the lambda that performs the actual property mutation
+     * @param property the property being mutated
+     * @param oldValue the value immediately before the assignment
+     * @param newValue the value immediately after the assignment
+     * @param mutationBlock the lambda that performs the actual backing-field write
      */
     @Suppress("UNCHECKED_CAST")
-    internal fun emitReactiveMutation(mutationBlock: () -> Unit) {
+    internal fun <V> emitPropertyChanged(property: KProperty<*>, oldValue: V, newValue: V, mutationBlock: () -> Unit) {
         check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
         if (eventsDisabled) {
             mutationBlock()
             return
         }
-        if (!shouldEmit) {
-            mutationBlock()
-            lastDateModified = LocalDateTime.now()
-            return
-        }
-        val entityBeforeChange = clone()
         mutationBlock()
         lastDateModified = LocalDateTime.now()
-        log.trace { "Firing reactive mutation event from $entityBeforeChange to $this" }
-        publisher.emitAsync(ReactiveMutationEvent(this as R, entityBeforeChange as R))
+
+        // If a batch accumulator is active, record this change and defer emission to mutateAndPublish.
+        val accumulator = _batchAccumulator.get()
+        if (accumulator != null) {
+            val kprop1 = property as? KProperty1<R, V>
+            if (kprop1 != null) {
+                accumulator.add(FieldChange(kprop1, oldValue, newValue))
+            }
+            return
+        }
+
+        if (!shouldEmit) return
+
+        val kprop1 = property as? KProperty1<R, V> ?: return
+        val indexEntries = loadIndexEntries()
+        val matchingIndex = indexEntries.firstOrNull { it.propertyName == property.name }
+        val event =
+            PropertyChanged<K, R, V>(
+                entity = this as R,
+                property = kprop1,
+                oldValue = oldValue,
+                newValue = newValue,
+                versionAtMutation = null,
+                oldIndexKey = if (matchingIndex != null) oldValue else null,
+                newIndexKey = if (matchingIndex != null) newValue else null
+            )
+        log.trace { "Firing property changed event on ${this::class.java.simpleName}: ${property.name} $oldValue -> $newValue" }
+        publisher.emitAsync(event)
+    }
+
+    /**
+     * Entry point for FxScalar delegates: emits a [PropertyChanged] event given the property name
+     * and captured old/new values. Used by [net.transgressoft.lirp.persistence.RegistryBase] when
+     * wiring scalar mutation callbacks for FxScalar property delegates.
+     *
+     * @param propertyName the name of the property that changed
+     * @param oldValue the property value before the FX setter ran
+     * @param newValue the property value after the FX setter ran
+     * @param mutationBlock the lambda wrapping the `super.set()` call on the FX property
+     */
+    @Suppress("UNCHECKED_CAST")
+    internal fun <V> emitFxScalarPropertyChanged(propertyName: String, oldValue: V, newValue: V, mutationBlock: () -> Unit) {
+        check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
+        if (eventsDisabled) {
+            mutationBlock()
+            return
+        }
+        mutationBlock()
+        lastDateModified = LocalDateTime.now()
+
+        // If a batch accumulator is active, defer emission.
+        val accumulator = _batchAccumulator.get()
+        if (accumulator != null) {
+            // For FxScalar properties in a batch, we can only store a change if we can find the KProperty1.
+            // Attempt a lazy lookup via the delegate registry.
+            val kprop1 =
+                this::class.memberProperties
+                    .filterIsInstance<KProperty1<R, V>>()
+                    .firstOrNull { it.name == propertyName }
+            if (kprop1 != null) {
+                accumulator.add(FieldChange(kprop1, oldValue, newValue))
+            }
+            return
+        }
+
+        if (!shouldEmit) return
+
+        val kprop1 =
+            this::class.memberProperties
+                .filterIsInstance<KProperty1<R, V>>()
+                .firstOrNull { it.name == propertyName } ?: return
+
+        val indexEntries = loadIndexEntries()
+        val matchingIndex = indexEntries.firstOrNull { it.propertyName == propertyName }
+        val event =
+            PropertyChanged<K, R, V>(
+                entity = this as R,
+                property = kprop1,
+                oldValue = oldValue,
+                newValue = newValue,
+                versionAtMutation = null,
+                oldIndexKey = if (matchingIndex != null) oldValue else null,
+                newIndexKey = if (matchingIndex != null) newValue else null
+            )
+        log.trace { "Firing fx scalar property changed event on ${this::class.java.simpleName}: $propertyName $oldValue -> $newValue" }
+        publisher.emitAsync(event)
     }
 
     override fun subscribe(action: suspend (MutationEvent<K, R>) -> Unit): LirpEventSubscription<in LirpEntity, MutationEvent.Type, MutationEvent<K, R>> {
@@ -327,11 +454,10 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
 
     /**
      * Suppresses event emission from [mutateAndPublish] and reactive property delegates.
-     * Mutations still execute, but no [ReactiveMutationEvent] is published.
+     * Mutations still execute, but no mutation event is published.
      *
      * Pair with [enableEvents] to restore normal emission. Designed for use in [clone]
-     * implementations where property setters would otherwise trigger infinite recursion
-     * through the clone-compare change detection.
+     * implementations where property setters would otherwise trigger event emission.
      *
      * @see enableEvents
      * @see withEventsDisabled
@@ -361,7 +487,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     }
 
     /**
-     * Creates a reactive property delegate that emits a [ReactiveMutationEvent] on value change.
+     * Creates a reactive property delegate that emits a [PropertyChanged] event on value change.
      *
      * Usage: `var name: String by reactiveProperty(initialName)`
      *
@@ -390,24 +516,69 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     protected fun <T> reactiveProperty(getter: () -> T, setter: (T) -> Unit): ReadWriteProperty<ReactiveEntityBase<K, R>, T> =
         ReactivePropertyDelegateWithAccessors(this, getter, setter)
 
+    /**
+     * Atomically mutates one or more reactive properties and emits a single [BatchChanged] event
+     * carrying all per-field changes. If no field net-changed during the block, the event is
+     * suppressed.
+     *
+     * All property mutations inside the block are accumulated via the delegate's [emitPropertyChanged]
+     * path rather than emitted individually. This avoids spurious intermediate events when multiple
+     * fields change together and lets consumers receive a coherent snapshot of the entire mutation.
+     *
+     * @param mutationAction the block that performs the mutations; its return value is forwarded
+     */
     @Suppress("UNCHECKED_CAST")
     protected fun <T> mutateAndPublish(mutationAction: () -> T): T {
         check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
         if (eventsDisabled)
             return mutationAction()
 
-        val entityBeforeChange = clone()
-        val result = mutationAction()
-        if (entityBeforeChange == this) {
+        // Install a fresh accumulator so nested emitPropertyChanged calls record into it, saving the
+        // enclosing one so a nested mutateAndPublish restores (not drops) the outer block's accumulator.
+        val previousAccumulator = _batchAccumulator.get()
+        val accumulator = mutableListOf<FieldChange<R, *>>()
+        _batchAccumulator.set(accumulator)
+
+        val result: T
+        try {
+            result = mutationAction()
+        } finally {
+            if (previousAccumulator != null) _batchAccumulator.set(previousAccumulator) else _batchAccumulator.remove()
+        }
+
+        if (accumulator.isEmpty()) {
             log.debug {
-                "No-change mutation on ${this::class.java.simpleName}(id=$id) — event skipped"
+                "No-change mutation on ${this::class.java.simpleName}(id=$id) — batch event skipped"
             }
-        } else {
-            lastDateModified = LocalDateTime.now()
-            if (shouldEmit) {
-                log.trace { "Firing entity update event from $entityBeforeChange to $this" }
-                publisher.emitAsync(ReactiveMutationEvent(this as R, entityBeforeChange as R))
+            return result
+        }
+
+        lastDateModified = LocalDateTime.now()
+        if (shouldEmit) {
+            // Capture old/new index keys from the first indexed field touched, if any.
+            val indexEntries = loadIndexEntries()
+            var oldIndexKey: Any? = null
+            var newIndexKey: Any? = null
+            if (indexEntries.isNotEmpty()) {
+                val indexedChange =
+                    accumulator.firstOrNull { change ->
+                        indexEntries.any { it.propertyName == change.property.name }
+                    }
+                if (indexedChange != null) {
+                    oldIndexKey = indexedChange.oldValue
+                    newIndexKey = indexedChange.newValue
+                }
             }
+            val event =
+                BatchChanged<K, R>(
+                    entity = this as R,
+                    changes = accumulator.toList(),
+                    versionAtMutation = null,
+                    oldIndexKey = oldIndexKey,
+                    newIndexKey = newIndexKey
+                )
+            log.trace { "Firing batch changed event on ${this::class.java.simpleName}(id=$id) with ${accumulator.size} field(s)" }
+            publisher.emitAsync(event)
         }
         return result
     }

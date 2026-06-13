@@ -442,13 +442,21 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     /**
      * Emits a [CrudEvent.Type.UPDATE] event to repository subscribers when an entity mutation is detected.
      *
-     * The [MutationEvent] carries both the previous and current entity state, allowing subscribers
-     * to observe what changed. The auto-reload path that reacts to optimistic-lock conflicts runs
-     * inside `withEventsDisabled`, so the entity's mutation subscription does not fire during the
-     * swap and `onEntityMutated` is not called for Conflict-induced state changes.
+     * The auto-reload path that reacts to optimistic-lock conflicts runs inside `withEventsDisabled`,
+     * so the entity's mutation subscription does not fire during the swap and `onEntityMutated` is
+     * not called for Conflict-induced state changes.
+     *
+     * The `oldEntities` map supplied to [StandardCrudEvent.Update] is produced by cloning the
+     * current entity at repository re-publish time. This is intentional: EVNT-06 targets the
+     * property-setter hot path where `clone()` was called per-mutation under subscriber load;
+     * the repository-level UPDATE re-publish is a low-frequency lifecycle hook where a single
+     * targeted clone is acceptable and no mutation event field carries the full pre-mutation snapshot.
      */
+    @Suppress("UNCHECKED_CAST")
     override fun onEntityMutated(event: MutationEvent<K, R>) {
-        publisher.emitAsync(StandardCrudEvent.Update(event.newEntity, event.oldEntity))
+        // A targeted clone at this re-publish site supplies the `oldEntities` before-snapshot for
+        // StandardCrudEvent.Update consumers. See KDoc above for rationale.
+        publisher.emitAsync(StandardCrudEvent.Update(event.entity, event.entity.clone() as R))
     }
 
     /**

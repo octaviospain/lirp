@@ -1,0 +1,114 @@
+public final class net/transgressoft/lirp/ksp/FxScalarAccessorProcessor : com/google/devtools/ksp/processing/SymbolProcessor {
+	public fun <init> (Lcom/google/devtools/ksp/processing/CodeGenerator;Lcom/google/devtools/ksp/processing/KSPLogger;)V
+	public fun finish ()V
+	public fun onError ()V
+	public fun process (Lcom/google/devtools/ksp/processing/Resolver;)Ljava/util/List;
+}
+
+public final class net/transgressoft/lirp/ksp/FxScalarAccessorProcessorProvider : net/transgressoft/lirp/ksp/LirpProcessorProvider {
+	public fun <init> ()V
+	public fun createProcessor (Lcom/google/devtools/ksp/processing/CodeGenerator;Lcom/google/devtools/ksp/processing/KSPLogger;)Lcom/google/devtools/ksp/processing/SymbolProcessor;
+}
+
+public final class net/transgressoft/lirp/ksp/IndexedProcessor : com/google/devtools/ksp/processing/SymbolProcessor {
+	public fun <init> (Lcom/google/devtools/ksp/processing/CodeGenerator;Lcom/google/devtools/ksp/processing/KSPLogger;)V
+	public fun finish ()V
+	public fun onError ()V
+	public fun process (Lcom/google/devtools/ksp/processing/Resolver;)Ljava/util/List;
+}
+
+public final class net/transgressoft/lirp/ksp/IndexedProcessorProvider : net/transgressoft/lirp/ksp/LirpProcessorProvider {
+	public fun <init> ()V
+	public fun createProcessor (Lcom/google/devtools/ksp/processing/CodeGenerator;Lcom/google/devtools/ksp/processing/KSPLogger;)Lcom/google/devtools/ksp/processing/SymbolProcessor;
+}
+
+public final class net/transgressoft/lirp/ksp/LirpAccessorValidationProcessor : com/google/devtools/ksp/processing/SymbolProcessor {
+	public fun <init> (Lcom/google/devtools/ksp/processing/CodeGenerator;Lcom/google/devtools/ksp/processing/KSPLogger;)V
+	public fun finish ()V
+	public fun onError ()V
+	public fun process (Lcom/google/devtools/ksp/processing/Resolver;)Ljava/util/List;
+}
+
+public final class net/transgressoft/lirp/ksp/LirpAccessorValidationProcessorProvider : net/transgressoft/lirp/ksp/LirpProcessorProvider {
+	public fun <init> ()V
+	public fun createProcessor (Lcom/google/devtools/ksp/processing/CodeGenerator;Lcom/google/devtools/ksp/processing/KSPLogger;)Lcom/google/devtools/ksp/processing/SymbolProcessor;
+}
+
+public abstract class net/transgressoft/lirp/ksp/LirpProcessorProvider : com/google/devtools/ksp/processing/SymbolProcessorProvider {
+	public fun <init> ()V
+	public final fun create (Lcom/google/devtools/ksp/processing/SymbolProcessorEnvironment;)Lcom/google/devtools/ksp/processing/SymbolProcessor;
+	public abstract fun createProcessor (Lcom/google/devtools/ksp/processing/CodeGenerator;Lcom/google/devtools/ksp/processing/KSPLogger;)Lcom/google/devtools/ksp/processing/SymbolProcessor;
+}
+
+public final class net/transgressoft/lirp/ksp/LirpRepositoryProcessor : com/google/devtools/ksp/processing/SymbolProcessor {
+	public fun <init> (Lcom/google/devtools/ksp/processing/CodeGenerator;Lcom/google/devtools/ksp/processing/KSPLogger;)V
+	public fun finish ()V
+	public fun onError ()V
+	public fun process (Lcom/google/devtools/ksp/processing/Resolver;)Ljava/util/List;
+}
+
+public final class net/transgressoft/lirp/ksp/LirpRepositoryProcessorProvider : net/transgressoft/lirp/ksp/LirpProcessorProvider {
+	public fun <init> ()V
+	public fun createProcessor (Lcom/google/devtools/ksp/processing/CodeGenerator;Lcom/google/devtools/ksp/processing/KSPLogger;)Lcom/google/devtools/ksp/processing/SymbolProcessor;
+}
+
+public final class net/transgressoft/lirp/ksp/LirpViaAccessorProcessor : com/google/devtools/ksp/processing/SymbolProcessor {
+	public fun <init> (Lcom/google/devtools/ksp/processing/CodeGenerator;Lcom/google/devtools/ksp/processing/KSPLogger;)V
+	public fun finish ()V
+	public fun onError ()V
+	public fun process (Lcom/google/devtools/ksp/processing/Resolver;)Ljava/util/List;
+}
+
+public final class net/transgressoft/lirp/ksp/LirpViaAccessorProcessorProvider : net/transgressoft/lirp/ksp/LirpProcessorProvider {
+	public fun <init> ()V
+	public fun createProcessor (Lcom/google/devtools/ksp/processing/CodeGenerator;Lcom/google/devtools/ksp/processing/KSPLogger;)Lcom/google/devtools/ksp/processing/SymbolProcessor;
+}
+
+public final class net/transgressoft/lirp/ksp/RawInitializerProcessor : com/google/devtools/ksp/processing/SymbolProcessor {
+	public fun <init> (Lcom/google/devtools/ksp/processing/CodeGenerator;Lcom/google/devtools/ksp/processing/KSPLogger;)V
+	public fun finish ()V
+	public fun onError ()V
+	public fun process (Lcom/google/devtools/ksp/processing/Resolver;)Ljava/util/List;
+}
+
+public final class net/transgressoft/lirp/ksp/RawInitializerProcessorProvider : net/transgressoft/lirp/ksp/LirpProcessorProvider {
+	public fun <init> ()V
+	public fun createProcessor (Lcom/google/devtools/ksp/processing/CodeGenerator;Lcom/google/devtools/ksp/processing/KSPLogger;)Lcom/google/devtools/ksp/processing/SymbolProcessor;
+}
+
+public final class net/transgressoft/lirp/ksp/ReactiveEntityRefProcessor : com/google/devtools/ksp/processing/SymbolProcessor {
+	public fun <init> (Lcom/google/devtools/ksp/processing/CodeGenerator;Lcom/google/devtools/ksp/processing/KSPLogger;)V
+	public fun finish ()V
+	public fun onError ()V
+	public fun process (Lcom/google/devtools/ksp/processing/Resolver;)Ljava/util/List;
+}
+
+public final class net/transgressoft/lirp/ksp/ReactiveEntityRefProcessorProvider : net/transgressoft/lirp/ksp/LirpProcessorProvider {
+	public fun <init> ()V
+	public fun createProcessor (Lcom/google/devtools/ksp/processing/CodeGenerator;Lcom/google/devtools/ksp/processing/KSPLogger;)Lcom/google/devtools/ksp/processing/SymbolProcessor;
+}
+
+public final class net/transgressoft/lirp/ksp/ReactivePropertyAccessorProcessor : com/google/devtools/ksp/processing/SymbolProcessor {
+	public fun <init> (Lcom/google/devtools/ksp/processing/CodeGenerator;Lcom/google/devtools/ksp/processing/KSPLogger;)V
+	public fun finish ()V
+	public fun onError ()V
+	public fun process (Lcom/google/devtools/ksp/processing/Resolver;)Ljava/util/List;
+}
+
+public final class net/transgressoft/lirp/ksp/ReactivePropertyAccessorProcessorProvider : net/transgressoft/lirp/ksp/LirpProcessorProvider {
+	public fun <init> ()V
+	public fun createProcessor (Lcom/google/devtools/ksp/processing/CodeGenerator;Lcom/google/devtools/ksp/processing/KSPLogger;)Lcom/google/devtools/ksp/processing/SymbolProcessor;
+}
+
+public final class net/transgressoft/lirp/ksp/TableDefProcessor : com/google/devtools/ksp/processing/SymbolProcessor {
+	public fun <init> (Lcom/google/devtools/ksp/processing/CodeGenerator;Lcom/google/devtools/ksp/processing/KSPLogger;)V
+	public fun finish ()V
+	public fun onError ()V
+	public fun process (Lcom/google/devtools/ksp/processing/Resolver;)Ljava/util/List;
+}
+
+public final class net/transgressoft/lirp/ksp/TableDefProcessorProvider : net/transgressoft/lirp/ksp/LirpProcessorProvider {
+	public fun <init> ()V
+	public fun createProcessor (Lcom/google/devtools/ksp/processing/CodeGenerator;Lcom/google/devtools/ksp/processing/KSPLogger;)Lcom/google/devtools/ksp/processing/SymbolProcessor;
+}
+

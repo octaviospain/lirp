@@ -162,8 +162,7 @@ class ConcurrencyStressTest : DescribeSpec({
                         repeat(EVENTS_PER_WRITER) { eventIndex ->
                             val newEntity = TestEntity("entity-$writerIndex-$eventIndex")
                             newEntity.name = "Name-$writerIndex-$eventIndex"
-                            val oldEntity = TestEntity("entity-$writerIndex-$eventIndex")
-                            publisher.emitAsync(ReactiveMutationEvent(newEntity, oldEntity))
+                            publisher.emitAsync(ReactiveMutationEvent(newEntity))
                         }
                     }
                 }
@@ -251,8 +250,7 @@ class ConcurrencyStressTest : DescribeSpec({
                         repeat(EVENTS_PER_WRITER) { eventIndex ->
                             val newEntity = TestEntity("interleaved-$writerIndex-$eventIndex")
                             newEntity.name = "Interleaved-$writerIndex-$eventIndex"
-                            val oldEntity = TestEntity("interleaved-$writerIndex-$eventIndex")
-                            mutationPublisher.emitAsync(ReactiveMutationEvent(newEntity, oldEntity))
+                            mutationPublisher.emitAsync(ReactiveMutationEvent(newEntity))
                         }
                     }
                 }

@@ -326,4 +326,16 @@ To publish to the wiki, copy the rendered file:
 cp lirp-benchmark/build/reports/jmh/Performance-Benchmarks.md ../lirp.wiki/Performance-Benchmarks.md
 ```
 
+To show how this run compares against the currently published numbers, render with `--baseline`
+pointing at the wiki copy before overwriting it. Every numeric table gains a `Δ vs prev` column
+labelled `(better)`/`(worse)` according to the metric's direction (throughput higher-is-better;
+latency, memory, and init time lower-is-better):
+
+```bash
+python3 lirp-benchmark/scripts/render_benchmark_results.py \
+  --results lirp-benchmark/build/reports/jmh/results.json \
+  --baseline ../lirp.wiki/Performance-Benchmarks.md \
+  --out ../lirp.wiki/Performance-Benchmarks.md
+```
+
 > The benchmark module is **never published to Maven Central** and is **excluded from CI**. It is a local development tool only.

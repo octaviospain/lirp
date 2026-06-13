@@ -21,24 +21,24 @@ package net.transgressoft.lirp.persistence
  * Marker interface for JavaFX scalar property delegates that participate in lirp's reactive mutation
  * event system. Implemented by `Lirp*Property` classes in the `lirp-fx` module.
  *
- * [RegistryBase] uses this interface to detect fx scalar property delegates in
+ * [RegistryBase] uses this interface to detect FxScalar property delegates in
  * [RegistryBase.bindEntityRefs] without creating a circular module dependency between
  * `lirp-core` and `lirp-fx`. When discovered, RegistryBase injects a mutation callback
- * that wraps each `super.set()` call in a clone-before-mutation sequence, emitting a
- * [net.transgressoft.lirp.event.ReactiveMutationEvent] on the owning entity's publisher.
+ * that emits a [net.transgressoft.lirp.event.PropertyChanged] event on the owning entity's
+ * publisher, carrying the old and new values captured synchronously before and after the
+ * `super.set()` call.
  *
- * The injected [callback] parameter accepts a mutation block supplied by the delegate —
- * typically a lambda that calls `super.set(newValue)` on the underlying Simple*Property.
- * RegistryBase wraps this block in [net.transgressoft.lirp.entity.ReactiveEntityBase.emitReactiveMutation]
- * to ensure clone-before-mutation ordering and correct event emission.
+ * The callback receives the old value captured by the FxScalar delegate before invoking
+ * `super.set()`, the new value, and a mutation block wrapping the `super.set()` call.
  */
-fun interface FxScalarPropertyDelegate {
+interface FxScalarPropertyDelegate {
     /**
-     * Binds a mutation callback injected by [RegistryBase] that wraps scalar mutations in
-     * clone-before-mutation event emission logic.
+     * Binds a mutation callback injected by [RegistryBase] that emits a typed mutation event for
+     * each scalar property assignment.
      *
-     * @param callback a function that accepts a mutation block (the `super.set()` call) and
-     *   executes it within lirp's reactive event pipeline
+     * @param callback a function that receives the captured old value (before `super.set()`),
+     *   the new value, and a mutation block (the `super.set()` call); executes the block and
+     *   emits a [net.transgressoft.lirp.event.PropertyChanged] event on the entity's publisher
      */
-    fun bindMutationCallback(callback: (() -> Unit) -> Unit)
+    fun bindMutationCallback(callback: (oldValue: Any?, newValue: Any?, mutationBlock: () -> Unit) -> Unit)
 }

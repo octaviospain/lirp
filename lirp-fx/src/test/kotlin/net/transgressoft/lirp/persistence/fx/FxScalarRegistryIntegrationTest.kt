@@ -18,6 +18,7 @@
 package net.transgressoft.lirp.persistence.fx
 
 import net.transgressoft.lirp.event.MutationEvent
+import net.transgressoft.lirp.event.PropertyChanged
 import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.testing.reactiveScope
@@ -75,8 +76,9 @@ class FxScalarRegistryIntegrationTest : StringSpec({
         latch.await(2, TimeUnit.SECONDS) shouldBe true
         val event = receivedEvent.get()
         event shouldNotBe null
-        event.oldEntity.tagProperty.get() shouldBe "initial"
-        event.newEntity.tagProperty.get() shouldBe "updated"
+        val pc = event as PropertyChanged<Int, FxAudioPlaylistEntity, String>
+        pc.oldValue shouldBe "initial"
+        pc.newValue shouldBe "updated"
     }
 
     "fx string property fires JavaFX ChangeListener after RegistryBase binding" {
@@ -111,8 +113,9 @@ class FxScalarRegistryIntegrationTest : StringSpec({
         latch.await(2, TimeUnit.SECONDS) shouldBe true
         val event = receivedEvent.get()
         event shouldNotBe null
-        event.oldEntity.yearProperty.get() shouldBe 0
-        event.newEntity.yearProperty.get() shouldBe 2025
+        val pc = event as PropertyChanged<Int, FxAudioPlaylistEntity, Int>
+        pc.oldValue shouldBe 0
+        pc.newValue shouldBe 2025
     }
 
     "fx boolean property emits ReactiveMutationEvent on set" {
@@ -131,8 +134,9 @@ class FxScalarRegistryIntegrationTest : StringSpec({
         latch.await(2, TimeUnit.SECONDS) shouldBe true
         val event = receivedEvent.get()
         event shouldNotBe null
-        event.oldEntity.activeProperty.get() shouldBe false
-        event.newEntity.activeProperty.get() shouldBe true
+        val pc = event as PropertyChanged<Int, FxAudioPlaylistEntity, Boolean>
+        pc.oldValue shouldBe false
+        pc.newValue shouldBe true
     }
 
     "fx object property emits ReactiveMutationEvent on set" {
@@ -151,8 +155,9 @@ class FxScalarRegistryIntegrationTest : StringSpec({
         latch.await(2, TimeUnit.SECONDS) shouldBe true
         val event = receivedEvent.get()
         event shouldNotBe null
-        event.oldEntity.descriptionProperty.get() shouldBe null
-        event.newEntity.descriptionProperty.get() shouldBe "vip"
+        val pc = event as PropertyChanged<Int, FxAudioPlaylistEntity, String>
+        pc.oldValue shouldBe null
+        pc.newValue shouldBe "vip"
     }
 
     "withEventsDisabled suppresses MutationEvent for fx scalar property" {

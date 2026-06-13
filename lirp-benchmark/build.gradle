@@ -46,7 +46,10 @@ jmh {
         '--add-opens=java.base/java.lang.reflect=ALL-UNNAMED',
         '--add-opens=java.base/java.util=ALL-UNNAMED',
         '--add-opens=java.base/sun.nio.ch=ALL-UNNAMED',
-        '--add-opens=java.base/java.io=ALL-UNNAMED'
+        '--add-opens=java.base/java.io=ALL-UNNAMED',
+        // jol cannot read field offsets of JDK record classes (e.g. SecureClassLoader$CodeSourceKey)
+        // reachable from an entity graph on this JDK; the magic-field-offset fallback restores sizing.
+        '-Djol.magicFieldOffset=true'
     ]
 }
 

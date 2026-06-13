@@ -19,7 +19,14 @@ package net.transgressoft.lirp.event
 
 import net.transgressoft.lirp.entity.ReactiveEntity
 
-data class ReactiveMutationEvent<K, R>(override val newEntity: R, override val oldEntity: R)
+/**
+ * General-purpose mutation event carrying only the mutated entity reference.
+ * Emitted by legacy code paths that do not yet carry per-property change details.
+ *
+ * @param K the entity key type
+ * @param R the entity type
+ */
+data class ReactiveMutationEvent<K, R>(override val entity: R)
 : MutationEvent<K, R> where K : Comparable<K>, R : ReactiveEntity<K, R> {
 
     override val type = MutationEvent.Type.MUTATE

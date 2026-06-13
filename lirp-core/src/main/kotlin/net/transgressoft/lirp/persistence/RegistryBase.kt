@@ -244,26 +244,54 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
     }
 
     /**
-     * Moves [liveEntity] from its old index positions (keyed by property values on [snapshot]) to
-     * its new index positions (keyed by property values on [liveEntity]).
+     * Moves [entity] from its old index bucket (keyed by the captured [oldIndexKey]) to its
+     * current index positions derived from the live entity state.
      *
-     * Called from entity mutation handlers where `snapshot` is the pre-mutation clone and
-     * `liveEntity` is the updated in-memory object. The set stored in each index bucket holds the
-     * live object reference, so the removal must use the live reference — hence the two-parameter
-     * signature rather than a simple `deindexEntity(old); indexEntity(new)` pair.
+     * Called from entity mutation handlers. Both [oldIndexKey] and [newIndexKey] are captured
+     * as immutable scalars at assignment time, guarding against drift when the coroutine subscriber
+     * drains asynchronously while the live entity undergoes further mutations. When neither key is
+     * non-null (the mutated property carries no `@Indexed` annotation), the call is a no-op; the
+     * entity's existing index placement is still correct.
+     *
+     * When [changedPropertyName] is provided, the old-key removal is scoped to the single index
+     * entry for that property, preventing cross-type bucket lookups when an entity has multiple
+     * `@Indexed` properties of different value types. Without this guard, applying one property's
+     * old key to a different property's sorted index triggers a [ClassCastException] inside the
+     * comparator (e.g. a `String` key against an `Int`-typed `ConcurrentSkipListMap`).
+     *
+     * The set stored in each index bucket always holds the live object reference, so removal
+     * passes [entity] rather than a separate snapshot reference.
+     *
+     * @param entity the entity to reindex
+     * @param oldIndexKey the pre-mutation value of the `@Indexed` property, or `null` when no
+     *   indexed property was touched
+     * @param newIndexKey unused — retained for call-site symmetry; the post-mutation placement is
+     *   derived from the live entity state via [indexEntity]
+     * @param changedPropertyName the property whose index must be updated; when `null`, all index
+     *   entries are candidates for removal (safe only when the entity has a single `@Indexed`
+     *   property, or when called from a batch path that has already validated type safety)
      */
     @Suppress("UNCHECKED_CAST")
-    protected fun reindexEntity(snapshot: T, liveEntity: T) {
+    protected fun reindexEntity(entity: T, oldIndexKey: Any?, newIndexKey: Any?, changedPropertyName: String? = null) {
         val entries = indexEntries ?: return
+        if (oldIndexKey == null && newIndexKey == null) return
+
+        // Remove entity from the old bucket. When changedPropertyName is provided, limit removal to
+        // the matching index entry — applying one property's captured key to a different property's
+        // index can cause a ClassCastException in sorted indexes if the value types differ.
         for (entry in entries) {
-            val oldValue = entry.getter(snapshot) ?: continue
+            if (changedPropertyName != null && entry.propertyName != changedPropertyName) continue
             if (entry.sorted) {
-                removeFromBucket(sortedIndexes[entry.indexName], oldValue as Comparable<Any>, liveEntity)
+                // Attempt removal only when oldIndexKey is Comparable — required by sorted indexes.
+                val sortedOld = oldIndexKey as? Comparable<Any> ?: continue
+                removeFromBucket(sortedIndexes[entry.indexName], sortedOld, entity)
             } else {
-                removeFromBucket(hashIndexes[entry.indexName], oldValue, liveEntity)
+                if (oldIndexKey != null) {
+                    removeFromBucket(hashIndexes[entry.indexName], oldIndexKey, entity)
+                }
             }
         }
-        indexEntity(liveEntity)
+        indexEntity(entity)
     }
 
     // Atomically remove [entity] from the value bucket and prune the key if the set becomes empty.
@@ -479,10 +507,10 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
 
     private fun bindFxScalarDelegates(entity: T) {
         if (entity !is ReactiveEntityBase<*, *>) return
-        for ((_, delegate) in entity.delegateRegistry) {
+        for ((propName, delegate) in entity.delegateRegistry) {
             if (delegate is FxScalarPropertyDelegate) {
-                delegate.bindMutationCallback { mutationBlock ->
-                    entity.emitReactiveMutation(mutationBlock)
+                delegate.bindMutationCallback { oldValue, newValue, mutationBlock ->
+                    entity.emitFxScalarPropertyChanged(propName, oldValue, newValue, mutationBlock)
                 }
             }
         }

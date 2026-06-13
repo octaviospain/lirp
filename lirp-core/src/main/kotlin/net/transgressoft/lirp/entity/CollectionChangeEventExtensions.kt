@@ -21,13 +21,12 @@ import net.transgressoft.lirp.event.AggregateMutationEvent
 import net.transgressoft.lirp.event.CollectionChangeEvent
 import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.MutationEvent
-import net.transgressoft.lirp.event.ReactiveMutationEvent
 import java.util.function.Consumer
 import kotlin.reflect.KClass
 
 // Extension functions providing a 3-tier subscription API for ReactiveEntity:
 // - subscribe — all events (property mutations, collection changes, bubble-up)
-// - subscribeToMutations — direct property mutation events only (ReactiveMutationEvent)
+// - subscribeToMutations — direct property mutation events only (PropertyChanged, BatchChanged, ReactiveMutationEvent)
 // - subscribeToCollectionChanges — collection diff events only (CollectionChangeEvent), optionally filtered by property name
 // Java consumers can use the Consumer-based overloads, callable as static methods on CollectionChangeEventExtensionsKt.
 
@@ -99,21 +98,22 @@ fun <K : Comparable<K>, R : ReactiveEntity<K, R>, E : Any> ReactiveEntity<K, R>.
 /**
  * Subscribes to direct property mutation events on this entity, excluding aggregate/collection events.
  *
- * Filters the entity's event stream to [ReactiveMutationEvent] instances only, excluding
- * [AggregateMutationEvent] (which wraps bubble-up or collection change events).
+ * Filters the entity's event stream to any [MutationEvent] that is not an [AggregateMutationEvent],
+ * delivering [net.transgressoft.lirp.event.PropertyChanged], [net.transgressoft.lirp.event.BatchChanged],
+ * and [net.transgressoft.lirp.event.ReactiveMutationEvent] instances to the action.
+ * [AggregateMutationEvent] (which wraps bubble-up or collection change events) is excluded.
  *
  * @param action the suspend function invoked for each property mutation event
  * @return a subscription handle that can be cancelled to stop receiving events
  */
 fun <K : Comparable<K>, R : ReactiveEntity<K, R>> ReactiveEntity<K, R>.subscribeToMutations(
-    action: suspend (ReactiveMutationEvent<K, R>) -> Unit
+    action: suspend (MutationEvent<K, R>) -> Unit
 ): LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>> =
     subscribe { event ->
-        if (event is ReactiveMutationEvent<*, *>) {
-            // Safe: the event is verified to be ReactiveMutationEvent<*, *> by the enclosing is-check.
-            // K and R are bound by the receiver's ReactiveEntity<K, R> type, so the cast is type-safe.
+        if (event !is AggregateMutationEvent<*, *>) {
+            // Safe: AggregateMutationEvent is excluded above; K and R are bound by the receiver.
             @Suppress("UNCHECKED_CAST")
-            action(event as ReactiveMutationEvent<K, R>)
+            action(event as MutationEvent<K, R>)
         }
     }
 
@@ -124,6 +124,6 @@ fun <K : Comparable<K>, R : ReactiveEntity<K, R>> ReactiveEntity<K, R>.subscribe
  * @return a subscription handle that can be cancelled to stop receiving events
  */
 fun <K : Comparable<K>, R : ReactiveEntity<K, R>> ReactiveEntity<K, R>.subscribeToMutations(
-    action: Consumer<ReactiveMutationEvent<K, R>>
+    action: Consumer<MutationEvent<K, R>>
 ): LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>> =
     subscribeToMutations { event -> action.accept(event) }

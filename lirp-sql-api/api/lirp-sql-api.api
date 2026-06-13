@@ -1,0 +1,71 @@
+public abstract interface class net/transgressoft/lirp/persistence/sql/ForeignKeyAware {
+	public abstract fun foreignKeys ()Ljava/util/List;
+}
+
+public final class net/transgressoft/lirp/persistence/sql/ForeignKeyDef {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lnet/transgressoft/lirp/entity/CascadeAction;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Lnet/transgressoft/lirp/entity/CascadeAction;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lnet/transgressoft/lirp/entity/CascadeAction;)Lnet/transgressoft/lirp/persistence/sql/ForeignKeyDef;
+	public static synthetic fun copy$default (Lnet/transgressoft/lirp/persistence/sql/ForeignKeyDef;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lnet/transgressoft/lirp/entity/CascadeAction;ILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/sql/ForeignKeyDef;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getColumnName ()Ljava/lang/String;
+	public final fun getOnDelete ()Lnet/transgressoft/lirp/entity/CascadeAction;
+	public final fun getReferencedColumn ()Ljava/lang/String;
+	public final fun getReferencedTable ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class net/transgressoft/lirp/persistence/sql/JunctionAccessor {
+	public abstract fun getDescriptor ()Lnet/transgressoft/lirp/persistence/sql/JunctionTableDef;
+	public abstract fun idsOf (Ljava/lang/Object;)Ljava/util/Collection;
+}
+
+public abstract interface class net/transgressoft/lirp/persistence/sql/JunctionAware {
+	public abstract fun applyJunctionRows (Ljava/lang/Object;Lnet/transgressoft/lirp/persistence/sql/JunctionTableDef;Ljava/util/List;)V
+	public abstract fun getJunctionAccessors ()Ljava/util/List;
+	public abstract fun getJunctionTableDefs ()Ljava/util/List;
+}
+
+public final class net/transgressoft/lirp/persistence/sql/JunctionColumnDef {
+	public fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/persistence/ColumnType;ZZ)V
+	public synthetic fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/persistence/ColumnType;ZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lnet/transgressoft/lirp/persistence/ColumnType;
+	public final fun component3 ()Z
+	public final fun component4 ()Z
+	public final fun copy (Ljava/lang/String;Lnet/transgressoft/lirp/persistence/ColumnType;ZZ)Lnet/transgressoft/lirp/persistence/sql/JunctionColumnDef;
+	public static synthetic fun copy$default (Lnet/transgressoft/lirp/persistence/sql/JunctionColumnDef;Ljava/lang/String;Lnet/transgressoft/lirp/persistence/ColumnType;ZZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/sql/JunctionColumnDef;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getName ()Ljava/lang/String;
+	public final fun getNullable ()Z
+	public final fun getPrimaryKey ()Z
+	public final fun getType ()Lnet/transgressoft/lirp/persistence/ColumnType;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class net/transgressoft/lirp/persistence/sql/JunctionTableDef {
+	public abstract fun getColumns ()Ljava/util/List;
+	public abstract fun getItemFkOnDelete ()Lnet/transgressoft/lirp/entity/CascadeAction;
+	public abstract fun getItemTableName ()Ljava/lang/String;
+	public abstract fun getParentFkOnDelete ()Lnet/transgressoft/lirp/entity/CascadeAction;
+	public abstract fun getParentTableName ()Ljava/lang/String;
+	public abstract fun getTableName ()Ljava/lang/String;
+	public abstract fun isOrdered ()Z
+}
+
+public abstract interface class net/transgressoft/lirp/persistence/sql/SqlTableDef : net/transgressoft/lirp/persistence/LirpTableDef {
+	public abstract fun applyRow (Ljava/lang/Object;Lorg/jetbrains/exposed/v1/core/ResultRow;Lorg/jetbrains/exposed/v1/core/Table;)V
+	public abstract fun applyScalarRow (Ljava/lang/Object;Lorg/jetbrains/exposed/v1/core/ResultRow;Lorg/jetbrains/exposed/v1/core/Table;Lnet/transgressoft/lirp/persistence/LirpRawInitializer;)V
+	public abstract fun fromRow (Lorg/jetbrains/exposed/v1/core/ResultRow;Lorg/jetbrains/exposed/v1/core/Table;)Ljava/lang/Object;
+	public abstract fun toParams (Ljava/lang/Object;Lorg/jetbrains/exposed/v1/core/Table;)Ljava/util/Map;
+}
+
+public abstract interface class net/transgressoft/lirp/persistence/sql/VersionedTableDef {
+	public abstract fun bumpVersion (Ljava/lang/Object;J)V
+}
+

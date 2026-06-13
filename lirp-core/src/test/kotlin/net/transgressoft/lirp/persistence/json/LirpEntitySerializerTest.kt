@@ -257,7 +257,7 @@ class LirpEntitySerializerTest : StringSpec({
  * FxScalarPropertyDelegate without get()/set() — triggers requireMethod error during serializer init.
  */
 private class BrokenFxScalarDelegate : FxScalarPropertyDelegate, LirpDelegate {
-    override fun bindMutationCallback(callback: (() -> Unit) -> Unit) {}
+    override fun bindMutationCallback(callback: (Any?, Any?, () -> Unit) -> Unit) {}
 }
 
 /**

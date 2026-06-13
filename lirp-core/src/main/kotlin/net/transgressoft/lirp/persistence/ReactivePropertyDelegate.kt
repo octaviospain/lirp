@@ -23,12 +23,16 @@ import kotlin.reflect.KProperty
 
 /**
  * Reactive property delegate that stores a value in its own backing field and emits a
- * [net.transgressoft.lirp.event.ReactiveMutationEvent] on assignment when the value changes.
+ * [net.transgressoft.lirp.event.PropertyChanged] event on assignment when the value changes.
+ *
+ * The old value is captured synchronously from [storedValue] before the backing field is updated,
+ * so no entity clone is performed on the setter hot path. The zero-alloc no-change guard
+ * (`if (value != storedValue)`) prevents spurious event emission.
  *
  * Promoted from a private inner class of [ReactiveEntityBase] to a top-level `internal` class so
  * KSP-generated code can write its backing field directly via [writeBackingDirectly] without
  * incurring reflection. The owning entity is injected via constructor and used to delegate the
- * emit/clone/timestamp control flow to [ReactiveEntityBase.emitReactiveMutation].
+ * emit and timestamp control flow to [ReactiveEntityBase.emitPropertyChanged].
  *
  * @param T the property value type
  */
@@ -44,13 +48,14 @@ internal class ReactivePropertyDelegate<T>(
     override fun setValue(thisRef: Any?, property: KProperty<*>, value: T) {
         check(!entity.isClosed) { "Entity '${entity::class.java.simpleName}' is closed" }
         if (value != storedValue) {
-            entity.emitReactiveMutation { storedValue = value }
+            val oldValue = storedValue // immutable capture before the mutation block runs
+            entity.emitPropertyChanged(property, oldValue, value) { storedValue = value }
         }
     }
 
     /**
-     * Writes [value] into the backing field without triggering event emission, the clone
-     * comparison, the lastDateModified bump, or any other reactive side effect.
+     * Writes [value] into the backing field without triggering event emission, the
+     * lastDateModified bump, or any other reactive side effect.
      *
      * Consumed by KSP-generated accessors to bulk-init entities from persisted rows.
      */
@@ -80,13 +85,14 @@ internal class ReactivePropertyDelegateWithAccessors<T>(
     override fun setValue(thisRef: Any?, property: KProperty<*>, value: T) {
         check(!entity.isClosed) { "Entity '${entity::class.java.simpleName}' is closed" }
         if (value != getter()) {
-            entity.emitReactiveMutation { setter(value) }
+            val oldValue = getter() // immutable capture before the mutation block runs
+            entity.emitPropertyChanged(property, oldValue, value) { setter(value) }
         }
     }
 
     /**
-     * Writes [value] through the supplied [setter] without triggering event emission, the clone
-     * comparison, the lastDateModified bump, or any other reactive side effect. For
+     * Writes [value] through the supplied [setter] without triggering event emission, the
+     * lastDateModified bump, or any other reactive side effect. For
      * `@Transient`-backed reactive properties, the setter lambda is the backing-write path.
      */
     internal fun writeBackingDirectly(value: T) {
@@ -97,7 +103,7 @@ internal class ReactivePropertyDelegateWithAccessors<T>(
 /**
  * Writes [value] directly into the backing field of the reactive-property delegate registered
  * on [entity] under [propertyName], bypassing event emission, lastDateModified updates, and
- * clone-based change detection.
+ * change detection.
  *
  * Consumed by KSP-generated `LirpReactivePropertyAccessor` and `LirpRawInitializer` implementations
  * to bulk-load entities from persisted rows without triggering the reactive pipeline. The

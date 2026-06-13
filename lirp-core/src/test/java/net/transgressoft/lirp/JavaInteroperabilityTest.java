@@ -12,6 +12,7 @@ import net.transgressoft.lirp.event.AggregateMutationEvent;
 import net.transgressoft.lirp.event.CollectionChangeEvent;
 import net.transgressoft.lirp.event.CrudEvent;
 import net.transgressoft.lirp.event.MutationEvent;
+import net.transgressoft.lirp.event.PropertyChanged;
 import net.transgressoft.lirp.event.ReactiveScope;
 import net.transgressoft.lirp.event.ReactiveMutationEvent;
 import net.transgressoft.lirp.persistence.AudioItem;
@@ -96,8 +97,9 @@ class JavaInteroperabilityTest {
                 String[] newValueHolder = new String[1];
 
                 var subscription = appName.subscribe(event -> {
-                    oldValueHolder[0] = event.getOldEntity().getValue();
-                    newValueHolder[0] = event.getNewEntity().getValue();
+                    var pc = (PropertyChanged<?, ?, ?>) event;
+                    oldValueHolder[0] = (String) pc.getOldValue();
+                    newValueHolder[0] = (String) pc.getNewValue();
                 });
 
                 appName.setValue("NewAppName");
@@ -166,8 +168,9 @@ class JavaInteroperabilityTest {
             var newTitle = new String[1];
 
             var subscription = audioItem.subscribe(event -> {
-                oldTitle[0] = event.getOldEntity().getTitle();
-                newTitle[0] = event.getNewEntity().getTitle();
+                var pc = (PropertyChanged<?, ?, ?>) event;
+                oldTitle[0] = (String) pc.getOldValue();
+                newTitle[0] = (String) pc.getNewValue();
             });
 
             audioItem.setTitle("Track Beta");
@@ -219,8 +222,9 @@ class JavaInteroperabilityTest {
 
             assertNotNull(subscriptionRef.get(), "onSubscribe must be called");
             assertEquals(1, receivedEvents.size());
-            assertEquals("Track Alpha", receivedEvents.get(0).getOldEntity().getTitle());
-            assertEquals("Track Beta", receivedEvents.get(0).getNewEntity().getTitle());
+            var pc0 = (PropertyChanged<?, ?, ?>) receivedEvents.get(0);
+            assertEquals("Track Alpha", (String) pc0.getOldValue());
+            assertEquals("Track Beta", (String) pc0.getNewValue());
         }
 
         @Test
@@ -649,15 +653,15 @@ class JavaInteroperabilityTest {
         }
 
         @Test
-        @DisplayName("subscribeToMutations Java Consumer overload receives ReactiveMutationEvent")
+        @DisplayName("subscribeToMutations Java Consumer overload receives MutationEvent for property change")
         void subscribeToMutations_Java_Consumer_receives_events() throws InterruptedException {
             var audioItem = new MutableAudioItem(1, "Track Alpha");
 
             var latch = new CountDownLatch(1);
-            AtomicReference<ReactiveMutationEvent<?, ?>> receivedEvent = new AtomicReference<>(null);
+            AtomicReference<MutationEvent<?, ?>> receivedEvent = new AtomicReference<>(null);
 
             CollectionChangeEventExtensionsKt.subscribeToMutations(audioItem,
-                (Consumer<ReactiveMutationEvent<Integer, AudioItem>>) event -> {
+                (Consumer<MutationEvent<Integer, AudioItem>>) event -> {
                     receivedEvent.set(event);
                     latch.countDown();
                 });
@@ -667,7 +671,7 @@ class JavaInteroperabilityTest {
 
             assertTrue(latch.await(2, SECONDS));
             assertNotNull(receivedEvent.get());
-            assertInstanceOf(ReactiveMutationEvent.class, receivedEvent.get());
+            assertInstanceOf(PropertyChanged.class, receivedEvent.get());
         }
     }
 
