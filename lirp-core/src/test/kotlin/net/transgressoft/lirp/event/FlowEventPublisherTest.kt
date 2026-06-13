@@ -27,8 +27,10 @@ import net.transgressoft.lirp.event.StandardCrudEvent.Create
 import net.transgressoft.lirp.event.StandardCrudEvent.Delete
 import net.transgressoft.lirp.event.StandardCrudEvent.Update
 import net.transgressoft.lirp.testing.reactiveScope
+import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.DescribeSpec
+import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.maps.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -39,6 +41,7 @@ import java.util.concurrent.Flow
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.function.Consumer
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -47,7 +50,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 
 class FlowEventPublisherTest : DescribeSpec({
     val reactive = reactiveScope()
@@ -552,18 +554,25 @@ class FlowEventPublisherTest : DescribeSpec({
                     }
 
                 try {
+                    // The SharedFlow has replay=0 and subscribe() starts its collecting coroutine
+                    // asynchronously, so events emitted before that coroutine is actually collecting
+                    // are dropped. Warm up first and wait until the subscriber observes an event:
+                    // that guarantees the collector is live before emitting the events under test,
+                    // making delivery deterministic rather than dependent on scheduler timing.
+                    publisher.emitAsync(Create(TestEntity("warmup")))
+                    eventually(5.seconds) {
+                        received.shouldNotBeEmpty()
+                    }
+                    received.clear()
+
                     repeat(5) { i ->
                         publisher.emitAsync(Create(TestEntity("entity-$i")))
                         delay(10.milliseconds)
                     }
 
-                    withTimeout(5000.milliseconds) {
-                        while (received.size < 5) {
-                            delay(10.milliseconds)
-                        }
+                    eventually(10.seconds) {
+                        received.size shouldBe 5
                     }
-
-                    received.size shouldBe 5
                     received.any { it.entities.values.first().id == "entity-0" } shouldBe true
                     received.any { it.entities.values.first().id == "entity-4" } shouldBe true
                 } finally {

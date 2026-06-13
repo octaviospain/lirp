@@ -6,6 +6,13 @@ public final class net/transgressoft/lirp/entity/CollectionChangeEventExtensions
 	public static final fun subscribeToMutations (Lnet/transgressoft/lirp/entity/ReactiveEntity;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 }
 
+public final class net/transgressoft/lirp/entity/PropertySubscriptionExtensionsKt {
+	public static final fun changesOf (Lnet/transgressoft/lirp/event/BatchChanged;Lkotlin/reflect/KProperty1;)Ljava/util/List;
+	public static final fun childPropertyChanged (Lnet/transgressoft/lirp/event/AggregateMutationEvent;Lkotlin/reflect/KProperty1;)Lnet/transgressoft/lirp/event/PropertyChanged;
+	public static final fun subscribeToProperty (Lnet/transgressoft/lirp/entity/ReactiveEntity;Lkotlin/reflect/KProperty1;Lkotlin/jvm/functions/Function3;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public static final fun subscribeToPropertyEvent (Lnet/transgressoft/lirp/entity/ReactiveEntity;Lkotlin/reflect/KProperty1;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+}
+
 public abstract class net/transgressoft/lirp/entity/ReactiveEntityBase : net/transgressoft/lirp/entity/ReactiveEntity {
 	protected fun <init> ()V
 	public fun <init> (Lkotlin/jvm/functions/Function1;)V
