@@ -81,7 +81,8 @@ public final class net/transgressoft/lirp/event/FlowEventPublisher : net/transgr
 	public fun <init> (Ljava/lang/String;)V
 	public fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/event/PublisherConfig;)V
 	public fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/event/PublisherConfig;Z)V
-	public synthetic fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/event/PublisherConfig;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/event/PublisherConfig;ZLnet/transgressoft/lirp/event/LirpErrorHandler;)V
+	public synthetic fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/event/PublisherConfig;ZLnet/transgressoft/lirp/event/LirpErrorHandler;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun activateEvents ([Lnet/transgressoft/lirp/event/EventType;)V
 	public fun close ()V
 	public fun disableEvents ([Lnet/transgressoft/lirp/event/EventType;)V
@@ -96,6 +97,7 @@ public final class net/transgressoft/lirp/event/FlowEventPublisher : net/transgr
 	public fun subscribe ([Lnet/transgressoft/lirp/event/EventType;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public fun subscribeAsync (Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public fun subscribeAsync (Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribeAsync (Lkotlin/jvm/functions/Function2;Lnet/transgressoft/lirp/event/LirpErrorHandler;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public fun subscribeAsync ([Lnet/transgressoft/lirp/event/EventType;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public fun toString ()Ljava/lang/String;
 }
@@ -702,7 +704,8 @@ public final class net/transgressoft/lirp/persistence/PendingUpdate {
 public abstract class net/transgressoft/lirp/persistence/PersistentRepositoryBase : net/transgressoft/lirp/persistence/VolatileRepository, net/transgressoft/lirp/persistence/PersistentRepository {
 	public static final field Companion Lnet/transgressoft/lirp/persistence/PersistentRepositoryBase$Companion;
 	public fun <init> (Ljava/lang/String;Z)V
-	public synthetic fun <init> (Ljava/lang/String;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljava/lang/String;ZLnet/transgressoft/lirp/event/LirpErrorHandler;)V
+	public synthetic fun <init> (Ljava/lang/String;ZLnet/transgressoft/lirp/event/LirpErrorHandler;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public synthetic fun add (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
 	public fun add (Lnet/transgressoft/lirp/entity/ReactiveEntity;)Z
 	protected final fun addToMemoryOnly (Lnet/transgressoft/lirp/entity/ReactiveEntity;)V
@@ -841,6 +844,7 @@ public abstract class net/transgressoft/lirp/persistence/RegistryBase : net/tran
 	public synthetic fun subscribe ([Lnet/transgressoft/lirp/event/EventType;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public fun subscribeAsync (Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public fun subscribeAsync (Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribeAsync (Lkotlin/jvm/functions/Function2;Lnet/transgressoft/lirp/event/LirpErrorHandler;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public fun subscribeAsync ([Lnet/transgressoft/lirp/event/CrudEvent$Type;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public synthetic fun subscribeAsync ([Lnet/transgressoft/lirp/event/EventType;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public static final fun viaAccessorFor$net_transgressoft_lirp_core (Ljava/lang/Class;)Lnet/transgressoft/lirp/persistence/LirpViaAccessor;
@@ -887,7 +891,8 @@ public class net/transgressoft/lirp/persistence/VolatileRepository : net/transgr
 	public fun <init> ()V
 	public fun <init> (Ljava/lang/String;)V
 	public fun <init> (Ljava/lang/String;Ljava/util/Map;)V
-	public synthetic fun <init> (Ljava/lang/String;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljava/lang/String;Ljava/util/Map;Lnet/transgressoft/lirp/event/LirpErrorHandler;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/util/Map;Lnet/transgressoft/lirp/event/LirpErrorHandler;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun add (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
 	public fun clear ()V
 	public fun equals (Ljava/lang/Object;)Z

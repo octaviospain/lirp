@@ -18,11 +18,16 @@
 package net.transgressoft.lirp.event
 
 import net.transgressoft.lirp.entity.LirpEntity
+import net.transgressoft.lirp.event.LirpErrorContext
+import net.transgressoft.lirp.event.LirpErrorHandler
+import net.transgressoft.lirp.event.LirpOperation
 import io.github.oshai.kotlinlogging.KotlinLogging
+import org.slf4j.MDC
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Flow
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
@@ -30,6 +35,11 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.slf4j.MDCContext
+
+// MDC keys for async event emission log correlation
+private const val MDC_KEY_REPOSITORY = "lirp.repository"
+private const val MDC_KEY_OPERATION = "lirp.operation"
 
 /**
  * Configuration for [FlowEventPublisher] behavior.
@@ -147,7 +157,14 @@ class FlowEventPublisher<ET : EventType, E : LirpEvent<ET>>
          * Lifecycle notification: immediately before the close is triggered, the callback
          * registered via [onCloseOnEmpty] is invoked so observers can react to the imminent shutdown.
          */
-        private val closeOnEmpty: Boolean = false
+        private val closeOnEmpty: Boolean = false,
+        /**
+         * Optional handler invoked after the existing error log when the async drain loop catches
+         * an exception during `flow.emit`. The framework logs first, then notifies the handler.
+         * The handler observes the failure but does not alter control flow (notify-only). When
+         * `null`, behavior is log-only — identical to not configuring a handler.
+         */
+        private val onError: LirpErrorHandler? = null
     ) : LirpEventPublisher<ET, E> {
 
         private val log = KotlinLogging.logger {}
@@ -164,14 +181,29 @@ class FlowEventPublisher<ET : EventType, E : LirpEvent<ET>>
             val changes: SharedFlow<E> = flow.asSharedFlow()
 
             init {
-                flowScope.launch {
-                    for (event in channel) {
-                        try {
-                            flow.emit(event)
-                        } catch (exception: Exception) {
-                            log.error(exception) { "Unexpected error during event emission: $event" }
+                MDC.put(MDC_KEY_REPOSITORY, id)
+                MDC.put(MDC_KEY_OPERATION, LirpOperation.EMIT.name)
+                try {
+                    flowScope.launch(MDCContext()) {
+                        for (event in channel) {
+                            try {
+                                flow.emit(event)
+                            } catch (cancellation: CancellationException) {
+                                throw cancellation
+                            } catch (exception: Exception) {
+                                log.error(exception) { "Unexpected error during event emission: $event" }
+                                // Notify after logging — handler observes but does not alter control flow
+                                try {
+                                    onError?.invoke(exception, LirpErrorContext(LirpOperation.EMIT, emptyList<Any>(), id))
+                                } catch (handlerEx: Throwable) {
+                                    log.error(handlerEx) { "LirpErrorHandler threw; exception swallowed to preserve drain loop" }
+                                }
+                            }
                         }
                     }
+                } finally {
+                    MDC.remove(MDC_KEY_REPOSITORY)
+                    MDC.remove(MDC_KEY_OPERATION)
                 }
             }
         }
@@ -430,6 +462,38 @@ class FlowEventPublisher<ET : EventType, E : LirpEvent<ET>>
         }
 
         /**
+         * Subscribes asynchronously with a per-subscription error handler.
+         *
+         * When [action] throws, the exception is logged at ERROR level and [onError] is invoked
+         * with operation [LirpOperation.EMIT] and this publisher's id. The failure does not
+         * consult any repository-level handler — per-subscription and repository-level handlers
+         * are independent. Omitting [onError] (i.e. calling the single-arg overload) keeps
+         * the existing log-only behavior.
+         *
+         * @param action The suspend action to execute when events are emitted
+         * @param onError Handler invoked after logging when [action] throws
+         * @return A subscription that can be used to unsubscribe
+         */
+        override fun subscribeAsync(
+            action: suspend (E) -> Unit,
+            onError: LirpErrorHandler
+        ): LirpEventSubscription<in LirpEntity, ET, E> =
+            subscribeAsync { event ->
+                try {
+                    action(event)
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (e: Exception) {
+                    log.error(e) { "Async subscriber action failed for publisher '$id'" }
+                    try {
+                        onError(e, LirpErrorContext(LirpOperation.EMIT, emptyList<Any>(), id))
+                    } catch (handlerEx: Throwable) {
+                        log.error(handlerEx) { "LirpErrorHandler threw; exception swallowed to preserve subscriber coroutine" }
+                    }
+                }
+            }
+
+        /**
          * Subscribes asynchronously to entity change events by providing a suspending action.
          *
          * @param action The suspend action to execute when events are emitted
@@ -520,7 +584,7 @@ class FlowEventPublisher<ET : EventType, E : LirpEvent<ET>>
 
         override fun disableEvents(vararg types: ET) {
             activatedEventTypes = activatedEventTypes - types.toSet()
-            log.trace { "Enabled event types from $id: $activatedEventTypes" }
+            log.trace { "Active event types after disable from $id: $activatedEventTypes" }
         }
 
         override fun activateEvents(vararg types: ET) {

@@ -27,7 +27,9 @@ kotlin-reflect = { module = "org.jetbrains.kotlin:kotlin-reflect", version.ref =
 
 coroutines-bom = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-bom", version.ref = "coroutines" }
 coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core" }
+coroutines-slf4j = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-slf4j" }
 coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test" }
+slf4j-api = { module = "org.slf4j:slf4j-api", version = "2.0.17" }
 
 ksp-api = { module = "com.google.devtools.ksp:symbol-processing-api", version.ref = "ksp" }
 

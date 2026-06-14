@@ -17,6 +17,8 @@
 
 package net.transgressoft.lirp.event
 
+import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -37,17 +39,38 @@ import kotlinx.coroutines.SupervisorJob
  * 4. Clean cancellation of ongoing operations when needed
  *
  * The default scopes use limited parallelism to prevent resource exhaustion while
- * maintaining responsive operation.
+ * maintaining responsive operation. A [CoroutineExceptionHandler] backstop is installed
+ * on both default scopes so uncaught exceptions from root coroutines are logged at ERROR
+ * level rather than silently discarded. The [SupervisorJob] ensures each failing launch
+ * is isolated — siblings continue to run.
  *
  * @see flowScope
  * @see ioScope
  */
 object ReactiveScope {
+
+    private val log = KotlinLogging.logger {}
+
+    /**
+     * Last-resort handler for uncaught exceptions that escape a root coroutine on either
+     * default scope. Logs the failure at ERROR level so it is observable even when no
+     * explicit try/catch surrounds the launch site.
+     *
+     * The [SupervisorJob] on each scope guarantees sibling coroutines are not cancelled
+     * when one child fails — this handler fires per failing root launch only.
+     */
+    private fun backstop(): CoroutineExceptionHandler =
+        CoroutineExceptionHandler { _, throwable ->
+            log.error(throwable) { "Uncaught coroutine failure in reactive scope" }
+        }
+
     // Default scope with limited parallelism to prevent resource exhaustion
     // but ensuring all entity events are processed
-    private var defaultFlowScope: CoroutineScope = CoroutineScope(Dispatchers.Default.limitedParallelism(4) + SupervisorJob())
+    private var defaultFlowScope: CoroutineScope =
+        CoroutineScope(Dispatchers.Default.limitedParallelism(4) + SupervisorJob() + backstop())
 
-    private var defaultIoScope: CoroutineScope = CoroutineScope(Dispatchers.IO.limitedParallelism(1) + SupervisorJob())
+    private var defaultIoScope: CoroutineScope =
+        CoroutineScope(Dispatchers.IO.limitedParallelism(1) + SupervisorJob() + backstop())
 
     /**
      * Sets the default scope for all reactive entities that don't specify their own.

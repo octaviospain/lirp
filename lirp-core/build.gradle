@@ -17,6 +17,8 @@ dependencies {
 
     implementation libs.jsr305
     implementation libs.kotlin.logging
+    implementation libs.coroutines.slf4j
+    implementation libs.slf4j.api
     implementation libs.kotlin.reflect
     implementation libs.serialization.json
 
@@ -27,6 +29,7 @@ dependencies {
     testFixturesImplementation project(path: ':lirp-api')
     testFixturesImplementation libs.kotlin.stdlib
     testFixturesImplementation libs.bundles.kotest
+    testFixturesImplementation libs.bundles.logback
     testFixturesImplementation libs.coroutines.test
     testFixturesImplementation libs.serialization.json
 
@@ -34,11 +37,11 @@ dependencies {
 
     testImplementation platform(libs.junit.bom)
     testImplementation libs.logback.core
+    testImplementation libs.logback.classic
     testImplementation libs.bundles.kotest
     testImplementation libs.mockk
     testImplementation libs.coroutines.test
     testImplementation libs.junit.jupiter
-    testRuntimeOnly libs.logback.classic
     testRuntimeOnly libs.junit.platform.launcher
 }
 

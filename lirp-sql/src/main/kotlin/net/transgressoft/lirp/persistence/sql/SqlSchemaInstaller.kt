@@ -63,6 +63,7 @@ internal class SqlSchemaInstaller<K : Comparable<K>, R>(
      */
     fun installJunctionForeignKeys() {
         if (junctionTables.isEmpty()) return
+        log.debug { "installJunctionForeignKeys: installing FK constraints for ${junctionTables.size} junction table(s)" }
 
         // Each FK is installed in its own transaction. Postgres (and some other dialects) abort the
         // entire transaction on a DDL error — even a swallowed duplicate-constraint error poisons the
@@ -109,6 +110,7 @@ internal class SqlSchemaInstaller<K : Comparable<K>, R>(
      */
     fun installEntityForeignKeys() {
         val foreignKeys = (tableDef as? ForeignKeyAware)?.foreignKeys() ?: return
+        log.debug { "installEntityForeignKeys: installing ${foreignKeys.size} scalar FK(s) on table '${tableDef.tableName}'" }
 
         if (isSqliteDialect()) {
             log.warn {

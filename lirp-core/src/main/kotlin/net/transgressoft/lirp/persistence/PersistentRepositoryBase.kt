@@ -20,11 +20,15 @@ package net.transgressoft.lirp.persistence
 import net.transgressoft.lirp.entity.ReactiveEntity
 import net.transgressoft.lirp.event.BatchChanged
 import net.transgressoft.lirp.event.CrudEvent
+import net.transgressoft.lirp.event.LirpErrorContext
+import net.transgressoft.lirp.event.LirpErrorHandler
 import net.transgressoft.lirp.event.LirpEventSubscription
+import net.transgressoft.lirp.event.LirpOperation
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.PropertyChanged
 import net.transgressoft.lirp.event.ReactiveScope
 import io.github.oshai.kotlinlogging.KotlinLogging
+import org.slf4j.MDC
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -34,9 +38,15 @@ import kotlin.concurrent.read
 import kotlin.concurrent.withLock
 import kotlin.concurrent.write
 import kotlin.time.Duration.Companion.milliseconds
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.slf4j.MDCContext
+
+// MDC keys shared across the async flush and drain paths for log correlation
+private const val MDC_KEY_REPOSITORY = "lirp.repository"
+private const val MDC_KEY_OPERATION = "lirp.operation"
 
 /**
  * Abstract foundation for persistent repositories providing entity mutation subscription management,
@@ -98,8 +108,12 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         initialEntities: MutableMap<K, R>,
         private val debounceMillis: Long = 100L,
         private val maxDelayMillis: Long = 1000L,
-        protected val loadOnInit: Boolean = true
-    ) : VolatileRepository<K, R>(context, name, initialEntities), PersistentRepository<K, R> {
+        protected val loadOnInit: Boolean = true,
+        private val onError: LirpErrorHandler? = null
+    ) : VolatileRepository<K, R>(context, name, initialEntities, onError), PersistentRepository<K, R> {
+
+        // Stored to populate MDC keys at flush launch time
+        private val repositoryName: String = name
 
         companion object {
             private const val CLOSED_MESSAGE = "PersistentRepositoryBase is closed"
@@ -117,9 +131,17 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
          * @param loadOnInit When `true` (default), the subclass is expected to call [load] in its
          *   own init block to eagerly load from the backing store. When `false`, [load] must be
          *   called explicitly by the caller.
+         * @param onError Optional handler invoked after logging when an async flush failure escapes
+         *   the scheduled coroutine. The framework logs the failure first; the handler observes but
+         *   does not alter control flow. When `null`, behavior is log-only.
          */
-        constructor(name: String, loadOnInit: Boolean = true) :
-            this(LirpContext.default, name, ConcurrentHashMap(), loadOnInit = loadOnInit)
+        constructor(name: String, loadOnInit: Boolean = true, onError: LirpErrorHandler? = null) :
+            this(LirpContext.default, name, ConcurrentHashMap(), loadOnInit = loadOnInit, onError = onError)
+
+        // Preserves the binary signature `<init>(String, boolean)` for subclasses compiled against
+        // the pre-onError API. The defaulted onError parameter on the constructor above changes the
+        // generated JVM signature, so this explicit overload keeps older binaries linking.
+        constructor(name: String, loadOnInit: Boolean) : this(name, loadOnInit, null)
 
         private val log = KotlinLogging.logger(javaClass.name)
 
@@ -423,6 +445,22 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
             }
         }
 
+        // Per-launch CoroutineExceptionHandler that routes an uncaught flush escape to onError.
+        // Installed on each individual flush launch so the handler fires exactly once per failed
+        // launch (flush()'s own catch re-enqueues and rethrows, and the rethrow escapes the
+        // launch to this handler). The synchronous close()→flush() path surfaces via the
+        // preserved rethrow — onError is NOT invoked there, avoiding double-firing.
+        private fun flushFailureHandler() =
+            onError?.let { handler ->
+                CoroutineExceptionHandler { _, throwable ->
+                    try {
+                        handler.invoke(throwable, LirpErrorContext(LirpOperation.FLUSH, emptyList<Any>(), repositoryName))
+                    } catch (handlerEx: Throwable) {
+                        log.error(handlerEx) { "LirpErrorHandler threw inside CoroutineExceptionHandler; exception swallowed" }
+                    }
+                }
+            }
+
         private fun scheduleFlush() {
             // Record the first-enqueue timestamp for the current mutation window.
             // compareAndSet(0, now) is a no-op on every subsequent enqueue in the same window,
@@ -443,22 +481,59 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
             if (maxDelayJob == null || maxDelayJob!!.isCompleted || maxDelayJob!!.isCancelled) {
                 val elapsedMillis = (System.nanoTime() - startNanos.get()) / 1_000_000L
                 val remainingMillis = (maxDelayMillis - elapsedMillis).coerceAtLeast(0L)
-                maxDelayJob =
-                    ReactiveScope.ioScope.launch {
-                        delay(remainingMillis.milliseconds)
-                        maxDelayJob = null
-                        flush()
-                    }
+                MDC.put(MDC_KEY_REPOSITORY, repositoryName)
+                MDC.put(MDC_KEY_OPERATION, LirpOperation.FLUSH.name)
+                try {
+                    val handler = flushFailureHandler()
+                    maxDelayJob =
+                        if (handler != null) {
+                            ReactiveScope.ioScope.launch(MDCContext() + handler) {
+                                delay(remainingMillis.milliseconds)
+                                maxDelayJob = null
+                                log.trace { "Async max-delay flush triggered for $repositoryName" }
+                                flush()
+                            }
+                        } else {
+                            ReactiveScope.ioScope.launch(MDCContext()) {
+                                delay(remainingMillis.milliseconds)
+                                maxDelayJob = null
+                                log.trace { "Async max-delay flush triggered for $repositoryName" }
+                                flush()
+                            }
+                        }
+                } finally {
+                    MDC.remove(MDC_KEY_REPOSITORY)
+                    MDC.remove(MDC_KEY_OPERATION)
+                }
             }
             // Sliding-window debounce: each new enqueue resets the idle timer.
             debounceJob?.cancel()
-            debounceJob =
-                ReactiveScope.ioScope.launch {
-                    delay(debounceMillis.milliseconds)
-                    maxDelayJob?.cancel()
-                    maxDelayJob = null
-                    flush()
-                }
+            MDC.put(MDC_KEY_REPOSITORY, repositoryName)
+            MDC.put(MDC_KEY_OPERATION, LirpOperation.FLUSH.name)
+            try {
+                val handler = flushFailureHandler()
+                debounceJob =
+                    if (handler != null) {
+                        ReactiveScope.ioScope.launch(MDCContext() + handler) {
+                            delay(debounceMillis.milliseconds)
+                            maxDelayJob?.cancel()
+                            maxDelayJob = null
+                            log.trace { "Async debounce flush triggered for $repositoryName" }
+                            flush()
+                        }
+                    } else {
+                        ReactiveScope.ioScope.launch(MDCContext()) {
+                            delay(debounceMillis.milliseconds)
+                            maxDelayJob?.cancel()
+                            maxDelayJob = null
+                            log.trace { "Async debounce flush triggered for $repositoryName" }
+                            flush()
+                        }
+                    }
+            } finally {
+                MDC.remove(MDC_KEY_REPOSITORY)
+                MDC.remove(MDC_KEY_OPERATION)
+            }
         }
 
         /**

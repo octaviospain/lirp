@@ -124,7 +124,7 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
                     dirty.set(true)
                     performSerialization()
                 }
-                log.info { "jsonFile set to $value" }
+                log.debug { "jsonFile set to $value" }
             }
 
         protected val json =
@@ -166,7 +166,7 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
                 "Provided jsonFile does not exist, is not writable or is not a json file"
             }
             val entities = decodeFromJson() ?: emptyMap()
-            log.info { "${entities.size} objects deserialized from file $jsonFile" }
+            log.debug { "${entities.size} objects deserialized from file $jsonFile" }
             // Symmetric with SqlRepository.loadFromStore: resolve the KSP-generated raw initializer
             // for each decoded entity and re-affirm every persisted field via its silent setter
             // inside withEventsDisabled. LirpEntitySerializer.deserialize already restored reactive

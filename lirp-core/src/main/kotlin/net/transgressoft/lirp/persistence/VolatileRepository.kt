@@ -21,6 +21,7 @@ import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
 import net.transgressoft.lirp.event.CrudEvent.Type.DELETE
 import net.transgressoft.lirp.event.FlowEventPublisher
+import net.transgressoft.lirp.event.LirpErrorHandler
 import net.transgressoft.lirp.event.StandardCrudEvent.Create
 import net.transgressoft.lirp.event.StandardCrudEvent.Delete
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -47,8 +48,9 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
     internal constructor(
         context: LirpContext,
         name: String,
-        initialEntities: MutableMap<K, T>
-    ) : RegistryBase<K, T>(context, initialEntities, FlowEventPublisher(name)), Repository<K, T> {
+        initialEntities: MutableMap<K, T>,
+        onError: LirpErrorHandler? = null
+    ) : RegistryBase<K, T>(context, initialEntities, FlowEventPublisher(name, onError = onError)), Repository<K, T> {
 
         internal constructor(
             context: LirpContext,
@@ -58,8 +60,14 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
         @JvmOverloads
         constructor(
             name: String = "Repository",
-            initialEntities: MutableMap<K, T> = ConcurrentHashMap()
-        ) : this(LirpContext.default, name, initialEntities)
+            initialEntities: MutableMap<K, T> = ConcurrentHashMap(),
+            /**
+             * Optional handler invoked after the existing error log when the async event drain
+             * catches an exception. The framework logs first, then notifies the handler.
+             * When `null`, behavior is log-only — identical to not configuring a handler.
+             */
+            onError: LirpErrorHandler? = null
+        ) : this(LirpContext.default, name, initialEntities, onError)
 
         private val log = KotlinLogging.logger(javaClass.name)
 

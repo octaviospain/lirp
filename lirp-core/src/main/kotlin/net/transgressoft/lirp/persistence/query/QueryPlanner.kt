@@ -189,7 +189,10 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
             return Strategy.SCAN_ONLY to executeViaPlan(pred, registry)
         }
         val indexable = extractIndexableLeaves(pred)
-        if (indexable.isEmpty()) return Strategy.SCAN_ONLY to registry.asSequence().filter { pred.matches(it) }
+        if (indexable.isEmpty()) {
+            log.trace { "QueryPlanner: no indexable leaves — full scan on ${registry.size()} entities" }
+            return Strategy.SCAN_ONLY to registry.asSequence().filter { pred.matches(it) }
+        }
         return indexAcceleratedCandidates(pred, indexable, registry)
     }
 

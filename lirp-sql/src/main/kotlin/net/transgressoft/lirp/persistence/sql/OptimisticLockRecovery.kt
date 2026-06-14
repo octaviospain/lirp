@@ -197,6 +197,9 @@ internal class OptimisticLockRecovery<K : Comparable<K>, R : ReactiveEntity<K, R
                     emitRecoveryFailed(id, entry.expectedVersion, e)
                     staleIds.remove(id)
                 } else {
+                    log.warn(e) {
+                        "recoverEntityFromConflict attempt $nextAttempts failed for id=$id; will retry"
+                    }
                     staleIds.compute(id) { _, prev ->
                         SqlRepository.StaleEntry((prev ?: entry).expectedVersion, nextAttempts)
                     }

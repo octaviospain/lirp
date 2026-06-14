@@ -20,6 +20,7 @@ package net.transgressoft.lirp.event
 import net.transgressoft.lirp.entity.LirpEntity
 import java.util.concurrent.Flow
 import java.util.function.Consumer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.SharedFlow
 
 /**
@@ -108,6 +109,41 @@ interface LirpEventPublisher<ET : EventType, out E : LirpEvent<ET>> : Flow.Publi
      * @return A subscription handle that can be cancelled to stop receiving events
      */
     fun subscribeAsync(action: Consumer<in E>): LirpEventSubscription<in LirpEntity, ET, @UnsafeVariance E> = subscribeAsync(action::accept)
+
+    /**
+     * Subscribes asynchronously with a per-subscription error handler.
+     *
+     * When [action] throws, the exception is caught and [onError] is invoked with operation
+     * [LirpOperation.EMIT]. The per-subscription handler is independent of any repository-level
+     * handler — omitting [onError] (using the single-arg overload) keeps log-only behavior and
+     * does not consult any repository-level handler.
+     *
+     * The default body wraps [action] in a try/catch that calls [onError] on any exception;
+     * implementations may override for richer context (e.g. pre-logging before notifying the handler).
+     * Coroutine cancellation is rethrown rather than routed to [onError], and any exception thrown by
+     * [onError] itself is swallowed so the handler cannot alter control flow (notify-only contract).
+     *
+     * @param action The suspend function invoked for each emitted event
+     * @param onError Handler invoked when [action] throws; the exception is swallowed after notification
+     * @return A subscription handle that can be cancelled to stop receiving events
+     */
+    fun subscribeAsync(
+        action: suspend (E) -> Unit,
+        onError: LirpErrorHandler
+    ): LirpEventSubscription<in LirpEntity, ET, @UnsafeVariance E> =
+        subscribeAsync { event ->
+            try {
+                action(event)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (e: Exception) {
+                try {
+                    onError(e, LirpErrorContext(LirpOperation.EMIT, emptyList(), this::class.qualifiedName ?: "unknown"))
+                } catch (_: Throwable) {
+                    // notify-only: a throwing handler must not alter control flow
+                }
+            }
+        }
 
     /**
      * Subscribes asynchronously to events of the specified types only.

@@ -32,11 +32,15 @@ public class net/transgressoft/lirp/persistence/sql/SqlRepository : net/transgre
 	public fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;I)V
 	public fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ILjava/lang/String;)V
 	public fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ILjava/lang/String;Z)V
-	public synthetic fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ILjava/lang/String;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ILjava/lang/String;ZLnet/transgressoft/lirp/event/LirpErrorHandler;)V
+	public synthetic fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ILjava/lang/String;ZLnet/transgressoft/lirp/event/LirpErrorHandler;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;)V
 	public fun <init> (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;Z)V
-	public synthetic fun <init> (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ZLnet/transgressoft/lirp/event/LirpErrorHandler;)V
+	public synthetic fun <init> (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ZLnet/transgressoft/lirp/event/LirpErrorHandler;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun <init> (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ZZ)V
-	public synthetic fun <init> (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ZZLnet/transgressoft/lirp/event/LirpErrorHandler;)V
+	public synthetic fun <init> (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ZZLnet/transgressoft/lirp/event/LirpErrorHandler;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun close ()V
 	protected fun extractVersion (Lnet/transgressoft/lirp/entity/ReactiveEntity;)Ljava/lang/Long;
 	public final fun installEntityForeignKeys ()V

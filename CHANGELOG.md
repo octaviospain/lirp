@@ -52,6 +52,15 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
 - **Additive change listeners** — `addOnChangeListener` / `addOnBucketsChangedListener` on the
   projection maps register observers and return an `AutoCloseable` that deregisters the individual
   listener.
+- **Configurable async error handler** — `LirpErrorHandler` (`fun interface`),
+  `LirpErrorContext` (`data class`), and `LirpOperation` (`enum`) are new public types in
+  `lirp-api`. Pass an `onError: LirpErrorHandler?` to `VolatileRepository`, `JsonFileRepository`,
+  or `SqlRepository` to receive a callback whenever an async operation (event drain or debounced
+  flush) catches an exception. The framework logs first, then invokes the handler; the handler
+  observes but does not alter control flow. When `null`, behaviour is log-only — identical to
+  previous versions. `LirpEventPublisher.subscribeAsync(action, onError)` adds a per-subscription
+  independent error handler so individual subscribers can observe failures without routing them
+  to the publisher-level handler.
 
 ### Changed
 

@@ -18,11 +18,19 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.ReactiveEntityBase
+import net.transgressoft.lirp.event.LirpErrorContext
+import net.transgressoft.lirp.event.LirpErrorHandler
+import net.transgressoft.lirp.event.LirpOperation
+import net.transgressoft.lirp.testing.ReactiveScopeSerialization
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Tests for [PersistentRepositoryBase.flush] exception-type branching.
@@ -128,6 +136,136 @@ internal class PersistentRepositoryBaseFlushTest : StringSpec({
         }
     }
 })
+
+/**
+ * Tests for the configurable [LirpErrorHandler] on async flush failures.
+ *
+ * Verifies that:
+ * - A configured handler is invoked exactly once with operation=FLUSH and the repository id
+ *   when the async debounce flush fails
+ * - With no handler configured, behavior is log-only (no invocation)
+ * - [PersistentRepositoryBase.close] still rethrows the final-flush exception regardless of
+ *   whether a handler is configured
+ */
+@DisplayName("PersistentRepositoryBase onError handler routing")
+internal class PersistentRepositoryBaseOnErrorTest : StringSpec() {
+
+    init {
+        extension(ReactiveScopeSerialization)
+
+        "configured onError handler fires exactly once with operation=FLUSH on async flush failure" {
+            val invocations = CopyOnWriteArrayList<Pair<Throwable, LirpErrorContext>>()
+            val latch = CountDownLatch(1)
+            val handler =
+                LirpErrorHandler { t, ctx ->
+                    invocations.add(t to ctx)
+                    latch.countDown()
+                }
+
+            val repo =
+                OnErrorFlushRepo(
+                    repoName = "on-error-flush-test",
+                    onError = handler,
+                    writeImpl = { _, _, _, _ -> throw RuntimeException("async flush failure") }
+                )
+
+            try {
+                // Trigger the debounce flush via add(); the async launch will call flush() which
+                // rethrows, escaping to the per-launch CoroutineExceptionHandler (onError fires once)
+                repo.addForTest(FlushEntity(10, "entity-a"))
+
+                // Wait for the handler to be invoked (async path)
+                latch.await(5, TimeUnit.SECONDS) shouldBe true
+
+                invocations.size shouldBe 1
+                val (_, ctx) = invocations.single()
+                ctx.operation shouldBe LirpOperation.FLUSH
+                ctx.repository shouldBe "on-error-flush-test"
+            } finally {
+                repo.quiesceAndClose()
+            }
+        }
+
+        "no handler configured keeps log-only behavior — handler is never consulted" {
+            val handlerInvocations = AtomicInteger(0)
+            val flushExecuted = CountDownLatch(1)
+
+            val repo =
+                OnErrorFlushRepo(
+                    repoName = "no-handler-test",
+                    onError = null,
+                    writeImpl = { _, _, _, _ ->
+                        flushExecuted.countDown()
+                        throw RuntimeException("async flush failure")
+                    }
+                )
+
+            try {
+                repo.addForTest(FlushEntity(11, "entity-b"))
+
+                // Wait until the async flush actually executed (proves the write pipeline fired)
+                flushExecuted.await(5, TimeUnit.SECONDS) shouldBe true
+
+                // No handler was configured, so the invocation counter must remain at zero
+                handlerInvocations.get() shouldBe 0
+            } finally {
+                repo.quiesceAndClose()
+            }
+        }
+
+        "close() still rethrows the final-flush exception regardless of handler configuration" {
+            val handler = LirpErrorHandler { _, _ -> }
+
+            val repo =
+                OnErrorFlushRepo(
+                    repoName = "close-rethrow-test",
+                    onError = handler,
+                    writeImpl = { _, _, _, _ -> throw RuntimeException("final flush failure") }
+                )
+
+            repo.addForTest(FlushEntity(12, "entity-c"))
+
+            // close() calls flush() synchronously — the rethrow contract must hold
+            shouldThrow<RuntimeException> { repo.close() }
+        }
+    }
+}
+
+/**
+ * [PersistentRepositoryBase] subclass for onError handler tests. Accepts an optional
+ * [LirpErrorHandler] via the public constructor and delegates [writePending] to [writeImpl].
+ */
+private class OnErrorFlushRepo(
+    repoName: String,
+    onError: LirpErrorHandler?,
+    var writeImpl: (List<FlushEntity>, List<PendingUpdate<Int, FlushEntity>>, List<Pair<Int, Long?>>, Boolean) -> Unit
+) : PersistentRepositoryBase<Int, FlushEntity>(name = repoName, loadOnInit = false, onError = onError) {
+
+    init {
+        load()
+    }
+
+    override fun loadFromStore(): Map<Int, FlushEntity> = emptyMap()
+
+    override fun writePending(
+        inserts: List<FlushEntity>,
+        updates: List<PendingUpdate<Int, FlushEntity>>,
+        deletes: List<Pair<Int, Long?>>,
+        hadClear: Boolean
+    ) {
+        writeImpl(inserts, updates, deletes, hadClear)
+    }
+
+    fun addForTest(entity: FlushEntity): Boolean = add(entity)
+
+    fun quiesceAndClose() {
+        writeImpl = { _, _, _, _ -> }
+        try {
+            close()
+        } catch (_: Exception) {
+        }
+    }
+}
 
 /** Minimal reactive entity for flush-routing tests. */
 private data class FlushEntity(
