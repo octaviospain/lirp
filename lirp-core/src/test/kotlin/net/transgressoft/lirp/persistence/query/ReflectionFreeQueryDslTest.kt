@@ -102,8 +102,6 @@ internal class ReflectionFreeQueryDslTest : FunSpec({
 
         repo.query { where { Product::category eq "books" } }.toList()
 
-        reactive.advance()
-
         readEventEmitted.get().shouldBeFalse()
     }
 
@@ -148,8 +146,6 @@ internal class ReflectionFreeQueryDslTest : FunSpec({
         repo.subscribe(CrudEvent.Type.READ) { readEventEmitted.set(true) }
 
         repo.query { where { Product::category eq "toys" } }.toList()
-
-        reactive.advance()
 
         // Empty results still trigger the event wrapper, but the emitted set is empty
         readEventEmitted.get().shouldBeTrue()

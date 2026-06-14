@@ -227,13 +227,13 @@ internal class VolatileRepositoryTest : FunSpec({
         val receivedAudioItemIds = mutableSetOf<Int>()
 
         val createSubscription =
-            repository.subscribe(CREATE) { event ->
+            repository.subscribeAsync(CREATE) { event ->
                 createEventsReceived.incrementAndGet()
                 event.entities.keys.forEach { receivedAudioItemIds.add(it) }
             }
 
         val updateSubscription =
-            repository.subscribe(UPDATE) { event ->
+            repository.subscribeAsync(UPDATE) { event ->
                 updateEventsReceived.incrementAndGet()
             }
 
@@ -401,7 +401,7 @@ internal class VolatileRepositoryTest : FunSpec({
             val t3 = trackRepo.create(3, "T3")
             val playlist = DefaultAudioPlaylist(1, "Bulk Add").also(playlistRepo::add)
 
-            playlist.subscribe { events.add(it) }
+            playlist.subscribeAsync { events.add(it) }
 
             playlist.audioItems.addAll(listOf(t1, t2, t3))
             reactive.advance()
@@ -424,7 +424,7 @@ internal class VolatileRepositoryTest : FunSpec({
                 DefaultAudioPlaylist(1, "Bulk Remove", listOf(1, 2, 3))
                     .also(playlistRepo::add)
 
-            playlist.subscribe { events.add(it) }
+            playlist.subscribeAsync { events.add(it) }
 
             playlist.audioItems.removeAll(listOf(t1, t3))
             reactive.advance()
@@ -441,7 +441,7 @@ internal class VolatileRepositoryTest : FunSpec({
 
             val playlist = DefaultAudioPlaylist(1, "Empty Add").also(playlistRepo::add)
 
-            playlist.subscribe { events.add(it) }
+            playlist.subscribeAsync { events.add(it) }
 
             val result = playlist.audioItems.addAll(emptyList())
             reactive.advance()
@@ -461,7 +461,7 @@ internal class VolatileRepositoryTest : FunSpec({
             val unrelated = trackRepo.create(99, "Unrelated")
             val playlist = DefaultAudioPlaylist(1, "No Match Remove").also(playlistRepo::add)
 
-            playlist.subscribe { events.add(it) }
+            playlist.subscribeAsync { events.add(it) }
 
             val result = playlist.audioItems.removeAll(listOf(unrelated))
             reactive.advance()
@@ -482,7 +482,7 @@ internal class VolatileRepositoryTest : FunSpec({
             val p3 = DefaultAudioPlaylist(3, "P3").also(sharedRepo::add)
             val group = DefaultAudioPlaylist(100, "Group").also(sharedRepo::add)
 
-            group.subscribe { events.add(it) }
+            group.subscribeAsync { events.add(it) }
 
             group.playlists.addAll(listOf(p1, p2, p3))
             reactive.advance()
@@ -501,7 +501,7 @@ internal class VolatileRepositoryTest : FunSpec({
             val t1 = trackRepo.create(1, "Track")
             val playlist = DefaultAudioPlaylist(1, "Test").also(playlistRepo::add)
 
-            playlist.subscribe { events.add(it) }
+            playlist.subscribeAsync { events.add(it) }
 
             playlist.audioItems.add(t1)
             reactive.advance()
@@ -522,7 +522,7 @@ internal class VolatileRepositoryTest : FunSpec({
                 DefaultAudioPlaylist(1, "Test", listOf(1))
                     .also(playlistRepo::add)
 
-            playlist.subscribe { events.add(it) }
+            playlist.subscribeAsync { events.add(it) }
 
             playlist.audioItems.remove(t1)
             reactive.advance()
@@ -543,7 +543,7 @@ internal class VolatileRepositoryTest : FunSpec({
                 DefaultAudioPlaylist(1, "Test", listOf(1))
                     .also(playlistRepo::add)
 
-            playlist.subscribe { events.add(it) }
+            playlist.subscribeAsync { events.add(it) }
 
             playlist.audioItems.clear()
             reactive.advance()
@@ -599,7 +599,7 @@ internal class VolatileRepositoryTest : FunSpec({
                 DefaultAudioPlaylist(1, "Retain", listOf(1, 2, 3))
                     .also(playlistRepo::add)
 
-            playlist.subscribe { events.add(it) }
+            playlist.subscribeAsync { events.add(it) }
 
             playlist.audioItems.retainAll(listOf(t2))
             reactive.advance()

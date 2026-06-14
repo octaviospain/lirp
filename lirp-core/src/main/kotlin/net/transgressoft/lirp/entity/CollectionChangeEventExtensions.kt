@@ -58,7 +58,7 @@ fun <K : Comparable<K>, R : ReactiveEntity<K, R>, E : Any> ReactiveEntity<K, R>.
     refName: String? = null,
     action: suspend (CollectionChangeEvent<E>) -> Unit
 ): LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>> =
-    subscribe { event ->
+    subscribeAsync { event ->
         if (event is AggregateMutationEvent<*, *> &&
             event.childEvent is CollectionChangeEvent<*> &&
             (refName == null || event.refName == refName)
@@ -109,11 +109,10 @@ fun <K : Comparable<K>, R : ReactiveEntity<K, R>, E : Any> ReactiveEntity<K, R>.
 fun <K : Comparable<K>, R : ReactiveEntity<K, R>> ReactiveEntity<K, R>.subscribeToMutations(
     action: suspend (MutationEvent<K, R>) -> Unit
 ): LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>> =
-    subscribe { event ->
+    subscribeAsync { event ->
         if (event !is AggregateMutationEvent<*, *>) {
             // Safe: AggregateMutationEvent is excluded above; K and R are bound by the receiver.
-            @Suppress("UNCHECKED_CAST")
-            action(event as MutationEvent<K, R>)
+            action(event)
         }
     }
 

@@ -30,7 +30,6 @@ import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.DescribeSpec
-import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.maps.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -68,8 +67,6 @@ class FlowEventPublisherTest : DescribeSpec({
             val newName = "Updated Name"
             entity.name = newName
 
-            reactive.advance()
-
             receivedEvents.size shouldBe 1
             val event = receivedEvents[0]
             event.shouldBeInstanceOf<PropertyChanged<String, TestEntity, String>>()
@@ -90,8 +87,6 @@ class FlowEventPublisherTest : DescribeSpec({
 
             entity.addFriendAddress("John", "Apple avenue")
 
-            reactive.advance()
-
             receivedEvents.size shouldBe 1
             val event = receivedEvents[0]
             // mutateAndPublish emits BatchChanged; assert the typed payload, not only live entity state
@@ -111,8 +106,6 @@ class FlowEventPublisherTest : DescribeSpec({
 
             entity.addUnmanagedProperty("John", "Apple avenue")
 
-            reactive.advance()
-
             receivedEvents.size shouldBe 0
         }
 
@@ -127,8 +120,6 @@ class FlowEventPublisherTest : DescribeSpec({
 
             val oldName = entity.name
             entity.name = oldName // Same value
-
-            reactive.advance()
 
             receivedEvents.size shouldBe 0
 
@@ -158,8 +149,6 @@ class FlowEventPublisherTest : DescribeSpec({
 
             val originalName = entity.name
             entity.name = "New Name"
-
-            reactive.advance()
 
             receivedEvents.size shouldBe 1
             val event = receivedEvents[0] as PropertyChanged<String, TestEntity, String>
@@ -195,7 +184,7 @@ class FlowEventPublisherTest : DescribeSpec({
             val receivedEvents = mutableListOf<CrudEvent<String, TestEntity>>()
 
             val subscription =
-                publisher.subscribe { event ->
+                publisher.subscribeAsync { event ->
                     if (event.isCreate()) {
                         receivedEvents.add(event)
                     }
@@ -221,7 +210,7 @@ class FlowEventPublisherTest : DescribeSpec({
             val receivedEvents = mutableListOf<CrudEvent<String, TestEntity>>()
 
             val subscription =
-                publisher.subscribe { event ->
+                publisher.subscribeAsync { event ->
                     if (event.isUpdate()) {
                         receivedEvents.add(event)
                     }
@@ -252,7 +241,7 @@ class FlowEventPublisherTest : DescribeSpec({
             val receivedEvents = mutableListOf<CrudEvent<String, TestEntity>>()
 
             val subscription =
-                publisher.subscribe { event ->
+                publisher.subscribeAsync { event ->
                     if (event.isDelete()) {
                         receivedEvents.add(event)
                     }
@@ -276,9 +265,9 @@ class FlowEventPublisherTest : DescribeSpec({
             val updateCounter = AtomicInteger(0)
             val deleteCounter = AtomicInteger(0)
 
-            val createSubscription = publisher.subscribe(CREATE) { createCounter.incrementAndGet() }
-            val updateSubscription = publisher.subscribe(UPDATE) { updateCounter.incrementAndGet() }
-            val deleteSubscription = publisher.subscribe(DELETE) { deleteCounter.incrementAndGet() }
+            val createSubscription = publisher.subscribeAsync(CREATE) { createCounter.incrementAndGet() }
+            val updateSubscription = publisher.subscribeAsync(UPDATE) { updateCounter.incrementAndGet() }
+            val deleteSubscription = publisher.subscribeAsync(DELETE) { deleteCounter.incrementAndGet() }
 
             val entity = TestEntity(UUID.randomUUID().toString())
             publisher.emitAsync(Create(entity))
@@ -331,8 +320,8 @@ class FlowEventPublisherTest : DescribeSpec({
             val counter1 = AtomicInteger(0)
             val counter2 = AtomicInteger(0)
 
-            val subscription1 = entity.subscribe { counter1.incrementAndGet() }
-            val subscription2 = entity.subscribe { counter2.incrementAndGet() }
+            val subscription1 = entity.subscribeAsync { counter1.incrementAndGet() }
+            val subscription2 = entity.subscribeAsync { counter2.incrementAndGet() }
 
             entity.name = "First update"
             entity.name = "Second update"
@@ -357,7 +346,7 @@ class FlowEventPublisherTest : DescribeSpec({
             val entity = TestEntity(UUID.randomUUID().toString())
             val counter = AtomicInteger(0)
 
-            val subscription = entity.subscribe(Consumer { counter.incrementAndGet() })
+            val subscription = entity.subscribeAsync(Consumer { counter.incrementAndGet() })
 
             entity.name = "Updated via Consumer"
 
@@ -401,7 +390,7 @@ class FlowEventPublisherTest : DescribeSpec({
             publisher.activateEvents(CREATE)
 
             val receivedEvents = mutableListOf<CrudEvent<String, TestEntity>>()
-            val subscription = publisher.subscribe { receivedEvents.add(it) }
+            val subscription = publisher.subscribeAsync { receivedEvents.add(it) }
 
             publisher.emitAsync(Create(TestEntity("before-cancel")))
             reactive.advance()
@@ -424,7 +413,7 @@ class FlowEventPublisherTest : DescribeSpec({
 
             val receivedEvents = mutableListOf<CrudEvent<String, TestEntity>>()
             val subscription =
-                publisher.subscribe { event ->
+                publisher.subscribeAsync { event ->
                     receivedEvents.add(event)
                 }
 
@@ -452,9 +441,9 @@ class FlowEventPublisherTest : DescribeSpec({
             val subscriber2Events = mutableListOf<CrudEvent<String, TestEntity>>()
             val subscriber3Events = mutableListOf<CrudEvent<String, TestEntity>>()
 
-            val sub1 = publisher.subscribe { subscriber1Events.add(it) }
-            val sub2 = publisher.subscribe { subscriber2Events.add(it) }
-            val sub3 = publisher.subscribe { subscriber3Events.add(it) }
+            val sub1 = publisher.subscribeAsync { subscriber1Events.add(it) }
+            val sub2 = publisher.subscribeAsync { subscriber2Events.add(it) }
+            val sub3 = publisher.subscribeAsync { subscriber3Events.add(it) }
 
             repeat(50) { i ->
                 publisher.emitAsync(Create(TestEntity("entity-$i")))
@@ -483,7 +472,7 @@ class FlowEventPublisherTest : DescribeSpec({
             val processedCount = AtomicInteger(0)
 
             val subscription =
-                publisher.subscribe { event ->
+                publisher.subscribeAsync { event ->
                     allEvents.add(event)
                     processedCount.incrementAndGet()
 
@@ -515,7 +504,7 @@ class FlowEventPublisherTest : DescribeSpec({
             val receivedEvents = mutableListOf<CrudEvent<String, TestEntity>>()
 
             val subscription =
-                publisher.subscribe { event ->
+                publisher.subscribeAsync { event ->
                     receivedEvents.add(event)
                     // Simulate slow subscriber
                     delay(1.milliseconds)
@@ -548,30 +537,32 @@ class FlowEventPublisherTest : DescribeSpec({
                 val received = CopyOnWriteArrayList<CrudEvent<String, TestEntity>>()
 
                 val subscription =
-                    publisher.subscribe { event ->
+                    publisher.subscribeAsync { event ->
                         delay(50.milliseconds)
                         received.add(event)
                     }
 
                 try {
                     // The SharedFlow has replay=0 and subscribe() starts its collecting coroutine
-                    // asynchronously, so events emitted before that coroutine is actually collecting
-                    // are dropped. Warm up first and wait until the subscriber observes an event:
-                    // that guarantees the collector is live before emitting the events under test,
-                    // making delivery deterministic rather than dependent on scheduler timing.
-                    publisher.emitAsync(Create(TestEntity("warmup")))
+                    // asynchronously, so events emitted before that coroutine is collecting are dropped.
+                    // Re-emit a warm-up event on every poll until the subscriber observes one: a single
+                    // warm-up emit can itself race ahead of the collector and be dropped, which would
+                    // leave `received` empty until the timeout. Once a warm-up is seen the collector is
+                    // live, so the events under test that follow cannot be dropped.
                     eventually(5.seconds) {
-                        received.shouldNotBeEmpty()
+                        publisher.emitAsync(Create(TestEntity("warmup")))
+                        received.any { it.entities.values.first().id == "warmup" } shouldBe true
                     }
-                    received.clear()
 
                     repeat(5) { i ->
                         publisher.emitAsync(Create(TestEntity("entity-$i")))
                         delay(10.milliseconds)
                     }
 
+                    // Count only the events under test; warm-up events still draining through the slow
+                    // subscriber must not affect the result, so filter by prefix rather than clearing.
                     eventually(10.seconds) {
-                        received.size shouldBe 5
+                        received.count { it.entities.values.first().id.startsWith("entity-") } shouldBe 5
                     }
                     received.any { it.entities.values.first().id == "entity-0" } shouldBe true
                     received.any { it.entities.values.first().id == "entity-4" } shouldBe true
@@ -596,7 +587,7 @@ class FlowEventPublisherTest : DescribeSpec({
             reactive.advance()
 
             val lateSubscriberEvents = mutableListOf<CrudEvent<String, TestEntity>>()
-            val lateSubscription = publisher.subscribe { lateSubscriberEvents.add(it) }
+            val lateSubscription = publisher.subscribeAsync { lateSubscriberEvents.add(it) }
 
             reactive.advance()
 
@@ -625,7 +616,7 @@ class FlowEventPublisherTest : DescribeSpec({
                 }
 
             val receivedEvents = mutableListOf<CrudEvent<String, TestEntity>>()
-            val subscription = publisher.subscribe { receivedEvents.add(it) }
+            val subscription = publisher.subscribeAsync { receivedEvents.add(it) }
 
             val entity = TestEntity(UUID.randomUUID().toString())
             publisher.emitAsync(Create(entity))
@@ -648,7 +639,7 @@ class FlowEventPublisherTest : DescribeSpec({
                 }
 
             val receivedEvents = mutableListOf<CrudEvent<String, TestEntity>>()
-            val subscription = publisher.subscribe { receivedEvents.add(it) }
+            val subscription = publisher.subscribeAsync { receivedEvents.add(it) }
 
             val entity = TestEntity(UUID.randomUUID().toString())
             publisher.emitAsync(Create(entity))
@@ -661,7 +652,7 @@ class FlowEventPublisherTest : DescribeSpec({
             subscription.cancel()
         }
 
-        it("with replay config delivers historical events to late subscribers") {
+        it("with replay config delivers historical events to late subscribers when bridge is armed at startup") {
             val replayCount = 3
             val publisher =
                 FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>(
@@ -671,7 +662,12 @@ class FlowEventPublisherTest : DescribeSpec({
                     activateEvents(CREATE)
                 }
 
-            // Emit events before any subscriber exists
+            // Arm the bridge before emitting so replay buffering starts from the first event.
+            // Without this, events emitted before the first subscribeAsync call are not buffered.
+            @Suppress("UNUSED_VARIABLE")
+            val bridge = publisher.changes
+
+            // Emit 5 events; with replay=3, only the last 3 are buffered
             val earlyEntities = List(5) { i -> TestEntity("early-entity-$i") }
             earlyEntities.forEach { entity ->
                 publisher.emitAsync(Create(entity))
@@ -681,7 +677,7 @@ class FlowEventPublisherTest : DescribeSpec({
 
             // Late subscriber should receive the last 3 events (replay count)
             val lateSubscriberEvents = mutableListOf<CrudEvent<String, TestEntity>>()
-            val lateSubscription = publisher.subscribe { lateSubscriberEvents.add(it) }
+            val lateSubscription = publisher.subscribeAsync { lateSubscriberEvents.add(it) }
 
             reactive.advance()
 
@@ -731,7 +727,7 @@ class FlowEventPublisherTest : DescribeSpec({
                 }
 
             val receivedEvents = mutableListOf<CrudEvent<String, TestEntity>>()
-            val subscription = publisher.subscribe { receivedEvents.add(it) }
+            val subscription = publisher.subscribeAsync { receivedEvents.add(it) }
 
             repeat(4) { i ->
                 publisher.emitAsync(Create(TestEntity("entity-$i")))
@@ -787,7 +783,7 @@ class FlowEventPublisherTest : DescribeSpec({
 
             val exception =
                 shouldThrow<IllegalStateException> {
-                    publisher.subscribe { }
+                    publisher.subscribeAsync { }
                 }
             exception.message shouldContain "test-publisher"
         }
@@ -798,7 +794,7 @@ class FlowEventPublisherTest : DescribeSpec({
 
             val exception =
                 shouldThrow<IllegalStateException> {
-                    publisher.subscribe(Consumer { })
+                    publisher.subscribeAsync(Consumer { })
                 }
             exception.message shouldContain "test-publisher"
         }
@@ -809,7 +805,7 @@ class FlowEventPublisherTest : DescribeSpec({
 
             val exception =
                 shouldThrow<IllegalStateException> {
-                    publisher.subscribe(CREATE) { }
+                    publisher.subscribeAsync(CREATE) { }
                 }
             exception.message shouldContain "test-publisher"
         }
@@ -842,7 +838,7 @@ class FlowEventPublisherTest : DescribeSpec({
                     activateEvents(CREATE)
                 }
             val receivedEvents = mutableListOf<CrudEvent<String, TestEntity>>()
-            publisher.subscribe { receivedEvents.add(it) }
+            publisher.subscribeAsync { receivedEvents.add(it) }
 
             publisher.emitAsync(Create(TestEntity("before-close")))
             reactive.advance()
@@ -871,7 +867,7 @@ class FlowEventPublisherTest : DescribeSpec({
                     ).apply {
                         activateEvents(CREATE)
                     }
-                publisher.subscribe { }
+                publisher.subscribeAsync { }
 
                 val iterations = 1000
                 val toggleJob =
@@ -901,7 +897,7 @@ class FlowEventPublisherTest : DescribeSpec({
                     activateEvents(UPDATE)
                 }
             val receivedEvents = mutableListOf<CrudEvent<String, TestEntity>>()
-            val subscription = publisher.subscribe { receivedEvents.add(it) }
+            val subscription = publisher.subscribeAsync { receivedEvents.add(it) }
 
             publisher.emitAsync(Create(TestEntity("entity-1")))
             reactive.advance()
@@ -924,7 +920,7 @@ class FlowEventPublisherTest : DescribeSpec({
                     val jobs =
                         (1..50).map {
                             launch {
-                                val sub = publisher.subscribe { }
+                                val sub = publisher.subscribeAsync { }
                                 // Tiny yield to increase interleaving probability
                                 delay(1.milliseconds)
                                 sub.cancel()
@@ -948,7 +944,7 @@ class FlowEventPublisherTest : DescribeSpec({
             val onEmptyCallCount = AtomicInteger(0)
             publisher.onCloseOnEmpty { onEmptyCallCount.incrementAndGet() }
 
-            val sub = publisher.subscribe { }
+            val sub = publisher.subscribeAsync { }
             sub.cancel()
             reactive.advance()
 
@@ -959,8 +955,8 @@ class FlowEventPublisherTest : DescribeSpec({
             val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("CloseAfterEmptyPublisher", closeOnEmpty = true)
             publisher.activateEvents(CREATE)
 
-            val sub1 = publisher.subscribe { }
-            val sub2 = publisher.subscribe { }
+            val sub1 = publisher.subscribeAsync { }
+            val sub2 = publisher.subscribeAsync { }
 
             publisher.isClosed shouldBe false
 
@@ -977,12 +973,12 @@ class FlowEventPublisherTest : DescribeSpec({
             val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("ClosedOnEmptyPublisher", closeOnEmpty = true)
             publisher.activateEvents(CREATE)
 
-            val sub = publisher.subscribe { }
+            val sub = publisher.subscribeAsync { }
             sub.cancel()
             reactive.advance()
 
             // closeOnEmpty close is automatic — subscribe returns a no-op instead of throwing
-            val noOpSub = publisher.subscribe { }
+            val noOpSub = publisher.subscribeAsync { }
             noOpSub.cancel() // should not throw
         }
 
@@ -990,13 +986,206 @@ class FlowEventPublisherTest : DescribeSpec({
             val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("EmitAfterEmptyPublisher", closeOnEmpty = true)
             publisher.activateEvents(CREATE)
 
-            val sub = publisher.subscribe { }
+            val sub = publisher.subscribeAsync { }
             sub.cancel()
             reactive.advance()
 
             shouldThrow<IllegalStateException> {
                 publisher.emitAsync(Create(TestEntity("entity-1")))
             }
+        }
+    }
+
+    describe("sync transport") {
+
+        it("sync-only publisher never arms the async bridge") {
+            val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("sync-only-bridge-test")
+            publisher.activateEvents(CREATE)
+            val received = mutableListOf<CrudEvent<String, TestEntity>>()
+
+            val sub = publisher.subscribe { received.add(it) }
+
+            repeat(5) { i -> publisher.emitAsync(Create(TestEntity("e-$i"))) }
+
+            publisher.isBridgeInitialized shouldBe false
+            received.size shouldBe 5
+
+            sub.cancel()
+        }
+
+        it("sync callback runs on the emitting thread before emitAsync returns") {
+            val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("sync-thread-test")
+            publisher.activateEvents(CREATE)
+            var callbackThread: Thread? = null
+
+            val sub = publisher.subscribe { callbackThread = Thread.currentThread() }
+
+            val emittingThread = Thread.currentThread()
+            publisher.emitAsync(Create(TestEntity("e-1")))
+
+            // Callback ran synchronously — observable without any reactive.advance()
+            callbackThread shouldBe emittingThread
+
+            sub.cancel()
+        }
+
+        it("exception in middle sync callback is isolated; other callbacks and async still receive the event") {
+            val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("exception-isolation-test")
+            publisher.activateEvents(CREATE)
+            val firstReceived = mutableListOf<CrudEvent<String, TestEntity>>()
+            val thirdReceived = mutableListOf<CrudEvent<String, TestEntity>>()
+            val asyncReceived = mutableListOf<CrudEvent<String, TestEntity>>()
+
+            publisher.subscribe { firstReceived.add(it) }
+            publisher.subscribe { throw RuntimeException("deliberate failure") }
+            publisher.subscribe { thirdReceived.add(it) }
+            publisher.subscribeAsync { asyncReceived.add(it) }
+
+            publisher.emitAsync(Create(TestEntity("e-1")))
+            reactive.advance()
+
+            firstReceived.size shouldBe 1
+            thirdReceived.size shouldBe 1
+            asyncReceived.size shouldBe 1
+        }
+
+        it("Error from sync callback propagates out of emitAsync and trampoline flag is reset after") {
+            val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("error-propagation-test")
+            publisher.activateEvents(CREATE)
+            var secondEventDelivered = false
+
+            publisher.subscribe { throw AssertionError("intentional error") }
+            publisher.subscribe { secondEventDelivered = true }
+
+            shouldThrow<AssertionError> {
+                publisher.emitAsync(Create(TestEntity("e-1")))
+            }
+
+            // Trampoline flag was reset in finally — subsequent emit still dispatches
+            shouldThrow<AssertionError> {
+                publisher.emitAsync(Create(TestEntity("e-2")))
+            }
+            secondEventDelivered shouldBe false
+        }
+
+        it("subscriberCount increments on sync subscribe and sync-only emitAsync still delivers") {
+            val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("sync-count-test")
+            publisher.activateEvents(CREATE)
+            val received = mutableListOf<CrudEvent<String, TestEntity>>()
+
+            publisher.subscriberCount shouldBe 0
+            val sub = publisher.subscribe { received.add(it) }
+            publisher.subscriberCount shouldBe 1
+
+            publisher.emitAsync(Create(TestEntity("e-1")))
+
+            received.size shouldBe 1
+
+            sub.cancel()
+            publisher.subscriberCount shouldBe 0
+        }
+
+        it("filtered sync subscribe delivers only matching event types and cancel removes the wrapper") {
+            val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("filtered-sync-test")
+            publisher.activateEvents(CREATE, UPDATE)
+            val createReceived = mutableListOf<CrudEvent<String, TestEntity>>()
+
+            val sub = publisher.subscribe(CREATE) { createReceived.add(it) }
+            publisher.subscriberCount shouldBe 1
+
+            publisher.emitAsync(Create(TestEntity("e-1")))
+            publisher.emitAsync(Update(TestEntity("e-1"), TestEntity("e-1")))
+
+            // Only CREATE was matched
+            createReceived.size shouldBe 1
+            createReceived[0].isCreate() shouldBe true
+
+            // Cancel removes the wrapper — count drops
+            sub.cancel()
+            publisher.subscriberCount shouldBe 0
+        }
+
+        it("reentrant emitAsync on same thread is drained breadth-first without stack overflow") {
+            val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("reentrancy-test")
+            publisher.activateEvents(CREATE, UPDATE)
+            val deliveryOrder = mutableListOf<String>()
+            val entity1 = TestEntity("e-1")
+            val entity2 = TestEntity("e-2")
+            val event1 = Create(entity1)
+            val event2 = Create(entity2)
+            var reentryFired = false
+
+            // First callback: on the first event, enqueues a second event from the same thread
+            publisher.subscribe { event ->
+                deliveryOrder.add("cb1:${event.entities.values.first().id}")
+                if (!reentryFired && event === event1) {
+                    reentryFired = true
+                    publisher.emitAsync(event2) // reentrant call from same thread
+                }
+            }
+            // Second callback: records receipt of both events
+            publisher.subscribe { event ->
+                deliveryOrder.add("cb2:${event.entities.values.first().id}")
+            }
+
+            publisher.emitAsync(event1)
+
+            // Breadth-first ordering: all callbacks see event1, then all callbacks see event2
+            deliveryOrder shouldBe listOf("cb1:e-1", "cb2:e-1", "cb1:e-2", "cb2:e-2")
+        }
+
+        it("closeOnEmpty publisher with sync-only subscriber closes after the subscriber cancels") {
+            val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("close-sync-only", closeOnEmpty = true)
+            publisher.activateEvents(CREATE)
+            val received = mutableListOf<CrudEvent<String, TestEntity>>()
+
+            val sub = publisher.subscribe { received.add(it) }
+            publisher.isClosed shouldBe false
+
+            sub.cancel()
+
+            publisher.isClosed shouldBe true
+        }
+
+        it("closeOnEmpty publisher with mixed subscribers closes only when both sync and async leave") {
+            val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("close-mixed", closeOnEmpty = true)
+            publisher.activateEvents(CREATE)
+
+            val syncSub = publisher.subscribe { }
+            val asyncSub = publisher.subscribeAsync { }
+
+            publisher.isClosed shouldBe false
+
+            syncSub.cancel()
+            publisher.isClosed shouldBe false // async still present
+
+            asyncSub.cancel()
+            reactive.advance()
+
+            publisher.isClosed shouldBe true
+        }
+
+        it("mixed sync and async subscribers both receive the same event") {
+            val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("mixed-test")
+            publisher.activateEvents(CREATE)
+            val syncReceived = mutableListOf<CrudEvent<String, TestEntity>>()
+            val asyncReceived = mutableListOf<CrudEvent<String, TestEntity>>()
+
+            val syncSub = publisher.subscribe { syncReceived.add(it) }
+            val asyncSub = publisher.subscribeAsync { asyncReceived.add(it) }
+
+            publisher.emitAsync(Create(TestEntity("e-1")))
+
+            // Sync delivered inline, no advance needed
+            syncReceived.size shouldBe 1
+
+            // Async delivered after advance
+            reactive.advance()
+            asyncReceived.size shouldBe 1
+            asyncReceived[0].entities.values.first().id shouldBe syncReceived[0].entities.values.first().id
+
+            syncSub.cancel()
+            asyncSub.cancel()
         }
     }
 
@@ -1010,7 +1199,7 @@ class FlowEventPublisherTest : DescribeSpec({
         it("subscriberCount increments on subscribe") {
             val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("test-publisher")
 
-            val subscription = publisher.subscribe { }
+            val subscription = publisher.subscribeAsync { }
 
             publisher.subscriberCount shouldBe 1
 
@@ -1020,7 +1209,7 @@ class FlowEventPublisherTest : DescribeSpec({
         it("subscriberCount decrements on cancel") {
             val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("test-publisher")
 
-            val subscription = publisher.subscribe { }
+            val subscription = publisher.subscribeAsync { }
             publisher.subscriberCount shouldBe 1
 
             subscription.cancel()
@@ -1032,10 +1221,10 @@ class FlowEventPublisherTest : DescribeSpec({
         it("subscriberCount tracks multiple subscribers correctly") {
             val publisher = FlowEventPublisher<CrudEvent.Type, CrudEvent<String, TestEntity>>("test-publisher")
 
-            val sub1 = publisher.subscribe { }
+            val sub1 = publisher.subscribeAsync { }
             publisher.subscriberCount shouldBe 1
 
-            val sub2 = publisher.subscribe { }
+            val sub2 = publisher.subscribeAsync { }
             publisher.subscriberCount shouldBe 2
 
             sub1.cancel()

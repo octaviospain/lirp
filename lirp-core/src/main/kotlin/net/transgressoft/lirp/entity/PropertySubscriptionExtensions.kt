@@ -68,7 +68,7 @@ fun <K : Comparable<K>, R : ReactiveEntity<K, R>, V> ReactiveEntity<K, R>.subscr
     property: KProperty1<R, V>,
     action: suspend (old: V, new: V) -> Unit
 ): LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>> =
-    subscribe { event ->
+    subscribeAsync { event ->
         if (event is PropertyChanged<*, *, *> && event.property.name == property.name) {
             @Suppress("UNCHECKED_CAST") // Safe: name check ensures only events for this property reach the cast
             action(event.oldValue as V, event.newValue as V)
@@ -104,7 +104,7 @@ fun <K : Comparable<K>, R : ReactiveEntity<K, R>, V> ReactiveEntity<K, R>.subscr
     property: KProperty1<R, V>,
     action: suspend (PropertyChanged<K, R, V>) -> Unit
 ): LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>> =
-    subscribe { event ->
+    subscribeAsync { event ->
         if (event is PropertyChanged<*, *, *> && event.property.name == property.name) {
             @Suppress("UNCHECKED_CAST") // Safe: name check ensures only events for this property reach the cast
             action(event as PropertyChanged<K, R, V>)

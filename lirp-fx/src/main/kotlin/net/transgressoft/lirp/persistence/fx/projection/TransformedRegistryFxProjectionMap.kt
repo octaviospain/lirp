@@ -147,7 +147,7 @@ class TransformedRegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>,
             // catches those cases: it precomputes the new V on the background thread and enqueues
             // a flush so FX listeners observe the updated transform result.
             updateSubscription =
-                registry.subscribe(CrudEvent.Type.UPDATE) { event ->
+                registry.subscribeAsync(CrudEvent.Type.UPDATE) { event ->
                     if (event is StandardCrudEvent.Update) {
                         val keysToFlush = event.entities.values.map(keyExtractor).toSet()
                         if (keysToFlush.isNotEmpty()) scheduleFlushForUpdates(keysToFlush)

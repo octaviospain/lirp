@@ -19,6 +19,7 @@ package net.transgressoft.lirp.event
 
 import net.transgressoft.lirp.entity.LirpEntity
 import io.github.oshai.kotlinlogging.KotlinLogging
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Flow
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -38,6 +39,10 @@ import kotlinx.coroutines.launch
  *
  * @property replay Number of events to replay to new subscribers. Default 0 means
  *   new subscribers only see events after they subscribe.
+ *   Note: replay buffering begins only after the async bridge is first armed (by accessing
+ *   [FlowEventPublisher.changes] or calling [FlowEventPublisher.subscribeAsync]). Events emitted
+ *   before the bridge is armed are not buffered. To buffer from startup: access `publisher.changes`
+ *   once at initialization.
  * @property extraBufferCapacity Buffer size for events when subscribers are slow.
  *   Larger values use more memory but handle burst traffic better.
  * @property onBufferOverflow What happens when buffer is full:
@@ -102,37 +107,32 @@ data class PublisherConfig(
 }
 
 /**
- * Class that provides reactive event publishing capabilities using Kotlin coroutine flows.
+ * Class that provides reactive event publishing with both synchronous callbacks and
+ * Kotlin coroutine flows.
  *
- * `FlowEventPublisher` implements the core functionality needed for reactive programming by:
- * 1. Managing a [MutableSharedFlow] to broadcast events to multiple subscribers
- * 2. Providing compatibility with both Java's [Flow.Subscriber] API and Kotlin's flow-based approach
- * 3. Supporting suspending functions for asynchronous event handling
- * 4. Implementing [AutoCloseable] for deterministic resource cleanup
- * 5. Tracking the number of active subscribers via atomic operations
+ * `FlowEventPublisher` supports two subscription transports:
+ * - **Synchronous** (`subscribe`): callbacks are stored in a [CopyOnWriteArrayList] and invoked
+ *   inline on the emitting thread before any async delivery. Zero coroutine overhead. Ideal for
+ *   fast in-process work (cache updates, index maintenance) that must be complete by the time
+ *   [emitAsync] returns. Reentrancy on the same publisher from the same thread is handled via a
+ *   per-publisher `ThreadLocal` trampoline that defers reentrant events breadth-first.
+ * - **Asynchronous** (`subscribeAsync`): actions run in coroutines on a background dispatcher via a
+ *   lazily constructed `Channel`/`MutableSharedFlow` bridge. The bridge is initialized on the first
+ *   call to [subscribeAsync], [changes], or [subscribe] with a [Flow.Subscriber]; a publisher with
+ *   only sync subscribers allocates no coroutine machinery.
  *
- * This class serves as a foundational layer for both entity-level reactivity (property changes)
- * and collection-level reactivity (CRUD operations) within the reactive architecture.
- *
- * Key features:
- * - Thread-safe event publication with backpressure handling
- * - Support for both traditional subscribers and modern flow collectors
- * - Coroutine-based asynchronous event processing
- * - Selective event publishing based on event type activation
- * - Lifecycle management via [close]/[isClosed] — a closed publisher rejects new operations
- * - Subscriber count visibility via [subscriberCount]
- * - Optional self-close when all subscribers cancel via [closeOnEmpty]
+ * [closeOnEmpty] fires only when both the sync callback list and the async subscriber count
+ * reach zero simultaneously.
  *
  * @param E The specific type of [LirpEvent] this publisher will emit
  *
  * @see [LirpEventPublisher]
  * @see [SharedFlow]
  */
-class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
+class FlowEventPublisher<ET : EventType, E : LirpEvent<ET>>
     @JvmOverloads
     constructor(
         private val id: String,
-        // SharedFlow for entity change events with sufficient buffer and SUSPEND policy to ensure no events are lost
         private val config: PublisherConfig = PublisherConfig.DEFAULT,
         /**
          * When true, the publisher closes itself when the last subscriber cancels and no subscribe
@@ -148,22 +148,53 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
          * registered via [onCloseOnEmpty] is invoked so observers can react to the imminent shutdown.
          */
         private val closeOnEmpty: Boolean = false
-    ): LirpEventPublisher<ET, E> {
+    ) : LirpEventPublisher<ET, E> {
 
         private val log = KotlinLogging.logger {}
 
         /**
-         * Channel for processing events with configurable buffer capacity.
-         *
-         * The capacity is determined by [PublisherConfig.channelCapacity], defaulting to
-         * [Channel.UNLIMITED]. Use a bounded capacity to cap
-         * memory usage under sustained high-frequency mutations with slow subscribers.
+         * Lazily initialized async bridge holding the Channel, MutableSharedFlow, and drain coroutine.
+         * Armed only on the first async entry point; never armed by sync subscribe overloads.
          */
-        private val eventChannel = Channel<E>(config.channelCapacity)
+        private inner class Bridge {
+            val channel: Channel<E> = Channel(config.channelCapacity)
 
-        private val changesFlow = MutableSharedFlow<E>(config.replay, config.extraBufferCapacity, config.onBufferOverflow)
+            @Suppress("kotlin:S6305") // Exposing mutable flow is ok here for a private class
+            val flow: MutableSharedFlow<E> = MutableSharedFlow(config.replay, config.extraBufferCapacity, config.onBufferOverflow)
+            val changes: SharedFlow<E> = flow.asSharedFlow()
 
-        override val changes: SharedFlow<E> = changesFlow.asSharedFlow()
+            init {
+                flowScope.launch {
+                    for (event in channel) {
+                        try {
+                            flow.emit(event)
+                        } catch (exception: Exception) {
+                            log.error(exception) { "Unexpected error during event emission: $event" }
+                        }
+                    }
+                }
+            }
+        }
+
+        private val _bridgeHolder: Lazy<Bridge> = lazy(LazyThreadSafetyMode.SYNCHRONIZED) { Bridge() }
+
+        private fun armBridge(): Bridge = _bridgeHolder.value
+
+        // Returns null (non-blocking) if the bridge is not yet initialized — safe for the emitAsync fast path
+        private val bridge: Bridge? get() = if (_bridgeHolder.isInitialized()) _bridgeHolder.value else null
+
+        /**
+         * Diagnostic read-only flag for testing: `true` only after the async bridge has been armed
+         * (on first call to [subscribeAsync], [changes], or [subscribe] with a [Flow.Subscriber]).
+         * A publisher with only sync [subscribe] callbacks must keep this `false`.
+         */
+        internal val isBridgeInitialized: Boolean get() = _bridgeHolder.isInitialized()
+
+        override val changes: SharedFlow<E>
+            get() {
+                check(!isClosed) { "Publisher '$id' is closed" }
+                return armBridge().changes
+            }
 
         /**
          * The coroutine scope used for emitting change events.
@@ -178,15 +209,16 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
 
         override val isClosed: Boolean get() = closedFlag.get()
 
-        private val _subscriberCount = AtomicInteger(0)
+        private val _syncSubscriberCount = AtomicInteger(0)
+        private val _asyncSubscriberCount = AtomicInteger(0)
 
-        override val subscriberCount: Int get() = _subscriberCount.get()
+        override val subscriberCount: Int get() = _syncSubscriberCount.get() + _asyncSubscriberCount.get()
 
         /**
-         * Tracks subscribe() calls that have incremented [_subscriberCount] but whose coroutine
-         * job has not yet been registered with [invokeOnCompletion]. While this counter is
-         * non-zero, [closeOnEmpty] must not trigger close() even if [_subscriberCount] reaches
-         * zero, because a concurrent subscriber is still being set up.
+         * Tracks subscribeAsync() calls that have incremented [_asyncSubscriberCount] but whose coroutine
+         * job has not yet been registered with [invokeOnCompletion]. While this counter is non-zero,
+         * [closeOnEmpty] must not trigger [close] even if [subscriberCount] reaches zero, because a
+         * concurrent subscriber is still being set up.
          */
         private val _inFlightSubscribes = AtomicInteger(0)
 
@@ -194,53 +226,104 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
         @Volatile
         private var onCloseOnEmptyCallback: (() -> Unit)? = null
 
+        /**
+         * Holds sync callbacks registered via [subscribe]. [CopyOnWriteArrayList] provides
+         * snapshot-safe iteration: concurrent subscribe/cancel during dispatch affects the
+         * next iteration only, never the current one.
+         */
+        private val directCallbacks = CopyOnWriteArrayList<(E) -> Unit>()
+
+        // Per-publisher reentrancy trampoline (modeled on Guava EventBus PerThreadQueuedDispatcher)
+        private val _isDispatching: ThreadLocal<Boolean> = ThreadLocal.withInitial { false }
+        private val _pendingEvents: ThreadLocal<ArrayDeque<E>> = ThreadLocal.withInitial { ArrayDeque() }
+
         init {
             log.trace { "FlowEventPublisher created: $id" }
-
-            // Create a single persistent coroutine to handle all emissions for a fire and forget approach
-            flowScope.launch {
-                for (event in eventChannel) {
-                    try {
-                        changesFlow.emit(event) // This suspends if needed
-                    } catch (exception: Exception) {
-                        log.error(exception) { "Unexpected error during event emission: $event" }
-                    }
-                }
-            }
         }
 
         /**
          * Permanently closes this publisher.
          *
          * Uses [AtomicBoolean.compareAndSet] to ensure the close logic runs exactly once even
-         * under concurrent calls. After closing, [emitAsync] and all [subscribe] overloads throw
-         * [IllegalStateException]. Idempotent: subsequent calls are safe no-ops.
+         * under concurrent calls. After closing, [emitAsync] and all [subscribe]/[subscribeAsync]
+         * overloads throw [IllegalStateException]. Idempotent: subsequent calls are safe no-ops.
          */
         override fun close() {
             if (closedFlag.compareAndSet(false, true)) {
-                eventChannel.close()
+                bridge?.channel?.close()
+                directCallbacks.clear()
                 log.trace { "$this closed" }
             }
         }
 
         override fun emitAsync(event: E) {
             check(!isClosed) { "Publisher '$id' is closed" }
-            // Short-circuit when nobody is listening and no replay is configured: the event would
-            // be funneled through eventChannel → changesFlow and dropped on the floor anyway.
-            // Skipping here avoids the trySend allocation, the activeTypes lookup, and the
-            // persistent-coroutine wakeup. Safe because replay == 0 means no late subscriber can
-            // observe events emitted before they subscribed.
-            if (_subscriberCount.get() == 0 && config.replay == 0) return
-            // Read the volatile reference once to get a consistent snapshot; a concurrent disableEvents()
-            // replacing the reference after this read will not affect the check or the send
+            // Short-circuit when nobody is listening and no replay is configured.
+            if (subscriberCount == 0 && config.replay == 0) return
+
+            // Read activatedEventTypes once; both dispatch paths share this snapshot.
             val activeTypes = activatedEventTypes
-            if (event.type in activeTypes) {
-                // Use trySend so we don't block the caller
-                // If the channel is full, this will return the closed/failed result
-                val result = eventChannel.trySend(event)
+
+            // [1] Sync dispatch: when callbacks are registered and the event type is active
+            if (directCallbacks.isNotEmpty() && event.type in activeTypes) {
+                dispatchSync(event)
+            }
+
+            // [2] Async bridge dispatch: only if the bridge has been armed
+            val b = bridge
+            if (b != null && event.type in activeTypes) {
+                val result = b.channel.trySend(event)
                 if (!result.isSuccess) {
                     log.warn { "Failed to send event to channel (capacity=${config.channelCapacity}): $event" }
                 }
+            }
+        }
+
+        /**
+         * Dispatches [event] to all sync callbacks using a per-publisher trampoline to handle
+         * reentrancy. When a sync callback triggers another [emitAsync] on the same publisher from
+         * the same thread, the reentrant event is queued and drained breadth-first after the current
+         * dispatch completes. Each callback is wrapped in try/catch(Exception) so a throwing callback
+         * does not prevent delivery to remaining callbacks. Error propagates as a bug detector.
+         */
+        private fun dispatchSync(event: E) {
+            if (_isDispatching.get()) {
+                _pendingEvents.get().addLast(event)
+                return
+            }
+            _isDispatching.set(true)
+            try {
+                var current: E? = event
+                while (current != null) {
+                    for (callback in directCallbacks) {
+                        try {
+                            callback(current)
+                        } catch (e: Exception) {
+                            log.error(e) { "Exception in sync callback for publisher '$id'" }
+                        }
+                    }
+                    current = _pendingEvents.get().removeFirstOrNull()
+                }
+            } finally {
+                _isDispatching.set(false)
+                // If a callback propagated a Throwable out of the drain loop, queued reentrant events
+                // remain; clear them so they are not silently replayed on the next dispatch on this thread.
+                _pendingEvents.get().clear()
+            }
+        }
+
+        /**
+         * Fires [closeOnEmpty] if both sync and async subscriber counts are zero and no async
+         * subscribe call is currently in-flight.
+         */
+        private fun maybeCloseOnEmpty() {
+            if (closeOnEmpty &&
+                _syncSubscriberCount.get() == 0 &&
+                _asyncSubscriberCount.get() == 0 &&
+                _inFlightSubscribes.get() == 0
+            ) {
+                onCloseOnEmptyCallback?.invoke()
+                close()
             }
         }
 
@@ -256,20 +339,50 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
         }
 
         /**
-         * Shared [invokeOnCompletion] handler used by all three subscribe() overloads.
-         *
-         * Decrements [_subscriberCount]. If both [_subscriberCount] and [_inFlightSubscribes]
-         * reach zero and [closeOnEmpty] is enabled, fires the [onCloseOnEmptyCallback] and
-         * then closes this publisher. The double-zero check prevents premature close during
-         * concurrent subscribe/cancel cycles where a new subscriber is still being registered.
+         * Shared [invokeOnCompletion] handler used by async subscribe overloads. Decrements
+         * [_asyncSubscriberCount] and delegates to [maybeCloseOnEmpty].
          */
         private fun Job.registerCompletionHandler() {
             invokeOnCompletion {
-                _subscriberCount.decrementAndGet()
-                if (closeOnEmpty && _subscriberCount.get() == 0 && _inFlightSubscribes.get() == 0) {
-                    onCloseOnEmptyCallback?.invoke()
-                    close()
+                _asyncSubscriberCount.decrementAndGet()
+                maybeCloseOnEmpty()
+            }
+        }
+
+        override fun subscribe(callback: (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, E> {
+            // Bracket registration with the in-flight counter so a concurrent last-subscriber cancel
+            // cannot closeOnEmpty between the isClosed check and the directCallbacks add — that would
+            // leave a live handle on a closed publisher and corrupt the subscriber count.
+            _inFlightSubscribes.incrementAndGet()
+            try {
+                if (isClosed) {
+                    if (closeOnEmpty) return cancelledSyncSubscription()
+                    error("Publisher '$id' is closed")
                 }
+                directCallbacks.add(callback)
+                _syncSubscriberCount.incrementAndGet()
+                log.trace { "Sync subscription registered to $id" }
+                return SyncSubscription(this, callback)
+            } finally {
+                _inFlightSubscribes.decrementAndGet()
+            }
+        }
+
+        override fun subscribe(vararg eventTypes: ET, callback: (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, E> {
+            _inFlightSubscribes.incrementAndGet()
+            try {
+                if (isClosed) {
+                    if (closeOnEmpty) return cancelledSyncSubscription()
+                    error("Publisher '$id' is closed")
+                }
+                // Store the wrapper lambda (not the original callback) so cancel() can remove it by identity
+                val wrapper: (E) -> Unit = { event -> if (event.type in eventTypes) callback(event) }
+                directCallbacks.add(wrapper)
+                _syncSubscriberCount.incrementAndGet()
+                log.trace { "Filtered sync subscription registered to $id for event types: ${eventTypes.joinToString()}" }
+                return SyncSubscription(this, wrapper)
+            } finally {
+                _inFlightSubscribes.decrementAndGet()
             }
         }
 
@@ -287,11 +400,25 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
             }
             log.trace { "Subscription registered to $subscriber" }
 
-            _subscriberCount.incrementAndGet()
+            _asyncSubscriberCount.incrementAndGet()
 
+            // Arm the bridge synchronously, before launching the collect coroutine. Otherwise an
+            // emitAsync between this call returning and the coroutine being scheduled would see a
+            // null bridge and silently drop the event; the channel must exist to buffer it.
+            val armed = armBridge()
+            // A concurrent external close() may have fired after the isClosed check above but before
+            // arming; arming would otherwise leak a Channel + drain coroutine that is never closed.
+            // Tear the freshly-armed bridge down on that race.
+            if (isClosed) {
+                armed.channel.close()
+                _asyncSubscriberCount.decrementAndGet()
+                _inFlightSubscribes.decrementAndGet()
+                if (closeOnEmpty) return
+                error("Publisher '$id' is closed")
+            }
             val job =
                 flowScope.launch {
-                    changesFlow.collect { event ->
+                    armed.flow.collect { event ->
                         subscriber.onNext(event)
                     }
                 }
@@ -303,12 +430,12 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
         }
 
         /**
-         * Subscribes to entity change events by providing an action to execute when changes occur.
+         * Subscribes asynchronously to entity change events by providing a suspending action.
          *
-         * @param action The action to execute when the entity changes
+         * @param action The suspend action to execute when events are emitted
          * @return A subscription that can be used to unsubscribe
          */
-        override fun subscribe(action: suspend (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, E> {
+        override fun subscribeAsync(action: suspend (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, E> {
             _inFlightSubscribes.incrementAndGet()
             if (isClosed) {
                 _inFlightSubscribes.decrementAndGet()
@@ -316,16 +443,29 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
                     return cancelledSubscription()
                 error("Publisher '$id' is closed")
             }
-            log.trace { "Anonymous subscription registered to $id" }
+            log.trace { "Async subscription registered to $id" }
 
-            _subscriberCount.incrementAndGet()
+            _asyncSubscriberCount.incrementAndGet()
+
+            // Arm the bridge synchronously, before launching the collect coroutine, so an emitAsync
+            // racing this subscription is buffered by the channel rather than dropped against a null bridge.
+            val armed = armBridge()
+            // Tear down the freshly-armed bridge if an external close() raced in after the isClosed
+            // check above, otherwise the Channel + drain coroutine would leak on the process-lived scope.
+            if (isClosed) {
+                armed.channel.close()
+                _asyncSubscriberCount.decrementAndGet()
+                _inFlightSubscribes.decrementAndGet()
+                if (closeOnEmpty) return cancelledSubscription()
+                error("Publisher '$id' is closed")
+            }
 
             // Each subscription requires its own collection coroutine to handle events independently
             // This is a deliberate design pattern for reactive subscriptions
             @Suppress("kotlin:S6311")
             val job =
                 flowScope.launch {
-                    changesFlow.collect { event ->
+                    armed.flow.collect { event ->
                         action(event)
                     }
                 }
@@ -336,23 +476,36 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
             return ReactiveSubscription(this, job)
         }
 
-        override fun subscribe(vararg eventTypes: ET, action: suspend (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, E> {
+        override fun subscribeAsync(vararg eventTypes: ET, action: suspend (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, E> {
             _inFlightSubscribes.incrementAndGet()
             if (isClosed) {
                 _inFlightSubscribes.decrementAndGet()
                 if (closeOnEmpty) return cancelledSubscription()
                 error("Publisher '$id' is closed")
             }
-            log.trace { "Subscription registered to $id for event types: ${eventTypes.joinToString()}" }
+            log.trace { "Async filtered subscription registered to $id for event types: ${eventTypes.joinToString()}" }
 
-            _subscriberCount.incrementAndGet()
+            _asyncSubscriberCount.incrementAndGet()
+
+            // Arm the bridge synchronously, before launching the collect coroutine, so an emitAsync
+            // racing this subscription is buffered by the channel rather than dropped against a null bridge.
+            val armed = armBridge()
+            // Tear down the freshly-armed bridge if an external close() raced in after the isClosed
+            // check above, otherwise the Channel + drain coroutine would leak on the process-lived scope.
+            if (isClosed) {
+                armed.channel.close()
+                _asyncSubscriberCount.decrementAndGet()
+                _inFlightSubscribes.decrementAndGet()
+                if (closeOnEmpty) return cancelledSubscription()
+                error("Publisher '$id' is closed")
+            }
 
             // Each subscription requires its own collection coroutine to handle events independently
             // This is a deliberate design pattern for reactive subscriptions
             @Suppress("kotlin:S6311")
             val job =
                 flowScope.launch {
-                    changesFlow.collect { event ->
+                    armed.flow.collect { event ->
                         if (event.type in eventTypes) {
                             action(event)
                         }
@@ -382,7 +535,10 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
         private fun cancelledSubscription(): LirpEventSubscription<in LirpEntity, ET, E> =
             ReactiveSubscription(this, Job().apply { cancel() })
 
-        inner class ReactiveSubscription<T: LirpEntity>(override val source: LirpEventPublisher<ET, E>, private val job: Job)
+        private fun cancelledSyncSubscription(): LirpEventSubscription<in LirpEntity, ET, E> =
+            SyncSubscription(this, {})
+
+        inner class ReactiveSubscription<T : LirpEntity>(override val source: LirpEventPublisher<ET, E>, private val job: Job)
         : LirpEventSubscription<T, ET, E> {
 
             override fun request(n: Long) {
@@ -391,6 +547,28 @@ class FlowEventPublisher<ET : EventType, E: LirpEvent<ET>>
 
             override fun cancel() {
                 job.cancel()
+            }
+        }
+
+        /**
+         * Subscription handle for synchronous callbacks registered via [subscribe].
+         *
+         * Cancellation removes the stored callback from [directCallbacks] and decrements the sync
+         * subscriber count. For filtered subscriptions, the stored callback is the wrapper lambda
+         * that performs the type check, not the original user-provided callback.
+         */
+        inner class SyncSubscription<T : LirpEntity>(override val source: LirpEventPublisher<ET, E>, private val storedCallback: (E) -> Unit)
+        : LirpEventSubscription<T, ET, E> {
+
+            override fun request(n: Long) {
+                error("Events cannot be requested on demand")
+            }
+
+            override fun cancel() {
+                if (directCallbacks.remove(storedCallback)) {
+                    _syncSubscriberCount.decrementAndGet()
+                    maybeCloseOnEmpty()
+                }
             }
         }
     }

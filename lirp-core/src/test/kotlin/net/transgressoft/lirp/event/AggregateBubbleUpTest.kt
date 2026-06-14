@@ -73,7 +73,7 @@ internal class AggregateBubbleUpTest : FunSpec({
         val receivedEvent = AtomicReference<MutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
 
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             receivedEvent.set(event)
             latch.countDown()
         }
@@ -94,7 +94,7 @@ internal class AggregateBubbleUpTest : FunSpec({
         val receivedEvent = AtomicReference<AggregateMutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
 
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 receivedEvent.set(event)
                 latch.countDown()
@@ -117,7 +117,7 @@ internal class AggregateBubbleUpTest : FunSpec({
         val receivedEvent = AtomicReference<AggregateMutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
 
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 receivedEvent.set(event)
                 latch.countDown()
@@ -144,7 +144,7 @@ internal class AggregateBubbleUpTest : FunSpec({
 
         val receivedEventCount = java.util.concurrent.atomic.AtomicInteger(0)
 
-        playlist.subscribe { receivedEventCount.incrementAndGet() }
+        playlist.subscribeAsync { receivedEventCount.incrementAndGet() }
 
         audioItem.title = "Track A Updated"
 
@@ -163,7 +163,7 @@ internal class AggregateBubbleUpTest : FunSpec({
         val latch1 = CountDownLatch(1)
         val receivedCount = java.util.concurrent.atomic.AtomicInteger(0)
 
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 receivedCount.incrementAndGet()
                 latch1.countDown()
@@ -180,7 +180,7 @@ internal class AggregateBubbleUpTest : FunSpec({
         playlist.audioItem.resolve()
 
         val latch2 = CountDownLatch(1)
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 latch2.countDown()
             }
@@ -207,7 +207,7 @@ internal class AggregateBubbleUpTest : FunSpec({
         val eventCount = java.util.concurrent.atomic.AtomicInteger(0)
         val latch = CountDownLatch(1)
 
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 eventCount.incrementAndGet()
                 latch.countDown()
@@ -248,7 +248,7 @@ internal class AggregateBubbleUpTest : FunSpec({
         val eventCount = java.util.concurrent.atomic.AtomicInteger(0)
         val latch = CountDownLatch(1)
 
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 eventCount.incrementAndGet()
                 latch.countDown()
@@ -274,14 +274,14 @@ internal class AggregateBubbleUpTest : FunSpec({
         val cReceivedCount = java.util.concurrent.atomic.AtomicInteger(0)
 
         // BubbleAudioPlaylist should receive bubble-up from BubbleAudioTrack
-        audioPlaylist.subscribe { event ->
+        audioPlaylist.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 bReceivedLatch.countDown()
             }
         }
 
         // BubbleAudioLibrary should NOT receive any events — bubble-up is single-level
-        audioLibrary.subscribe { cReceivedCount.incrementAndGet() }
+        audioLibrary.subscribeAsync { cReceivedCount.incrementAndGet() }
 
         track.updateTrackName("mutated")
 

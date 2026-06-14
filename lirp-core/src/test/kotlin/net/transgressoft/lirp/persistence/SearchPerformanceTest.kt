@@ -128,8 +128,6 @@ internal class SearchPerformanceTest : StringSpec({
 
         repository.lazySearch { true }.toSet()
 
-        reactive.advance()
-
         readEventEmitted.get() shouldBe false
     }
 
@@ -161,8 +159,6 @@ internal class SearchPerformanceTest : StringSpec({
         repository.subscribe(READ) { readEventEmitted.set(true) }
 
         repository.searchStream { true }.collect(Collectors.toSet())
-
-        reactive.advance()
 
         readEventEmitted.get() shouldBe false
     }

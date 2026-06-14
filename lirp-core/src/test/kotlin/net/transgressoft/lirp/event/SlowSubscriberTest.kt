@@ -82,10 +82,10 @@ class SlowSubscriberTest : DescribeSpec({
             publisher.activateEvents(CrudEvent.Type.CREATE)
 
             // Fast subscriber: instant handler, no delay
-            val fastSub = publisher.subscribe { fastCounter.incrementAndGet() }
+            val fastSub = publisher.subscribeAsync { fastCounter.incrementAndGet() }
             // Slow subscriber: deliberate delay simulating expensive processing
             val slowSub =
-                publisher.subscribe { event ->
+                publisher.subscribeAsync { event ->
                     delay(SLOW_DELAY_MS.milliseconds)
                     slowCounter.incrementAndGet()
                 }
@@ -123,12 +123,12 @@ class SlowSubscriberTest : DescribeSpec({
             publisher.activateEvents(CrudEvent.Type.CREATE)
 
             val fastSub =
-                publisher.subscribe {
+                publisher.subscribeAsync {
                     fastCounter.incrementAndGet()
                     fastLatch.countDown()
                 }
             val slowSub =
-                publisher.subscribe { event ->
+                publisher.subscribeAsync { event ->
                     delay(SLOW_DELAY_MS.milliseconds)
                     slowCounter.incrementAndGet()
                     slowLatch.countDown()
@@ -175,12 +175,12 @@ class SlowSubscriberTest : DescribeSpec({
             publisher.activateEvents(CrudEvent.Type.CREATE)
 
             val fastSub =
-                publisher.subscribe {
+                publisher.subscribeAsync {
                     fastLatch.countDown()
                     if (fastLatch.count == 0L) fastCompletedMs.set(System.currentTimeMillis())
                 }
             val slowSub =
-                publisher.subscribe { event ->
+                publisher.subscribeAsync { event ->
                     delay(SLOW_DELAY_MS.milliseconds)
                     slowLatch.countDown()
                     if (slowLatch.count == 0L) slowCompletedMs.set(System.currentTimeMillis())
@@ -216,9 +216,9 @@ class SlowSubscriberTest : DescribeSpec({
 
             val repository = AudioItemVolatileRepository()
 
-            val fastSub = repository.subscribe { fastCounter.incrementAndGet() }
+            val fastSub = repository.subscribeAsync { fastCounter.incrementAndGet() }
             val slowSub =
-                repository.subscribe { event ->
+                repository.subscribeAsync { event ->
                     delay(SLOW_DELAY_MS.milliseconds)
                     slowCounter.incrementAndGet()
                 }
@@ -250,9 +250,9 @@ class SlowSubscriberTest : DescribeSpec({
 
             val repository = AudioItemVolatileRepository()
 
-            val fastSub = repository.subscribe { fastLatch.countDown() }
+            val fastSub = repository.subscribeAsync { fastLatch.countDown() }
             val slowSub =
-                repository.subscribe { event ->
+                repository.subscribeAsync { event ->
                     delay(SLOW_DELAY_MS.milliseconds)
                     slowLatch.countDown()
                 }

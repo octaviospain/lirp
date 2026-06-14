@@ -156,27 +156,59 @@ class AlbumRepository : VolatileRepository<Int, Album>("Albums") {
 
 val repo = AlbumRepository()
 
-// Repository-level: track all structural changes
+// Repository-level: track all structural changes (synchronous — runs inline on the calling thread)
 repo.subscribe { event ->
     when (event) {
-        is StandardCrudEvent.Create -> println("Added: ${event.entity.title}")
-        is StandardCrudEvent.Update -> println("Updated album ${event.entityId}")
-        is StandardCrudEvent.Delete -> println("Removed album ${event.entityId}")
+        is StandardCrudEvent.Create -> println("Added: ${event.entities.values.first().title}")
+        is StandardCrudEvent.Update -> println("Updated album")
+        is StandardCrudEvent.Delete -> println("Removed album")
         else -> {}
     }
 }
 
 val nevermind = repo.create(1, "Nevermind", "rock", 42)
 
-// Entity-level: fine-grained property change tracking
+// Entity-level: fine-grained property change tracking (synchronous)
 nevermind.subscribe { event ->
-    println("Rating changed: ${event.oldEntity.rating} -> ${event.newEntity.rating}")
+    if (event is PropertyChanged<*, *, *>)
+        println("${event.property.name}: ${event.oldValue} -> ${event.newValue}")
 }
 
 nevermind.rating = 9.5  // fires both entity subscriber and repository Update event
+
+// For slow or remote work, use subscribeAsync — delivers on a coroutine, does not block the emitting thread
+repo.subscribeAsync { event ->
+    if (event is StandardCrudEvent.Create) {
+        // e.g. update a remote search index, send a notification — safe here because we're on a coroutine
+        println("Async: album added to search index: ${event.entities.values.first().title}")
+    }
+}
 ```
 
 See [Core Concepts](https://github.com/octaviospain/lirp/wiki/Core-Concepts) for the reactive-property model, subscription patterns, and entity lifecycle.
+
+### Synchronous vs asynchronous subscriptions
+
+LIRP offers two subscription transports:
+
+| Transport | Method | Delivery | Use when |
+|-----------|--------|----------|----------|
+| **Synchronous** | `subscribe { }` | Inline on the emitting thread, before `emitAsync` returns | Fast in-process work: cache updates, audit appends, in-memory index maintenance — anything that must be visible by the time the mutation returns |
+| **Asynchronous** | `subscribeAsync { }` | On a coroutine dispatcher, after `emitAsync` returns | Slow, blocking, or remote work (database writes, HTTP calls, fan-out); anything that must not block the mutation path |
+
+```kotlin
+// Sync — runs immediately on the thread that mutates the entity
+entity.subscribe { event ->
+    localIndex.update(event)   // fast, must be consistent before the next read
+}
+
+// Async — runs on a coroutine after the mutation returns
+entity.subscribeAsync { event ->
+    searchService.reindex(event.entity)   // slow — safe to defer
+}
+```
+
+If a sync callback is slow or blocks, it delays the emitting thread for every mutation. Use `subscribeAsync` for any work that takes more than a few microseconds or that calls I/O.
 
 ## SQL Persistence
 
@@ -312,6 +344,15 @@ Benchmarks run with JMH 1.37 on OpenJDK 21.0.10, 13th Gen Intel Core i7-13700, 6
 | `JsonFileRepository` | 97,720 ops/s | 27 ns |
 
 `findById()` at 27 ns is against the in-memory `ConcurrentHashMap` — the SQL and JSON repositories skip the round-trip entirely. For operation-level persistence timing details and full benchmark methodology, see [Performance Benchmarks](https://github.com/octaviospain/lirp/wiki/Performance-Benchmarks).
+
+## Upgrading to v3.0.0
+
+Version 3.0.0 contains breaking changes to the subscription API and the mutation event model. See **[CHANGELOG.md](CHANGELOG.md)** for the full migration guide, including:
+
+- `subscribe` is now **synchronous** by default — rename all former async `subscribe` call sites to `subscribeAsync`
+- `changes` access arms the replay buffer lazily — touch `publisher.changes` at boot if replay buffering from startup is needed
+- `PropertyChanged` / `BatchChanged` replace `oldEntity` / `newEntity` on mutation events
+- Core and FX projection map imports moved to `…persistence.projection` subpackages
 
 ## Documentation
 

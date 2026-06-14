@@ -44,7 +44,7 @@ class ExceptionIsolationTest : DescribeSpec({
             publisher.activateEvents(CREATE)
 
             // Throwing subscriber — unconditional exception on every event
-            publisher.subscribe { throw RuntimeException("intentional subscriber exception") }
+            publisher.subscribeAsync { throw RuntimeException("intentional subscriber exception") }
 
             val healthy1 = publisher.record()
             val healthy2 = publisher.record()
@@ -63,8 +63,8 @@ class ExceptionIsolationTest : DescribeSpec({
             publisher.activateEvents(CREATE)
 
             // Two throwing subscribers
-            publisher.subscribe { throw RuntimeException("thrower-1 exception") }
-            publisher.subscribe { throw RuntimeException("thrower-2 exception") }
+            publisher.subscribeAsync { throw RuntimeException("thrower-1 exception") }
+            publisher.subscribeAsync { throw RuntimeException("thrower-2 exception") }
 
             val healthy = publisher.record()
 
@@ -81,7 +81,7 @@ class ExceptionIsolationTest : DescribeSpec({
             publisher.activateEvents(CREATE)
 
             // Throwing subscriber registered via the plain subscribe() overload
-            publisher.subscribe { throw RuntimeException("intentional exception from plain subscribe") }
+            publisher.subscribeAsync { throw RuntimeException("intentional exception from plain subscribe") }
 
             // Healthy subscriber registered via the filtered record(eventType) overload
             val healthy = publisher.record(CREATE)

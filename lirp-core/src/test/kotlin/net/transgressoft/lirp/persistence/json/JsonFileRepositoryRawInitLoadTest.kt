@@ -101,7 +101,7 @@ class JsonFileRepositoryRawInitLoadTest : StringSpec({
         // Attach a per-entity subscriber AFTER load completes; any retroactive event would surface here.
         val events = CopyOnWriteArrayList<String>()
         for (entity in repo) {
-            entity.subscribe { event -> events += event.toString() }
+            entity.subscribeAsync { event -> events += event.toString() }
         }
         // Bulk-load itself is a no-op for subscriber notifications. Sanity-check the first mutation
         // emits exactly one event so we know the subscription is wired.

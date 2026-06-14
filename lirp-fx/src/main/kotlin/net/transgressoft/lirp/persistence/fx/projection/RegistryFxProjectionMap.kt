@@ -149,7 +149,7 @@ class RegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identi
             // catches those cases by scheduling a force-flush (remove then re-insert) for the
             // entity's current projection key.
             updateSubscription =
-                registry.subscribe(CrudEvent.Type.UPDATE) { event ->
+                registry.subscribeAsync(CrudEvent.Type.UPDATE) { event ->
                     if (event is StandardCrudEvent.Update) {
                         val keysToFlush = event.entities.values.map(keyExtractor).toSet()
                         if (keysToFlush.isNotEmpty()) scheduleUpdateFlush(keysToFlush)

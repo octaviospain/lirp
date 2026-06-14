@@ -1508,7 +1508,7 @@ internal class TableDefProcessorTest : FunSpec({
         val mutationCount = java.util.concurrent.atomic.AtomicInteger(0)
         val subscribeMethod =
             playlistClass.methods.first {
-                it.name == "subscribe" &&
+                it.name == "subscribeAsync" &&
                     it.parameterCount == 1 &&
                     it.parameterTypes[0] == kotlin.jvm.functions.Function2::class.java
             }

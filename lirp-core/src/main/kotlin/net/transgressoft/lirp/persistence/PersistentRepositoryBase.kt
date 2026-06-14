@@ -562,61 +562,70 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
          */
         protected fun subscribeEntity(entity: R) {
             val subscription =
-                entity.subscribe { mutationEvent ->
+                entity.subscribeAsync { mutationEvent ->
                     pendingLock.read {
                         if (closed) return@read
-                        // Extract the pre-mutation version and index keys from the captured carrier.
-                        // PropertyChanged and BatchChanged carry immutable scalars frozen at assignment
-                        // time, so they are safe to read here even under deferred coroutine dispatch.
-                        val versionAtMutation: Long? =
-                            when (mutationEvent) {
-                                is PropertyChanged<*, *, *> ->
-                                    @Suppress("UNCHECKED_CAST")
-                                    (mutationEvent as PropertyChanged<K, R, *>).versionAtMutation
-                                        ?: extractVersion(mutationEvent.entity)
-                                is BatchChanged<*, *> ->
-                                    @Suppress("UNCHECKED_CAST")
-                                    (mutationEvent as BatchChanged<K, R>).versionAtMutation
-                                        ?: extractVersion(mutationEvent.entity)
-                                else -> extractVersion(mutationEvent.entity)
-                            }
-                        enqueueUpdate(mutationEvent.entity, versionAtMutation)
-
-                        // Keep secondary indexes in sync before invoking the subclass hook so a
-                        // throwing override of onEntityMutated cannot leave findByIndex / range
-                        // queries returning stale results.
-                        //
-                        // Scope each old-key removal to the property that actually changed. A single
-                        // batch can touch several @Indexed properties of different runtime types, and
-                        // applying one property's key to a differently-typed sorted index would throw
-                        // ClassCastException in the comparator. PropertyChanged carries one
-                        // (property, key) pair; BatchChanged is fanned out per indexed field change.
-                        when (mutationEvent) {
-                            is PropertyChanged<*, *, *> -> {
-                                @Suppress("UNCHECKED_CAST")
-                                val propertyChanged = mutationEvent as PropertyChanged<K, R, *>
-                                reindexEntity(
-                                    propertyChanged.entity,
-                                    propertyChanged.oldIndexKey,
-                                    propertyChanged.newIndexKey,
-                                    propertyChanged.property.name
-                                )
-                            }
-                            is BatchChanged<*, *> -> {
-                                @Suppress("UNCHECKED_CAST")
-                                val batchChanged = mutationEvent as BatchChanged<K, R>
-                                for (change in batchChanged.changes) {
-                                    if (isPropertyIndexed(change.property)) {
-                                        reindexEntity(batchChanged.entity, change.oldValue, change.newValue, change.property.name)
-                                    }
-                                }
-                            }
-                            else -> { /* ReactiveMutationEvent / AggregateMutationEvent — no index keys to apply */ }
-                        }
+                        enqueueUpdate(mutationEvent.entity, versionAtMutation(mutationEvent))
+                        // Reindex before the subclass hook so a throwing onEntityMutated override
+                        // cannot leave findByIndex / range queries returning stale results.
+                        reindexMutation(mutationEvent)
                         onEntityMutated(mutationEvent)
                     }
                 }
             subscriptionsMap[entity.id] = subscription
+        }
+
+        /**
+         * Resolves the entity version to pin into the pending update cell for `@Version`-aware subclasses.
+         *
+         * [PropertyChanged] and [BatchChanged] carry an immutable `versionAtMutation` scalar frozen at
+         * assignment time, safe to read under deferred coroutine dispatch. Falling back to [extractVersion]
+         * on the live entity is safe because version bumps run inside the debounced write pipeline, not at
+         * mutation time, so the live entity still holds the pre-flush value when the subscriber drains.
+         */
+        private fun versionAtMutation(mutationEvent: MutationEvent<K, R>): Long? =
+            when (mutationEvent) {
+                is PropertyChanged<*, *, *> ->
+                    @Suppress("UNCHECKED_CAST")
+                    (mutationEvent as PropertyChanged<K, R, *>).versionAtMutation ?: extractVersion(mutationEvent.entity)
+                is BatchChanged<*, *> ->
+                    @Suppress("UNCHECKED_CAST")
+                    (mutationEvent as BatchChanged<K, R>).versionAtMutation ?: extractVersion(mutationEvent.entity)
+                else -> extractVersion(mutationEvent.entity)
+            }
+
+        /**
+         * Applies the mutation's index-key delta to the secondary indexes.
+         *
+         * Each old-key removal is scoped to the property that actually changed: a single batch can touch
+         * several `@Indexed` properties of different runtime types, and applying one property's key to a
+         * differently-typed sorted index would throw [ClassCastException] in the comparator. [PropertyChanged]
+         * carries one (property, key) pair; [BatchChanged] is fanned out per indexed field change.
+         * [ReactiveMutationEvent]/[AggregateMutationEvent] carry no index keys and are skipped.
+         */
+        private fun reindexMutation(mutationEvent: MutationEvent<K, R>) {
+            when (mutationEvent) {
+                is PropertyChanged<*, *, *> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val propertyChanged = mutationEvent as PropertyChanged<K, R, *>
+                    reindexEntity(
+                        propertyChanged.entity,
+                        propertyChanged.oldIndexKey,
+                        propertyChanged.newIndexKey,
+                        propertyChanged.property.name
+                    )
+                }
+                is BatchChanged<*, *> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val batchChanged = mutationEvent as BatchChanged<K, R>
+                    for (change in batchChanged.changes) {
+                        if (isPropertyIndexed(change.property)) {
+                            reindexEntity(batchChanged.entity, change.oldValue, change.newValue, change.property.name)
+                        }
+                    }
+                }
+                else -> { /* ReactiveMutationEvent / AggregateMutationEvent — no index keys to apply */ }
+            }
         }
 
         /**

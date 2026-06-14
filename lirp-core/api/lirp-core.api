@@ -31,9 +31,11 @@ public abstract class net/transgressoft/lirp/entity/ReactiveEntityBase : net/tra
 	public final fun setEventsDisabled (Z)V
 	public fun setLastDateModified (Ljava/time/LocalDateTime;)V
 	public fun subscribe (Ljava/util/concurrent/Flow$Subscriber;)V
-	public fun subscribe (Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
-	public fun subscribe (Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
-	public fun subscribe ([Lnet/transgressoft/lirp/event/MutationEvent$Type;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribe (Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribe ([Lnet/transgressoft/lirp/event/MutationEvent$Type;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribeAsync (Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribeAsync (Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribeAsync ([Lnet/transgressoft/lirp/event/MutationEvent$Type;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public fun withEventsDisabled (Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
 	public final fun withEventsDisabledForClone (Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
 }
@@ -90,14 +92,23 @@ public final class net/transgressoft/lirp/event/FlowEventPublisher : net/transgr
 	public fun isEventActive (Lnet/transgressoft/lirp/event/EventType;)Z
 	public final fun onCloseOnEmpty (Lkotlin/jvm/functions/Function0;)V
 	public fun subscribe (Ljava/util/concurrent/Flow$Subscriber;)V
-	public fun subscribe (Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
-	public fun subscribe (Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
-	public fun subscribe ([Lnet/transgressoft/lirp/event/EventType;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribe (Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribe ([Lnet/transgressoft/lirp/event/EventType;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribeAsync (Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribeAsync (Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribeAsync ([Lnet/transgressoft/lirp/event/EventType;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public fun toString ()Ljava/lang/String;
 }
 
 public final class net/transgressoft/lirp/event/FlowEventPublisher$ReactiveSubscription : net/transgressoft/lirp/event/LirpEventSubscription {
 	public fun <init> (Lnet/transgressoft/lirp/event/FlowEventPublisher;Lnet/transgressoft/lirp/event/LirpEventPublisher;Lkotlinx/coroutines/Job;)V
+	public fun cancel ()V
+	public fun getSource ()Lnet/transgressoft/lirp/event/LirpEventPublisher;
+	public fun request (J)V
+}
+
+public final class net/transgressoft/lirp/event/FlowEventPublisher$SyncSubscription : net/transgressoft/lirp/event/LirpEventSubscription {
+	public fun <init> (Lnet/transgressoft/lirp/event/FlowEventPublisher;Lnet/transgressoft/lirp/event/LirpEventPublisher;Lkotlin/jvm/functions/Function1;)V
 	public fun cancel ()V
 	public fun getSource ()Lnet/transgressoft/lirp/event/LirpEventPublisher;
 	public fun request (J)V
@@ -825,10 +836,13 @@ public abstract class net/transgressoft/lirp/persistence/RegistryBase : net/tran
 	public fun searchStream (Ljava/util/function/Predicate;)Ljava/util/stream/Stream;
 	public fun size ()I
 	public fun subscribe (Ljava/util/concurrent/Flow$Subscriber;)V
-	public fun subscribe (Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
-	public fun subscribe (Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
-	public fun subscribe ([Lnet/transgressoft/lirp/event/CrudEvent$Type;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
-	public synthetic fun subscribe ([Lnet/transgressoft/lirp/event/EventType;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribe (Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribe ([Lnet/transgressoft/lirp/event/CrudEvent$Type;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public synthetic fun subscribe ([Lnet/transgressoft/lirp/event/EventType;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribeAsync (Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribeAsync (Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribeAsync ([Lnet/transgressoft/lirp/event/CrudEvent$Type;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public synthetic fun subscribeAsync ([Lnet/transgressoft/lirp/event/EventType;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public static final fun viaAccessorFor$net_transgressoft_lirp_core (Ljava/lang/Class;)Lnet/transgressoft/lirp/persistence/LirpViaAccessor;
 	protected final fun wireRefBubbleUp (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)V
 }

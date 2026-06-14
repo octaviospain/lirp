@@ -45,11 +45,11 @@ class ReactiveEntityLazyInitTest : StringSpec({
         publisherCreationCounter.get() shouldBe 0
 
         // Subscribe - should trigger publisher creation
-        val subscription = entity.subscribe { }
+        val subscription = entity.subscribeAsync { }
         publisherCreationCounter.get() shouldBe 1
 
         // Subsequent subscriptions should not create new publishers
-        val subscription2 = entity.subscribe { }
+        val subscription2 = entity.subscribeAsync { }
         publisherCreationCounter.get() shouldBe 1
 
         subscription.cancel()
@@ -80,7 +80,7 @@ class ReactiveEntityLazyInitTest : StringSpec({
         // Subscribe
         val receivedEvents = mutableListOf<MutationEvent<String, LazyTestEntity>>()
         val subscription =
-            entity.subscribe { event ->
+            entity.subscribeAsync { event ->
                 receivedEvents.add(event)
             }
 
@@ -133,7 +133,7 @@ class ReactiveEntityLazyInitTest : StringSpec({
         // Subscribe to only the first 10
         val subscriptions =
             entities.take(10).map { entity ->
-                entity.subscribe { }
+                entity.subscribeAsync { }
             }
 
         // Only the first 10 should have publishers
@@ -164,7 +164,7 @@ class ReactiveEntityLazyInitTest : StringSpec({
         customFactoryCalled.get() shouldBe 0
 
         // Subscribe - factory should be called
-        val subscription = entity.subscribe { }
+        val subscription = entity.subscribeAsync { }
         customFactoryCalled.get() shouldBe 1
 
         subscription.cancel()
@@ -182,7 +182,7 @@ class ReactiveEntityLazyInitTest : StringSpec({
             (1..threadCount).map {
                 executor.submit<Unit> {
                     latch.await()
-                    entity.subscribe { }
+                    entity.subscribeAsync { }
                 }
             }
 
@@ -199,7 +199,7 @@ class ReactiveEntityLazyInitTest : StringSpec({
         entity.close()
 
         shouldThrow<IllegalStateException> {
-            entity.subscribe { }
+            entity.subscribeAsync { }
         }
     }
 
@@ -207,14 +207,14 @@ class ReactiveEntityLazyInitTest : StringSpec({
         val publisherCreationCounter = AtomicInteger(0)
         val entity = LazyTestEntity("close-with-publisher", publisherCreationCounter)
 
-        val subscription = entity.subscribe { }
+        val subscription = entity.subscribeAsync { }
         publisherCreationCounter.get() shouldBe 1
 
         entity.close()
         entity.isClosed shouldBe true
 
         shouldThrow<IllegalStateException> {
-            entity.subscribe { }
+            entity.subscribeAsync { }
         }
 
         subscription.cancel()

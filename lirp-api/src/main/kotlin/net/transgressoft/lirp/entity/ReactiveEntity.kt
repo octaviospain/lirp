@@ -34,6 +34,12 @@ import kotlinx.coroutines.flow.SharedFlow
  * - **Dormant**: All subscribers cancelled; publisher shut down and nullified. Reactivates lazily on next subscription.
  * - **Closed**: Terminal state. All operations that mutate or subscribe throw [IllegalStateException].
  *
+ * Subscription transports:
+ * - **Synchronous** (`subscribe`): the callback is invoked inline on the emitting thread, before
+ *   any async delivery. Ideal for fast in-process work that must be visible immediately after the mutation.
+ * - **Asynchronous** (`subscribeAsync`): the action runs in a coroutine on a background dispatcher.
+ *   Suitable for slow, blocking, or fan-out work that must not block the emitting thread.
+ *
  * @param K the type of the entity's id.
  * @param R the type of the entity.
  */
@@ -53,7 +59,7 @@ interface ReactiveEntity<K, R : ReactiveEntity<K, R>> :
     val isClosed: Boolean
 
     /**
-     * A flow of entity change events that can be observed by collectors.
+     * A flow of entity change events that can be observed by collectors asynchronously.
      */
     val changes: SharedFlow<MutationEvent<K, R>>
 
@@ -63,30 +69,56 @@ interface ReactiveEntity<K, R : ReactiveEntity<K, R>> :
     fun emitAsync(event: MutationEvent<K, R>)
 
     /**
-     * Subscribes to all mutation events on this entity.
+     * Subscribes synchronously to all mutation events on this entity.
+     *
+     * The callback is invoked inline on the emitting thread before any async delivery.
+     *
+     * @param callback The function invoked for each mutation event on the emitting thread
+     * @return A subscription handle that can be cancelled to stop receiving events
+     */
+    fun subscribe(callback: (MutationEvent<K, R>) -> Unit): LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>
+
+    /**
+     * Subscribes synchronously to mutation events of the specified types only.
+     *
+     * The callback is invoked inline on the emitting thread for matching events only.
+     *
+     * @param eventTypes The mutation event types to filter on
+     * @param callback The function invoked for each matching event on the emitting thread
+     * @return A subscription handle that can be cancelled to stop receiving events
+     */
+    fun subscribe(vararg eventTypes: MutationEvent.Type, callback: (MutationEvent<K, R>) -> Unit):
+        LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>
+
+    /**
+     * Subscribes asynchronously to all mutation events on this entity.
+     *
+     * Events are delivered on a coroutine; the action does not run on the emitting thread.
      *
      * @param action The suspend function invoked for each mutation event
      * @return A subscription handle that can be cancelled to stop receiving events
      */
-    fun subscribe(action: suspend (MutationEvent<K, R>) -> Unit): LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>
+    fun subscribeAsync(action: suspend (MutationEvent<K, R>) -> Unit): LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>
 
     /**
-     * Subscribes to all mutation events on this entity using a Java [Consumer].
+     * Java-interop async subscription via [Consumer]; delegates to [subscribeAsync].
      *
-     * @param action The consumer invoked for each mutation event
+     * @param action The consumer invoked for each mutation event in a coroutine
      * @return A subscription handle that can be cancelled to stop receiving events
      */
-    fun subscribe(action: Consumer<in MutationEvent<K, R>>): LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>> =
-        subscribe(action::accept)
+    fun subscribeAsync(action: Consumer<in MutationEvent<K, R>>): LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>> =
+        subscribeAsync(action::accept)
 
     /**
-     * Subscribes to mutation events of the specified types, using a Java [Consumer].
+     * Subscribes asynchronously to mutation events of the specified types, using a Java [Consumer].
+     *
+     * Events are delivered on a coroutine for the matching types only.
      *
      * @param eventTypes The mutation event types to filter on
-     * @param action The consumer invoked for each matching event
+     * @param action The consumer invoked for each matching event in a coroutine
      * @return A subscription handle that can be cancelled to stop receiving events
      */
-    fun subscribe(vararg eventTypes: MutationEvent.Type, action: Consumer<in MutationEvent<K, R>>):
+    fun subscribeAsync(vararg eventTypes: MutationEvent.Type, action: Consumer<in MutationEvent<K, R>>):
         LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>>
 
     /**
@@ -117,7 +149,7 @@ interface ReactiveEntity<K, R : ReactiveEntity<K, R>> :
     /**
      * Permanently closes this entity and releases its publisher resources.
      *
-     * After closing [subscribe] throw [IllegalStateException]. Idempotent: subsequent calls are safe no-ops.
+     * After closing [subscribe] and [subscribeAsync] throw [IllegalStateException]. Idempotent: subsequent calls are safe no-ops.
      */
     override fun close()
 

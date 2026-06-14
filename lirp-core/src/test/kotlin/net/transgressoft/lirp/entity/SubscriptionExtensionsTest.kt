@@ -192,7 +192,7 @@ class SubscriptionExtensionsTest : StringSpec({
         val receivedEvents = mutableListOf<Any>()
         val latch = CountDownLatch(2)
 
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             receivedEvents.add(event)
             latch.countDown()
         }
@@ -291,7 +291,7 @@ class SubscriptionExtensionsTest : StringSpec({
         val receivedBatch = AtomicReference<Any?>(null)
         val latch = CountDownLatch(1)
 
-        item.subscribe { event ->
+        item.subscribeAsync { event ->
             if (event is BatchChanged<*, *>) {
                 receivedBatch.set(event)
                 latch.countDown()
@@ -316,7 +316,7 @@ class SubscriptionExtensionsTest : StringSpec({
         val receivedBatch = AtomicReference<Any?>(null)
         val latch = CountDownLatch(1)
 
-        item.subscribe { event ->
+        item.subscribeAsync { event ->
             if (event is BatchChanged<*, *>) {
                 receivedBatch.set(event)
                 latch.countDown()
@@ -339,7 +339,7 @@ class SubscriptionExtensionsTest : StringSpec({
         val receivedAggEvent = AtomicReference<Any?>(null)
         val latch = CountDownLatch(1)
 
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 receivedAggEvent.set(event)
                 latch.countDown()
@@ -364,7 +364,7 @@ class SubscriptionExtensionsTest : StringSpec({
         val receivedAggEvent = AtomicReference<Any?>(null)
         val latch = CountDownLatch(1)
 
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 receivedAggEvent.set(event)
                 latch.countDown()

@@ -35,14 +35,16 @@ public abstract interface class net/transgressoft/lirp/entity/ReactiveEntity : j
 	public abstract fun getChanges ()Lkotlinx/coroutines/flow/SharedFlow;
 	public abstract fun getLastDateModified ()Ljava/time/LocalDateTime;
 	public abstract fun isClosed ()Z
-	public fun subscribe (Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
-	public abstract fun subscribe (Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
-	public abstract fun subscribe ([Lnet/transgressoft/lirp/event/MutationEvent$Type;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public abstract fun subscribe (Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public abstract fun subscribe ([Lnet/transgressoft/lirp/event/MutationEvent$Type;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribeAsync (Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public abstract fun subscribeAsync (Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public abstract fun subscribeAsync ([Lnet/transgressoft/lirp/event/MutationEvent$Type;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public abstract fun withEventsDisabled (Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
 }
 
 public final class net/transgressoft/lirp/entity/ReactiveEntity$DefaultImpls {
-	public static fun subscribe (Lnet/transgressoft/lirp/entity/ReactiveEntity;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public static fun subscribeAsync (Lnet/transgressoft/lirp/entity/ReactiveEntity;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 }
 
 public abstract interface class net/transgressoft/lirp/entity/SoftDeletable {
@@ -119,13 +121,15 @@ public abstract interface class net/transgressoft/lirp/event/LirpEventPublisher 
 	public abstract fun getSubscriberCount ()I
 	public abstract fun isClosed ()Z
 	public abstract fun isEventActive (Lnet/transgressoft/lirp/event/EventType;)Z
-	public fun subscribe (Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
-	public abstract fun subscribe (Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
-	public abstract fun subscribe ([Lnet/transgressoft/lirp/event/EventType;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public abstract fun subscribe (Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public abstract fun subscribe ([Lnet/transgressoft/lirp/event/EventType;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribeAsync (Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public abstract fun subscribeAsync (Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public abstract fun subscribeAsync ([Lnet/transgressoft/lirp/event/EventType;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 }
 
 public final class net/transgressoft/lirp/event/LirpEventPublisher$DefaultImpls {
-	public static fun subscribe (Lnet/transgressoft/lirp/event/LirpEventPublisher;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public static fun subscribeAsync (Lnet/transgressoft/lirp/event/LirpEventPublisher;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 }
 
 public abstract interface class net/transgressoft/lirp/event/LirpEventSubscriber : java/util/concurrent/Flow$Subscriber {
@@ -373,7 +377,7 @@ public abstract interface class net/transgressoft/lirp/persistence/PersistentRep
 public final class net/transgressoft/lirp/persistence/PersistentRepository$DefaultImpls {
 	public static fun minus (Lnet/transgressoft/lirp/persistence/PersistentRepository;Ljava/util/Collection;)Z
 	public static fun minus (Lnet/transgressoft/lirp/persistence/PersistentRepository;Lnet/transgressoft/lirp/entity/ReactiveEntity;)Z
-	public static fun subscribe (Lnet/transgressoft/lirp/persistence/PersistentRepository;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/PersistentRepository;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 }
 
 public final class net/transgressoft/lirp/persistence/RawInitEntry {
@@ -400,7 +404,7 @@ public abstract interface class net/transgressoft/lirp/persistence/ReactivePrimi
 }
 
 public final class net/transgressoft/lirp/persistence/ReactivePrimitive$DefaultImpls {
-	public static fun subscribe (Lnet/transgressoft/lirp/persistence/ReactivePrimitive;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/ReactivePrimitive;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 }
 
 public abstract interface class net/transgressoft/lirp/persistence/Registry : java/lang/Iterable, kotlin/jvm/internal/markers/KMappedMarker, net/transgressoft/lirp/event/LirpEventPublisher {
@@ -420,7 +424,7 @@ public abstract interface class net/transgressoft/lirp/persistence/Registry : ja
 }
 
 public final class net/transgressoft/lirp/persistence/Registry$DefaultImpls {
-	public static fun subscribe (Lnet/transgressoft/lirp/persistence/Registry;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/Registry;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 }
 
 public abstract interface class net/transgressoft/lirp/persistence/Repository : net/transgressoft/lirp/persistence/Registry {
@@ -435,7 +439,7 @@ public abstract interface class net/transgressoft/lirp/persistence/Repository : 
 public final class net/transgressoft/lirp/persistence/Repository$DefaultImpls {
 	public static fun minus (Lnet/transgressoft/lirp/persistence/Repository;Ljava/util/Collection;)Z
 	public static fun minus (Lnet/transgressoft/lirp/persistence/Repository;Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
-	public static fun subscribe (Lnet/transgressoft/lirp/persistence/Repository;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/Repository;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 }
 
 public abstract interface annotation class net/transgressoft/lirp/persistence/Version : java/lang/annotation/Annotation {
@@ -449,6 +453,6 @@ public abstract interface class net/transgressoft/lirp/persistence/json/JsonRepo
 public final class net/transgressoft/lirp/persistence/json/JsonRepository$DefaultImpls {
 	public static fun minus (Lnet/transgressoft/lirp/persistence/json/JsonRepository;Ljava/util/Collection;)Z
 	public static fun minus (Lnet/transgressoft/lirp/persistence/json/JsonRepository;Lnet/transgressoft/lirp/entity/ReactiveEntity;)Z
-	public static fun subscribe (Lnet/transgressoft/lirp/persistence/json/JsonRepository;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/json/JsonRepository;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 }
 

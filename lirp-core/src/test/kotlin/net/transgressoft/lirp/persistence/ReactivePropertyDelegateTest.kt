@@ -33,10 +33,8 @@ class ReactivePropertyDelegateTest : StringSpec({
         val entity = DelegateProbeEntity("probe-1", "initial")
         val received = CopyOnWriteArrayList<MutationEvent<String, DelegateProbeEntity>>()
         val subscription = entity.subscribe { received.add(it) }
-        reactive.advance()
 
         writeReactivePropertyBackingField<String>(entity, "name", "silently-rewritten")
-        reactive.advance()
 
         entity.name shouldBe "silently-rewritten"
         received.shouldBeEmpty()
@@ -58,13 +56,11 @@ class ReactivePropertyDelegateTest : StringSpec({
         val entity = DelegateProbeEntity("probe-3", "initial")
         val received = CopyOnWriteArrayList<MutationEvent<String, DelegateProbeEntity>>()
         val subscription = entity.subscribe { received.add(it) }
-        reactive.advance()
 
         val timestampBefore = entity.lastDateModified
         // Ensure clock tick so timestamps can differ
         Thread.sleep(2)
         entity.name = "loudly-changed"
-        reactive.advance()
 
         entity.name shouldBe "loudly-changed"
         received.size shouldBe 1
