@@ -51,7 +51,7 @@ abstract class LirpEventSubscriberBase<T : LirpEntity, ET: EventType, E : LirpEv
     init {
         addOnSubscribeEventAction {
             subscription = it
-            log.info { "$name subscribed to ${it.source}" }
+            log.debug { "$name subscribed to ${it.source}" }
         }
     }
 

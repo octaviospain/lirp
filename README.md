@@ -345,6 +345,52 @@ Benchmarks run with JMH 1.37 on OpenJDK 21.0.10, 13th Gen Intel Core i7-13700, 6
 
 `findById()` at 27 ns is against the in-memory `ConcurrentHashMap` — the SQL and JSON repositories skip the round-trip entirely. For operation-level persistence timing details and full benchmark methodology, see [Performance Benchmarks](https://github.com/octaviospain/lirp/wiki/Performance-Benchmarks).
 
+## Logging
+
+LIRP uses [SLF4J](https://www.slf4j.org/) via [kotlin-logging](https://github.com/oshai/kotlin-logging) and ships **no logging configuration in its published jars**. Add your preferred SLF4J binding (`logback-classic`, `log4j-slf4j2-impl`, etc.) to your application; LIRP will use it automatically.
+
+### Log level policy
+
+| Level | What LIRP logs at that level |
+|-------|------------------------------|
+| TRACE | Per-mutation / per-entity events — property changes, flush triggers, strategy dispatch |
+| DEBUG | Lifecycle events — repository init/close, entity add/remove, subscribe/unsubscribe, FK installation, flush counts |
+| WARN  | Recoverable issues — cascade failures, buffer overflow, conflict detected, FK reconciliation, retry attempts |
+| ERROR | Permanent failures and invariant breaches — serialisation errors, unrecoverable recovery, uncaught async exceptions |
+
+### MDC keys
+
+When structured logging is enabled (SLF4J MDC + `kotlinx-coroutines-slf4j`), LIRP populates the
+following keys for the duration of async operations so log lines carry full context:
+
+| MDC key | Value |
+|---------|-------|
+| `lirp.repository` | Repository name (e.g. `AlbumRepository`) |
+| `lirp.operation` | Operation name (e.g. `FLUSH`, `EMIT`) |
+
+The keys are set before each async launch and removed in a `finally` block, so they do not leak
+into unrelated coroutines.
+
+### Error handler
+
+Repositories accept an optional `onError: LirpErrorHandler?` constructor parameter. When set,
+the handler is invoked after the existing error log whenever an async operation catches an
+exception. The framework logs first; the handler observes but does not alter control flow.
+
+```kotlin
+val repo = SqlRepository<Int, Album>(
+    dataSource,
+    Album_LirpTableDef,
+    onError = LirpErrorHandler { throwable, ctx ->
+        metrics.increment("lirp.flush.error", "repo" to ctx.repository)
+        alerting.notify("${ctx.operation} on ${ctx.repository} failed: ${throwable.message}")
+    }
+)
+```
+
+Individual subscriptions can also carry an independent error handler via
+`subscribeAsync(action, onError)`, independent of the repository-level handler.
+
 ## Upgrading to v3.0.0
 
 Version 3.0.0 contains breaking changes to the subscription API and the mutation event model. See **[CHANGELOG.md](CHANGELOG.md)** for the full migration guide, including:

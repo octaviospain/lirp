@@ -108,6 +108,25 @@ public abstract interface class net/transgressoft/lirp/event/EventType {
 	public abstract fun getCode ()I
 }
 
+public final class net/transgressoft/lirp/event/LirpErrorContext {
+	public fun <init> (Lnet/transgressoft/lirp/event/LirpOperation;Ljava/util/Collection;Ljava/lang/String;)V
+	public final fun component1 ()Lnet/transgressoft/lirp/event/LirpOperation;
+	public final fun component2 ()Ljava/util/Collection;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Lnet/transgressoft/lirp/event/LirpOperation;Ljava/util/Collection;Ljava/lang/String;)Lnet/transgressoft/lirp/event/LirpErrorContext;
+	public static synthetic fun copy$default (Lnet/transgressoft/lirp/event/LirpErrorContext;Lnet/transgressoft/lirp/event/LirpOperation;Ljava/util/Collection;Ljava/lang/String;ILjava/lang/Object;)Lnet/transgressoft/lirp/event/LirpErrorContext;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEntityIds ()Ljava/util/Collection;
+	public final fun getOperation ()Lnet/transgressoft/lirp/event/LirpOperation;
+	public final fun getRepository ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class net/transgressoft/lirp/event/LirpErrorHandler {
+	public abstract fun invoke (Ljava/lang/Throwable;Lnet/transgressoft/lirp/event/LirpErrorContext;)V
+}
+
 public abstract interface class net/transgressoft/lirp/event/LirpEvent {
 	public abstract fun getType ()Lnet/transgressoft/lirp/event/EventType;
 }
@@ -125,11 +144,13 @@ public abstract interface class net/transgressoft/lirp/event/LirpEventPublisher 
 	public abstract fun subscribe ([Lnet/transgressoft/lirp/event/EventType;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public fun subscribeAsync (Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public abstract fun subscribeAsync (Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribeAsync (Lkotlin/jvm/functions/Function2;Lnet/transgressoft/lirp/event/LirpErrorHandler;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public abstract fun subscribeAsync ([Lnet/transgressoft/lirp/event/EventType;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 }
 
 public final class net/transgressoft/lirp/event/LirpEventPublisher$DefaultImpls {
 	public static fun subscribeAsync (Lnet/transgressoft/lirp/event/LirpEventPublisher;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public static fun subscribeAsync (Lnet/transgressoft/lirp/event/LirpEventPublisher;Lkotlin/jvm/functions/Function2;Lnet/transgressoft/lirp/event/LirpErrorHandler;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 }
 
 public abstract interface class net/transgressoft/lirp/event/LirpEventSubscriber : java/util/concurrent/Flow$Subscriber {
@@ -142,6 +163,19 @@ public abstract interface class net/transgressoft/lirp/event/LirpEventSubscriber
 
 public abstract interface class net/transgressoft/lirp/event/LirpEventSubscription : java/util/concurrent/Flow$Subscription {
 	public abstract fun getSource ()Lnet/transgressoft/lirp/event/LirpEventPublisher;
+}
+
+public final class net/transgressoft/lirp/event/LirpOperation : java/lang/Enum {
+	public static final field CLEAR Lnet/transgressoft/lirp/event/LirpOperation;
+	public static final field CREATE Lnet/transgressoft/lirp/event/LirpOperation;
+	public static final field DELETE Lnet/transgressoft/lirp/event/LirpOperation;
+	public static final field EMIT Lnet/transgressoft/lirp/event/LirpOperation;
+	public static final field FLUSH Lnet/transgressoft/lirp/event/LirpOperation;
+	public static final field RECOVER Lnet/transgressoft/lirp/event/LirpOperation;
+	public static final field UPDATE Lnet/transgressoft/lirp/event/LirpOperation;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lnet/transgressoft/lirp/event/LirpOperation;
+	public static fun values ()[Lnet/transgressoft/lirp/event/LirpOperation;
 }
 
 public abstract interface class net/transgressoft/lirp/event/MutationEvent : net/transgressoft/lirp/event/LirpEvent {
@@ -378,6 +412,7 @@ public final class net/transgressoft/lirp/persistence/PersistentRepository$Defau
 	public static fun minus (Lnet/transgressoft/lirp/persistence/PersistentRepository;Ljava/util/Collection;)Z
 	public static fun minus (Lnet/transgressoft/lirp/persistence/PersistentRepository;Lnet/transgressoft/lirp/entity/ReactiveEntity;)Z
 	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/PersistentRepository;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/PersistentRepository;Lkotlin/jvm/functions/Function2;Lnet/transgressoft/lirp/event/LirpErrorHandler;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 }
 
 public final class net/transgressoft/lirp/persistence/RawInitEntry {
@@ -425,6 +460,7 @@ public abstract interface class net/transgressoft/lirp/persistence/Registry : ja
 
 public final class net/transgressoft/lirp/persistence/Registry$DefaultImpls {
 	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/Registry;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function2;Lnet/transgressoft/lirp/event/LirpErrorHandler;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 }
 
 public abstract interface class net/transgressoft/lirp/persistence/Repository : net/transgressoft/lirp/persistence/Registry {
@@ -440,6 +476,7 @@ public final class net/transgressoft/lirp/persistence/Repository$DefaultImpls {
 	public static fun minus (Lnet/transgressoft/lirp/persistence/Repository;Ljava/util/Collection;)Z
 	public static fun minus (Lnet/transgressoft/lirp/persistence/Repository;Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
 	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/Repository;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/Repository;Lkotlin/jvm/functions/Function2;Lnet/transgressoft/lirp/event/LirpErrorHandler;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 }
 
 public abstract interface annotation class net/transgressoft/lirp/persistence/Version : java/lang/annotation/Annotation {
@@ -454,5 +491,6 @@ public final class net/transgressoft/lirp/persistence/json/JsonRepository$Defaul
 	public static fun minus (Lnet/transgressoft/lirp/persistence/json/JsonRepository;Ljava/util/Collection;)Z
 	public static fun minus (Lnet/transgressoft/lirp/persistence/json/JsonRepository;Lnet/transgressoft/lirp/entity/ReactiveEntity;)Z
 	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/json/JsonRepository;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/json/JsonRepository;Lkotlin/jvm/functions/Function2;Lnet/transgressoft/lirp/event/LirpErrorHandler;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 }
 

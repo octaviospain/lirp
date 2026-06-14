@@ -19,6 +19,7 @@ package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.entity.ReactiveEntity
 import net.transgressoft.lirp.event.CrudEvent
+import net.transgressoft.lirp.event.LirpErrorHandler
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.StandardCrudEvent
 import net.transgressoft.lirp.persistence.PendingUpdate
@@ -91,8 +92,18 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     private val dataSource: DataSource,
     private val tableDef: SqlTableDef<R>,
     private val ownsDataSource: Boolean,
-    loadOnInit: Boolean = true
-) : PersistentRepositoryBase<K, R>("SqlRepository-${tableDef.tableName}", loadOnInit) {
+    loadOnInit: Boolean = true,
+    onError: LirpErrorHandler? = null
+) : PersistentRepositoryBase<K, R>("SqlRepository-${tableDef.tableName}", loadOnInit, onError) {
+
+    /**
+     * ABI-preserving constructor: forwards to the 5-param primary with `onError = null`.
+     *
+     * Retained to keep binary compatibility with callers that were compiled against the
+     * previous 4-param primary constructor signature.
+     */
+    constructor(dataSource: DataSource, tableDef: SqlTableDef<R>, ownsDataSource: Boolean, loadOnInit: Boolean):
+        this(dataSource, tableDef, ownsDataSource, loadOnInit, null)
 
     /**
      * Creates a [SqlRepository] using a user-provided [DataSource].
@@ -104,9 +115,17 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      * @param tableDef The SQL table definition describing the entity's column mapping.
      * @param loadOnInit When `true` (default), rows are loaded from the database immediately
      *   during construction. When `false`, [load] must be called explicitly.
+     * @param onError Optional handler invoked after logging when an async flush failure escapes
+     *   the scheduled coroutine. When `null`, behavior is log-only.
      */
-    constructor(dataSource: DataSource, tableDef: SqlTableDef<R>, loadOnInit: Boolean = true):
-        this(dataSource, tableDef, false, loadOnInit)
+    @JvmOverloads
+    constructor(
+        dataSource: DataSource,
+        tableDef: SqlTableDef<R>,
+        loadOnInit: Boolean = true,
+        onError: LirpErrorHandler? = null
+    ):
+        this(dataSource, tableDef, false, loadOnInit, onError)
 
     /**
      * Creates a [SqlRepository] with a HikariCP connection pool configured from the given JDBC URL.
@@ -127,6 +146,8 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      * @param schema Optional database schema name to use for the connection.
      * @param loadOnInit When `true` (default), rows are loaded from the database immediately
      *   during construction. When `false`, [load] must be called explicitly.
+     * @param onError Optional handler invoked after logging when an async flush failure escapes
+     *   the scheduled coroutine. When `null`, behavior is log-only.
      */
     @JvmOverloads
     constructor(
@@ -134,8 +155,9 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         tableDef: SqlTableDef<R>,
         poolSize: Int = 10,
         schema: String? = null,
-        loadOnInit: Boolean = true
-    ) : this(buildDataSource(jdbcUrl, poolSize, schema), tableDef, true, loadOnInit)
+        loadOnInit: Boolean = true,
+        onError: LirpErrorHandler? = null
+    ) : this(buildDataSource(jdbcUrl, poolSize, schema), tableDef, true, loadOnInit, onError)
 
     private val interpreter = ExposedTableInterpreter()
     private val exposedTable: ExposedTable = interpreter.interpret(tableDef)
@@ -358,6 +380,9 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         // A successful retry observes the freshest canonical state; a permanently-failing entry
         // escalates to RecoveryFailed and is removed.
         recovery?.drainStaleIds()
+        log.debug {
+            "writePending: ${inserts.size} insert(s), ${updates.size} update(s), ${deletes.size} delete(s), hadClear=$hadClear"
+        }
         val conflicts = mutableListOf<PendingConflict<K>>()
         transaction(db = db) {
             // #202: junction rows must be wiped before the parent table when FKs may not yet be

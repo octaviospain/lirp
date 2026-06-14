@@ -65,6 +65,7 @@ internal class ViaJoinExecutor<T : IdentifiableEntity<*>> {
         }
 
         val strategy = chooseStrategy(viaArm, parentRegistry)
+        log.trace { "Via executor: dispatching strategy=$strategy for ${viaArm::class.simpleName}" }
         val viaResults =
             when (strategy) {
                 ViaStrategy.PER_PARENT_LOOP -> perParentLoop(viaArm, parentRegistry)
