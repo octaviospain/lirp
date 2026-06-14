@@ -93,7 +93,7 @@ internal class ReflectionFreeVerificationTest : FunSpec({
         val playlist = playlistRepo.create(id = 200, audioItemId = 2)
 
         var received = false
-        playlist.subscribe { received = true }
+        playlist.subscribeAsync { received = true }
         audioItem.title = "Track B Updated"
 
         received shouldBe true
@@ -119,7 +119,7 @@ internal class ReflectionFreeVerificationTest : FunSpec({
         val playlist = mutableRefRepo.create(id = 400, audioItemId = 4)
 
         var receivedAfterClose = false
-        playlist.subscribe { receivedAfterClose = true }
+        playlist.subscribeAsync { receivedAfterClose = true }
 
         // close() uses loadRefAccessor + cancelAllBubbleUp — not the old declaredFields scan
         playlist.close()

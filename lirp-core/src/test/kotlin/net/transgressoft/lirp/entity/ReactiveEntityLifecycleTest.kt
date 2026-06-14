@@ -18,7 +18,8 @@
 package net.transgressoft.lirp.entity
 
 import net.transgressoft.lirp.event.MutationEvent
-import net.transgressoft.lirp.event.MutationEvent.Type.MUTATE
+import net.transgressoft.lirp.event.MutationEvent.Type.BATCH_CHANGED
+import net.transgressoft.lirp.event.MutationEvent.Type.PROPERTY_CHANGED
 import net.transgressoft.lirp.event.PropertyChanged
 import net.transgressoft.lirp.event.ReactiveMutationEvent
 import net.transgressoft.lirp.persistence.AudioItem
@@ -64,12 +65,12 @@ class ReactiveEntityLifecycleTest : StringSpec({
     "ReactiveEntity close() closes its publisher when publisher is initialized" {
         val entity = LazyTestEntity("lifecycle-4")
 
-        val subscription = entity.subscribe { }
+        val subscription = entity.subscribeAsync { }
         entity.close()
 
         entity.isClosed shouldBe true
         shouldThrow<IllegalStateException> {
-            entity.subscribe { }
+            entity.subscribeAsync { }
         }
 
         subscription.cancel()
@@ -92,7 +93,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
 
         val exception =
             shouldThrow<IllegalStateException> {
-                entity.subscribe { }
+                entity.subscribeAsync { }
             }
         exception.message shouldContain "LazyTestEntity"
     }
@@ -119,7 +120,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
     "Closed ReactiveEntity throws IllegalStateException on emitAsync" {
         val entity = LazyTestEntity("lifecycle-8")
         // Subscribe first to initialize the publisher
-        val subscription = entity.subscribe { }
+        val subscription = entity.subscribeAsync { }
         entity.close()
 
         shouldThrow<IllegalStateException> {
@@ -134,14 +135,14 @@ class ReactiveEntityLifecycleTest : StringSpec({
         val entity = LazyTestEntity("lifecycle-9", creationCounter)
 
         // First subscription creates the publisher (counter = 1)
-        val subscription = entity.subscribe { }
+        val subscription = entity.subscribeAsync { }
         creationCounter.get() shouldBe 1
 
         subscription.cancel()
         reactive.advance()
 
         // Entity is dormant: next subscription must create a fresh publisher (counter = 2)
-        val subscription2 = entity.subscribe { }
+        val subscription2 = entity.subscribeAsync { }
         creationCounter.get() shouldBe 2
 
         subscription2.cancel()
@@ -151,14 +152,14 @@ class ReactiveEntityLifecycleTest : StringSpec({
         val creationCounter = AtomicInteger(0)
         val entity = LazyTestEntity("lifecycle-10", creationCounter)
 
-        val subscriptions = List(3) { entity.subscribe { } }
+        val subscriptions = List(3) { entity.subscribeAsync { } }
         creationCounter.get() shouldBe 1
 
         subscriptions.forEach { it.cancel() }
         reactive.advance()
 
         // Entity is dormant: next subscription recreates the publisher
-        val subscription = entity.subscribe { }
+        val subscription = entity.subscribeAsync { }
         creationCounter.get() shouldBe 2
 
         subscription.cancel()
@@ -169,13 +170,13 @@ class ReactiveEntityLifecycleTest : StringSpec({
         val entity = LazyTestEntity("lifecycle-11", creationCounter)
 
         // Go dormant
-        val sub1 = entity.subscribe { }
+        val sub1 = entity.subscribeAsync { }
         sub1.cancel()
         reactive.advance()
 
         // Reactivate: subscribe again — must not throw
         val receivedEvents = mutableListOf<MutationEvent<String, LazyTestEntity>>()
-        val sub2 = entity.subscribe { event -> receivedEvents.add(event) }
+        val sub2 = entity.subscribeAsync { event -> receivedEvents.add(event) }
 
         entity.value = "reactivated"
         reactive.advance()
@@ -191,20 +192,20 @@ class ReactiveEntityLifecycleTest : StringSpec({
         val entity = LazyTestEntity("lifecycle-12", creationCounter)
 
         // Cycle 1: subscribe -> cancel -> dormant
-        val sub1 = entity.subscribe { }
+        val sub1 = entity.subscribeAsync { }
         creationCounter.get() shouldBe 1
         sub1.cancel()
         reactive.advance()
 
         // Cycle 2: subscribe -> cancel -> dormant
-        val sub2 = entity.subscribe { }
+        val sub2 = entity.subscribeAsync { }
         creationCounter.get() shouldBe 2
         sub2.cancel()
         reactive.advance()
 
         // Cycle 3: subscribe (active), receive events
         val receivedEvents = mutableListOf<MutationEvent<String, LazyTestEntity>>()
-        val sub3 = entity.subscribe { event -> receivedEvents.add(event) }
+        val sub3 = entity.subscribeAsync { event -> receivedEvents.add(event) }
         creationCounter.get() shouldBe 3
 
         entity.value = "after-cycles"
@@ -224,7 +225,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
         creationCounter.get() shouldBe 0
 
         // Active: publisher created on first subscribe
-        val sub1 = entity.subscribe { }
+        val sub1 = entity.subscribeAsync { }
         creationCounter.get() shouldBe 1
 
         // Dormant: all subscribers cancelled
@@ -232,7 +233,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
         reactive.advance()
 
         // Active again: new subscription reactivates
-        val sub2 = entity.subscribe { }
+        val sub2 = entity.subscribeAsync { }
         creationCounter.get() shouldBe 2
 
         // Closed: permanent terminal state
@@ -241,13 +242,13 @@ class ReactiveEntityLifecycleTest : StringSpec({
         entity.isClosed shouldBe true
 
         shouldThrow<IllegalStateException> {
-            entity.subscribe { }
+            entity.subscribeAsync { }
         }
     }
 
     "ReactiveEntityBase emitAsync throws IllegalStateException when entity is closed" {
         val audioItem = MutableAudioItem(1, "Track Alpha")
-        val sub = audioItem.subscribe { }
+        val sub = audioItem.subscribeAsync { }
         audioItem.close()
 
         shouldThrow<IllegalStateException> {
@@ -257,21 +258,26 @@ class ReactiveEntityLifecycleTest : StringSpec({
         sub.cancel()
     }
 
-    "ReactiveEntityBase subscribe with vararg eventTypes throws IllegalArgumentException when MUTATE is absent" {
-        val audioItem = MutableAudioItem(1, "Track Alpha")
-
-        shouldThrow<IllegalArgumentException> {
-            audioItem.subscribe(*emptyArray<MutationEvent.Type>(), action = Consumer { _ -> })
-        }
-
-        audioItem.close()
-    }
-
-    "ReactiveEntityBase subscribe with MUTATE type succeeds and delivers events" {
+    "ReactiveEntityBase subscribeAsync with vararg eventTypes excludes non-matching event types" {
         val audioItem = MutableAudioItem(1, "Track Alpha")
         val received = mutableListOf<MutationEvent<Int, AudioItem>>()
 
-        val subscription = audioItem.subscribe(MUTATE) { event -> received.add(event) }
+        // A single-property assignment emits PROPERTY_CHANGED; a BATCH_CHANGED-only filter must exclude it.
+        val subscription = audioItem.subscribeAsync(BATCH_CHANGED, action = Consumer { event -> received.add(event) })
+        audioItem.title = "Track Beta"
+        reactive.advance()
+
+        received.size shouldBe 0
+        subscription.cancel()
+        audioItem.close()
+    }
+
+    "ReactiveEntityBase subscribeAsync with matching event type delivers events" {
+        val audioItem = MutableAudioItem(1, "Track Alpha")
+        val received = mutableListOf<MutationEvent<Int, AudioItem>>()
+
+        // A property assignment emits PROPERTY_CHANGED, so a PROPERTY_CHANGED filter receives it.
+        val subscription = audioItem.subscribeAsync(PROPERTY_CHANGED) { event -> received.add(event) }
 
         audioItem.title = "Track Beta"
         reactive.advance()
@@ -284,7 +290,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
     "disableEvents suppresses mutation events from reactiveProperty setters" {
         val audioItem = MutableAudioItem(1, "Track Alpha")
         val received = mutableListOf<MutationEvent<Int, AudioItem>>()
-        val subscription = audioItem.subscribe { event -> received.add(event) }
+        val subscription = audioItem.subscribeAsync { event -> received.add(event) }
 
         audioItem.suppressEvents()
         audioItem.title = "Track Beta"
@@ -307,7 +313,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
     "withEventsDisabled suppresses events and restores emission afterward" {
         val audioItem = MutableAudioItem(1, "Track Alpha")
         val received = mutableListOf<MutationEvent<Int, AudioItem>>()
-        val subscription = audioItem.subscribe { event -> received.add(event) }
+        val subscription = audioItem.subscribeAsync { event -> received.add(event) }
 
         audioItem.silently {
             audioItem.title = "Silent Track"
@@ -327,7 +333,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
     "withEventsDisabled restores state even if action throws" {
         val audioItem = MutableAudioItem(1, "Track Alpha")
         val received = mutableListOf<MutationEvent<Int, AudioItem>>()
-        val subscription = audioItem.subscribe { event -> received.add(event) }
+        val subscription = audioItem.subscribeAsync { event -> received.add(event) }
 
         shouldThrow<RuntimeException> {
             audioItem.silently {
@@ -347,7 +353,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
     "disableEvents suppresses mutateAndPublish block emission" {
         val audioItem = MutableAudioItem(1, "Track Alpha")
         val received = mutableListOf<MutationEvent<Int, AudioItem>>()
-        val subscription = audioItem.subscribe { event -> received.add(event) }
+        val subscription = audioItem.subscribeAsync { event -> received.add(event) }
 
         audioItem.suppressEvents()
         audioItem.bulkUpdate("Silent Track")

@@ -127,7 +127,7 @@ class MultiKeyRegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : 
                 if (!isSoftDeleted(entity)) addToBucket(entity)
             }
             subscription =
-                registry.subscribe(
+                registry.subscribeAsync(
                     CrudEvent.Type.CREATE,
                     CrudEvent.Type.UPDATE,
                     CrudEvent.Type.DELETE

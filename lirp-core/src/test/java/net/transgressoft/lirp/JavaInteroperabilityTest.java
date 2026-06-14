@@ -96,7 +96,7 @@ class JavaInteroperabilityTest {
                 String[] oldValueHolder = new String[1];
                 String[] newValueHolder = new String[1];
 
-                var subscription = appName.subscribe(event -> {
+                var subscription = appName.subscribeAsync(event -> {
                     var pc = (PropertyChanged<?, ?, ?>) event;
                     oldValueHolder[0] = (String) pc.getOldValue();
                     newValueHolder[0] = (String) pc.getNewValue();
@@ -167,7 +167,7 @@ class JavaInteroperabilityTest {
             var oldTitle = new String[1];
             var newTitle = new String[1];
 
-            var subscription = audioItem.subscribe(event -> {
+            var subscription = audioItem.subscribeAsync(event -> {
                 var pc = (PropertyChanged<?, ?, ?>) event;
                 oldTitle[0] = (String) pc.getOldValue();
                 newTitle[0] = (String) pc.getNewValue();
@@ -314,7 +314,7 @@ class JavaInteroperabilityTest {
             audioItem.close();
 
             assertTrue(audioItem.isClosed());
-            assertThrows(IllegalStateException.class, () -> audioItem.subscribe(event -> {}));
+            assertThrows(IllegalStateException.class, () -> audioItem.subscribeAsync(event -> {}));
         }
 
         @Test
@@ -324,7 +324,7 @@ class JavaInteroperabilityTest {
             repository.close();
 
             assertTrue(repository.isClosed());
-            assertThrows(IllegalStateException.class, () -> repository.subscribe(event -> {}));
+            assertThrows(IllegalStateException.class, () -> repository.subscribeAsync(event -> {}));
         }
     }
 
@@ -339,14 +339,14 @@ class JavaInteroperabilityTest {
 
             try (var audioItem = new MutableAudioItem(1, "Track Alpha")) {
                 audioItemRef[0] = audioItem;
-                var subscription = audioItem.subscribe(event -> {});
+                var subscription = audioItem.subscribeAsync(event -> {});
                 audioItem.setTitle("Track Beta");
                 scheduler.advanceUntilIdle();
                 subscription.cancel();
             }
 
             assertTrue(audioItemRef[0].isClosed());
-            assertThrows(IllegalStateException.class, () -> audioItemRef[0].subscribe(event -> {}));
+            assertThrows(IllegalStateException.class, () -> audioItemRef[0].subscribeAsync(event -> {}));
         }
 
         @Test
@@ -361,7 +361,7 @@ class JavaInteroperabilityTest {
             }
 
             assertTrue(repoRef[0].isClosed());
-            assertThrows(IllegalStateException.class, () -> repoRef[0].subscribe(event -> {}));
+            assertThrows(IllegalStateException.class, () -> repoRef[0].subscribeAsync(event -> {}));
         }
     }
 
@@ -467,10 +467,10 @@ class JavaInteroperabilityTest {
             var audioItem = new MutableAudioItem(1, "Track Alpha");
 
             // Throwing Consumer — unconditional exception on every event
-            audioItem.subscribe(event -> { throw new RuntimeException("intentional Java exception"); });
+            audioItem.subscribeAsync(event -> { throw new RuntimeException("intentional Java exception"); });
 
             var healthyCounter = new AtomicInteger(0);
-            audioItem.subscribe(event -> healthyCounter.incrementAndGet());
+            audioItem.subscribeAsync(event -> healthyCounter.incrementAndGet());
 
             audioItem.setTitle("Track Beta");
             audioItem.setTitle("Track Charlie");
@@ -541,7 +541,7 @@ class JavaInteroperabilityTest {
             var latch = new CountDownLatch(1);
             var receivedAggregateEvent = new AtomicReference<MutationEvent<?, ?>>(null);
 
-            bubbleUp.subscribe(event -> {
+            bubbleUp.subscribeAsync(event -> {
                 if (event instanceof AggregateMutationEvent) {
                     receivedAggregateEvent.set(event);
                     latch.countDown();
@@ -685,7 +685,7 @@ class JavaInteroperabilityTest {
             var repository = new AudioItemVolatileRepository();
             var eventEntities = new ArrayList<AudioItem>();
 
-            var subscription = repository.subscribe(
+            var subscription = repository.subscribeAsync(
                 event -> eventEntities.addAll(event.getEntities().values()));
 
             repository.create(1, "Track Alpha", "");
@@ -706,7 +706,7 @@ class JavaInteroperabilityTest {
             repository.create(1, "Track Alpha", "");
 
             List<CrudEvent<Integer, ? extends AudioItem>> receivedEvents = new ArrayList<>();
-            var subscription = repository.subscribe(event -> receivedEvents.add(event));
+            var subscription = repository.subscribeAsync(event -> receivedEvents.add(event));
 
             repository.remove(alpha);
             scheduler.advanceUntilIdle();
@@ -745,7 +745,7 @@ class JavaInteroperabilityTest {
             repository.create(3, "Track Charlie", "");
 
             List<CrudEvent<Integer, ? extends AudioItem>> receivedEvents = new ArrayList<>();
-            var subscription = repository.subscribe(event -> receivedEvents.add(event));
+            var subscription = repository.subscribeAsync(event -> receivedEvents.add(event));
 
             repository.clear();
             scheduler.advanceUntilIdle();

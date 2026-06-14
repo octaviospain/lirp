@@ -70,17 +70,17 @@ class ConcurrencyStressTest : DescribeSpec({
 
             // Subscribers registered before writers start
             val sub1 =
-                repository.subscribe { event ->
+                repository.subscribeAsync { event ->
                     queue1.add(event)
                     latch1.countDown()
                 }
             val sub2 =
-                repository.subscribe { event ->
+                repository.subscribeAsync { event ->
                     queue2.add(event)
                     latch2.countDown()
                 }
             val sub3 =
-                repository.subscribe { event ->
+                repository.subscribeAsync { event ->
                     queue3.add(event)
                     latch3.countDown()
                 }
@@ -140,17 +140,17 @@ class ConcurrencyStressTest : DescribeSpec({
 
             // Subscribers registered before writers start
             val sub1 =
-                publisher.subscribe { event ->
+                publisher.subscribeAsync { event ->
                     queue1.add(event)
                     latch1.countDown()
                 }
             val sub2 =
-                publisher.subscribe { event ->
+                publisher.subscribeAsync { event ->
                     queue2.add(event)
                     latch2.countDown()
                 }
             val sub3 =
-                publisher.subscribe { event ->
+                publisher.subscribeAsync { event ->
                     queue3.add(event)
                     latch3.countDown()
                 }
@@ -214,22 +214,22 @@ class ConcurrencyStressTest : DescribeSpec({
 
             // Subscribers registered before writers start
             val crudSub1 =
-                repository.subscribe { event ->
+                repository.subscribeAsync { event ->
                     crudQueue1.add(event)
                     crudLatch1.countDown()
                 }
             val crudSub2 =
-                repository.subscribe { event ->
+                repository.subscribeAsync { event ->
                     crudQueue2.add(event)
                     crudLatch2.countDown()
                 }
             val mutSub1 =
-                mutationPublisher.subscribe { event ->
+                mutationPublisher.subscribeAsync { event ->
                     mutQueue1.add(event)
                     mutLatch1.countDown()
                 }
             val mutSub2 =
-                mutationPublisher.subscribe { event ->
+                mutationPublisher.subscribeAsync { event ->
                     mutQueue2.add(event)
                     mutLatch2.countDown()
                 }

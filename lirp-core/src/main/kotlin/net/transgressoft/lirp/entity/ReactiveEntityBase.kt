@@ -433,9 +433,20 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
         publisher.emitAsync(event)
     }
 
-    override fun subscribe(action: suspend (MutationEvent<K, R>) -> Unit): LirpEventSubscription<in LirpEntity, MutationEvent.Type, MutationEvent<K, R>> {
+    override fun subscribe(callback: (MutationEvent<K, R>) -> Unit): LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>> {
         check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
-        return publisher.subscribe(action)
+        return publisher.subscribe(callback)
+    }
+
+    override fun subscribe(vararg eventTypes: MutationEvent.Type, callback: (MutationEvent<K, R>) -> Unit):
+        LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>> {
+        check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
+        return publisher.subscribe(*eventTypes, callback = callback)
+    }
+
+    override fun subscribeAsync(action: suspend (MutationEvent<K, R>) -> Unit): LirpEventSubscription<in LirpEntity, MutationEvent.Type, MutationEvent<K, R>> {
+        check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
+        return publisher.subscribeAsync(action)
     }
 
     override fun subscribe(subscriber: Flow.Subscriber<in MutationEvent<K, R>>?) {
@@ -443,13 +454,10 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
         publisher.subscribe(subscriber)
     }
 
-    override fun subscribe(vararg eventTypes: MutationEvent.Type, action: Consumer<in MutationEvent<K, R>>):
+    override fun subscribeAsync(vararg eventTypes: MutationEvent.Type, action: Consumer<in MutationEvent<K, R>>):
         LirpEventSubscription<in R, MutationEvent.Type, MutationEvent<K, R>> {
         check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
-        require(MUTATE in eventTypes) {
-            throw IllegalArgumentException("Only UPDATE event is supported for reactive entities")
-        }
-        return subscribe(action::accept)
+        return publisher.subscribeAsync(*eventTypes, action = action::accept)
     }
 
     /**

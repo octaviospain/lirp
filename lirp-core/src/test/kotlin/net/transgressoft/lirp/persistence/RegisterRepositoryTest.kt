@@ -210,7 +210,7 @@ internal class RegisterRepositoryTest : StringSpec({
         // Bubble-up must fire: a mutation on the audio item should reach the playlist's subscribers
         // as an AggregateMutationEvent.
         val bubbleUpReceived = AtomicBoolean(false)
-        loadedPlaylist.subscribe { event ->
+        loadedPlaylist.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) bubbleUpReceived.set(true)
         }
         audioItem.title = "Track Alpha Updated"

@@ -156,7 +156,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         val playlist = DefaultAudioPlaylist(1, "Test").also(playlistRepo::add)
         val events = Collections.synchronizedList(mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>())
 
-        playlist.subscribe { events.add(it) }
+        playlist.subscribeAsync { events.add(it) }
         val beforeModified = playlist.lastDateModified
 
         // Bounded spin-wait until system clock advances past the captured timestamp.
@@ -215,7 +215,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
             DefaultAudioPlaylist(1, "Test", listOf(1))
                 .also(playlistRepo::add)
         val events = Collections.synchronizedList(mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>())
-        playlist.subscribe { events.add(it) }
+        playlist.subscribeAsync { events.add(it) }
 
         playlist.audioItems[0] = t2
 
@@ -234,7 +234,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
             DefaultAudioPlaylist(1, "Test", listOf(1, 3))
                 .also(playlistRepo::add)
         val events = Collections.synchronizedList(mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>())
-        playlist.subscribe { events.add(it) }
+        playlist.subscribeAsync { events.add(it) }
 
         playlist.audioItems.add(1, t2)
 
@@ -252,7 +252,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
             DefaultAudioPlaylist(1, "Test", listOf(1, 2, 3))
                 .also(playlistRepo::add)
         val events = Collections.synchronizedList(mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>())
-        playlist.subscribe { events.add(it) }
+        playlist.subscribeAsync { events.add(it) }
 
         val removed = playlist.audioItems.removeAt(1)
 
@@ -272,7 +272,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
             DefaultAudioPlaylist(1, "Test", listOf(1, 2, 3))
                 .also(playlistRepo::add)
         val events = Collections.synchronizedList(mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>())
-        playlist.subscribe { events.add(it) }
+        playlist.subscribeAsync { events.add(it) }
 
         val sub = playlist.audioItems.subList(1, 3)
         sub.add(tNew)
@@ -291,7 +291,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
             DefaultAudioPlaylist(1, "Test", listOf(1, 2))
                 .also(playlistRepo::add)
         val events = Collections.synchronizedList(mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>())
-        playlist.subscribe { events.add(it) }
+        playlist.subscribeAsync { events.add(it) }
 
         val iter = playlist.audioItems.listIterator()
         iter.next()
@@ -310,7 +310,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
             DefaultAudioPlaylist(100, "Group", initialPlaylistIds = setOf(1, 2))
                 .also(playlistRepo::add)
         val events = Collections.synchronizedList(mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>())
-        group.subscribe { events.add(it) }
+        group.subscribeAsync { events.add(it) }
 
         val iter = group.playlists.iterator()
         iter.next()
@@ -379,7 +379,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
             DefaultAudioPlaylist(100, "Group", initialPlaylistIds = setOf(1, 2, 3))
                 .also(playlistRepo::add)
         val events = Collections.synchronizedList(mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>())
-        group.subscribe { events.add(it) }
+        group.subscribeAsync { events.add(it) }
 
         val result = group.playlists.removeAll(listOf(p1, p2))
         reactive.advance()
@@ -393,7 +393,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         val unrelated = DefaultAudioPlaylist(99, "Unrelated").also(playlistRepo::add)
         val group = DefaultAudioPlaylist(100, "Group", initialPlaylistIds = setOf(1)).also(playlistRepo::add)
         val events = Collections.synchronizedList(mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>())
-        group.subscribe { events.add(it) }
+        group.subscribeAsync { events.add(it) }
 
         val result = group.playlists.removeAll(listOf(unrelated))
         reactive.advance()
@@ -405,7 +405,7 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
     "addAll on mutable aggregate set returns false and emits no event when collection is empty" {
         val group = DefaultAudioPlaylist(100, "Group").also(playlistRepo::add)
         val events = Collections.synchronizedList(mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>())
-        group.subscribe { events.add(it) }
+        group.subscribeAsync { events.add(it) }
 
         val result = group.playlists.addAll(emptyList())
         reactive.advance()

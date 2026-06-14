@@ -104,7 +104,7 @@ internal class AggregateCascadeTest : FunSpec({
         val eventCountBefore = AtomicInteger(0)
         val beforeLatch = CountDownLatch(1)
         val subscription =
-            playlist.subscribe { event ->
+            playlist.subscribeAsync { event ->
                 if (event is AggregateMutationEvent<*, *>) {
                     eventCountBefore.incrementAndGet()
                     beforeLatch.countDown()
@@ -234,7 +234,7 @@ internal class AggregateCascadeTest : FunSpec({
 
         // After final cancel, no events should be forwarded
         val eventCount = AtomicInteger(0)
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 eventCount.incrementAndGet()
             }
@@ -255,7 +255,7 @@ internal class AggregateCascadeTest : FunSpec({
         val eventCount = AtomicInteger(0)
         val initialLatch = CountDownLatch(1)
 
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 eventCount.incrementAndGet()
                 initialLatch.countDown()
@@ -283,7 +283,7 @@ internal class AggregateCascadeTest : FunSpec({
         val playlist = mutableRefPlaylistRepo.create(id = 100, audioItemId = 1)
 
         val received = mutableListOf<MutationEvent<Int, MutableRefPlaylist>>()
-        playlist.subscribe { received.add(it) }
+        playlist.subscribeAsync { received.add(it) }
 
         audioItem.title = "Track B"
         reactive.advance()

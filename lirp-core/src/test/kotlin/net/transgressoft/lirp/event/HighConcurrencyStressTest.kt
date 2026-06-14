@@ -65,7 +65,7 @@ class HighConcurrencyStressTest : DescribeSpec({
             // Register all 250 subscribers before writers start
             val subscriptions =
                 subscribers.map { (queue, latch) ->
-                    repository.subscribe { event ->
+                    repository.subscribeAsync { event ->
                         queue.add(event)
                         latch.countDown()
                     }
@@ -116,7 +116,7 @@ class HighConcurrencyStressTest : DescribeSpec({
             // Register all 250 subscribers before writers start
             val subscriptions =
                 subscribers.map { (queue, latch) ->
-                    publisher.subscribe { event ->
+                    publisher.subscribeAsync { event ->
                         queue.add(event)
                         latch.countDown()
                     }

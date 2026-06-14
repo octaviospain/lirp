@@ -30,8 +30,16 @@ import kotlinx.coroutines.flow.SharedFlow
  * events to interested subscribers. It serves as a bridge between the standard
  * Java Flow API and lirp event system.
  *
+ * Subscription transports:
+ * - **Synchronous** (`subscribe`): the callback is invoked inline on the emitting thread, before
+ *   any async delivery. Zero coroutine overhead; ideal for fast in-process work (cache updates,
+ *   audit appends) that must be visible by the time the mutation returns.
+ * - **Asynchronous** (`subscribeAsync`): the action runs in a coroutine on a background dispatcher.
+ *   Suitable for slow, blocking, or fan-out work that must not block the emitting thread.
+ *
  * A publisher can be permanently closed via [close]. Once closed, it rejects new subscriptions
- * and event emissions. The [subscriberCount] property allows observing the number of active subscribers.
+ * and event emissions. The [subscriberCount] property allows observing the number of active subscribers,
+ * counting both sync and async registrations.
  *
  * @param ET The specific type of [EventType] associated with this publisher
  * @param E The specific type of [LirpEvent] published by this publisher
@@ -39,7 +47,9 @@ import kotlinx.coroutines.flow.SharedFlow
 interface LirpEventPublisher<ET : EventType, out E : LirpEvent<ET>> : Flow.Publisher<@UnsafeVariance E>, AutoCloseable {
 
     /**
-     * A flow of entity change events that collectors can observe.
+     * A flow of entity change events that collectors can observe asynchronously.
+     *
+     * Accessing this property arms the internal async bridge if it has not been armed yet.
      */
     val changes: SharedFlow<E>
 
@@ -51,7 +61,7 @@ interface LirpEventPublisher<ET : EventType, out E : LirpEvent<ET>> : Flow.Publi
     val isClosed: Boolean
 
     /**
-     * The current number of active subscribers.
+     * The current number of active subscribers, counting both synchronous and asynchronous registrations.
      */
     val subscriberCount: Int
 
@@ -61,27 +71,54 @@ interface LirpEventPublisher<ET : EventType, out E : LirpEvent<ET>> : Flow.Publi
     fun emitAsync(event: @UnsafeVariance E)
 
     /**
-     * Subscribes to all events emitted by this publisher.
+     * Subscribes synchronously to all events emitted by this publisher.
+     *
+     * The callback is invoked inline on the emitting thread before any async delivery.
+     *
+     * @param callback The function invoked for each emitted event on the emitting thread
+     * @return A subscription handle that can be cancelled to stop receiving events
+     */
+    fun subscribe(callback: (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, @UnsafeVariance E>
+
+    /**
+     * Subscribes synchronously to events of the specified types only.
+     *
+     * The callback is invoked inline on the emitting thread for matching events only.
+     *
+     * @param eventTypes The event types to filter on; events of other types are ignored
+     * @param callback The function invoked for each matching event on the emitting thread
+     * @return A subscription handle that can be cancelled to stop receiving events
+     */
+    fun subscribe(vararg eventTypes: ET, callback: (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, @UnsafeVariance E>
+
+    /**
+     * Subscribes asynchronously to all events emitted by this publisher.
+     *
+     * Events are delivered on a coroutine; the action does not run on the emitting thread.
      *
      * @param action The suspend function invoked for each emitted event
      * @return A subscription handle that can be cancelled to stop receiving events
      */
-    fun subscribe(action: suspend (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, @UnsafeVariance E>
+    fun subscribeAsync(action: suspend (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, @UnsafeVariance E>
 
     /**
-     * Legacy compatibility method for Java-style Consumer subscriptions.
-     * Consider migrating to the Kotlin Flow-based subscription method instead.
+     * Java-interop async subscription via [Consumer]; delegates to [subscribeAsync].
+     *
+     * @param action The consumer invoked for each emitted event in a coroutine
+     * @return A subscription handle that can be cancelled to stop receiving events
      */
-    fun subscribe(action: Consumer<in E>): LirpEventSubscription<in LirpEntity, ET, @UnsafeVariance E> = subscribe(action::accept)
+    fun subscribeAsync(action: Consumer<in E>): LirpEventSubscription<in LirpEntity, ET, @UnsafeVariance E> = subscribeAsync(action::accept)
 
     /**
-     * Subscribes to events of the specified types only.
+     * Subscribes asynchronously to events of the specified types only.
+     *
+     * Events are delivered on a coroutine; the action does not run on the emitting thread.
      *
      * @param eventTypes The event types to filter on; events of other types are ignored
      * @param action The suspend function invoked for each matching event
      * @return A subscription handle that can be cancelled to stop receiving events
      */
-    fun subscribe(vararg eventTypes: ET, action: suspend (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, @UnsafeVariance E>
+    fun subscribeAsync(vararg eventTypes: ET, action: suspend (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, @UnsafeVariance E>
 
     /**
      * Activates emission for the given event types. Events of non-activated types are silently dropped.
@@ -107,7 +144,7 @@ interface LirpEventPublisher<ET : EventType, out E : LirpEvent<ET>> : Flow.Publi
     /**
      * Permanently closes this publisher.
      *
-     * After closing, [emitAsync] and all [subscribe] overloads throw [IllegalStateException].
+     * After closing, [emitAsync] and all [subscribe]/[subscribeAsync] overloads throw [IllegalStateException].
      * Idempotent: subsequent calls are safe no-ops.
      */
     override fun close()

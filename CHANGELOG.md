@@ -84,6 +84,60 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
 
 ## Migration from 2.x to 3.0
 
+### `subscribe` is now synchronous by default
+
+The unqualified `subscribe` overload now delivers callbacks **synchronously on the emitting thread**.
+All former async `subscribe` call sites must be renamed to `subscribeAsync`:
+
+```kotlin
+// 2.x — subscribe was asynchronous (coroutine-based)
+entity.subscribe { event: MutationEvent<K, R> ->
+    searchService.reindex(event.entity)   // ran on a coroutine
+}
+
+// 3.0.0 — rename to subscribeAsync to keep coroutine delivery
+entity.subscribeAsync { event: MutationEvent<K, R> ->
+    searchService.reindex(event.entity)   // still runs on a coroutine
+}
+
+// 3.0.0 — use subscribe for fast in-process work that must be synchronous
+entity.subscribe { event: MutationEvent<K, R> ->
+    localCache.invalidate(event.entity.id)   // runs inline, no coroutine overhead
+}
+```
+
+**Migration steps:**
+1. Rename all former `subscribe { suspend lambda }` call sites to `subscribeAsync`.
+2. Leave any callback that is fast and must run synchronously (cache updates, index maintenance,
+   audit appends) as `subscribe`.
+3. Use `subscribeAsync` for slow, blocking, or remote work that must not delay the emitting thread.
+
+The `subscribeAsync(Consumer<E>)` Java overload replaces the former `subscribe(Consumer<E>)`.
+
+The filtered `subscribeAsync(vararg eventTypes, Consumer<E>)` overload on reactive entities now
+honors its event-type filter: a subscriber receives only the requested types. Previously the filter
+argument was ignored and every event type was delivered. Java callers relying on the old
+deliver-everything behavior must subscribe without a type filter to keep receiving all events.
+
+### `changes` access arms the replay buffer (lazy bridge init)
+
+In 2.x, the async bridge (Channel + SharedFlow) was created when the publisher was constructed.
+In 3.0.0, it is created lazily on the first call to `subscribeAsync`, `changes`, or
+`subscribe(Flow.Subscriber)`. Events emitted before the bridge is armed are **not** buffered.
+
+```kotlin
+// 2.x — replay worked without any boot step
+val publisher = FlowEventPublisher<...>("id", PublisherConfig.withReplay(5))
+publisher.emitAsync(event1)   // buffered automatically
+
+// 3.0.0 — arm the bridge before emitting to enable replay buffering
+val publisher = FlowEventPublisher<...>("id", PublisherConfig.withReplay(5))
+publisher.changes   // arms the bridge; subsequent emits are buffered
+publisher.emitAsync(event1)   // now buffered for replay
+```
+
+If replay buffering from startup is required, access `publisher.changes` once during initialization.
+
 ### Core projection imports
 
 | 2.x | 3.0.0 |

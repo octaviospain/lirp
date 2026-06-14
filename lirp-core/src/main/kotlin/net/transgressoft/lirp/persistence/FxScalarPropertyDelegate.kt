@@ -31,6 +31,7 @@ package net.transgressoft.lirp.persistence
  * The callback receives the old value captured by the FxScalar delegate before invoking
  * `super.set()`, the new value, and a mutation block wrapping the `super.set()` call.
  */
+@Suppress("kotlin:S6517") // Nominal capability marker, its single method is incidental
 interface FxScalarPropertyDelegate {
     /**
      * Binds a mutation callback injected by [RegistryBase] that emits a typed mutation event for

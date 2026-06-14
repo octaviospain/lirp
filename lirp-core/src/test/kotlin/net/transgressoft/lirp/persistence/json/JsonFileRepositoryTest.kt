@@ -266,7 +266,7 @@ class JsonFileRepositoryTest : DescribeSpec({
         it("publishes create events under concurrency").config(tags = setOf(Stress)) {
             val events = Collections.synchronizedList(mutableListOf<CrudEvent<Int, PolymorphicCustomer>>())
             val subscription: LirpEventSubscription<in PolymorphicCustomer, CrudEvent.Type, CrudEvent<Int, PolymorphicCustomer>> =
-                repository.subscribe(CREATE) { events.add(it) }
+                repository.subscribeAsync(CREATE) { events.add(it) }
             val testCustomers = (1..5_000).map { arbitraryStandardCustomer(it).next() }.distinct()
             testCustomers.chunked(500).map { chunk ->
                 reactive.scope.launch { chunk.forEach { c -> repository.create(c.id, c.name, c.email) } }
@@ -350,7 +350,7 @@ class JsonFileRepositoryTest : DescribeSpec({
         it("subscribers receive all create and delete events in order despite rapid changes") {
             val receivedEvents = mutableListOf<String>()
             val subscription =
-                repository.subscribe { event ->
+                repository.subscribeAsync { event ->
                     when {
                         event.isCreate() -> receivedEvents.add("CREATE-${event.entities.keys.first()}")
                         event.isUpdate() -> receivedEvents.add("UPDATE-${event.entities.keys.first()}")
@@ -793,7 +793,7 @@ class JsonFileRepositoryTest : DescribeSpec({
                 }
             val playlist = playlistRepo.create(1, "EventTest")
 
-            playlist.subscribe { received.set(true) }
+            playlist.subscribeAsync { received.set(true) }
 
             playlist.audioItems.add(t1)
 
@@ -903,7 +903,7 @@ class JsonFileRepositoryTest : DescribeSpec({
             val deferred = StandardCustomerJsonFileRepository(ctx, deferredFile, loadOnInit = false)
             try {
                 val receivedEvents = AtomicReference(mutableListOf<CrudEvent<Int, PolymorphicCustomer>>())
-                deferred.subscribe { event -> receivedEvents.get().add(event) }
+                deferred.subscribeAsync { event -> receivedEvents.get().add(event) }
                 deferred.load()
                 reactive.advance()
                 receivedEvents.get().filter { it.isCreate() || it.isUpdate() } shouldBe emptyList()

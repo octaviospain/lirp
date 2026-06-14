@@ -118,7 +118,7 @@ class AggregateJsonPersistenceTest : FunSpec({
         val bubbleUpReceived = AtomicBoolean(false)
 
         // Subscribe to the playlist to detect that a bubble-up event was emitted
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             if (event is AggregateMutationEvent) {
                 bubbleUpReceived.set(true)
                 persistenceLatch.countDown()
@@ -168,7 +168,7 @@ class AggregateJsonPersistenceTest : FunSpec({
         val reloadedPlaylist = playlistRepo2.findById(10).get()
         val bubbleUpLatch = CountDownLatch(1)
 
-        reloadedPlaylist.subscribe { event ->
+        reloadedPlaylist.subscribeAsync { event ->
             if (event is AggregateMutationEvent) bubbleUpLatch.countDown()
         }
 

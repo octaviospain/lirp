@@ -25,10 +25,6 @@ import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
-import io.kotest.matchers.shouldNotBe
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Integration tests verifying that [net.transgressoft.lirp.persistence.RegistryBase] correctly
@@ -63,20 +59,14 @@ class FxScalarRegistryIntegrationTest : StringSpec({
     "RegistryBase binds fx string property and emits ReactiveMutationEvent on set" {
         val entity = fxPlaylistRepo.create(1, "playlist", tag = "initial")
 
-        val receivedEvent = AtomicReference<MutationEvent<Int, FxAudioPlaylistEntity>>(null)
-        val latch = CountDownLatch(1)
+        val received = mutableListOf<MutationEvent<Int, FxAudioPlaylistEntity>>()
 
-        entity.subscribe { event ->
-            receivedEvent.set(event)
-            latch.countDown()
-        }
+        entity.subscribe { event -> received.add(event) }
 
         entity.tagProperty.set("updated")
 
-        latch.await(2, TimeUnit.SECONDS) shouldBe true
-        val event = receivedEvent.get()
-        event shouldNotBe null
-        val pc = event as PropertyChanged<Int, FxAudioPlaylistEntity, String>
+        received.size shouldBe 1
+        val pc = received[0] as PropertyChanged<Int, FxAudioPlaylistEntity, String>
         pc.oldValue shouldBe "initial"
         pc.newValue shouldBe "updated"
     }
@@ -100,20 +90,14 @@ class FxScalarRegistryIntegrationTest : StringSpec({
     "fx integer property emits ReactiveMutationEvent on set" {
         val entity = fxPlaylistRepo.create(2, "playlist", year = 0)
 
-        val receivedEvent = AtomicReference<MutationEvent<Int, FxAudioPlaylistEntity>>(null)
-        val latch = CountDownLatch(1)
+        val received = mutableListOf<MutationEvent<Int, FxAudioPlaylistEntity>>()
 
-        entity.subscribe { event ->
-            receivedEvent.set(event)
-            latch.countDown()
-        }
+        entity.subscribe { event -> received.add(event) }
 
         entity.yearProperty.set(2025)
 
-        latch.await(2, TimeUnit.SECONDS) shouldBe true
-        val event = receivedEvent.get()
-        event shouldNotBe null
-        val pc = event as PropertyChanged<Int, FxAudioPlaylistEntity, Int>
+        received.size shouldBe 1
+        val pc = received[0] as PropertyChanged<Int, FxAudioPlaylistEntity, Int>
         pc.oldValue shouldBe 0
         pc.newValue shouldBe 2025
     }
@@ -121,20 +105,14 @@ class FxScalarRegistryIntegrationTest : StringSpec({
     "fx boolean property emits ReactiveMutationEvent on set" {
         val entity = fxPlaylistRepo.create(3, "playlist", active = false)
 
-        val receivedEvent = AtomicReference<MutationEvent<Int, FxAudioPlaylistEntity>>(null)
-        val latch = CountDownLatch(1)
+        val received = mutableListOf<MutationEvent<Int, FxAudioPlaylistEntity>>()
 
-        entity.subscribe { event ->
-            receivedEvent.set(event)
-            latch.countDown()
-        }
+        entity.subscribe { event -> received.add(event) }
 
         entity.activeProperty.set(true)
 
-        latch.await(2, TimeUnit.SECONDS) shouldBe true
-        val event = receivedEvent.get()
-        event shouldNotBe null
-        val pc = event as PropertyChanged<Int, FxAudioPlaylistEntity, Boolean>
+        received.size shouldBe 1
+        val pc = received[0] as PropertyChanged<Int, FxAudioPlaylistEntity, Boolean>
         pc.oldValue shouldBe false
         pc.newValue shouldBe true
     }
@@ -142,20 +120,14 @@ class FxScalarRegistryIntegrationTest : StringSpec({
     "fx object property emits ReactiveMutationEvent on set" {
         val entity = fxPlaylistRepo.create(4, "playlist", description = null)
 
-        val receivedEvent = AtomicReference<MutationEvent<Int, FxAudioPlaylistEntity>>(null)
-        val latch = CountDownLatch(1)
+        val received = mutableListOf<MutationEvent<Int, FxAudioPlaylistEntity>>()
 
-        entity.subscribe { event ->
-            receivedEvent.set(event)
-            latch.countDown()
-        }
+        entity.subscribe { event -> received.add(event) }
 
         entity.descriptionProperty.set("vip")
 
-        latch.await(2, TimeUnit.SECONDS) shouldBe true
-        val event = receivedEvent.get()
-        event shouldNotBe null
-        val pc = event as PropertyChanged<Int, FxAudioPlaylistEntity, String>
+        received.size shouldBe 1
+        val pc = received[0] as PropertyChanged<Int, FxAudioPlaylistEntity, String>
         pc.oldValue shouldBe null
         pc.newValue shouldBe "vip"
     }
@@ -163,36 +135,27 @@ class FxScalarRegistryIntegrationTest : StringSpec({
     "withEventsDisabled suppresses MutationEvent for fx scalar property" {
         val entity = fxPlaylistRepo.create(5, "playlist", tag = "before")
 
-        val receivedEvent = AtomicReference<MutationEvent<Int, FxAudioPlaylistEntity>>(null)
-        val latch = CountDownLatch(1)
+        val received = mutableListOf<MutationEvent<Int, FxAudioPlaylistEntity>>()
 
-        entity.subscribe { event ->
-            receivedEvent.set(event)
-            latch.countDown()
-        }
+        entity.subscribe { event -> received.add(event) }
 
         entity.silently { entity.tagProperty.set("silent") }
 
-        latch.await(500, TimeUnit.MILLISECONDS) shouldBe false
-        receivedEvent.get() shouldBe null
+        received.size shouldBe 0
         entity.tagProperty.get() shouldBe "silent"
     }
 
     "fx scalar property set before repository add does not emit event" {
         val entity = FxAudioPlaylistEntity(6, "standalone")
 
-        val receivedEvent = AtomicReference<MutationEvent<Int, FxAudioPlaylistEntity>>(null)
+        val received = mutableListOf<MutationEvent<Int, FxAudioPlaylistEntity>>()
 
-        entity.subscribe { event ->
-            receivedEvent.set(event)
-        }
+        entity.subscribe { event -> received.add(event) }
 
         entity.tagProperty.set("changed")
 
-        // Drain pending coroutines — entity is standalone (not in a repository), so no publisher
-        // is active. advanceUntilIdle() confirms no event delivery is pending.
-        reactive.advance()
+        // Entity is standalone (not in a repository), so no publisher is active — no event emitted.
         entity.tagProperty.get() shouldBe "changed"
-        receivedEvent.get() shouldBe null
+        received.size shouldBe 0
     }
 })

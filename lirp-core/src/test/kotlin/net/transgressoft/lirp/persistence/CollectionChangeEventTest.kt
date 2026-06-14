@@ -62,7 +62,7 @@ internal class CollectionChangeEventTest : StringSpec({
         val receivedEvent = AtomicReference<AggregateMutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
 
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 receivedEvent.set(event)
                 latch.countDown()
@@ -89,7 +89,7 @@ internal class CollectionChangeEventTest : StringSpec({
         val receivedEvent = AtomicReference<AggregateMutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
 
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 receivedEvent.set(event)
                 latch.countDown()
@@ -117,7 +117,7 @@ internal class CollectionChangeEventTest : StringSpec({
         val receivedEvent = AtomicReference<AggregateMutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
 
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 receivedEvent.set(event)
                 latch.countDown()
@@ -145,7 +145,7 @@ internal class CollectionChangeEventTest : StringSpec({
         val receivedEvents = mutableListOf<AggregateMutationEvent<*, *>>()
         val latch = CountDownLatch(1)
 
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 receivedEvents.add(event)
                 latch.countDown()
@@ -173,7 +173,7 @@ internal class CollectionChangeEventTest : StringSpec({
         val receivedEvents = mutableListOf<AggregateMutationEvent<*, *>>()
         val latch = CountDownLatch(1)
 
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 receivedEvents.add(event)
                 latch.countDown()
@@ -201,7 +201,7 @@ internal class CollectionChangeEventTest : StringSpec({
         val receivedEvent = AtomicReference<AggregateMutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
 
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 receivedEvent.set(event)
                 latch.countDown()
@@ -225,7 +225,7 @@ internal class CollectionChangeEventTest : StringSpec({
         val playlist = DefaultAudioPlaylist(1, "Test").also(playlistRepo::add)
 
         var eventCount = 0
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 eventCount++
             }
@@ -243,7 +243,7 @@ internal class CollectionChangeEventTest : StringSpec({
         val playlist = DefaultAudioPlaylist(1, "Test").also(playlistRepo::add)
 
         var reactiveMutationCount = 0
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             if (event is ReactiveMutationEvent<*, *>) {
                 reactiveMutationCount++
             }
@@ -264,7 +264,7 @@ internal class CollectionChangeEventTest : StringSpec({
         val receivedEvent = AtomicReference<AggregateMutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
 
-        group.subscribe { event ->
+        group.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 receivedEvent.set(event)
                 latch.countDown()
@@ -291,7 +291,7 @@ internal class CollectionChangeEventTest : StringSpec({
         val receivedEvent = AtomicReference<AggregateMutationEvent<*, *>>(null)
         val latch = CountDownLatch(1)
 
-        playlist.subscribe { event ->
+        playlist.subscribeAsync { event ->
             if (event is AggregateMutationEvent<*, *>) {
                 receivedEvent.set(event)
                 latch.countDown()

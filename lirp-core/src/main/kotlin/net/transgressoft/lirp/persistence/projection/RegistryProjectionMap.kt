@@ -118,7 +118,7 @@ class RegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identifi
             // Subscribe after the seed is complete to avoid double-applying events that arrive
             // during iteration.
             subscription =
-                registry.subscribe(
+                registry.subscribeAsync(
                     CrudEvent.Type.CREATE,
                     CrudEvent.Type.UPDATE,
                     CrudEvent.Type.DELETE

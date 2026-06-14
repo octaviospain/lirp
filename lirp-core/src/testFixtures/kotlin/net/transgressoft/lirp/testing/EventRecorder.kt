@@ -77,8 +77,8 @@ fun <ET : EventType, E : LirpEvent<ET>> LirpEventPublisher<ET, E>.record(
 ): EventRecorder<E> {
     val recorder = EventRecorder<E>()
     val subscription: LirpEventSubscription<in LirpEntity, ET, E> =
-        if (types.isEmpty()) subscribe(action = recorder::record)
-        else subscribe(*types, action = recorder::record)
+        if (types.isEmpty()) subscribe(callback = recorder::record)
+        else subscribe(*types, callback = recorder::record)
 
     // Subscription is kept alive by the publisher's internal bookkeeping; the explicit type
     // annotation above silences a compiler inference warning on the vararg branch.

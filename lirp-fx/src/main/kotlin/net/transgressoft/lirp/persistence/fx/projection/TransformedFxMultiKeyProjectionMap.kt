@@ -189,7 +189,7 @@ class TransformedFxMultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>,
      */
     private fun subscribeEntity(entity: E) {
         val subscription =
-            entity.subscribe { event ->
+            entity.subscribeAsync { event ->
                 // Delegate re-bucketing to reconcile, which computes the key delta from its own
                 // reverse-index (the tracked pre-mutation membership) and the current entity state.
                 core.reconcile(event.entity)

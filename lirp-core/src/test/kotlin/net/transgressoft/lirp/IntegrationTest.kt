@@ -67,7 +67,7 @@ class IntegrationTest : DescribeSpec({
                     (1..subscriberCount).map {
                         reactive.scope.launch {
                             val events = Collections.synchronizedList(mutableListOf<CrudEvent<String, TestEntity>>())
-                            val subscription = publisher.subscribe { event -> events.add(event) }
+                            val subscription = publisher.subscribeAsync { event -> events.add(event) }
                             reactive.advance()
                             collectedCounts.add(events.size)
                             subscription.cancel()
@@ -191,7 +191,7 @@ class IntegrationTest : DescribeSpec({
             val subscriptions =
                 (1..subscriberCount).map {
                     val events = Collections.synchronizedList(mutableListOf<CrudEvent<String, TestEntity>>())
-                    val sub = publisher.subscribe { event -> events.add(event) }
+                    val sub = publisher.subscribeAsync { event -> events.add(event) }
                     sub to events
                 }
 
@@ -223,14 +223,14 @@ class IntegrationTest : DescribeSpec({
             val subscribersPerEntity = 3
 
             val repoEvents = Collections.synchronizedList(mutableListOf<CrudEvent<Int, PolymorphicCustomer>>())
-            val repoSubscription = repository.subscribe { repoEvents.add(it) }
+            val repoSubscription = repository.subscribeAsync { repoEvents.add(it) }
 
             val customers = (1..entityCount).map { id -> repository.create(id, "Customer-$id", null) }
 
             val entitySubscriptions =
                 customers.flatMap { customer ->
                     (1..subscribersPerEntity).map {
-                        customer.subscribe { }
+                        customer.subscribeAsync { }
                     }
                 }
             reactive.advance()
@@ -255,7 +255,7 @@ class IntegrationTest : DescribeSpec({
 
             val entity = LazyTestEntity("concurrent-test")
             val receivedEvents = Collections.synchronizedList(mutableListOf<MutationEvent<String, LazyTestEntity>>())
-            val subscription = entity.subscribe { event -> receivedEvents.add(event) }
+            val subscription = entity.subscribeAsync { event -> receivedEvents.add(event) }
 
             val jobs =
                 (1..mutationCount).map { coroutineId ->
@@ -298,7 +298,7 @@ class IntegrationTest : DescribeSpec({
 
                 val subscriptions =
                     (1..3).map {
-                        entity.subscribe { event -> cycleEvents.add(event) }
+                        entity.subscribeAsync { event -> cycleEvents.add(event) }
                     }
 
                 repeat(mutationsPerCycle) { i ->
@@ -316,7 +316,7 @@ class IntegrationTest : DescribeSpec({
             creationCounter.get() shouldBeGreaterThanOrEqual cycleCount
 
             val finalEvents = Collections.synchronizedList(mutableListOf<MutationEvent<String, LazyTestEntity>>())
-            val finalSubscription = entity.subscribe { event -> finalEvents.add(event) }
+            val finalSubscription = entity.subscribeAsync { event -> finalEvents.add(event) }
             entity.value = "final-check"
             reactive.advance()
 

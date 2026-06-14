@@ -45,7 +45,7 @@ class PublisherResilienceTest : DescribeSpec({
             publisher.activateEvents(CREATE)
 
             // Throwing subscriber — its coroutine will crash on every received event
-            publisher.subscribe { throw RuntimeException("intentional exception") }
+            publisher.subscribeAsync { throw RuntimeException("intentional exception") }
 
             // First emission phase: throwing subscriber crashes
             repeat(5) { i ->
@@ -71,7 +71,7 @@ class PublisherResilienceTest : DescribeSpec({
             publisher.activateEvents(CREATE)
 
             // Register both a throwing subscriber and a healthy one simultaneously
-            publisher.subscribe { throw RuntimeException("intentional exception") }
+            publisher.subscribeAsync { throw RuntimeException("intentional exception") }
             val healthy = publisher.record()
 
             // First emission phase: both subscribers active, throwing one crashes
@@ -97,9 +97,9 @@ class PublisherResilienceTest : DescribeSpec({
             publisher.activateEvents(CREATE)
 
             // Register one throwing and two healthy subscribers
-            publisher.subscribe { throw RuntimeException("intentional exception") }
-            publisher.subscribe { /* healthy subscriber 1 */ }
-            publisher.subscribe { /* healthy subscriber 2 */ }
+            publisher.subscribeAsync { throw RuntimeException("intentional exception") }
+            publisher.subscribeAsync { /* healthy subscriber 1 */ }
+            publisher.subscribeAsync { /* healthy subscriber 2 */ }
 
             // Emit events to trigger the throwing subscriber's crash and let its coroutine terminate
             repeat(5) { i ->

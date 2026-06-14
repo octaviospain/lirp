@@ -375,7 +375,7 @@ class AggregateRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
         // the cast is safe because subscribe() only reads from the entity's publisher,
         // which is internally consistent regardless of the type parameter.
         val rawChild = referencedEntity as ReactiveEntity<Comparable<Any>, *>
-        return rawChild.subscribe { childEvent ->
+        return rawChild.subscribeAsync { childEvent ->
             // Type parameters are erased at runtime; the self-referential bound R : ReactiveEntity<K, R>
             // cannot be verified at the wildcard call site. ReactiveEntityBase.emitBubbleUpEvent() is used
             // here because it is defined on the entity class itself (which has the correctly-typed R),
