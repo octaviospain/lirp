@@ -39,6 +39,18 @@ jmh {
     if (project.hasProperty('jmh.includes')) {
         includes = [project.property('jmh.includes')]
     }
+    // GC profiler (gc.alloc.rate.norm): gradle :lirp-benchmark:jmh -Pjmh.profilers=gc
+    if (project.hasProperty('jmh.profilers')) {
+        profilers = project.property('jmh.profilers').split(',').toList()
+    }
+    // Async-profiler flame graphs (local only): gradle :lirp-benchmark:jmh -Pjmh.asyncProfiler
+    if (project.hasProperty('jmh.asyncProfiler')) {
+        def asyncProfilerPath = project.findProperty('asyncProfilerPath') ?:
+            "${System.getProperty('user.home')}/.local/share/JetBrains/Toolbox/apps/intellij-idea-ultimate/lib/async-profiler/amd64/libasyncProfiler.so"
+        if (!profilers) profilers = []
+        profilers += 'async'
+        jvmArgsAppend = ["-agentpath:${asyncProfilerPath}=start,event=cpu,file=/tmp/lirp-profile.svg,flamegraph"]
+    }
     resultFormat = 'JSON'
     resultsFile = project.file('build/reports/jmh/results.json')
     jvmArgs = [

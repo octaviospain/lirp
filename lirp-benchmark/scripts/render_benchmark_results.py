@@ -32,7 +32,7 @@ Environment placeholders (substituted before benchmark tokens):
 Examples:
     {{ score | VolatileRepoBenchmark | addEntity | 100 }}
     {{ p50 | MemoryProfilingBenchmark | peakMemoryDuringInit | entityCount=10000,subscriberCount=5 }}
-    {{ score | CollapseBenchmark | collapseOps | opCount=10000 }}
+    {{ p50 | MutationLatencyBenchmark | mutateProperty | subscriberCount=1,transport=sync | bare }}
 """
 
 from __future__ import annotations
