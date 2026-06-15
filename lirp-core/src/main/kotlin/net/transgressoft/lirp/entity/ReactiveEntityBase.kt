@@ -37,10 +37,12 @@ import net.transgressoft.lirp.persistence.KspAccessorLoader
 import net.transgressoft.lirp.persistence.LirpDelegate
 import net.transgressoft.lirp.persistence.LirpIndexAccessor
 import net.transgressoft.lirp.persistence.LirpRefAccessor
+import net.transgressoft.lirp.persistence.PolymorphicAggregateDelegate
 import net.transgressoft.lirp.persistence.ReactivePropertyDelegate
 import net.transgressoft.lirp.persistence.ReactivePropertyDelegateWithAccessors
 import io.github.oshai.kotlinlogging.KotlinLogging
 import java.time.LocalDateTime
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Flow
 import java.util.concurrent.atomic.AtomicReference
 import java.util.function.Consumer
@@ -293,6 +295,47 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
                 childEvent = childEvent
             )
         publisher.emitAsync(aggregateEvent)
+    }
+
+    private val _polymorphicDelegates: CopyOnWriteArrayList<PolymorphicAggregateDelegate> = CopyOnWriteArrayList()
+
+    /**
+     * Registers a [PolymorphicAggregateDelegate] with this entity so that pre-persist validation
+     * can iterate over all polymorphic references before an insert is enqueued.
+     *
+     * Called automatically by [PolymorphicAggregateDelegate.provideDelegate] when the delegated
+     * property is initialized at entity construction. The backing list is a [CopyOnWriteArrayList]
+     * so the flush/add threads observe a safely-published, immutable snapshot; a duplicate guard
+     * keeps a re-run of delegate initialization from binding the same arms (and re-running their
+     * unchecked casts) twice.
+     */
+    internal fun registerPolymorphicDelegate(d: PolymorphicAggregateDelegate) {
+        if (d !in _polymorphicDelegates) _polymorphicDelegates.add(d)
+    }
+
+    /**
+     * Iterates over all registered [PolymorphicAggregateDelegate] instances and invokes their
+     * pre-persist validation. Called by the persistence layer before enqueueing an insert so that
+     * entities with invalid polymorphic state (both-set or none-set) are rejected before writing.
+     *
+     * @throws IllegalStateException when any delegate violates the exactly-one-non-null rule
+     */
+    internal fun validatePolymorphicDelegates() {
+        _polymorphicDelegates.forEach { it.validateBeforePersist() }
+    }
+
+    /**
+     * Binds the inner [net.transgressoft.lirp.persistence.AggregateRefDelegate] of each arm in
+     * every registered [PolymorphicAggregateDelegate] to the appropriate [net.transgressoft.lirp.persistence.Registry].
+     *
+     * Called by [net.transgressoft.lirp.persistence.RegistryBase] during entity add, after the
+     * KSP-generated ref-binding pass. This allows polymorphic arms to resolve entities from their
+     * target registries without requiring a generated [net.transgressoft.lirp.persistence.LirpRefAccessor].
+     *
+     * @param context the [net.transgressoft.lirp.persistence.LirpContext] providing registry lookups
+     */
+    internal fun bindPolymorphicArms(context: net.transgressoft.lirp.persistence.LirpContext) {
+        _polymorphicDelegates.forEach { it.bindArms(context) }
     }
 
     /**

@@ -480,6 +480,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
         }
         bindCollectionRefs(entity)
         bindFxScalarDelegates(entity)
+        (entity as? net.transgressoft.lirp.entity.ReactiveEntityBase<*, *>)?.bindPolymorphicArms(context)
     }
 
     @Suppress("UNCHECKED_CAST")

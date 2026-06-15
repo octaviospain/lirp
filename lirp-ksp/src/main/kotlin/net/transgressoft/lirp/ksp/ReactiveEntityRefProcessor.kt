@@ -32,6 +32,7 @@ import com.google.devtools.ksp.validate
 import java.io.File
 
 private const val REACTIVE_ENTITY_REF_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.Aggregate"
+private const val PERSISTENCE_MAPPING_FQN_REF = "net.transgressoft.lirp.persistence.PersistenceMapping"
 private const val REACTIVE_ENTITY_REFERENCE_FQN = "net.transgressoft.lirp.persistence.ReactiveEntityReference"
 private const val AGGREGATE_COLLECTION_REF_FQN = "net.transgressoft.lirp.persistence.AggregateCollectionRef"
 private const val AGGREGATE_LIST_REF_DELEGATE_FQN = "net.transgressoft.lirp.persistence.AggregateListRefDelegate"
@@ -43,6 +44,14 @@ private val STDLIB_COLLECTION_FQNS =
         "kotlin.collections.List",
         "kotlin.collections.Set"
     )
+
+/**
+ * Matches one `arm<K, E>("label") { scalar }` call in source text. Shares the canonical arm grammar
+ * with [TableDefProcessor.ARM_REGEX] (positional or named cascade, `this.`-qualified scalar paths).
+ * Capture groups: 1 = K type name, 2 = E type name, 3 = label, 4 = onDelete value (empty → DETACH),
+ * 5 = scalar reference path.
+ */
+private val POLYMORPHIC_ARM_REGEX = buildArmRegex()
 
 /**
  * KSP processor that generates [LirpRefAccessor][net.transgressoft.lirp.persistence.LirpRefAccessor]
@@ -98,11 +107,48 @@ class ReactiveEntityRefProcessor(
             classToProperties.getOrPut(parent) { mutableListOf() }.add(symbol)
         }
 
-        for ((classDecl, properties) in classToProperties) {
-            generateAccessor(classDecl, properties)
+        // Collect classes that have polymorphicAggregate() properties but no @Aggregate annotations.
+        // These classes need a _LirpRefAccessor generated even though they have no annotated properties.
+        for (classDecl in classToProperties.keys.toSet() +
+            collectPolymorphicAggregateClasses(resolver, classToProperties.keys, unableToProcess)) {
+            val properties = classToProperties.getOrDefault(classDecl, mutableListOf())
+            generateAccessor(classDecl, properties, resolver, unableToProcess)
         }
 
         return unableToProcess
+    }
+
+    /**
+     * Scans all classes reachable from the current resolver's perspective for `polymorphicAggregate(`
+     * declarations, returning the subset that have such properties but are not already in [knownClasses].
+     * Only classes that are [KSAnnotated.validate]able are returned.
+     */
+    private fun collectPolymorphicAggregateClasses(
+        resolver: Resolver,
+        knownClasses: Set<KSClassDeclaration>,
+        unableToProcess: MutableList<KSAnnotated>
+    ): Set<KSClassDeclaration> {
+        val result = mutableSetOf<KSClassDeclaration>()
+        // Use the @PersistenceMapping-annotated classes as the universe to scan, since only mapped
+        // entities need a _LirpRefAccessor. We enumerate them via the same FQN the TableDefProcessor uses.
+        for (symbol in resolver.getSymbolsWithAnnotation(PERSISTENCE_MAPPING_FQN_REF)) {
+            val classDecl = symbol as? KSClassDeclaration ?: continue
+            if (classDecl in knownClasses) continue
+            // Defer (do not silently skip) classes not yet resolvable so KSP runs another round once
+            // their symbols are available, mirroring the @ReactiveEntityRef deferral path in process().
+            if (!classDecl.validate()) {
+                unableToProcess.add(classDecl)
+                continue
+            }
+            // Quick check: does any property in this class contain polymorphicAggregate(?
+            val hasPolymorphic =
+                classDecl.getAllProperties().any { prop ->
+                    val text = readSourceLines(prop, linesAfter = 1) ?: return@any false
+                    text.contains("polymorphicAggregate(")
+                }
+            if (hasPolymorphic) result.add(classDecl)
+        }
+        return result
     }
 
     /**
@@ -203,7 +249,138 @@ class ReactiveEntityRefProcessor(
         )
     }
 
-    private fun generateAccessor(classDecl: KSClassDeclaration, properties: List<KSPropertyDeclaration>) {
+    /**
+     * Scans all properties on [classDecl] for `polymorphicAggregate(` declarations and adds one
+     * [PolymorphicArmRefMeta] per arm to [result]. Arm target types are resolved from the file's
+     * import list.
+     *
+     * When a property has an arm whose target type is not yet resolvable, that property is deferred:
+     * its partial arms are dropped from [result] and the property is added to [unableToProcess] so KSP
+     * runs another round. Returns `true` if any property on the class was deferred, so the caller can
+     * skip emitting an incomplete accessor — mirroring the all-or-defer behaviour of `TableDefProcessor`
+     * and preventing the generated RefEntry list from drifting from the table definition's foreign keys.
+     */
+    private fun collectPolymorphicArmMetas(
+        classDecl: KSClassDeclaration,
+        resolver: Resolver,
+        result: MutableList<PolymorphicArmRefMeta>,
+        unableToProcess: MutableList<KSAnnotated>
+    ): Boolean {
+        var deferred = false
+        for (prop in classDecl.getAllProperties()) {
+            val quickText = readSourceLines(prop, linesAfter = 1) ?: continue
+            if (!quickText.contains("polymorphicAggregate(")) continue
+            // Read to end of file so the balanced-paren walk always reaches the closing ')',
+            // regardless of arm count or formatting.
+            val fullText = readSourceFromProperty(prop) ?: continue
+            val boundedText = extractPolymorphicAggregateSpan(fullText)
+            val propName = prop.simpleName.asString()
+            val className = classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString()
+            // Fail loud on arm declarations the regex cannot parse so they are not silently dropped
+            // from cascade-wiring metadata while the runtime delegate keeps them.
+            val unparseable = unparseableArmCalls(boundedText, POLYMORPHIC_ARM_REGEX)
+            if (unparseable.isNotEmpty()) {
+                logger.error(
+                    "Property '$className.$propName' has polymorphic arm declaration(s) the processor cannot parse: " +
+                        unparseable.joinToString("; ") + ". Use arm<K, E>(\"label\"[, CascadeAction.X]) { scalar }.",
+                    prop
+                )
+                continue
+            }
+            val armMatches = POLYMORPHIC_ARM_REGEX.findAll(boundedText).toList()
+            val labels = armMatches.map { it.groupValues[3] }
+            val duplicates = labels.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+            if (duplicates.isNotEmpty()) {
+                logger.error("Property '$className.$propName' has duplicate polymorphic arm label(s): $duplicates.", prop)
+                continue
+            }
+            val invalid = labels.filterNot { isValidArmLabel(it) }
+            if (invalid.isNotEmpty()) {
+                logger.error(
+                    "Property '$className.$propName' has polymorphic arm label(s) that are not valid Kotlin identifiers: " +
+                        "$invalid. Labels become generated data class names and must match [A-Za-z_][A-Za-z_0-9]*.",
+                    prop
+                )
+                continue
+            }
+            val armsForProperty = mutableListOf<PolymorphicArmRefMeta>()
+            var propertyDeferred = false
+            for (m in armMatches) {
+                val eTypeName = m.groupValues[2].trim()
+                val label = m.groupValues[3]
+                val onDelete = m.groupValues[4].takeIf { it.isNotEmpty() } ?: "DETACH"
+                val scalarName = armScalarFromPath(m.groupValues[5])
+                val referencedFqn = resolveArmTargetFqn(eTypeName, prop, resolver)
+                if (referencedFqn == null) {
+                    // Defer the whole property rather than emitting a partial arm set: a missing arm here
+                    // would leave the _LirpRefAccessor out of sync with the table definition's per-arm
+                    // foreign keys after multi-round symbol resolution.
+                    unableToProcess.add(prop)
+                    propertyDeferred = true
+                    break
+                }
+                armsForProperty.add(
+                    PolymorphicArmRefMeta(
+                        refName = "$propName.$label",
+                        polymorphicPropName = propName,
+                        armLabel = label,
+                        armScalarName = scalarName,
+                        referencedClassFqn = referencedFqn,
+                        cascadeAction = onDelete
+                    )
+                )
+            }
+            if (propertyDeferred) {
+                deferred = true
+                continue
+            }
+            result.addAll(armsForProperty)
+        }
+        return deferred
+    }
+
+    /**
+     * Resolves the FQN of an arm's target entity type from the source-level simple name by
+     * parsing the containing file's import statements. Falls back to the entity's own package.
+     * Returns `null` when the class is not resolvable in this round.
+     */
+    private fun resolveArmTargetFqn(
+        eTypeName: String,
+        prop: KSPropertyDeclaration,
+        resolver: Resolver
+    ): String? {
+        val location = prop.location as? FileLocation ?: return null
+        val sourceFile = File(location.filePath)
+        if (sourceFile.exists()) {
+            val packageName = prop.packageName.asString()
+            val importFqn = resolveImportedFqn(sourceFile.readLines(), eTypeName, packageName)
+            if (importFqn != null) {
+                val decl = resolver.getClassDeclarationByName(resolver.getKSNameFromString(importFqn))
+                if (decl != null) return importFqn
+            }
+        }
+        val packageName = prop.packageName.asString()
+        if (packageName.isNotEmpty()) {
+            val fqn = "$packageName.$eTypeName"
+            val decl = resolver.getClassDeclarationByName(resolver.getKSNameFromString(fqn))
+            if (decl != null) return fqn
+        }
+        return null
+    }
+
+    /**
+     * Extracts the source span of a `polymorphicAggregate(…)` call from the scanned text by
+     * performing a balanced-parenthesis walk starting at the first `(` after `polymorphicAggregate`.
+     */
+    private fun extractPolymorphicAggregateSpan(text: String): String =
+        extractBalancedCallSpan(text, "polymorphicAggregate(")
+
+    private fun generateAccessor(
+        classDecl: KSClassDeclaration,
+        properties: List<KSPropertyDeclaration>,
+        resolver: Resolver? = null,
+        unableToProcess: MutableList<KSAnnotated> = mutableListOf()
+    ) {
         val visibility = effectiveVisibilityModifier(classDecl)
         if (visibility == null) {
             val fqn = classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString()
@@ -224,6 +401,20 @@ class ReactiveEntityRefProcessor(
         val collectionMetas = mutableListOf<CollectionRefPropertyMeta>()
         classifyProperties(properties, classDecl, singleEntries, collectionMetas)
 
+        // Synthesise per-arm RefEntry metadata for polymorphicAggregate() properties. These carry no
+        // @Aggregate annotation, so they are discovered via source-text scanning across all properties
+        // on the entity class.
+        val polymorphicArmEntries = mutableListOf<PolymorphicArmRefMeta>()
+        if (resolver != null) {
+            val deferred = collectPolymorphicArmMetas(classDecl, resolver, polymorphicArmEntries, unableToProcess)
+            // A polymorphic property with an unresolved arm target was deferred to a later round; skip
+            // emitting now so the accessor is regenerated once with its complete arm set.
+            if (deferred) return
+        }
+
+        // Skip generation when there are no entries at all — avoids an empty accessor file.
+        if (singleEntries.isEmpty() && collectionMetas.isEmpty() && polymorphicArmEntries.isEmpty()) return
+
         val file =
             codeGenerator.createNewFile(
                 dependencies = Dependencies(false, classDecl.containingFile!!),
@@ -231,9 +422,13 @@ class ReactiveEntityRefProcessor(
                 fileName = accessorName
             )
 
-        // Collect import statements for all referenced entity classes (single + collection)
+        // Collect import statements for all referenced entity classes (single + collection + arms)
         val allReferencedFqns =
-            (singleEntries.map { it.referencedClassFqn } + collectionMetas.map { it.referencedClassFqn })
+            (
+                singleEntries.map { it.referencedClassFqn } +
+                    collectionMetas.map { it.referencedClassFqn } +
+                    polymorphicArmEntries.map { it.referencedClassFqn }
+            )
                 .distinct()
                 .filter { it.contains('.') }
                 .sorted()
@@ -243,7 +438,7 @@ class ReactiveEntityRefProcessor(
         // returns the delegate itself typed as ReactiveEntityReference<K, E>. Casting to
         // AggregateRefDelegate<*, *> is safe — the only aggregate<K,E> implementation is
         // AggregateRefDelegate. The UNCHECKED_CAST suppression is placed on each RefEntry call.
-        val entriesCode =
+        val standardEntriesCode =
             singleEntries.joinToString(",\n        ") { meta ->
                 val referencedSimpleName = meta.referencedClassFqn.substringAfterLast('.')
                 """
@@ -258,6 +453,33 @@ class ReactiveEntityRefProcessor(
                 )
                 """.trimIndent()
             }
+
+        // Per-arm RefEntry — idGetter uses the arm delegate's referenceId (throws if null, matching
+        // the contract of non-optional aggregates). The arm delegate is reached via armDelegate(label)
+        // and cast to AggregateRefDelegate<*, *>. Both casts are suppressed because the arm delegate
+        // is always an AggregateRefDelegate and the K type is erased at this star-projection level.
+        val armEntriesCode =
+            polymorphicArmEntries.joinToString(",\n        ") { meta ->
+                val referencedSimpleName = meta.referencedClassFqn.substringAfterLast('.')
+                """
+                @Suppress("UNCHECKED_CAST")
+                RefEntry(
+                    refName = "${meta.refName}",
+                    idGetter = { it.${meta.polymorphicPropName}.armDelegate("${meta.armLabel}").referenceId as Comparable<Any> },
+                    delegateGetter = { it.${meta.polymorphicPropName}.armDelegate("${meta.armLabel}") as AggregateRefDelegate<*, *> },
+                    referencedClass = $referencedSimpleName::class.java,
+                    bubbleUp = false,
+                    cascadeAction = CascadeAction.${meta.cascadeAction}
+                )
+                """.trimIndent()
+            }
+
+        val allSingleEntryParts =
+            buildList {
+                if (standardEntriesCode.isNotBlank()) add(standardEntriesCode)
+                if (armEntriesCode.isNotBlank()) add(armEntriesCode)
+            }
+        val entriesCode = allSingleEntryParts.joinToString(",\n        ")
 
         val collectionEntriesCode =
             collectionMetas.joinToString(",\n        ") { meta ->
@@ -303,7 +525,7 @@ class ReactiveEntityRefProcessor(
                 appendLine(" * Provides direct ID getter and delegate getter lambdas — no runtime reflection.")
                 appendLine(" */")
                 appendLine("$visibility class `$accessorName` : LirpRefAccessor<$kotlinClassName> {")
-                if (singleEntries.isEmpty()) {
+                if (entriesCode.isBlank()) {
                     appendLine("    override val entries: List<RefEntry<*, $kotlinClassName>> = emptyList()")
                 } else {
                     appendLine("    override val entries: List<RefEntry<*, $kotlinClassName>> = listOf(")
@@ -425,6 +647,20 @@ class ReactiveEntityRefProcessor(
         val startLine = (propLine - linesBefore).coerceAtLeast(0)
         val endLine = (propLine + linesAfter + 1).coerceAtMost(lines.size)
         return lines.subList(startLine, endLine).joinToString("\n")
+    }
+
+    /**
+     * Reads source text from a property's declaration line to end of file, used for
+     * `polymorphicAggregate(...)` declarations whose arm count or formatting cannot be bounded by a
+     * fixed line window; the caller bounds the result with [extractPolymorphicAggregateSpan].
+     */
+    private fun readSourceFromProperty(prop: KSPropertyDeclaration): String? {
+        val location = prop.location as? FileLocation ?: return null
+        val file = File(location.filePath)
+        if (!file.exists()) return null
+        val lines = file.readLines()
+        val propLine = (location.lineNumber - 1).coerceAtLeast(0)
+        return lines.subList(propLine, lines.size).joinToString("\n")
     }
 
     /**
@@ -555,4 +791,20 @@ private data class CollectionRefPropertyMeta(
     val referencedClassFqn: String,
     val cascadeAction: String,
     val isOrdered: Boolean
+)
+
+/**
+ * Resolved metadata for one arm of a `polymorphicAggregate` property. The [refName] is
+ * dot-namespaced (`"${polymorphicPropName}.${armLabel}"`) so that cascade dispatch can address
+ * each arm individually. The [delegateGetter] in the generated code reaches the arm's inner
+ * [net.transgressoft.lirp.persistence.AggregateRefDelegate] via
+ * `entity.${polymorphicPropName}.armDelegate("${armLabel}")`.
+ */
+private data class PolymorphicArmRefMeta(
+    val refName: String,
+    val polymorphicPropName: String,
+    val armLabel: String,
+    val armScalarName: String,
+    val referencedClassFqn: String,
+    val cascadeAction: String
 )
