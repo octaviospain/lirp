@@ -138,3 +138,23 @@ internal data class ConverterInfo(
     val converterFqn: String,
     val sqlTypeFqn: String
 )
+
+/**
+ * Raw parsed metadata for one arm extracted from the source text of a `polymorphicAggregate(...)`
+ * property declaration. Carries the textual K and E type names, the arm label, the backing scalar
+ * identifier, and the cascade action name — all as strings at this stage; FQN resolution happens
+ * in [TableDefProcessor.collectAggregateProperties] after import-list lookup.
+ *
+ * After FQN resolution, [entityFqn] is set to the fully-qualified name of the arm's target entity
+ * class so the sealed-union emitter can generate exact-typed subtypes and import statements
+ * without re-querying the KSP model.
+ */
+internal data class ArmTextMeta(
+    val kTypeName: String,
+    val eTypeName: String,
+    val label: String,
+    val scalarName: String,
+    val onDeleteName: String = "DETACH",
+    /** Fully-qualified name of the arm's target entity class; populated after import-list resolution. */
+    val entityFqn: String = ""
+)

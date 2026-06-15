@@ -733,6 +733,37 @@ public abstract class net/transgressoft/lirp/persistence/PersistentRepositoryBas
 public final class net/transgressoft/lirp/persistence/PersistentRepositoryBase$Companion {
 }
 
+public final class net/transgressoft/lirp/persistence/PolymorphicAggregateDelegate : kotlin/properties/ReadOnlyProperty {
+	public fun <init> (Ljava/util/List;)V
+	public final fun armDelegate (Ljava/lang/String;)Lnet/transgressoft/lirp/persistence/AggregateRefDelegate;
+	public synthetic fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Ljava/lang/Object;
+	public fun getValue (Lnet/transgressoft/lirp/entity/ReactiveEntityBase;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/PolymorphicAggregateDelegate;
+	public final fun provideDelegate (Lnet/transgressoft/lirp/entity/ReactiveEntityBase;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/PolymorphicAggregateDelegate;
+	public final fun resolution ()Lnet/transgressoft/lirp/persistence/PolymorphicResolution;
+	public final fun resolve ()Lnet/transgressoft/lirp/entity/IdentifiableEntity;
+	public final fun validateBeforePersist ()V
+}
+
+public final class net/transgressoft/lirp/persistence/PolymorphicAggregateDelegateKt {
+	public static final fun polymorphicAggregate ([Lnet/transgressoft/lirp/persistence/PolymorphicArmDelegate;)Lnet/transgressoft/lirp/persistence/PolymorphicAggregateDelegate;
+}
+
+public final class net/transgressoft/lirp/persistence/PolymorphicArmDelegate {
+	public fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/entity/CascadeAction;Lnet/transgressoft/lirp/persistence/AggregateRefDelegate;Lkotlin/jvm/functions/Function0;Ljava/lang/Class;)V
+	public synthetic fun <init> (Ljava/lang/String;Lnet/transgressoft/lirp/entity/CascadeAction;Lnet/transgressoft/lirp/persistence/AggregateRefDelegate;Lkotlin/jvm/functions/Function0;Ljava/lang/Class;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getLabel ()Ljava/lang/String;
+	public final fun getOnDelete ()Lnet/transgressoft/lirp/entity/CascadeAction;
+	public final fun hasValue ()Z
+}
+
+public final class net/transgressoft/lirp/persistence/PolymorphicResolution {
+	public fun <init> (Ljava/util/List;)V
+	public final fun resolve ()Lnet/transgressoft/lirp/entity/IdentifiableEntity;
+	public final fun resolveActive ()Lkotlin/Pair;
+	public final fun resolveActiveLabel ()Ljava/lang/String;
+	public final fun resolveArm (Ljava/lang/String;)Lnet/transgressoft/lirp/entity/IdentifiableEntity;
+}
+
 public abstract class net/transgressoft/lirp/persistence/ReactivePrimitiveWrapper : net/transgressoft/lirp/entity/ReactiveEntityBase, net/transgressoft/lirp/persistence/ReactivePrimitive {
 	public fun <init> (Ljava/lang/String;Ljava/lang/Comparable;)V
 	public synthetic fun getId ()Ljava/lang/Comparable;

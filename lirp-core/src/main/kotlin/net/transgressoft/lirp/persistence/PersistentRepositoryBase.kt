@@ -18,6 +18,7 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.ReactiveEntity
+import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.event.BatchChanged
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.LirpErrorContext
@@ -753,6 +754,11 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
                 // claim and cancel the tentative subscription between subscribeEntity and
                 // super.add, leaving the entity visible with no live subscription.
                 withLifecycleLock(entity.id) {
+                    // Validate the exactly-one polymorphic invariant BEFORE mutating repository state.
+                    // Running it after subscribeEntity/super.add would leave a rejected entity registered
+                    // with a live subscription when validation throws — a partial mutation visible to the
+                    // caller despite add() failing.
+                    (entity as? ReactiveEntityBase<*, *>)?.validatePolymorphicDelegates()
                     subscribeEntity(entity)
                     val added = super.add(entity)
                     if (added) {
