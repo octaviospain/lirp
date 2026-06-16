@@ -94,7 +94,7 @@ internal class ViaJoinExecutor<T : IdentifiableEntity<*>> {
      *
      * **Live-read invariant is preserved.** Although the matching-children set is snapshotted
      * up-front (the strategy's defining property), each parent's `parentProp.get(p)` call
-     * runs at yield time. An `@Aggregate(onDelete = DETACH)` reconciliation that runs
+     * runs at yield time. A `@ToManyAggregates(onDelete = DETACH)` reconciliation that runs
      * mid-iteration is reflected on the very next parent yielded — the snapshot only fixes
      * which child ids are "interesting", never which parents reference them.
      *

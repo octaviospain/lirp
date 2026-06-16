@@ -96,7 +96,7 @@ internal class AggregateCascadeTest : FunSpec({
         val audioItemRepo = AudioItemVolatileRepository(ctx)
         val audioItem = audioItemRepo.create(id = 1, title = "Track A") as MutableAudioItem
 
-        // MutableRefPlaylist has @Aggregate(bubbleUp = true) — default onDelete is DETACH
+        // MutableRefPlaylist has @ToOneAggregate(bubbleUp = true) — default onDelete is DETACH
         val mutableRefPlaylistRepo = MutableRefPlaylistRepo(ctx)
         val playlist = mutableRefPlaylistRepo.create(id = 100, audioItemId = 1)
 
@@ -248,7 +248,7 @@ internal class AggregateCascadeTest : FunSpec({
         val audioItemRepo = AudioItemVolatileRepository(ctx)
         val audioItem = audioItemRepo.create(id = 1, title = "Track A") as MutableAudioItem
 
-        // MutableRefPlaylist has @Aggregate(bubbleUp = true) — default onDelete is DETACH
+        // MutableRefPlaylist has @ToOneAggregate(bubbleUp = true) — default onDelete is DETACH
         val mutableRefPlaylistRepo = MutableRefPlaylistRepo(ctx)
         val playlist = mutableRefPlaylistRepo.create(id = 100, audioItemId = 1)
 

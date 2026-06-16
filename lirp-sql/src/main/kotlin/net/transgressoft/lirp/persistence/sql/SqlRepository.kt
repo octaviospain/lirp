@@ -288,7 +288,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
 
     /**
      * Installs the single-entity foreign-key constraints declared on this entity's scalar
-     * `@Aggregate` references.
+     * `@ToOneAggregate` references.
      *
      * The entity table is created without these constraints during [init] for the same reason
      * junction tables are: the referenced target table may belong to a different [SqlRepository]

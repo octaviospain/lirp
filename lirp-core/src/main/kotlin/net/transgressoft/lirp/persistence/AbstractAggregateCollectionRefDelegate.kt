@@ -141,7 +141,7 @@ abstract class AbstractAggregateCollectionRefDelegate<K : Comparable<K>, E : Ide
     private fun checkSingleRefsNotReferencing(accessor: LirpRefAccessor<*>, entity: Any, targetClass: Class<*>, targetIds: Set<K>) {
         @Suppress("UNCHECKED_CAST")
         for (entry in (accessor as LirpRefAccessor<Any>).entries) {
-            val refId = entry.idGetter(entity)
+            val refId = entry.idGetter(entity) ?: continue
             check(!(entry.referencedClass == targetClass && refId in targetIds)) {
                 "Cannot cascade-delete ${targetClass.simpleName}(id=$refId): still referenced by other entities"
             }

@@ -23,7 +23,7 @@ package net.transgressoft.lirp.persistence.sql
  *
  * `SqlRepository` checks for this interface with an `as?` cast to determine whether junction
  * tables must be created, their FK constraints installed, and their rows synchronised on each
- * flush cycle. Entities without collection-typed `@Aggregate` references should not implement
+ * flush cycle. Entities without collection-typed `@ToManyAggregates` references should not implement
  * this interface.
  *
  * Implementing this interface implies co-presence of all three members: every descriptor in
@@ -33,7 +33,7 @@ package net.transgressoft.lirp.persistence.sql
  * previously needed when these members lived as defaulted no-ops on [SqlTableDef].
  *
  * KSP-generated `_LirpTableDef` classes implement this interface automatically when the entity
- * declares one or more collection-typed `@Aggregate` properties — codegen consumers are
+ * declares one or more collection-typed `@ToManyAggregates` properties — codegen consumers are
  * unaffected by the segregation. Only hand-written [SqlTableDef] implementers that use junction
  * tables must add this interface; the compiler guides them to implement all required members.
  *

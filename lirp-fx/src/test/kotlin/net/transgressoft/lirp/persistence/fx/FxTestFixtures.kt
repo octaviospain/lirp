@@ -20,9 +20,9 @@ package net.transgressoft.lirp.persistence.fx
 import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.entity.ReactiveEntityBase
-import net.transgressoft.lirp.persistence.Aggregate
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.LirpRepository
+import net.transgressoft.lirp.persistence.ToManyAggregates
 import net.transgressoft.lirp.persistence.VolatileRepository
 import javafx.beans.property.BooleanProperty
 import javafx.beans.property.DoubleProperty
@@ -56,10 +56,10 @@ class FxAudioPlaylistEntity(
     val ratingProperty: DoubleProperty by fxDouble(initialRating, dispatchToFxThread = false)
     val descriptionProperty: ObjectProperty<String?> by fxObject<String?>(initialDescription, dispatchToFxThread = false)
 
-    @Aggregate(onDelete = CascadeAction.DETACH)
+    @ToManyAggregates(onDelete = CascadeAction.DETACH)
     val audioItems by fxAggregateList<Int, AudioItem>(initialAudioItemIds, dispatchToFxThread = false)
 
-    @Aggregate(onDelete = CascadeAction.DETACH)
+    @ToManyAggregates(onDelete = CascadeAction.DETACH)
     val playlists by fxAggregateSet<Int, FxAudioPlaylistEntity>(initialPlaylistIds, dispatchToFxThread = false)
 
     override fun clone(): FxAudioPlaylistEntity =

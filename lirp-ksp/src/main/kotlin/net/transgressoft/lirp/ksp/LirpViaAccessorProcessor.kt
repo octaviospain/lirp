@@ -31,7 +31,8 @@ import com.google.devtools.ksp.symbol.KSTypeAlias
 import com.google.devtools.ksp.validate
 import java.io.File
 
-private const val AGGREGATE_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.Aggregate"
+private const val TO_MANY_AGGREGATES_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.ToManyAggregates"
+private const val TO_ONE_AGGREGATE_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.ToOneAggregate"
 private const val AGGREGATE_COLLECTION_REF_FQN = "net.transgressoft.lirp.persistence.AggregateCollectionRef"
 private const val AGGREGATE_LIST_REF_DELEGATE_FQN = "net.transgressoft.lirp.persistence.AggregateListRefDelegate"
 private const val AGGREGATE_SET_REF_DELEGATE_FQN = "net.transgressoft.lirp.persistence.AggregateSetRefDelegate"
@@ -46,7 +47,8 @@ private val STDLIB_COLLECTION_FQNS =
 /**
  * KSP processor that generates [LirpViaAccessor][net.transgressoft.lirp.persistence.LirpViaAccessor]
  * implementations for entity classes containing
- * [@Aggregate][net.transgressoft.lirp.persistence.Aggregate] properties.
+ * [@ToManyAggregates][net.transgressoft.lirp.persistence.ToManyAggregates] or
+ * [@ToOneAggregate][net.transgressoft.lirp.persistence.ToOneAggregate] properties.
  *
  * For each entity class, a `{ClassName}_LirpViaAccessor` file is emitted in the same package as the
  * entity, providing typed [kotlin.reflect.KProperty1] descriptors that the cross-aggregate Query DSL
@@ -69,12 +71,14 @@ class LirpViaAccessorProcessor(
 ) : SymbolProcessor {
 
     override fun process(resolver: Resolver): List<KSAnnotated> {
-        val symbols = resolver.getSymbolsWithAnnotation(AGGREGATE_ANNOTATION_FQN)
         val unableToProcess = mutableListOf<KSAnnotated>()
-
         val classToProperties = mutableMapOf<KSClassDeclaration, MutableList<KSPropertyDeclaration>>()
 
-        for (symbol in symbols) {
+        val allSymbols =
+            resolver.getSymbolsWithAnnotation(TO_MANY_AGGREGATES_ANNOTATION_FQN) +
+                resolver.getSymbolsWithAnnotation(TO_ONE_AGGREGATE_ANNOTATION_FQN)
+
+        for (symbol in allSymbols) {
             if (symbol !is KSPropertyDeclaration) continue
             val parent = symbol.parentDeclaration as? KSClassDeclaration ?: continue
             if (!parent.validate()) {
@@ -208,9 +212,16 @@ class LirpViaAccessorProcessor(
     }
 
     /**
-     * Resolves each `@Aggregate` reference property into a [ViaPropertyMeta], partitioned into
+     * Resolves each `@ToOneAggregate` / `@ToManyAggregates` reference property into a [ViaPropertyMeta], partitioned into
      * single-reference and collection-reference metas. Properties whose referenced class cannot be
      * determined are skipped with a warning rather than failing the build.
+     *
+     * For scalar `@ToOneAggregate` references (e.g. `var labelId: Int`), `prop.type` resolves to the
+     * FK key type (e.g. `Int`), not the referenced entity — so `findReferencedClassFqnFromType` always
+     * returns null for them. The fix is to read the referenced class from the annotation's `target`
+     * argument for any non-collection `@ToOneAggregate` property where type-based resolution fails.
+     * The delegate-val form (where `prop.type` already resolves to the delegate type carrying the entity
+     * as a type argument) continues to work through the type-based path.
      */
     private fun collectViaPropertyMetas(
         properties: List<KSPropertyDeclaration>,
@@ -221,12 +232,23 @@ class LirpViaAccessorProcessor(
         for (prop in properties) {
             val resolvedType = prop.type.resolve()
             val isCollection = isCollectionReference(prop, resolvedType)
-            val referencedClassFqn =
+            var referencedClassFqn =
                 if (isCollection) {
                     findReferencedClassFqnFromCollectionType(resolvedType)
                 } else {
                     findReferencedClassFqnFromType(resolvedType)
                 }
+            // For scalar @ToOneAggregate properties the resolved type is the FK key type (e.g. Int/UUID),
+            // not a delegate carrying the entity — fall back to the annotation's target argument.
+            if (referencedClassFqn == null && !isCollection) {
+                val toOneAnnotation =
+                    prop.annotations.firstOrNull {
+                        it.annotationType.resolve().declaration.qualifiedName?.asString() == TO_ONE_AGGREGATE_ANNOTATION_FQN
+                    }
+                referencedClassFqn =
+                    (toOneAnnotation?.arguments?.firstOrNull { it.name?.asString() == "target" }?.value as? KSType)
+                        ?.declaration?.qualifiedName?.asString()
+            }
             if (referencedClassFqn == null) {
                 val kind = if (isCollection) "collection property" else "property"
                 logger.warn(

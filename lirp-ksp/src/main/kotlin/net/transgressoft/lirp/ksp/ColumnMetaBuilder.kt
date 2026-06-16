@@ -28,7 +28,7 @@ import com.google.devtools.ksp.symbol.KSValueParameter
 import com.google.devtools.ksp.symbol.Modifier
 import com.google.devtools.ksp.validate
 
-private const val AGGREGATE_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.Aggregate"
+private const val TO_MANY_AGGREGATES_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.ToManyAggregates"
 
 /**
  * Represents the outcome of a column-eligibility check for a KSP property declaration.
@@ -36,7 +36,7 @@ private const val AGGREGATE_ANNOTATION_FQN = "net.transgressoft.lirp.persistence
  * The three variants are mutually exclusive and encode the complete decision:
  * - [Column] — the property maps to a persistable SQL column; carries the resolved [ColumnMeta].
  * - [Excluded] — the property is intentionally excluded from persistence (e.g. `@Transient`,
- *   `@PersistenceIgnore`, `@Aggregate`, private backing field, or a pure computed property).
+ *   `@PersistenceIgnore`, `@ToOneAggregate` / `@ToManyAggregates`, private backing field, or a pure computed property).
  * - [Deferred] — the property type or one of its annotations could not be resolved in the current
  *   KSP round. The enclosing entity [symbol] should be returned in `unableToProcess` so KSP
  *   re-presents it in a later round once the missing type is available.
@@ -114,7 +114,7 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
         val isVersion = versionedName != null && propName == versionedName
         val isAggregateBackingScalar = propName in aggregateBackingScalarNames
 
-        // reject converter arguments on PK / @Version / @Aggregate single-ref FK columns
+        // reject converter arguments on PK / @Version / @ToOneAggregate single-ref FK columns
         // BEFORE invoking resolveConverter (which carries /). This preserves the
         // one-diagnostic-per-site invariant: a misplaced converter on a rejected target emits
         // the target rejection, not the kind/S diagnostics.
@@ -137,7 +137,7 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
                     }
                     isAggregateBackingScalar -> {
                         logger.error(
-                            "@PersistenceProperty(converter = …) is not allowed on @Aggregate single-ref FK scalar column '$propertyFqn'. " +
+                            "@PersistenceProperty(converter = …) is not allowed on @ToOneAggregate single-ref FK scalar column '$propertyFqn'. " +
                                 "Converter routing on aggregate FK columns is out of scope; the FK column type is dictated by the referenced entity's primary key type."
                         )
                         null
@@ -511,7 +511,7 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
                 annotation.annotationType.resolve().declaration.qualifiedName?.asString()
                     ?: return Eligibility.Deferred(enclosingClass, unresolvedAnnotation = true)
             when (fqn) {
-                AGGREGATE_ANNOTATION_FQN,
+                TO_MANY_AGGREGATES_ANNOTATION_FQN,
                 TRANSIENT_FQN,
                 KOTLINX_SERIALIZATION_TRANSIENT_FQN -> return Eligibility.Excluded
             }

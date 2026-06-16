@@ -36,11 +36,11 @@ import com.google.devtools.ksp.symbol.Modifier
  * For each qualifying entity the processor collects:
  *
  * - Reactive-backed properties detected via [isReactivePropertyDelegate] (ordinary
- *   `reactiveProperty(...)`, `@Version`, and `@Aggregate` single-ref Id properties).
+ *   `reactiveProperty(...)`, `@Version`, and `@ToOneAggregate` single-ref Id properties).
  * - Non-reactive `var` scalar properties that are not constructor parameters (e.g.
  *   `lastDateModified`).
  *
- * Collection-typed `@Aggregate` properties (`aggregateList`, `aggregateSet`, and their `mutable*`
+ * Collection-typed `@ToManyAggregates` properties (`aggregateList`, `aggregateSet`, and their `mutable*`
  * variants) are excluded — junction-row materialization is handled separately by
  * `SqlTableDef.applyJunctionRows`.
  *

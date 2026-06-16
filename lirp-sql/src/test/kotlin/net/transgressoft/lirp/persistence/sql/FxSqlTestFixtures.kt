@@ -20,11 +20,11 @@ package net.transgressoft.lirp.persistence.sql
 import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.entity.ReactiveEntityBase
-import net.transgressoft.lirp.persistence.Aggregate
 import net.transgressoft.lirp.persistence.ColumnDef
 import net.transgressoft.lirp.persistence.ColumnType
 import net.transgressoft.lirp.persistence.LirpRawInitializer
 import net.transgressoft.lirp.persistence.LirpRegistryInfo
+import net.transgressoft.lirp.persistence.ToManyAggregates
 import net.transgressoft.lirp.persistence.fx.fxAggregateList
 import net.transgressoft.lirp.persistence.fx.fxBoolean
 import net.transgressoft.lirp.persistence.fx.fxDouble
@@ -112,7 +112,7 @@ class FxSqlTestEntity(
     val tagProperty: ObjectProperty<String?> by fxObject<String?>(initialTag, dispatchToFxThread = false)
     val groupProperty: StringProperty by fxString(initialGroup, dispatchToFxThread = false)
 
-    @Aggregate(onDelete = CascadeAction.NONE)
+    @ToManyAggregates(onDelete = CascadeAction.NONE)
     val items by fxAggregateList<Int, FxSqlTestItem>(initialItemIds, dispatchToFxThread = false)
 
     override fun clone(): FxSqlTestEntity =

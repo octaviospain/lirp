@@ -21,7 +21,7 @@ package net.transgressoft.lirp.persistence
  * Internal API consumed by KSP-generated code; not intended for direct use by application code.
  *
  * Used by `SqlRepository.loadFromStore` and `JsonFileRepository.loadFromStore` to apply per-row
- * scalar, reactive, `@Aggregate`-single-ref-Id, `@Version`, and primary-key values to a freshly
+ * scalar, reactive, `@ToOneAggregate`-single-ref-Id, `@Version`, and primary-key values to a freshly
  * constructed entity without going through reactive setters. The silent-setter path writes the
  * backing field directly, so no events fire, no dirty flag is raised, and `lastDateModified` is
  * not bumped during bulk load.

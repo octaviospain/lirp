@@ -32,7 +32,7 @@ import javax.sql.DataSource
 
 /**
  * Installs and manages the SQL schema for a [SqlRepository]'s entity and junction tables,
- * including deferred FK constraints for single-entity and collection (`@Aggregate`) references.
+ * including deferred FK constraints for single-entity (`@ToOneAggregate`) and collection (`@ToManyAggregates`) references.
  *
  * Schema creation runs during [SqlRepository] init; FK installation is deferred to
  * [installJunctionForeignKeys] / [installEntityForeignKeys] so that cross-repository references
@@ -99,7 +99,7 @@ internal class SqlSchemaInstaller<K : Comparable<K>, R>(
     }
 
     /**
-     * Installs FK constraints declared on this entity's scalar `@Aggregate` references.
+     * Installs FK constraints declared on this entity's scalar `@ToOneAggregate` references.
      *
      * The entity table is created without these constraints during init for the same reason
      * junction tables are: the referenced target table may belong to a different [SqlRepository]

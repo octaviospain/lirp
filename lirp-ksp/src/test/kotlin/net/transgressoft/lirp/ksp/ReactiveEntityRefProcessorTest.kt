@@ -119,7 +119,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
             """
         )
 
-    test("generates entries for entity with single aggregate property") {
+    test("generates entries for entity with @ToOneAggregate scalar property") {
         val result =
             KspTestSupport.compile(
                 ReactiveEntityRefProcessorProvider(),
@@ -128,20 +128,22 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                     """
                     package test
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.Aggregate
-                    import net.transgressoft.lirp.persistence.aggregate
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+                    import net.transgressoft.lirp.persistence.ToOneAggregate
 
-                    data class OrderEntity(override val id: Int) : ReactiveEntityBase<Int, OrderEntity>() {
+                    @PersistenceMapping
+                    class OrderEntity(override val id: Int) : ReactiveEntityBase<Int, OrderEntity>() {
                         override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = copy()
+                        override fun clone() = OrderEntity(id)
                     }
 
-                    data class InvoiceEntity(override val id: Int, var orderId: Int) : ReactiveEntityBase<Int, InvoiceEntity>() {
+                    @PersistenceMapping
+                    class InvoiceEntity(override val id: Int, orderId: Int) : ReactiveEntityBase<Int, InvoiceEntity>() {
                         override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = copy()
+                        override fun clone() = InvoiceEntity(id, orderId)
 
-                        @Aggregate
-                        val order by aggregate<Int, OrderEntity> { orderId }
+                        @ToOneAggregate(target = OrderEntity::class)
+                        var orderId: Int by reactiveProperty(orderId)
                     }
                     """
                 )
@@ -151,7 +153,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
         val content = result.generatedFileContent("InvoiceEntity_LirpRefAccessor.kt")
         content shouldContain "override val entries: List<RefEntry<*, InvoiceEntity>>"
         content shouldContain "refName = \"order\""
-        content shouldContain "idGetter = { it.order.referenceId }"
+        content shouldContain "idGetter = { it.orderId as Comparable<Any> }"
         content shouldContain "override val collectionEntries: List<CollectionRefEntry<*, InvoiceEntity>> = emptyList()"
     }
 
@@ -166,7 +168,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                     package test
                     import net.transgressoft.lirp.entity.CascadeAction
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.Aggregate
+                    import net.transgressoft.lirp.persistence.ToManyAggregates
                     import net.transgressoft.lirp.persistence.aggregateList
 
                     data class TestTrack(override val id: Int) : ReactiveEntityBase<Int, TestTrack>() {
@@ -178,7 +180,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                         override val uniqueId: String get() = "${'$'}id"
                         override fun clone() = copy()
 
-                        @Aggregate(onDelete = CascadeAction.CASCADE)
+                        @ToManyAggregates(onDelete = CascadeAction.CASCADE)
                         val items by aggregateList<Int, TestTrack>(trackIds)
                     }
                     """
@@ -205,7 +207,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                     """
                     package test
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.Aggregate
+                    import net.transgressoft.lirp.persistence.ToManyAggregates
                     import net.transgressoft.lirp.persistence.aggregateSet
 
                     data class PlaylistRef(override val id: Long) : ReactiveEntityBase<Long, PlaylistRef>() {
@@ -217,7 +219,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                         override val uniqueId: String get() = "${'$'}id"
                         override fun clone() = copy()
 
-                        @Aggregate
+                        @ToManyAggregates
                         val playlists by aggregateSet<Long, PlaylistRef>(playlistIds)
                     }
                     """
@@ -233,7 +235,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
         content shouldContain "cascadeAction = CascadeAction.NONE"
     }
 
-    test("generates both entries and collectionEntries for entity with mixed single and collection refs") {
+    test("generates both entries and collectionEntries for entity with mixed @ToOneAggregate and @ToManyAggregates refs") {
         val result =
             KspTestSupport.compile(
                 ReactiveEntityRefProcessorProvider(),
@@ -244,13 +246,15 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                     package test
                     import net.transgressoft.lirp.entity.CascadeAction
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.Aggregate
-                    import net.transgressoft.lirp.persistence.aggregate
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+                    import net.transgressoft.lirp.persistence.ToManyAggregates
+                    import net.transgressoft.lirp.persistence.ToOneAggregate
                     import net.transgressoft.lirp.persistence.aggregateList
 
-                    data class ArtistEntity(override val id: Int) : ReactiveEntityBase<Int, ArtistEntity>() {
+                    @PersistenceMapping
+                    class ArtistEntity(override val id: Int) : ReactiveEntityBase<Int, ArtistEntity>() {
                         override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = copy()
+                        override fun clone() = ArtistEntity(id)
                     }
 
                     data class TrackEntity(override val id: Int) : ReactiveEntityBase<Int, TrackEntity>() {
@@ -258,18 +262,19 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                         override fun clone() = copy()
                     }
 
-                    data class AlbumEntity(
+                    @PersistenceMapping
+                    class AlbumEntity(
                         override val id: Int,
-                        var artistId: Int,
+                        artistId: Int,
                         val trackIds: List<Int>
                     ) : ReactiveEntityBase<Int, AlbumEntity>() {
                         override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = copy()
+                        override fun clone() = AlbumEntity(id, artistId, trackIds)
 
-                        @Aggregate(bubbleUp = true)
-                        val artist by aggregate<Int, ArtistEntity> { artistId }
+                        @ToOneAggregate(target = ArtistEntity::class, bubbleUp = true)
+                        var artistId: Int by reactiveProperty(artistId)
 
-                        @Aggregate(onDelete = CascadeAction.CASCADE)
+                        @ToManyAggregates(onDelete = CascadeAction.CASCADE)
                         val tracks by aggregateList<Int, TrackEntity>(trackIds)
                     }
                     """
@@ -278,10 +283,10 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         val content = result.generatedFileContent("AlbumEntity_LirpRefAccessor.kt")
-        // Single ref entry
+        // To-one ref entry
         content shouldContain "override val entries: List<RefEntry<*, AlbumEntity>>"
         content shouldContain "refName = \"artist\""
-        content shouldContain "idGetter = { it.artist.referenceId }"
+        content shouldContain "idGetter = { it.artistId as Comparable<Any> }"
         content shouldContain "bubbleUp = true"
         // Collection ref entry
         content shouldContain "override val collectionEntries: List<CollectionRefEntry<*, AlbumEntity>>"
@@ -314,7 +319,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                         """
                         package test
                         import net.transgressoft.lirp.entity.ReactiveEntityBase
-                        import net.transgressoft.lirp.persistence.Aggregate
+                        import net.transgressoft.lirp.persistence.ToManyAggregates
                         import net.transgressoft.lirp.persistence.${case.delegateFn}
 
                         data class ${case.refEntityName}(override val id: Int) : ReactiveEntityBase<Int, ${case.refEntityName}>() {
@@ -326,8 +331,8 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                             override val uniqueId: String get() = "${'$'}id"
                             override fun clone() = copy()
 
-                            @Aggregate(bubbleUp = true)
-                            val refs by ${case.delegateFn}<Int, ${case.refEntityName}> { refIds }
+                            @ToManyAggregates(bubbleUp = true)
+                            val refs by ${case.delegateFn}<Int, ${case.refEntityName}>(refIds)
                         }
                         """
                     )
@@ -349,7 +354,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                     """
                     package test
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.Aggregate
+                    import net.transgressoft.lirp.persistence.ToManyAggregates
                     import net.transgressoft.lirp.persistence.aggregateList
                     import net.transgressoft.lirp.persistence.aggregateSet
 
@@ -366,10 +371,10 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                         override val uniqueId: String get() = "${'$'}id"
                         override fun clone() = copy()
 
-                        @Aggregate
+                        @ToManyAggregates
                         val orderedRefs by aggregateList<Int, RefEntity>(orderedIds)
 
-                        @Aggregate
+                        @ToManyAggregates
                         val uniqueRefs by aggregateSet<Int, RefEntity>(uniqueIds)
                     }
                     """
@@ -386,7 +391,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
         uniqueBlock shouldContain "isOrdered = false"
     }
 
-    test("uses @Aggregate annotation for detection and ignores unannotated properties") {
+    test("uses @ToManyAggregates annotation for detection and ignores unannotated properties") {
         val result =
             KspTestSupport.compile(
                 ReactiveEntityRefProcessorProvider(),
@@ -396,7 +401,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                     """
                     package test
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.Aggregate
+                    import net.transgressoft.lirp.persistence.ToManyAggregates
                     import net.transgressoft.lirp.persistence.aggregateList
                     import net.transgressoft.lirp.persistence.aggregateSet
 
@@ -413,10 +418,10 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                         override val uniqueId: String get() = "${'$'}id"
                         override fun clone() = copy()
 
-                        @Aggregate
+                        @ToManyAggregates
                         val annotatedRefs by aggregateList<Int, SomeEntity>(annotatedIds)
 
-                        // No @Aggregate annotation — should NOT appear in generated accessor
+                        // No @ToManyAggregates annotation — should NOT appear in generated accessor
                         val ignoredRefs by aggregateSet<Int, SomeEntity>(ignoredIds)
                     }
                     """
@@ -438,21 +443,23 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                     """
                     package test
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.Aggregate
-                    import net.transgressoft.lirp.persistence.aggregate
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+                    import net.transgressoft.lirp.persistence.ToOneAggregate
 
                     class Outer {
-                        data class InnerEntity(override val id: Int) : ReactiveEntityBase<Int, InnerEntity>() {
+                        @PersistenceMapping
+                        class InnerEntity(override val id: Int) : ReactiveEntityBase<Int, InnerEntity>() {
                             override val uniqueId: String get() = "${'$'}id"
-                            override fun clone() = copy()
+                            override fun clone() = InnerEntity(id)
                         }
 
-                        data class RefEntity(override val id: Int, var innerId: Int) : ReactiveEntityBase<Int, RefEntity>() {
+                        @PersistenceMapping
+                        class RefEntity(override val id: Int, innerId: Int) : ReactiveEntityBase<Int, RefEntity>() {
                             override val uniqueId: String get() = "${'$'}id"
-                            override fun clone() = copy()
+                            override fun clone() = RefEntity(id, innerId)
 
-                            @Aggregate
-                            val inner by aggregate<Int, InnerEntity> { innerId }
+                            @ToOneAggregate(target = InnerEntity::class)
+                            var innerId: Int by reactiveProperty(innerId)
                         }
                     }
                     """
@@ -475,21 +482,23 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                     """
                     package test
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.Aggregate
-                    import net.transgressoft.lirp.persistence.aggregate
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+                    import net.transgressoft.lirp.persistence.ToOneAggregate
 
                     class A {
                         class B {
-                            data class RefEntity(override val id: Int) : ReactiveEntityBase<Int, RefEntity>() {
+                            @PersistenceMapping
+                            class RefEntity(override val id: Int) : ReactiveEntityBase<Int, RefEntity>() {
                                 override val uniqueId: String get() = "${'$'}id"
-                                override fun clone() = copy()
+                                override fun clone() = RefEntity(id)
                             }
-                            data class C(override val id: Int, var refId: Int) : ReactiveEntityBase<Int, C>() {
+                            @PersistenceMapping
+                            class C(override val id: Int, refId: Int) : ReactiveEntityBase<Int, C>() {
                                 override val uniqueId: String get() = "${'$'}id"
-                                override fun clone() = copy()
+                                override fun clone() = C(id, refId)
 
-                                @Aggregate
-                                val ref by aggregate<Int, RefEntity> { refId }
+                                @ToOneAggregate(target = RefEntity::class)
+                                var refId: Int by reactiveProperty(refId)
                             }
                         }
                     }
@@ -513,20 +522,22 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                     """
                     package test
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.Aggregate
-                    import net.transgressoft.lirp.persistence.aggregate
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+                    import net.transgressoft.lirp.persistence.ToOneAggregate
 
-                    data class TargetEntity(override val id: Int) : ReactiveEntityBase<Int, TargetEntity>() {
+                    @PersistenceMapping
+                    class TargetEntity(override val id: Int) : ReactiveEntityBase<Int, TargetEntity>() {
                         override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = copy()
+                        override fun clone() = TargetEntity(id)
                     }
 
-                    data class TopLevelEntity(override val id: Int, var targetId: Int) : ReactiveEntityBase<Int, TopLevelEntity>() {
+                    @PersistenceMapping
+                    class TopLevelEntity(override val id: Int, targetId: Int) : ReactiveEntityBase<Int, TopLevelEntity>() {
                         override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = copy()
+                        override fun clone() = TopLevelEntity(id, targetId)
 
-                        @Aggregate
-                        val target by aggregate<Int, TargetEntity> { targetId }
+                        @ToOneAggregate(target = TargetEntity::class)
+                        var targetId: Int by reactiveProperty(targetId)
                     }
                     """
                 )
@@ -550,7 +561,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                     package test
                     import net.transgressoft.lirp.entity.CascadeAction
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.Aggregate
+                    import net.transgressoft.lirp.persistence.ToManyAggregates
                     import net.transgressoft.lirp.persistence.mutableAggregateList
 
                     data class TestTrack(override val id: Int) : ReactiveEntityBase<Int, TestTrack>() {
@@ -562,7 +573,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                         override val uniqueId: String get() = "${'$'}id"
                         override fun clone() = copy()
 
-                        @Aggregate(onDelete = CascadeAction.CASCADE)
+                        @ToManyAggregates(onDelete = CascadeAction.CASCADE)
                         val items by mutableAggregateList<Int, TestTrack>(trackIds)
                     }
                     """
@@ -577,5 +588,38 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
         content shouldContain "cascadeAction = CascadeAction.CASCADE"
         content shouldContain "isOrdered = true"
         content shouldContain "override val entries: List<RefEntry<*, MutablePlaylistEntity>> = emptyList()"
+    }
+
+    test("ReactiveEntityRefProcessor emits compile error when @ToManyAggregates is placed on aggregate{} delegate val") {
+        val result =
+            KspTestSupport.compile(
+                ReactiveEntityRefProcessorProvider(),
+                SourceFile.kotlin(
+                    "BadSingleRefEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.ToManyAggregates
+                    import net.transgressoft.lirp.persistence.aggregate
+
+                    data class AudioTrack(override val id: Int) : ReactiveEntityBase<Int, AudioTrack>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                    }
+
+                    data class BadSingleRefEntity(override val id: Int, var trackId: Int) : ReactiveEntityBase<Int, BadSingleRefEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+
+                        @ToManyAggregates
+                        val track by aggregate<Int, AudioTrack> { trackId }
+                    }
+                    """
+                ),
+                withCompilation = false
+            )
+
+        result.messages shouldContain "@ToManyAggregates must be placed on a collection-typed property"
+        result.messages shouldContain "use @ToOneAggregate"
     }
 })

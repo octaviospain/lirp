@@ -774,7 +774,7 @@ internal class EmbeddableAnalyzer(
         if (childHasElementCollection) {
             logger.error(
                 "@ElementCollection is not supported inside an @Embeddable. " +
-                    "Move the property to the parent entity, or declare a dedicated @Aggregate child entity. " +
+                    "Move the property to the parent entity, or declare a dedicated child entity with `@ToOneAggregate`. " +
                     "Offending property: $typeFqn.$childParamName.",
                 childProp
             )

@@ -34,4 +34,5 @@ internal object LirpGenNames {
     const val REGISTRY_INFO_SUFFIX = "_LirpRegistryInfo"
     const val TABLE_DEF_SUFFIX = "_LirpTableDef"
     const val FX_SCALAR_ACCESSOR_SUFFIX = "_LirpFxScalarAccessor"
+    const val TO_ONE_EXT_ACCESSOR_SUFFIX = "_LirpToOneExtAccessor"
 }

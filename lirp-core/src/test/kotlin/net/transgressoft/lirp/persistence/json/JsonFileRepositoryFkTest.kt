@@ -21,10 +21,11 @@ import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.event.CrudEvent
-import net.transgressoft.lirp.persistence.Aggregate
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.LirpDeserializationException
 import net.transgressoft.lirp.persistence.LirpRepository
+import net.transgressoft.lirp.persistence.ToManyAggregates
+import net.transgressoft.lirp.persistence.ToOneAggregate
 import net.transgressoft.lirp.persistence.VolatileRepository
 import net.transgressoft.lirp.persistence.mutableAggregateSet
 import net.transgressoft.lirp.persistence.optionalAggregate
@@ -43,8 +44,8 @@ import kotlinx.serialization.builtins.serializer
 /**
  * Tests for [JsonFileRepository] foreign-key reconciliation behavior driven by [JsonFkPolicy].
  *
- * Verifies the silent-reconciliation contract: when a parent's `@Aggregate`
- * reference points to an entity that is missing from its registry at load time,
+ * Verifies the silent-reconciliation contract: when a parent's aggregate reference
+ * (`@ToOneAggregate` or `@ToManyAggregates`) points to an entity that is missing from its registry at load time,
  * [JsonFkPolicy.LOG_AND_RECONCILE] (the default) drops dangling collection IDs and nulls
  * dangling nullable scalar refs without emitting `CrudEvent.UPDATE` and without bumping
  * `@Version`. [JsonFkPolicy.STRICT] surfaces the same condition as a
@@ -158,7 +159,7 @@ internal class JsonFileRepositoryFkTest : StringSpec({
             shouldThrow<LirpDeserializationException> {
                 FkItemJsonRepo(ctx2, itemFile, 50L, fkPolicy = JsonFkPolicy.STRICT)
             }
-        exception.message!! shouldContain "Dangling @Aggregate reference"
+        exception.message!! shouldContain "Dangling aggregate reference"
 
         ctx2.close()
     }
@@ -179,7 +180,7 @@ internal class JsonFileRepositoryFkTest : StringSpec({
             shouldThrow<LirpDeserializationException> {
                 FkParentJsonRepo(ctx2, parentFile, 50L, fkPolicy = JsonFkPolicy.STRICT)
             }
-        exception.message!! shouldContain "Dangling @Aggregate reference"
+        exception.message!! shouldContain "Dangling aggregate reference"
 
         ctx2.close()
     }
@@ -204,7 +205,7 @@ class FkItem(
 
     override val uniqueId: String get() = "fk-item-$id"
 
-    @Aggregate(onDelete = CascadeAction.NONE)
+    @ToManyAggregates(onDelete = CascadeAction.NONE)
     val tags by mutableAggregateSet<Int, FkTag>(initialTagIds)
 
     override fun clone(): FkItem = FkItem(id, LinkedHashSet(tags.referenceIds))
@@ -218,7 +219,7 @@ class FkChild(override val id: Int) : ReactiveEntityBase<Int, FkChild>(), Identi
 }
 
 /**
- * Aggregate root with a nullable scalar `@Aggregate` reference and a manually-tracked
+ * Aggregate root with a nullable scalar `@ToOneAggregate` reference and a manually-tracked
  * `version` field. The version field is incremented only by domain mutations performed via
  * [bumpVersion], never by reconciliation, so the reconciliation-silence contract can be asserted.
  */
@@ -230,7 +231,7 @@ class FkParent(
 
     override val uniqueId: String get() = "fk-parent-$id"
 
-    @Aggregate(onDelete = CascadeAction.DETACH)
+    @ToOneAggregate(target = FkChild::class, onDelete = CascadeAction.DETACH)
     val child by optionalAggregate<Int, FkChild> { childId }
 
     override fun clone(): FkParent = FkParent(id, childId, version)

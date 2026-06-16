@@ -32,7 +32,7 @@ import javax.sql.DataSource
 // Two reactive entities — FkParent and FkChild — exercise both junction-table foreign-key
 // semantics (via FkParent.childIds) and a scalar foreign-key column (single_child_id). The
 // scalar FK constraint is installed by FkScalarFkInstaller during table creation:
-// SqlTableDef.foreignKeys() is declared by KSP for single-entity @Aggregate references but is
+// SqlTableDef.foreignKeys() is declared by KSP for single-entity @ToOneAggregate references but is
 // not yet consumed by SqlRepository.init, so the integration tests pre-create the parent / child
 // tables with an inline ON DELETE clause (idempotent against SchemaUtils.create). This exercises
 // the database-side semantics that LIRP will eventually emit and verifies the cascade-action

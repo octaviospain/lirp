@@ -23,8 +23,9 @@ import net.transgressoft.lirp.entity.ReactiveEntity
  * A [MutationEvent] emitted on a parent (referencing) entity when a referenced child entity mutates
  * or a referenced collection changes, and bubble-up propagation is enabled for that reference.
  *
- * Bubble-up is opt-in per reference via
- * [@Aggregate(bubbleUp = true)][net.transgressoft.lirp.persistence.Aggregate].
+ * Bubble-up is opt-in per reference by setting `bubbleUp = true` on
+ * [@ToOneAggregate][net.transgressoft.lirp.persistence.ToOneAggregate] or
+ * [@ToManyAggregates][net.transgressoft.lirp.persistence.ToManyAggregates].
  * When active, a child mutation causes the parent entity to emit this event on its own publisher,
  * allowing parent subscribers to react to descendant state changes without subscribing to each child
  * individually.
@@ -59,8 +60,12 @@ interface AggregateMutationEvent<K, R : ReactiveEntity<K, R>> : MutationEvent<K,
     /**
      * The name of the reference that triggered the bubble-up propagation.
      *
-     * Corresponds to the property name of the [@Aggregate][net.transgressoft.lirp.persistence.Aggregate]
-     * annotated property on the parent entity.
+     * Corresponds to the generated reference name for the annotated relationship. For
+     * [@ToManyAggregates][net.transgressoft.lirp.persistence.ToManyAggregates] and delegate-val
+     * [@ToOneAggregate][net.transgressoft.lirp.persistence.ToOneAggregate] forms, this is the
+     * annotated property name directly. For scalar FK
+     * [@ToOneAggregate][net.transgressoft.lirp.persistence.ToOneAggregate] forms, this is the
+     * annotated property name with the trailing `Id` stripped (e.g. `companyId` → `company`).
      */
     val refName: String
 

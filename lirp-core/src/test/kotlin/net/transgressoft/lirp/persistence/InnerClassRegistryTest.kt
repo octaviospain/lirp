@@ -235,8 +235,8 @@ internal class InnerClassRegistryTest : StringSpec({
 })
 
 /**
- * Minimal entity base for [InnerClassRegistryTest] — has no [Aggregate][net.transgressoft.lirp.entity.Aggregate]
- * delegate properties, so no KSP accessor is expected.
+ * Minimal entity base for [InnerClassRegistryTest] — has no aggregate-reference properties,
+ * so no KSP accessor is expected.
  * Used to create anonymous, local, and inner class subtypes.
  */
 internal open class SimpleTestEntity(override val id: Int) : ReactiveEntityBase<Int, SimpleTestEntity>() {

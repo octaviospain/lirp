@@ -62,7 +62,35 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
   independent error handler so individual subscribers can observe failures without routing them
   to the publisher-level handler.
 
+### Added
+
+- **`@ToOneAggregate`** — new annotation for FK scalar properties that replaces the hand-written
+  companion `val` pattern. Place `@ToOneAggregate(target = TargetClass::class, onDelete = …)` on a
+  scalar property whose name ends in `Id` (e.g. `var labelId: Int?`). KSP generates a
+  `_LirpToOneExtAccessor.kt` file containing an extension property (e.g. `release.label`) that
+  navigates to the referenced entity via the bound `AggregateRefDelegate`. `bubbleUp = true` and all
+  cascade modes (CASCADE, DETACH, RESTRICT, NONE) are supported identically to the old `@Aggregate`
+  to-one pattern. `@ToOneAggregate` may also be placed on a single-entity `by aggregate { … }` /
+  `by optionalAggregate { … }` delegate (no accessor is generated — the delegate `val` is the
+  navigation member) for the case where the reference key is computed rather than a stored scalar;
+  the scalar form above is the recommended default. See
+  [GitHub #255](https://github.com/octaviospain/lirp/issues/255).
+
 ### Changed
+
+- **`@Aggregate` renamed to `@ToManyAggregates`** — the existing annotation for collection-typed
+  aggregate references is renamed. All call sites that used `@Aggregate` must be updated to
+  `@ToManyAggregates`. The annotation's parameters (`bubbleUp`, `onDelete`) are unchanged.
+  `@ToManyAggregates` is now **collection-only**: applying it to a single (non-collection) reference
+  is a compile error directing you to `@ToOneAggregate`, making the to-one/to-many split
+  self-enforcing. See [Migration](#migration-aggregate-to-tomanyaggregates) below.
+
+### Removed
+
+- **Single-entity `@Aggregate` (to-one) removed** — the two-declaration pattern (`var xId` scalar
+  + `@Aggregate @PersistenceIgnore val x by optionalAggregate { xId }`) is replaced entirely by
+  `@ToOneAggregate` placed directly on the persisted FK scalar. All single-entity `@Aggregate`
+  usages must be migrated to `@ToOneAggregate`. See [Migration](#migration-toone-aggregate) below.
 
 - **Core projection package** — all projection types moved from `net.transgressoft.lirp.persistence`
   to `net.transgressoft.lirp.persistence.projection`, and the `CoreFactories` file was renamed to
@@ -92,6 +120,106 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
   overwrite another subscriber's wiring.
 
 ## Migration from 2.x to 3.0
+
+### Single-entity `@Aggregate` replaced by `@ToOneAggregate` {#migration-toone-aggregate}
+
+The two-declaration pattern for single-entity FK references is replaced by a single annotation on
+the persisted FK scalar. The `@Aggregate` annotation is removed; use `@ToOneAggregate` instead. The
+`aggregate()` / `optionalAggregate()` delegate factories themselves are **retained** — if a
+reference key must be computed rather than read from a stored scalar, keep the
+`by aggregate { … }` / `by optionalAggregate { … }` delegate and annotate it with `@ToOneAggregate`.
+Flattening to the scalar form below is the recommended default.
+
+**Before (two declarations):**
+
+```kotlin
+var ownerCompanyId: UUID? by reactiveProperty(null)
+
+@Aggregate(bubbleUp = false, onDelete = CascadeAction.DETACH)
+@PersistenceIgnore
+val ownerCompany by optionalAggregate<UUID, Company> { ownerCompanyId }
+```
+
+**After (one declaration):**
+
+```kotlin
+@ToOneAggregate(target = Company::class, onDelete = CascadeAction.DETACH)
+var ownerCompanyId: UUID? by reactiveProperty(null)
+// KSP generates: val Vehicle.ownerCompany: ReactiveEntityReference<UUID, Company>
+```
+
+For required (non-nullable) FK scalars:
+
+```kotlin
+// Before
+var vehicleId: UUID by reactiveProperty(UUID(0, 0))
+
+@Aggregate(onDelete = CascadeAction.CASCADE)
+@PersistenceIgnore
+val vehicle by aggregate<UUID, Vehicle> { vehicleId }
+
+// After
+@ToOneAggregate(target = Vehicle::class, onDelete = CascadeAction.CASCADE)
+var vehicleId: UUID by reactiveProperty(UUID(0, 0))
+```
+
+**Navigation — import required.** The generated extension accessor `ownerCompany` lives in a
+KSP-generated file and is not a member of the entity class. You must import it explicitly before
+navigating:
+
+```kotlin
+import net.transgressoft.fleet.vehicle.ownerCompany  // generated — import required
+
+val resolved = vehicle.ownerCompany.resolve()  // Optional<Company>
+val refId    = vehicle.ownerCompany.referenceId  // UUID?
+```
+
+IDEs suggest the import automatically. If a call site fails to compile with
+`Unresolved reference: ownerCompany`, add the import for the generated accessor.
+
+**Migration steps:**
+
+1. For every `@Aggregate @PersistenceIgnore val x by aggregate { xId }` or
+   `@Aggregate @PersistenceIgnore val x by optionalAggregate { xId }`:
+   - Remove the two-line companion declaration entirely.
+   - Add `@ToOneAggregate(target = X::class, onDelete = ...)` on the scalar `var xId`.
+   - Ensure the scalar name ends with `Id` — KSP enforces this at compile time. The generated
+     extension accessor name is derived by stripping the `Id` suffix (`companyId` → `company`).
+2. Replace all `import net.transgressoft.lirp.persistence.Aggregate` with
+   `import net.transgressoft.lirp.persistence.ToOneAggregate` at single-entity call sites.
+3. Remove `@PersistenceIgnore` imports that are no longer needed (the companion val is gone).
+4. At every navigation call site (`entity.ownerCompany.resolve()` etc.), add the import for
+   the KSP-generated extension accessor.
+
+**Scalar naming rule:** The FK scalar must end with `Id` (case-exact). `companyId` → accessor
+`company`; `liabilityInsuranceCompanyId` → accessor `liabilityInsuranceCompany`. A scalar without
+the `Id` suffix produces a KSP compile error directing you to rename it.
+
+**Nullability determines optional vs. required:** A nullable scalar (`UUID?`) produces an optional
+reference — `resolve()` returns `Optional.empty()` when the FK is null. A non-nullable scalar
+(`UUID`) produces a required reference. No explicit optionality parameter needed.
+
+See [GitHub #255](https://github.com/octaviospain/lirp/issues/255) for background.
+
+### `@Aggregate` renamed to `@ToManyAggregates` {#migration-aggregate-to-tomanyaggregates}
+
+All `@Aggregate` annotations on collection-typed properties must be renamed to `@ToManyAggregates`.
+The parameters are identical:
+
+```kotlin
+// Before
+@Aggregate(bubbleUp = true, onDelete = CascadeAction.DETACH)
+val tracks by aggregateList<Int, Track> { trackIds }
+
+// After
+@ToManyAggregates(bubbleUp = true, onDelete = CascadeAction.DETACH)
+val tracks by aggregateList<Int, Track> { trackIds }
+```
+
+**Migration steps:**
+1. Replace all `import net.transgressoft.lirp.persistence.Aggregate` with
+   `import net.transgressoft.lirp.persistence.ToManyAggregates`.
+2. Replace all `@Aggregate(…)` annotations with `@ToManyAggregates(…)` — parameters unchanged.
 
 ### `subscribe` is now synchronous by default
 

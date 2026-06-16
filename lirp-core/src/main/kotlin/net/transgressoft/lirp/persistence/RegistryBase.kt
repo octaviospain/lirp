@@ -115,7 +115,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
     /**
      * Cached [LirpViaAccessor] loaded from the KSP-generated `{EntityName}_LirpViaAccessor` for this entity type.
      * Holds the typed [KProperty1] descriptors consumed by the cross-aggregate Query DSL planner.
-     * Null until discovery runs; remains null when no generated accessor exists (entity has no `@Aggregate` properties).
+     * Null until discovery runs; remains null when no generated accessor exists (entity has no `@ToOneAggregate` / `@ToManyAggregates` properties).
      *
      * Discovery occurs lazily on first entity registration via [discoverViaAccessors].
      */
@@ -360,7 +360,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
      *
      * The generated accessor provides [RefEntry] descriptors with direct ID getter lambdas,
      * completely avoiding `kotlin-reflect` or `java.lang.reflect` overhead. If no generated
-     * accessor is found (KSP not applied or no [@Aggregate][Aggregate] annotations),
+     * accessor is found (KSP not applied or no `@ToOneAggregate` / `@ToManyAggregates` annotations),
      * the reference entry list remains empty.
      *
      * Anonymous and local class entities are skipped early — they can never have KSP-generated
@@ -398,7 +398,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
      *
      * The generated accessor provides typed [KProperty1] descriptors used by the cross-aggregate
      * Query DSL planner to resolve `via(prop)` references at query time, completely avoiding
-     * `kotlin-reflect`. If no generated accessor is found (entity has no `@Aggregate` properties
+     * `kotlin-reflect`. If no generated accessor is found (entity has no `@ToOneAggregate` / `@ToManyAggregates` properties
      * or KSP not applied), the cached accessor remains `null`.
      *
      * Anonymous and local class entities are skipped early — they can never have KSP-generated
@@ -762,7 +762,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
                 for (entity in typed) {
                     // Look up the accessor by the entity's concrete runtime class — refAccessorFor
                     // resolves "${concreteClass.name}_LirpRefAccessor", and that class is generated
-                    // per concrete @Aggregate-annotated entity, not per registered interface.
+                    // per concrete aggregate-annotated entity, not per registered interface.
                     val accessor = refAccessorFor(entity.javaClass) ?: continue
                     val refsThisClass =
                         accessor.entries.any { it.referencedClass == referencedClass } ||
@@ -814,7 +814,7 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
         /**
          * Returns the [LirpViaAccessor] for [entityClass], loading it via [KspAccessorLoader] on
          * first call and caching the result. Returns `null` if no KSP-generated accessor exists
-         * for the class (entity has no `@Aggregate` properties) or when [entityClass] is anonymous
+         * for the class (entity has no `@ToOneAggregate` / `@ToManyAggregates` properties) or when [entityClass] is anonymous
          * or local (no stable binary name).
          *
          * Consumed by the cross-aggregate Query DSL planner to resolve `via(prop)` references to

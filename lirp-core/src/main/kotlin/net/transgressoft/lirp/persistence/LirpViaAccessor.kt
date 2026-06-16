@@ -19,9 +19,9 @@ package net.transgressoft.lirp.persistence
 
 /**
  * Contract for KSP-generated cross-aggregate `via` accessors that expose typed [kotlin.reflect.KProperty1]
- * descriptors for every [@Aggregate][Aggregate] property of an entity.
+ * descriptors for every aggregate-reference property (`@ToOneAggregate` / `@ToManyAggregates`) of an entity.
  *
- * Each entity class with at least one [@Aggregate][Aggregate] property gets a compile-time
+ * Each entity class with at least one `@ToOneAggregate` / `@ToManyAggregates` property gets a compile-time
  * generated implementation of this interface, named `{EntityName}_LirpViaAccessor` and placed in the
  * same package as the entity. The generated class is discovered at runtime via a convention-based
  * [Class.forName] lookup, mirroring the sibling [LirpRefAccessor] and [LirpIndexAccessor] patterns.
@@ -40,15 +40,15 @@ package net.transgressoft.lirp.persistence
  * KProperty1 references to the descriptors that point at the right child entity class.
  *
  * @param T the entity type this accessor was generated for
- * @property collectionEntries one [ViaCollectionAccessorEntry] per collection-typed `@Aggregate`
+ * @property collectionEntries one [ViaCollectionAccessorEntry] per collection-typed `@ToManyAggregates`
  *   property (whether declared via `aggregateList`, `aggregateSet`, or their mutable variants)
- * @property singleEntries one [ViaSingleAccessorEntry] per single-entity `@Aggregate` property
+ * @property singleEntries one [ViaSingleAccessorEntry] per single-entity `@ToOneAggregate` property
  */
 interface LirpViaAccessor<T> {
 
     /**
      * Pre-built collection-reference descriptors for every collection-typed
-     * [@Aggregate][Aggregate] property declared on [T].
+     * [@ToManyAggregates][ToManyAggregates] property declared on [T].
      *
      * Star-projected K since collection references on the same entity may point to differently-typed IDs.
      */
@@ -56,7 +56,7 @@ interface LirpViaAccessor<T> {
 
     /**
      * Pre-built single-entity reference descriptors for every single-entity
-     * [@Aggregate][Aggregate] property declared on [T].
+     * [@ToOneAggregate][ToOneAggregate] property declared on [T].
      *
      * Star-projected K since single references on the same entity may point to differently-typed IDs.
      */
