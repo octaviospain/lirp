@@ -22,7 +22,7 @@ import net.transgressoft.lirp.entity.IdentifiableEntity
 /**
  * A lazily-resolved reference to a collection of aggregate entities stored in a [Registry].
  *
- * Instances are returned by property delegates declared with `@Aggregate` in entity classes,
+ * Instances are returned by property delegates declared with `@ToManyAggregates` in entity classes,
  * using either `aggregateList` (ordered, duplicates allowed) or `aggregateSet` (unique elements)
  * factory functions. The delegate holds only the raw IDs of the referenced entities; actual entity
  * lookups are deferred to the first [resolveAll] call.
@@ -32,7 +32,7 @@ import net.transgressoft.lirp.entity.IdentifiableEntity
  *
  * Example:
  * ```kotlin
- * @Aggregate
+ * @ToManyAggregates
  * val items by aggregateList<Int, AudioItem>(itemIds)
  *
  * // Resolving all referenced entities:

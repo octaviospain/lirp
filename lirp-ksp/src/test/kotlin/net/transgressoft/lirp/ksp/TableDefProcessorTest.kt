@@ -1071,7 +1071,7 @@ internal class TableDefProcessorTest : FunSpec({
                 package test
                 import net.transgressoft.lirp.entity.IdentifiableEntity
                 import net.transgressoft.lirp.entity.ReactiveEntityBase
-                import net.transgressoft.lirp.persistence.Aggregate
+                import net.transgressoft.lirp.persistence.ToManyAggregates
                 import net.transgressoft.lirp.persistence.PersistenceMapping
                 import net.transgressoft.lirp.persistence.aggregateList
 
@@ -1084,7 +1084,7 @@ internal class TableDefProcessorTest : FunSpec({
                 @PersistenceMapping
                 class Playlist(override val id: Int) : ReactiveEntityBase<Int, Playlist>() {
                     var trackIds: List<Int> = emptyList()
-                    @Aggregate
+                    @ToManyAggregates
                     val tracks by aggregateList<Int, Track>(trackIds)
 
                     override val uniqueId: String get() = "${'$'}id"
@@ -1117,7 +1117,7 @@ internal class TableDefProcessorTest : FunSpec({
                     """
                 package test
                 import net.transgressoft.lirp.entity.ReactiveEntityBase
-                import net.transgressoft.lirp.persistence.Aggregate
+                import net.transgressoft.lirp.persistence.ToManyAggregates
                 import net.transgressoft.lirp.persistence.PersistenceMapping
                 import net.transgressoft.lirp.persistence.aggregateSet
 
@@ -1130,7 +1130,7 @@ internal class TableDefProcessorTest : FunSpec({
                 @PersistenceMapping
                 class Album(override val id: Int) : ReactiveEntityBase<Int, Album>() {
                     var tagIds: Set<Int> = emptySet()
-                    @Aggregate
+                    @ToManyAggregates
                     val tags by aggregateSet<Int, Tag>(tagIds)
 
                     override val uniqueId: String get() = "${'$'}id"
@@ -1146,7 +1146,7 @@ internal class TableDefProcessorTest : FunSpec({
         junction shouldNotContain "position"
     }
 
-    test("attaches RESTRICT foreign key to scalar backing single-entity aggregate") {
+    test("attaches RESTRICT foreign key to @ToOneAggregate scalar") {
         val result =
             KspTestSupport.compile(
                 TableDefProcessorProvider(),
@@ -1156,9 +1156,8 @@ internal class TableDefProcessorTest : FunSpec({
                 package test
                 import net.transgressoft.lirp.entity.CascadeAction
                 import net.transgressoft.lirp.entity.ReactiveEntityBase
-                import net.transgressoft.lirp.persistence.Aggregate
                 import net.transgressoft.lirp.persistence.PersistenceMapping
-                import net.transgressoft.lirp.persistence.aggregate
+                import net.transgressoft.lirp.persistence.ToOneAggregate
 
                 @PersistenceMapping
                 class Customer(override val id: Int) : ReactiveEntityBase<Int, Customer>() {
@@ -1169,9 +1168,8 @@ internal class TableDefProcessorTest : FunSpec({
 
                 @PersistenceMapping
                 class Order(override val id: Long, customerId: Int) : ReactiveEntityBase<Long, Order>() {
+                    @ToOneAggregate(target = Customer::class, onDelete = CascadeAction.RESTRICT)
                     var customerId: Int by reactiveProperty(customerId)
-                    @Aggregate(onDelete = CascadeAction.RESTRICT)
-                    val customer by aggregate<Int, Customer> { customerId }
                     override val uniqueId: String get() = "${'$'}id"
                     override fun clone() = Order(id, customerId)
                 }
@@ -1188,7 +1186,7 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "onDelete = CascadeAction.RESTRICT"
     }
 
-    test("rejects DETACH on non-nullable backing scalar at compile time") {
+    test("rejects DETACH on non-nullable @ToOneAggregate scalar at compile time") {
         val result =
             KspTestSupport.compile(
                 TableDefProcessorProvider(),
@@ -1198,9 +1196,8 @@ internal class TableDefProcessorTest : FunSpec({
                 package test
                 import net.transgressoft.lirp.entity.CascadeAction
                 import net.transgressoft.lirp.entity.ReactiveEntityBase
-                import net.transgressoft.lirp.persistence.Aggregate
                 import net.transgressoft.lirp.persistence.PersistenceMapping
-                import net.transgressoft.lirp.persistence.aggregate
+                import net.transgressoft.lirp.persistence.ToOneAggregate
 
                 @PersistenceMapping
                 class Country(override val id: Long) : ReactiveEntityBase<Long, Country>() {
@@ -1211,9 +1208,8 @@ internal class TableDefProcessorTest : FunSpec({
 
                 @PersistenceMapping
                 class Address(override val id: Long, countryId: Long) : ReactiveEntityBase<Long, Address>() {
+                    @ToOneAggregate(target = Country::class, onDelete = CascadeAction.DETACH)
                     var countryId: Long by reactiveProperty(countryId)
-                    @Aggregate(onDelete = CascadeAction.DETACH)
-                    val country by aggregate<Long, Country> { countryId }
                     override val uniqueId: String get() = "${'$'}id"
                     override fun clone() = Address(id, countryId)
                 }
@@ -1225,7 +1221,7 @@ internal class TableDefProcessorTest : FunSpec({
         result.messages shouldContain "requires a nullable backing scalar"
     }
 
-    test("allows DETACH on nullable backing scalar and emits SET_NULL semantics") {
+    test("allows DETACH on nullable @ToOneAggregate scalar and emits SET_NULL semantics") {
         val result =
             KspTestSupport.compile(
                 TableDefProcessorProvider(),
@@ -1235,9 +1231,8 @@ internal class TableDefProcessorTest : FunSpec({
                 package test
                 import net.transgressoft.lirp.entity.CascadeAction
                 import net.transgressoft.lirp.entity.ReactiveEntityBase
-                import net.transgressoft.lirp.persistence.Aggregate
                 import net.transgressoft.lirp.persistence.PersistenceMapping
-                import net.transgressoft.lirp.persistence.aggregate
+                import net.transgressoft.lirp.persistence.ToOneAggregate
 
                 @PersistenceMapping
                 class Region(override val id: Long) : ReactiveEntityBase<Long, Region>() {
@@ -1248,9 +1243,8 @@ internal class TableDefProcessorTest : FunSpec({
 
                 @PersistenceMapping
                 class Site(override val id: Long, regionId: Long?) : ReactiveEntityBase<Long, Site>() {
+                    @ToOneAggregate(target = Region::class, onDelete = CascadeAction.DETACH)
                     var regionId: Long? by reactiveProperty(regionId)
-                    @Aggregate(onDelete = CascadeAction.DETACH)
-                    val region by aggregate<Long, Region> { regionId!! }
                     override val uniqueId: String get() = "${'$'}id"
                     override fun clone() = Site(id, regionId)
                 }
@@ -1264,7 +1258,7 @@ internal class TableDefProcessorTest : FunSpec({
         content shouldContain "onDelete = CascadeAction.DETACH"
     }
 
-    test("resolves backing scalar from optionalAggregate lambda and emits SET_NULL FK") {
+    test("emits SET_NULL FK for nullable @ToOneAggregate scalar with DETACH action") {
         val result =
             KspTestSupport.compile(
                 TableDefProcessorProvider(),
@@ -1274,18 +1268,14 @@ internal class TableDefProcessorTest : FunSpec({
                 package test
                 import net.transgressoft.lirp.entity.CascadeAction
                 import net.transgressoft.lirp.entity.ReactiveEntityBase
-                import net.transgressoft.lirp.persistence.Aggregate
-                import net.transgressoft.lirp.persistence.PersistenceIgnore
                 import net.transgressoft.lirp.persistence.PersistenceMapping
-                import net.transgressoft.lirp.persistence.optionalAggregate
+                import net.transgressoft.lirp.persistence.ToOneAggregate
                 import java.util.UUID
 
                 @PersistenceMapping
                 class Tenant(override val id: UUID, parentTenantId: UUID? = null) : ReactiveEntityBase<UUID, Tenant>() {
+                    @ToOneAggregate(target = Tenant::class, onDelete = CascadeAction.DETACH)
                     var parentTenantId: UUID? by reactiveProperty(parentTenantId)
-                    @Aggregate(onDelete = CascadeAction.DETACH)
-                    @PersistenceIgnore
-                    val parentTenant by optionalAggregate<UUID, Tenant> { parentTenantId }
                     override val uniqueId: String get() = "${'$'}id"
                     override fun clone() = Tenant(id, parentTenantId)
                 }
@@ -1310,7 +1300,7 @@ internal class TableDefProcessorTest : FunSpec({
                     """
                 package test
                 import net.transgressoft.lirp.entity.ReactiveEntityBase
-                import net.transgressoft.lirp.persistence.Aggregate
+                import net.transgressoft.lirp.persistence.ToManyAggregates
                 import net.transgressoft.lirp.persistence.PersistenceMapping
                 import net.transgressoft.lirp.persistence.aggregateList
 
@@ -1323,7 +1313,7 @@ internal class TableDefProcessorTest : FunSpec({
                 @PersistenceMapping
                 class Playlist(override val id: Int) : ReactiveEntityBase<Int, Playlist>() {
                     var trackIds: List<Int> = emptyList()
-                    @Aggregate
+                    @ToManyAggregates
                     val tracks by aggregateList<Int, Track>(trackIds)
 
                     override val uniqueId: String get() = "${'$'}id"
@@ -1350,7 +1340,7 @@ internal class TableDefProcessorTest : FunSpec({
                     """
                 package test
                 import net.transgressoft.lirp.entity.ReactiveEntityBase
-                import net.transgressoft.lirp.persistence.Aggregate
+                import net.transgressoft.lirp.persistence.ToManyAggregates
                 import net.transgressoft.lirp.persistence.PersistenceMapping
                 import net.transgressoft.lirp.persistence.aggregateList
 
@@ -1363,7 +1353,7 @@ internal class TableDefProcessorTest : FunSpec({
                 @PersistenceMapping
                 class Playlist(override val id: Int) : ReactiveEntityBase<Int, Playlist>() {
                     var trackIds: List<Int> = emptyList()
-                    @Aggregate
+                    @ToManyAggregates
                     val tracks by aggregateList<Int, Track>(trackIds)
 
                     override val uniqueId: String get() = "${'$'}id"
@@ -1390,7 +1380,7 @@ internal class TableDefProcessorTest : FunSpec({
                     """
                 package test
                 import net.transgressoft.lirp.entity.ReactiveEntityBase
-                import net.transgressoft.lirp.persistence.Aggregate
+                import net.transgressoft.lirp.persistence.ToManyAggregates
                 import net.transgressoft.lirp.persistence.PersistenceMapping
                 import net.transgressoft.lirp.persistence.aggregateList
 
@@ -1403,7 +1393,7 @@ internal class TableDefProcessorTest : FunSpec({
                 @PersistenceMapping
                 class Playlist(override val id: Int) : ReactiveEntityBase<Int, Playlist>() {
                     var trackIds: List<Int> = emptyList()
-                    @Aggregate
+                    @ToManyAggregates
                     val tracks by aggregateList<Int, Track>(trackIds)
 
                     override val uniqueId: String get() = "${'$'}id"
@@ -1457,7 +1447,7 @@ internal class TableDefProcessorTest : FunSpec({
                     """
                 package test
                 import net.transgressoft.lirp.entity.ReactiveEntityBase
-                import net.transgressoft.lirp.persistence.Aggregate
+                import net.transgressoft.lirp.persistence.ToManyAggregates
                 import net.transgressoft.lirp.persistence.PersistenceMapping
                 import net.transgressoft.lirp.persistence.aggregateList
 
@@ -1470,7 +1460,7 @@ internal class TableDefProcessorTest : FunSpec({
                 @PersistenceMapping
                 class RuntimePlaylist(override val id: Int) : ReactiveEntityBase<Int, RuntimePlaylist>() {
                     var trackIds: List<Int> = emptyList()
-                    @Aggregate
+                    @ToManyAggregates
                     val tracks by aggregateList<Int, Track>(trackIds)
 
                     override val uniqueId: String get() = "${'$'}id"
@@ -1547,7 +1537,7 @@ internal class TableDefProcessorTest : FunSpec({
                     """
                 package test
                 import net.transgressoft.lirp.entity.ReactiveEntityBase
-                import net.transgressoft.lirp.persistence.Aggregate
+                import net.transgressoft.lirp.persistence.ToManyAggregates
                 import net.transgressoft.lirp.persistence.PersistenceMapping
                 import net.transgressoft.lirp.persistence.aggregateList
 
@@ -1560,7 +1550,7 @@ internal class TableDefProcessorTest : FunSpec({
                 @PersistenceMapping
                 class BadPlaylist(override val id: Int) : ReactiveEntityBase<Int, BadPlaylist>() {
                     // No `var trackIds: List<Int>` backing field — KSP must surface this.
-                    @Aggregate
+                    @ToManyAggregates
                     val tracks by aggregateList<Int, Track>(emptyList())
 
                     override val uniqueId: String get() = "${'$'}id"

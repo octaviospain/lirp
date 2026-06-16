@@ -29,7 +29,7 @@ import org.junit.jupiter.api.DisplayName
 /**
  * KSP compilation tests for [RawInitializerProcessor], verifying that the processor generates
  * `_LirpRawInitializer` files for entities with reactive-property and non-reactive `var`
- * scalar fields, while excluding collection-typed `@Aggregate` properties.
+ * scalar fields, while excluding collection-typed `@ToManyAggregates` properties.
  */
 @OptIn(ExperimentalCompilerApi::class)
 @DisplayName("RawInitializerProcessor")
@@ -96,7 +96,7 @@ internal class RawInitializerProcessorTest : StringSpec({
         content shouldContain "writeReactivePropertyBackingField"
     }
 
-    "generates initializer for entity with @Aggregate single-ref Id" {
+    "generates initializer for entity with FK scalar Id property" {
         val result =
             KspTestSupport.compile(
                 RawInitializerProcessorProvider(),
@@ -441,7 +441,7 @@ internal class RawInitializerProcessorTest : StringSpec({
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         val content = result.generatedFileContent("Parent_LirpRawInitializer.kt")
         content shouldContain "name = \"name\""
-        // childIds is a plain `var List<Int>` (no @Aggregate annotation in this minimal test);
+        // childIds is a plain `var List<Int>` (no @ToManyAggregates annotation in this minimal test);
         // it is collection-typed so it must NOT receive a raw-init entry. The detection mirrors
         // the runtime behaviour for aggregateList/aggregateSet collection refs.
         content shouldNotContain "name = \"childIds\""

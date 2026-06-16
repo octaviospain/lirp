@@ -31,7 +31,7 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 
 /**
- * Integration coverage of the live-read invariant under `@Aggregate(onDelete = DETACH)` lifecycle.
+ * Integration coverage of the live-read invariant under `@ToOneAggregate(onDelete = DETACH)` / `@ToManyAggregates(onDelete = DETACH)` lifecycle.
  * Verifies that FK-nulling semantics propagate through the `Via*` AST nodes and the planner
  * without any caching or stale snapshot.
  *

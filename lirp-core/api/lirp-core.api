@@ -23,7 +23,10 @@ public abstract class net/transgressoft/lirp/entity/ReactiveEntityBase : net/tra
 	protected final fun enableEvents ()V
 	public fun getChanges ()Lkotlinx/coroutines/flow/SharedFlow;
 	public final fun getEventsDisabled ()Z
+	public final fun getExistingToOneRef (Ljava/lang/String;)Lnet/transgressoft/lirp/persistence/AggregateRefDelegate;
 	public fun getLastDateModified ()Ljava/time/LocalDateTime;
+	public final fun getOrComputeToOneRef (Ljava/lang/String;ZLkotlin/jvm/functions/Function0;)Lnet/transgressoft/lirp/persistence/AggregateRefDelegate;
+	public final fun getToOneRef (Ljava/lang/String;)Lnet/transgressoft/lirp/persistence/AggregateRefDelegate;
 	public fun isClosed ()Z
 	protected final fun mutateAndPublish (Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
 	protected final fun reactiveProperty (Ljava/lang/Object;)Lkotlin/properties/ReadWriteProperty;

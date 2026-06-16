@@ -20,10 +20,10 @@ package net.transgressoft.lirp.persistence.fx
 import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.entity.ReactiveEntityBase
-import net.transgressoft.lirp.persistence.Aggregate
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.FxObservableCollection
 import net.transgressoft.lirp.persistence.LirpRepository
+import net.transgressoft.lirp.persistence.ToManyAggregates
 import net.transgressoft.lirp.persistence.VolatileRepository
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.spec.style.StringSpec
@@ -44,10 +44,10 @@ class LazyFxPlaylistEntity(
 ) : ReactiveEntityBase<Int, LazyFxPlaylistEntity>(), IdentifiableEntity<Int> {
     override val uniqueId: String get() = "lazy-fx-playlist-$id"
 
-    @Aggregate(onDelete = CascadeAction.DETACH)
+    @ToManyAggregates(onDelete = CascadeAction.DETACH)
     val audioItems by fxAggregateList<Int, AudioItem>(initialAudioItemIds, dispatchToFxThread = false, lazySnapshot = true)
 
-    @Aggregate(onDelete = CascadeAction.DETACH)
+    @ToManyAggregates(onDelete = CascadeAction.DETACH)
     val relatedItems by fxAggregateSet<Int, AudioItem>(initialRelatedIds, dispatchToFxThread = false, lazySnapshot = true)
 
     override fun clone(): LazyFxPlaylistEntity = LazyFxPlaylistEntity(id, audioItems.referenceIds.toList(), LinkedHashSet(relatedItems.referenceIds))

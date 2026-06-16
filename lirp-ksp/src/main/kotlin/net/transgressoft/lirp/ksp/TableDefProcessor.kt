@@ -32,7 +32,8 @@ import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.validate
 import java.io.File
 
-private const val AGGREGATE_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.Aggregate"
+private const val TO_MANY_AGGREGATES_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.ToManyAggregates"
+private const val TO_ONE_AGGREGATE_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.ToOneAggregate"
 
 /**
  * Matches one `arm<K, E>("label") { scalar }` call, tolerating optional whitespace and an
@@ -121,7 +122,7 @@ class TableDefProcessor(
 
         val sqlTableDefAvailable = detectSqlTableDefAvailability(resolver)
 
-        // Collect @Aggregate properties per class (single-entity and collection refs) plus
+        // Collect aggregate-reference properties per class (single-entity and collection refs) plus
         // synthesised per-arm metadata from polymorphicAggregate() declarations. Performed once
         // per round so the per-entity codegen below has everything it needs without re-scanning.
         val aggregatesByClass = collectAggregateProperties(resolver, classes, unableToProcess)
@@ -131,7 +132,7 @@ class TableDefProcessor(
             val foreignKeys = sqlTableDefAvailable.let { foreignKeyAnalyzer.collectForeignKeys(classDecl, aggregates) }
             val junctionRefs =
                 if (sqlTableDefAvailable) foreignKeyAnalyzer.collectJunctionRefs(classDecl, aggregates) else emptyList()
-            // Backing collection fields for @Aggregate collection refs are never SQL columns —
+            // Backing collection fields for @ToManyAggregates collection refs are never SQL columns —
             // they are the in-memory mirror of junction-table rows. Exclude them from column
             // collection so the column-type mapper doesn't emit "Unsupported column type
             // 'kotlin.collections.List'" errors.
@@ -145,9 +146,18 @@ class TableDefProcessor(
                     }
                     .map { it.simpleName.asString() }
                     .toSet()
+            // Delegate-val @ToOneAggregate properties (e.g. `val label by aggregate<K, E> { labelId }`)
+            // are not SQL columns — the delegate property name resolves to AggregateRefDelegate, not a
+            // scalar type. Detect them by the fact that propertyName != backingScalarName (the
+            // backingScalarName was extracted from the lambda body and differs from the delegate val name).
+            val toOneDelegateValNames =
+                aggregates.filter { !it.isCollection && it.backingScalarName != null && it.backingScalarName != it.propertyName }
+                    .map { it.propertyName }
+                    .toSet()
             val excludedBackingFields =
                 aggregates.mapNotNullTo(mutableSetOf()) { if (it.isCollection) it.backingCollectionName else null } +
-                    polymorphicPropNames
+                    polymorphicPropNames +
+                    toOneDelegateValNames
             // inputs: backing scalar names for single-entity aggregates (FK columns). These are
             // excluded from converter routing because the FK column type is dictated by the
             // referenced entity's primary key type, not by a domain-to-scalar converter.
@@ -245,7 +255,7 @@ class TableDefProcessor(
     }
 
     /**
-     * Scans every entity class for `@Aggregate` properties and `polymorphicAggregate()` declarations,
+     * Scans every entity class for `@ToOneAggregate` / `@ToManyAggregates` properties and `polymorphicAggregate()` declarations,
      * classifies each as collection-typed or single-entity, and records the metadata needed to emit
      * junction tables (collection refs) and foreign-key constraints (single refs).
      *
@@ -257,7 +267,7 @@ class TableDefProcessor(
      * scalar property that backs the foreign key.
      *
      * For `polymorphicAggregate(arm<K,E>("label") { scalar }, …)` properties (which carry no
-     * `@Aggregate` annotation), all entity properties are scanned via source text and one synthetic
+     * aggregate annotation), all entity properties are scanned via source text and one synthetic
      * [AggregatePropertyMeta] is added per arm. Arms with `onDelete = NONE` are still synthesised
      * here so that any FK-level validation runs; [ForeignKeyAnalyzer.collectForeignKeys] drops
      * NONE-keyed entries before emitting constraints.
@@ -268,15 +278,24 @@ class TableDefProcessor(
         unableToProcess: MutableList<KSAnnotated>
     ): Map<KSClassDeclaration, List<AggregatePropertyMeta>> {
         val byClass = mutableMapOf<KSClassDeclaration, MutableList<AggregatePropertyMeta>>()
-        for (symbol in resolver.getSymbolsWithAnnotation(AGGREGATE_ANNOTATION_FQN)) {
+        for (symbol in resolver.getSymbolsWithAnnotation(TO_MANY_AGGREGATES_ANNOTATION_FQN)) {
             if (symbol !is KSPropertyDeclaration) continue
             val parent = symbol.parentDeclaration as? KSClassDeclaration ?: continue
             if (parent !in classes) continue
             val meta = analyzeAggregateProperty(symbol) ?: continue
             byClass.getOrPut(parent) { mutableListOf() }.add(meta)
         }
+        // Scan @ToOneAggregate-annotated FK scalar properties.
+        for (symbol in resolver.getSymbolsWithAnnotation(TO_ONE_AGGREGATE_ANNOTATION_FQN)) {
+            if (symbol !is KSPropertyDeclaration) continue
+            val parent = symbol.parentDeclaration as? KSClassDeclaration ?: continue
+            if (parent !in classes) continue
+            val meta = analyzeToOneAggregateProperty(symbol) ?: continue
+            byClass.getOrPut(parent) { mutableListOf() }.add(meta)
+        }
+
         // Scan all entity classes for polymorphicAggregate() declarations. These properties have no
-        // @Aggregate annotation, so they are invisible to the annotation-based pass above.
+        // no aggregate annotation, so they are invisible to the annotation-based pass above.
         for (classDecl in classes) {
             for (prop in classDecl.getAllProperties()) {
                 // Quick pre-filter: read minimal context to check for the factory keyword before
@@ -421,7 +440,7 @@ class TableDefProcessor(
     private fun analyzeAggregateProperty(prop: KSPropertyDeclaration): AggregatePropertyMeta? {
         val annotation =
             prop.annotations.firstOrNull {
-                it.annotationType.resolve().declaration.qualifiedName?.asString() == AGGREGATE_ANNOTATION_FQN
+                it.annotationType.resolve().declaration.qualifiedName?.asString() == TO_MANY_AGGREGATES_ANNOTATION_FQN
             } ?: return null
         val onDeleteName = foreignKeyAnalyzer.extractCascadeActionName(annotation.arguments.firstOrNull { it.name?.asString() == "onDelete" }?.value)
 
@@ -440,7 +459,7 @@ class TableDefProcessor(
         val referencedClass =
             findReferencedClassDeclaration(resolvedType, isCollection) ?: run {
                 logger.warn(
-                    "Could not resolve the referenced entity class for @Aggregate property " +
+                    "Could not resolve the referenced entity class for aggregate-reference property " +
                         "'${prop.simpleName.asString()}' — its declared type exposes no usable entity type " +
                         "argument; skipping FK/junction generation for it.",
                     prop
@@ -460,6 +479,67 @@ class TableDefProcessor(
             referencedClass = referencedClass,
             backingScalarName = backingScalarName,
             backingCollectionName = backingCollectionName
+        )
+    }
+
+    /**
+     * Builds [AggregatePropertyMeta] for a property annotated with
+     * [@ToOneAggregate][net.transgressoft.lirp.persistence.ToOneAggregate].
+     *
+     * Two forms are supported:
+     * - **Scalar FK form** (`@ToOneAggregate var xId: K`): the annotated property itself is the FK
+     *   column, so [AggregatePropertyMeta.backingScalarName] is the property's own name.
+     * - **Delegate-val form** (`@ToOneAggregate val x by aggregate<K, E> { xId }`): the FK column
+     *   is the scalar referenced inside the lambda body (`xId`), extracted via
+     *   [extractAggregateLambdaIdentifier]. When the lambda body is a computed expression rather than
+     *   a simple identifier, no FK metadata is emitted — the reference is valid in memory but has no
+     *   corresponding SQL column.
+     */
+    private fun analyzeToOneAggregateProperty(prop: KSPropertyDeclaration): AggregatePropertyMeta? {
+        val annotation =
+            prop.annotations.firstOrNull {
+                it.annotationType.resolve().declaration.qualifiedName?.asString() == TO_ONE_AGGREGATE_ANNOTATION_FQN
+            } ?: return null
+
+        val onDeleteName =
+            foreignKeyAnalyzer.extractCascadeActionName(
+                annotation.arguments.firstOrNull { it.name?.asString() == "onDelete" }?.value
+            )
+
+        // Extract target: KClass<*> → KSType → KSClassDeclaration (confirmed pattern from ColumnMetaBuilder.kt:684).
+        val targetArg =
+            annotation.arguments.firstOrNull { it.name?.asString() == "target" }?.value as? KSType
+                ?: return null
+        val referencedClass = targetArg.declaration as? KSClassDeclaration ?: return null
+
+        val sourceText = readSourceLines(prop, linesBefore = 0, linesAfter = 2) ?: ""
+        val isDelegateVal =
+            sourceText.contains("aggregate {") ||
+                sourceText.contains("aggregate<") ||
+                sourceText.contains("optionalAggregate") ||
+                sourceText.contains("mutableAggregate{") ||
+                sourceText.contains("mutableAggregate<")
+
+        val backingScalarName =
+            if (isDelegateVal) {
+                // For the delegate-val form the FK column is the lambda's referenced scalar,
+                // not the delegate property name. When the lambda body is a computed expression
+                // (not a bare identifier), there is no SQL FK column — return null to skip FK
+                // emission rather than emitting broken metadata.
+                extractAggregateLambdaIdentifier(sourceText) ?: return null
+            } else {
+                prop.simpleName.asString()
+            }
+
+        return AggregatePropertyMeta(
+            property = prop,
+            propertyName = prop.simpleName.asString(),
+            isCollection = false,
+            isOrdered = false,
+            onDeleteName = onDeleteName,
+            referencedClass = referencedClass,
+            backingScalarName = backingScalarName,
+            backingCollectionName = null
         )
     }
 

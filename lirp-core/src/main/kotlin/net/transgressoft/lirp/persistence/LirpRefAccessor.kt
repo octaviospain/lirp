@@ -19,10 +19,10 @@ package net.transgressoft.lirp.persistence
 
 /**
  * Contract for KSP-generated aggregate reference accessors, covering both single-entity
- * references ([@Aggregate][Aggregate]) and collection-typed references
- * (`@Aggregate` with `aggregateList`/`aggregateSet` delegates).
+ * references ([@ToOneAggregate][ToOneAggregate]) and collection-typed references
+ * (`@ToManyAggregates` with `aggregateList`/`aggregateSet` delegates).
  *
- * Each entity class with [@Aggregate][Aggregate] properties gets a compile-time
+ * Each entity class with `@ToOneAggregate` / `@ToManyAggregates` properties gets a compile-time
  * generated implementation of this interface. The generated class is named
  * `{EntityName}_LirpRefAccessor` and lives in the same package as the entity, discovered at
  * runtime via a convention-based [Class.forName] lookup.
@@ -42,7 +42,7 @@ interface LirpRefAccessor<T> {
 
     /**
      * Pre-built reference entries with direct ID getter and delegate getter lambdas for all
-     * [@Aggregate][Aggregate] properties.
+     * [@ToOneAggregate][ToOneAggregate] properties.
      *
      * Star-projected K since references on the same entity may point to differently-typed IDs.
      */
@@ -50,7 +50,7 @@ interface LirpRefAccessor<T> {
 
     /**
      * Pre-built collection reference entries with direct IDs getter and delegate getter lambdas
-     * for all collection-typed `@Aggregate` properties.
+     * for all collection-typed `@ToManyAggregates` properties.
      *
      * Returns an empty list by default for backward compatibility with existing generated accessors
      * that do not yet declare collection-typed references.

@@ -208,7 +208,7 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
         }
 
         /**
-         * Walks every deserialized entity, inspects its `@Aggregate` references against the live
+         * Walks every deserialized entity, inspects its aggregate references against the live
          * registries on the owning [LirpContext], and applies the configured [JsonFkPolicy].
          *
          * `LOG_AND_RECONCILE` (default) drops dangling collection IDs and nulls dangling nullable
@@ -221,13 +221,13 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
          * mirroring SQL `ON DELETE RESTRICT` semantics.
          *
          * Reconciliation only applies to mutable aggregate-collection delegates
-         * ([MutableAggregateList] / [MutableAggregateSet]) and to mutable scalar `@Aggregate`
+         * ([MutableAggregateList] / [MutableAggregateSet]) and to mutable scalar `@ToOneAggregate`
          * properties whose name follows the `${refName}Id` convention. Immutable collection refs
          * (whose IDs are captured at construction time and have no setter) cannot be reconciled in
          * place; for those a warning is logged and the dangling IDs remain.
          */
         private fun reconcileDanglingRefs(entities: Map<K, R>) {
-            // Self-reference fallback: when an entity's @Aggregate target is the same entity type
+            // Self-reference fallback: when an entity's aggregate target is the same entity type
             // being loaded, the registry hasn't seen these entities yet (loadFromStore runs before
             // addToMemoryOnly). Treat the in-progress map as resolvable so self-referencing
             // hierarchies survive a round-trip without being clobbered.
@@ -295,7 +295,7 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
 
                 if (fkPolicy == JsonFkPolicy.STRICT) {
                     throw LirpDeserializationException(
-                        "Dangling @Aggregate reference(s) found in ${entity.javaClass.simpleName}(id=${entity.id})." +
+                        "Dangling aggregate reference(s) found in ${entity.javaClass.simpleName}(id=${entity.id})." +
                             " Reference '${collEntry.refName}' points to missing ${collEntry.referencedClass.simpleName}" +
                             "(ids=$dangling)"
                     )
@@ -338,14 +338,12 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
         ) {
             for (entry in accessor.entries) {
                 val typedEntry = entry as net.transgressoft.lirp.persistence.RefEntry<Comparable<Any>, Any>
-                val refId =
-                    runCatching { typedEntry.idGetter(entity as Any) }
-                        .getOrNull() ?: continue
+                val refId = typedEntry.idGetter(entity as Any) ?: continue
                 if (isResolvable(refId as Any, entry.referencedClass, selfEntityClasses)) continue
 
                 if (fkPolicy == JsonFkPolicy.STRICT) {
                     throw LirpDeserializationException(
-                        "Dangling @Aggregate reference found in ${entity.javaClass.simpleName}(id=${entity.id})." +
+                        "Dangling aggregate reference found in ${entity.javaClass.simpleName}(id=${entity.id})." +
                             " Reference '${entry.refName}' points to missing ${entry.referencedClass.simpleName}(id=$refId)"
                     )
                 }

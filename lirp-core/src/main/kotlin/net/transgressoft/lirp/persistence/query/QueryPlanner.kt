@@ -146,7 +146,7 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
      *
      * **Live `referenceIds` reads.** Both Via execution paths read `parentProp.get(p)` at
      * per-parent matching time; no parent collection is snapshotted at planner entry. This
-     * is what makes `@Aggregate(onDelete = DETACH)` reconciliation surface in the next
+     * is what makes `@ToOneAggregate(onDelete = DETACH)` / `@ToManyAggregates(onDelete = DETACH)` reconciliation surface in the next
      * query call.
      *
      * **Note on ordering:** when [Query.orderBy] is non-empty, the candidate sequence

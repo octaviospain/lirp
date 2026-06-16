@@ -19,13 +19,13 @@ package net.transgressoft.lirp.persistence.query
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.entity.ReactiveEntityBase
-import net.transgressoft.lirp.persistence.Aggregate
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
 import net.transgressoft.lirp.persistence.BubbleUpAudioPlaylist
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.RegistryBase
+import net.transgressoft.lirp.persistence.ToOneAggregate
 import net.transgressoft.lirp.persistence.VolatileRepository
 import net.transgressoft.lirp.persistence.aggregate
 import io.kotest.core.annotation.DisplayName
@@ -43,7 +43,7 @@ import io.kotest.matchers.shouldBe
  * Verifies the convention-based `Class.forName("{Entity}_LirpViaAccessor")` discovery
  * mirrors [RegistryBase.discoverIndexes] semantics: double-checked locking, anonymous/local
  * class skip, `ClassNotFoundException` → null. The KSP-generated `BubbleUpAudioPlaylist_LirpViaAccessor`
- * provides the single-ref fixture; [SimpleNoAggregateEntity] (no `@Aggregate` properties)
+ * provides the single-ref fixture; [SimpleNoAggregateEntity] (no aggregate-reference properties)
  * exercises the negative path.
  */
 @DisplayName("Via accessor discovery")
@@ -92,7 +92,7 @@ internal class ViaAccessorDiscoveryTest : FunSpec({
         accessor1.singleEntries[0].referencedClass shouldBe AudioItem::class.java
     }
 
-    test("entity with no @Aggregate properties returns null accessor") {
+    test("entity with no aggregate-reference properties returns null accessor") {
         val repo = SimpleNoAggregateRepo()
         repo.add(SimpleNoAggregateEntity(1, "foo"))
         repo.viaAccessorOrNull().shouldBeNull()
@@ -103,8 +103,8 @@ internal class ViaAccessorDiscoveryTest : FunSpec({
         repo.close()
     }
 
-    test("anonymous subclass of an open @Aggregate-bearing entity returns null via the short-circuit, not via ClassNotFoundException") {
-        // OpenAggregateEntity is `open` and has an @Aggregate property, so KSP generates
+    test("anonymous subclass of an open entity bearing an aggregate reference returns null via the short-circuit, not via ClassNotFoundException") {
+        // OpenAggregateEntity is `open` and has an aggregate-reference property, so KSP generates
         // OpenAggregateEntity_LirpViaAccessor at test compile time. That accessor is loadable
         // via Class.forName for the BASE class. Without the isAnonymousClass / isLocalClass
         // short-circuit, the discovery path would attempt
@@ -133,7 +133,7 @@ internal class ViaAccessorDiscoveryTest : FunSpec({
 })
 
 /**
- * Open entity carrying an `@Aggregate` property so KSP generates a real
+ * Open entity carrying a `@ToOneAggregate` delegate-val property so KSP generates a real
  * `OpenAggregateEntity_LirpViaAccessor` at test compile time. Used by the short-circuit
  * isolation test: anonymous subclasses of this class must return null from
  * [RegistryBase.viaAccessorFor] via the early-return on `isAnonymousClass`, not via a
@@ -145,7 +145,7 @@ open class OpenAggregateEntity(
 ) : ReactiveEntityBase<Int, OpenAggregateEntity>() {
     override val uniqueId: String get() = "open-agg-$id"
 
-    @Aggregate
+    @ToOneAggregate(target = AudioItem::class)
     val audioItem by aggregate<Int, AudioItem> { audioItemId }
 
     override fun clone() = OpenAggregateEntity(id, audioItemId)
@@ -155,7 +155,7 @@ open class OpenAggregateEntity(
 internal class TestablePlaylistRepo :
     VolatileRepository<Int, BubbleUpAudioPlaylist>(LirpContext.default, "TestablePlaylists")
 
-/** Plain entity without any `@Aggregate` properties — no `_LirpViaAccessor` will exist. */
+/** Plain entity without any aggregate-reference properties — no `_LirpViaAccessor` will exist. */
 internal open class SimpleNoAggregateEntity(
     override val id: Int,
     val label: String,

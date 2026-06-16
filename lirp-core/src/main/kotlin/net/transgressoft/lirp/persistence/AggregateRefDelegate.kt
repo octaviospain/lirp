@@ -42,7 +42,7 @@ import kotlin.reflect.KProperty
  * This ensures that resolutions correctly reflect live registry state: removed entities return
  * `Optional.empty()` and ID changes on the owning entity return the new entity on the next call.
  *
- * **Bubble-up propagation:** When enabled via `@Aggregate(bubbleUp = true)`, the delegate
+ * **Bubble-up propagation:** When enabled via `@ToOneAggregate(bubbleUp = true)`, the delegate
  * subscribes to the referenced entity's `changes` flow after [wireBubbleUp] is called. Each child
  * [MutationEvent] is forwarded to the parent entity's publisher as a
  * [net.transgressoft.lirp.event.StandardAggregateMutationEvent], allowing parent subscribers to
@@ -67,14 +67,13 @@ import kotlin.reflect.KProperty
  *
  * Example:
  * ```kotlin
- * class Order(override val id: Long, var customerId: Int) : ReactiveEntityBase<Long, Order>() {
- *     @Aggregate(bubbleUp = true, onDelete = CascadeAction.DETACH)
- *     @Transient
- *     val customer by aggregate<Int, Customer> { customerId }
+ * class DefaultAudioPlaylist(override val id: Int, var trackId: Int) : ReactiveEntityBase<Int, DefaultAudioPlaylist>() {
+ *     @ToOneAggregate(target = AudioTrack::class, bubbleUp = true, onDelete = CascadeAction.DETACH)
+ *     val track by aggregate<Int, AudioTrack> { trackId }
  * }
  *
- * // After adding the order to its repository:
- * val resolved: Optional<Customer> = order.customer.resolve()
+ * // After adding the playlist to its repository:
+ * val resolved: Optional<AudioTrack> = playlist.track.resolve()
  * ```
  *
  * @param K the type of the referenced entity's ID
@@ -300,7 +299,8 @@ class AggregateRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
                 // Exclude the entity that is triggering the cascade
                 if (entity === owningEntity) continue
                 for (entry in accessor.entries) {
-                    check(!(entry.referencedClass == targetClass && entry.idGetter(entity) == targetId)) {
+                    val refId = entry.idGetter(entity) ?: continue
+                    check(!(entry.referencedClass == targetClass && refId == targetId)) {
                         "Cannot cascade-delete ${targetClass.simpleName}(id=$targetId): still referenced by other entities"
                     }
                 }
@@ -327,7 +327,7 @@ class AggregateRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
         val accessor = RegistryBase.refAccessorFor(referencedEntity.javaClass) ?: return
         for (entry in accessor.entries) {
             if (entry.cascadeAction != CascadeAction.CASCADE) continue
-            val targetId = entry.idGetter(referencedEntity)
+            val targetId = entry.idGetter(referencedEntity) ?: continue
             val targetKey = RegistryBase.cascadeKey(entry.referencedClass, targetId)
             check(targetKey !in visited) {
                 "Cascade cycle detected: entity '${entry.referencedClass.simpleName}(id=$targetId)' is already being cascaded on this thread"
@@ -407,14 +407,13 @@ class AggregateRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
  * [ReactiveEntityReference.resolve] call to obtain the current referenced entity ID.
  * Resolution always queries the bound registry fresh — no caching is applied.
  *
- * **Requires KSP** — annotate the delegated property with [@Aggregate][Aggregate]
+ * **Requires KSP** — annotate the delegated property with [@ToOneAggregate][ToOneAggregate]
  * so the KSP processor generates the required `{ClassName}_LirpRefAccessor` class.
  *
  * Example:
  * ```kotlin
- * @Aggregate(bubbleUp = true, onDelete = CascadeAction.DETACH)
- * @Transient
- * val customer by aggregate<Int, Customer> { customerId }
+ * @ToOneAggregate(target = AudioTrack::class, bubbleUp = true, onDelete = CascadeAction.DETACH)
+ * val track by aggregate<Int, AudioTrack> { trackId }
  * ```
  *
  * @param K the type of the referenced entity's ID, must be [Comparable]
@@ -436,14 +435,13 @@ fun <K : Comparable<K>, E : IdentifiableEntity<K>> aggregate(
  * Common for self-referential hierarchies (e.g., parent-child tenant trees) and optional
  * foreign key relationships.
  *
- * **Requires KSP** — annotate the delegated property with [@Aggregate][Aggregate]
+ * **Requires KSP** — annotate the delegated property with [@ToOneAggregate][ToOneAggregate]
  * so the KSP processor generates the required `{ClassName}_LirpRefAccessor` class.
  *
  * Example:
  * ```kotlin
- * @Aggregate(onDelete = CascadeAction.DETACH)
- * @Transient
- * val parentTenant by optionalAggregate<UUID, Tenant> { parentTenantId }
+ * @ToOneAggregate(target = AudioItem::class, onDelete = CascadeAction.DETACH)
+ * val audioItem by optionalAggregate<Int, AudioItem> { audioItemId }
  * ```
  *
  * @param K the type of the referenced entity's ID, must be [Comparable]

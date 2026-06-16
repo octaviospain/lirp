@@ -21,7 +21,7 @@ import kotlin.reflect.KClass
 
 /**
  * Marks a property whose type is `List<E>` or `Set<E>` as a *value-element collection*: the
- * elements have no independent identity (unlike `@Aggregate` references) and are persisted
+ * elements have no independent identity (unlike `@ToOneAggregate` / `@ToManyAggregates` references) and are persisted
  * alongside the parent entity in a single TEXT column carrying a JSON array of converter-encoded
  * element representations. The empty-collection invariant (`[]`) is preserved via the runtime
  * write path, not via a DDL DEFAULT clause (MySQL rejects `DEFAULT` on TEXT columns).

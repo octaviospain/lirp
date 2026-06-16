@@ -304,7 +304,7 @@ class MultiKeyAudioPlaylist(
 ) : ReactiveEntityBase<Int, MultiKeyAudioPlaylist>(), IdentifiableEntity<Int> {
     override val uniqueId: String get() = "multi-key-audio-playlist-$id"
 
-    @Aggregate(onDelete = CascadeAction.DETACH)
+    @ToManyAggregates(onDelete = CascadeAction.DETACH)
     val audioItems by mutableAggregateList<Int, MutableMultiKeyAudioItem>(initialAudioItemIds)
 
     override fun clone(): MultiKeyAudioPlaylist =
@@ -396,10 +396,10 @@ class DefaultAudioPlaylist(
 ) : MutablePlaylistBase<AudioItem, MutableAudioPlaylist>(id, name),
     MutableAudioPlaylist {
 
-    @Aggregate(onDelete = CascadeAction.DETACH)
+    @ToManyAggregates(onDelete = CascadeAction.DETACH)
     override val audioItems by mutableAggregateList<Int, AudioItem>(initialAudioItemIds)
 
-    @Aggregate(onDelete = CascadeAction.DETACH)
+    @ToManyAggregates(onDelete = CascadeAction.DETACH)
     override val playlists by mutableAggregateSet<Int, MutableAudioPlaylist>(initialPlaylistIds)
 
     override fun clone(): DefaultAudioPlaylist =
@@ -578,7 +578,7 @@ class CascadeAudioPlaylist(
 
     var name: String by reactiveProperty("")
 
-    @Aggregate(onDelete = CascadeAction.CASCADE)
+    @ToManyAggregates(onDelete = CascadeAction.CASCADE)
     val audioItems by mutableAggregateList<Int, AudioItem>(initialAudioItemIds)
 
     override fun clone(): CascadeAudioPlaylist =
@@ -609,7 +609,7 @@ class RestrictAudioPlaylist(
 
     var name: String by reactiveProperty(name)
 
-    @Aggregate(onDelete = CascadeAction.RESTRICT)
+    @ToManyAggregates(onDelete = CascadeAction.RESTRICT)
     val audioItems by mutableAggregateList<Int, AudioItem>(initialAudioItemIds)
 
     override fun clone(): RestrictAudioPlaylist =
@@ -639,7 +639,7 @@ class NoneAudioPlaylist(
 
     var name: String by reactiveProperty(name)
 
-    @Aggregate(onDelete = CascadeAction.NONE)
+    @ToManyAggregates(onDelete = CascadeAction.NONE)
     val audioItems by mutableAggregateList<Int, AudioItem>(initialAudioItemIds)
 
     override fun clone(): NoneAudioPlaylist =
@@ -738,7 +738,7 @@ class ImmutableAudioPlaylist(
 ) : ReactiveEntityBase<Int, ImmutableAudioPlaylist>(), IdentifiableEntity<Int> {
     override val uniqueId: String get() = "immutable-audio-playlist-$id"
 
-    @Aggregate
+    @ToManyAggregates
     val audioItems by aggregateList<Int, AudioItem>(initialAudioItemIds)
 
     override fun clone(): ImmutableAudioPlaylist =
@@ -765,7 +765,7 @@ class ImmutablePlaylistGroup(
 ) : ReactiveEntityBase<Int, ImmutablePlaylistGroup>(), IdentifiableEntity<Int> {
     override val uniqueId: String get() = "immutable-playlist-group-$id"
 
-    @Aggregate
+    @ToManyAggregates
     val playlists by aggregateSet<Int, ImmutableAudioPlaylist>(initialPlaylistIds)
 
     override fun clone(): ImmutablePlaylistGroup =
@@ -818,7 +818,7 @@ class DetachAudioPlaylist(
 
     var name: String by reactiveProperty("")
 
-    @Aggregate(onDelete = CascadeAction.DETACH)
+    @ToManyAggregates(onDelete = CascadeAction.DETACH)
     val audioItems by mutableAggregateList<Int, AudioItem>(initialAudioItemIds)
 
     override fun clone(): DetachAudioPlaylist =
@@ -863,7 +863,7 @@ class CascadeMusicPlaylistGroup(
 ) : ReactiveEntityBase<Int, CascadeMusicPlaylistGroup>(), IdentifiableEntity<Int> {
     override val uniqueId: String get() = "cascade-music-playlist-group-$id"
 
-    @Aggregate(onDelete = CascadeAction.CASCADE)
+    @ToManyAggregates(onDelete = CascadeAction.CASCADE)
     val playlists by aggregateSet<Int, MutableAudioPlaylist>(initialPlaylistIds)
 
     override fun clone(): CascadeMusicPlaylistGroup =
@@ -890,7 +890,7 @@ class RestrictMusicPlaylistGroup(
 ) : ReactiveEntityBase<Int, RestrictMusicPlaylistGroup>(), IdentifiableEntity<Int> {
     override val uniqueId: String get() = "restrict-music-playlist-group-$id"
 
-    @Aggregate(onDelete = CascadeAction.RESTRICT)
+    @ToManyAggregates(onDelete = CascadeAction.RESTRICT)
     val playlists by aggregateSet<Int, MutableAudioPlaylist>(initialPlaylistIds)
 
     override fun clone(): RestrictMusicPlaylistGroup =
@@ -917,7 +917,7 @@ class DetachMusicPlaylistGroup(
 ) : ReactiveEntityBase<Int, DetachMusicPlaylistGroup>(), IdentifiableEntity<Int> {
     override val uniqueId: String get() = "detach-music-playlist-group-$id"
 
-    @Aggregate(onDelete = CascadeAction.DETACH)
+    @ToManyAggregates(onDelete = CascadeAction.DETACH)
     val playlists by aggregateSet<Int, MutableAudioPlaylist>(initialPlaylistIds)
 
     override fun clone(): DetachMusicPlaylistGroup =
@@ -944,7 +944,7 @@ class NoneMusicPlaylistGroup(
 ) : ReactiveEntityBase<Int, NoneMusicPlaylistGroup>(), IdentifiableEntity<Int> {
     override val uniqueId: String get() = "none-music-playlist-group-$id"
 
-    @Aggregate(onDelete = CascadeAction.NONE)
+    @ToManyAggregates(onDelete = CascadeAction.NONE)
     val playlists by aggregateSet<Int, MutableAudioPlaylist>(initialPlaylistIds)
 
     override fun clone(): NoneMusicPlaylistGroup =
@@ -1018,7 +1018,7 @@ class BubbleUpAudioPlaylist(
 ) : ReactiveEntityBase<Int, BubbleUpAudioPlaylist>(), IdentifiableEntity<Int> {
     override val uniqueId: String get() = "bubble-up-audio-playlist-$id"
 
-    @Aggregate(bubbleUp = true)
+    @ToOneAggregate(target = AudioItem::class, bubbleUp = true)
     val audioItem by aggregate<Int, AudioItem> { audioItemId }
 
     override fun clone(): BubbleUpAudioPlaylist = BubbleUpAudioPlaylist(id, audioItemId)
@@ -1052,6 +1052,7 @@ class BubbleUpAudioPlaylistRepo internal constructor(context: LirpContext) :
  * Leaf entity in the transitive bubble-up chain with a mutable [trackName] property.
  * Replaces [EntityA] with music-domain naming.
  */
+@PersistenceMapping(name = "bubble_audio_track")
 class BubbleAudioTrack(
     override val id: Int,
     val initialTrackName: String
@@ -1080,15 +1081,18 @@ class BubbleAudioTrack(
 /**
  * Middle entity in the transitive bubble-up chain: references [BubbleAudioTrack] with
  * bubble-up enabled. Replaces [EntityB] with music-domain naming.
+ *
+ * Navigation via generated extension `BubbleAudioPlaylist.track`.
  */
+@PersistenceMapping(name = "bubble_audio_playlist")
 class BubbleAudioPlaylist(
     override val id: Int,
-    var trackId: Int
+    trackId: Int
 ) : ReactiveEntityBase<Int, BubbleAudioPlaylist>(), IdentifiableEntity<Int> {
     override val uniqueId: String get() = "bubble-audio-playlist-$id"
 
-    @Aggregate(bubbleUp = true)
-    val track by aggregate<Int, BubbleAudioTrack> { trackId }
+    @ToOneAggregate(target = BubbleAudioTrack::class, bubbleUp = true, onDelete = CascadeAction.NONE)
+    var trackId: Int by reactiveProperty(trackId)
 
     override fun clone(): BubbleAudioPlaylist = BubbleAudioPlaylist(id, trackId)
 
@@ -1115,7 +1119,7 @@ class BubbleAudioLibrary(
 ) : ReactiveEntityBase<Int, BubbleAudioLibrary>(), IdentifiableEntity<Int> {
     override val uniqueId: String get() = "bubble-audio-library-$id"
 
-    @Aggregate(bubbleUp = true)
+    @ToOneAggregate(target = BubbleAudioPlaylist::class, bubbleUp = true)
     val playlist by aggregate<Int, BubbleAudioPlaylist> { playlistId }
 
     override fun clone(): BubbleAudioLibrary = BubbleAudioLibrary(id, playlistId)
@@ -1178,7 +1182,7 @@ class MutableRefPlaylist(
 
     override val uniqueId: String get() = "mutable-ref-playlist-$id"
 
-    @Aggregate(bubbleUp = true)
+    @ToOneAggregate(target = AudioItem::class, bubbleUp = true)
     val audioItem by aggregate<Int, AudioItem> { audioItemId }
 
     override fun clone(): MutableRefPlaylist = MutableRefPlaylist(id, audioItemId)
@@ -1224,7 +1228,7 @@ class OptionalRefPlaylist(
 ) : ReactiveEntityBase<Int, OptionalRefPlaylist>(), IdentifiableEntity<Int> {
     override val uniqueId: String get() = "optional-ref-playlist-$id"
 
-    @Aggregate(bubbleUp = false, onDelete = CascadeAction.DETACH)
+    @ToOneAggregate(target = AudioItem::class, bubbleUp = false, onDelete = CascadeAction.DETACH)
     val audioItem by optionalAggregate<Int, AudioItem> { audioItemId }
 
     override fun clone(): OptionalRefPlaylist = OptionalRefPlaylist(id, audioItemId)
@@ -1314,7 +1318,7 @@ class CyclicPlaylist(
 ) : ReactiveEntityBase<Long, CyclicPlaylist>(), IdentifiableEntity<Long> {
     override val uniqueId: String get() = "cyclic-playlist-$id"
 
-    @Aggregate(onDelete = CascadeAction.CASCADE)
+    @ToOneAggregate(target = CyclicPlaylistChild::class, onDelete = CascadeAction.CASCADE)
     val child by aggregate<Long, CyclicPlaylistChild> { childId }
 
     override fun clone(): CyclicPlaylist = CyclicPlaylist(id, childId)
@@ -1340,7 +1344,7 @@ class CyclicPlaylistChild(
 ) : ReactiveEntityBase<Long, CyclicPlaylistChild>(), IdentifiableEntity<Long> {
     override val uniqueId: String get() = "cyclic-playlist-child-$id"
 
-    @Aggregate(onDelete = CascadeAction.CASCADE)
+    @ToOneAggregate(target = CyclicPlaylist::class, onDelete = CascadeAction.CASCADE)
     val parent by aggregate<Long, CyclicPlaylist> { parentId }
 
     override fun clone(): CyclicPlaylistChild = CyclicPlaylistChild(id, parentId)
@@ -1391,7 +1395,7 @@ class RestrictRefPlaylist(
 ) : ReactiveEntityBase<Int, RestrictRefPlaylist>(), IdentifiableEntity<Int> {
     override val uniqueId: String get() = "restrict-ref-playlist-$id"
 
-    @Aggregate(onDelete = CascadeAction.RESTRICT)
+    @ToOneAggregate(target = AudioItem::class, onDelete = CascadeAction.RESTRICT)
     val audioItem by aggregate<Int, AudioItem> { audioItemId }
 
     override fun clone(): RestrictRefPlaylist = RestrictRefPlaylist(id, audioItemId)
@@ -1428,7 +1432,7 @@ class NoneRefPlaylist(
 ) : ReactiveEntityBase<Int, NoneRefPlaylist>(), IdentifiableEntity<Int> {
     override val uniqueId: String get() = "none-ref-playlist-$id"
 
-    @Aggregate(onDelete = CascadeAction.NONE)
+    @ToOneAggregate(target = AudioItem::class, onDelete = CascadeAction.NONE)
     val audioItem by aggregate<Int, AudioItem> { audioItemId }
 
     override fun clone(): NoneRefPlaylist = NoneRefPlaylist(id, audioItemId)

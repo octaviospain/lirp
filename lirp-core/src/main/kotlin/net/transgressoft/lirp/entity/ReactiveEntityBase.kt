@@ -109,7 +109,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
 
     /**
      * Cached KSP-generated [LirpRefAccessor] for this entity's class, discovered lazily on first [close].
-     * Null if no accessor was found (entity has no [@Aggregate][net.transgressoft.lirp.persistence.Aggregate] properties).
+     * Null if no accessor was found (entity has no `@ToOneAggregate` / `@ToManyAggregates` properties).
      */
     @Volatile
     private var _refAccessor: LirpRefAccessor<*>? = null
@@ -226,7 +226,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
      * double-checked locking so the lookup runs at most once per entity instance and the result
      * is visible to all threads.
      *
-     * Returns `null` if no accessor was found (entity has no [@Aggregate][net.transgressoft.lirp.persistence.Aggregate]
+     * Returns `null` if no accessor was found (entity has no `@ToOneAggregate` / `@ToManyAggregates`
      * properties or KSP was not applied). Entities GC'd without [close] never incur this cost —
      * consistent with the lazy publisher pattern.
      */
@@ -281,8 +281,8 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
      * Accepts any [LirpEvent] as [childEvent] — both [MutationEvent] for property-level bubble-up
      * and [CollectionChangeEvent] for collection-level diffs.
      *
-     * @param refName the property name of the [@Aggregate][net.transgressoft.lirp.persistence.Aggregate]
-     *   annotated property that triggered the bubble-up
+     * @param refName the property name of the aggregate-reference property
+     *   (`@ToOneAggregate` or `@ToManyAggregates`) that triggered the bubble-up
      * @param childEvent the original [LirpEvent] from the referenced child entity or collection
      */
     @Suppress("UNCHECKED_CAST")
@@ -642,6 +642,74 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
      * @return the result of [action]
      */
     fun <T> withEventsDisabledForClone(action: () -> T): T = withEventsDisabled(action)
+
+    @Volatile
+    private var _toOneRefDelegates: MutableMap<String, AggregateRefDelegate<*, *>>? = null
+
+    /**
+     * Stores a to-one ref delegate under its accessor name (e.g. `"company"`) at bind time.
+     *
+     * Called from [getOrComputeToOneRef] the first time a to-one ref delegate is needed.
+     * The accessor name is derived from the scalar name by stripping the trailing `Id` suffix
+     * (e.g. `"companyId"` → `"company"`).
+     */
+    private fun storeToOneRef(refName: String, delegate: AggregateRefDelegate<*, *>) {
+        val map =
+            _toOneRefDelegates
+                ?: synchronized(this) {
+                    _toOneRefDelegates
+                        ?: java.util.concurrent.ConcurrentHashMap<String, AggregateRefDelegate<*, *>>()
+                            .also { _toOneRefDelegates = it }
+                }
+        map[refName] = delegate
+    }
+
+    /**
+     * Returns the [AggregateRefDelegate] stored under [refName], or throws [IllegalStateException]
+     * if no delegate is found — which indicates either the entity was not added to a repository,
+     * or the accessor was invoked before the repository had a chance to bind the ref.
+     */
+    fun getToOneRef(refName: String): AggregateRefDelegate<*, *> =
+        _toOneRefDelegates?.get(refName)
+            ?: error(
+                "No AggregateRefDelegate registered for to-one ref '$refName' on ${this::class.java.simpleName}. " +
+                    "Ensure the entity is added to its repository before navigating via the extension accessor."
+            )
+
+    /**
+     * Returns the [AggregateRefDelegate] stored under [refName] if one already exists, or `null`
+     * if no delegate has been created yet. Unlike [getToOneRef], this never throws and never
+     * allocates a new delegate — it is safe to call during teardown (e.g., [close]).
+     */
+    fun getExistingToOneRef(refName: String): AggregateRefDelegate<*, *>? = _toOneRefDelegates?.get(refName)
+
+    /**
+     * Returns the [AggregateRefDelegate] stored under [refName], constructing and storing one if
+     * absent. Called from the KSP-generated `_LirpRefAccessor` delegate getter so that the delegate
+     * is created at the same time `bindEntityRefs` first calls the getter — no additional call site
+     * in [net.transgressoft.lirp.persistence.RegistryBase] is needed.
+     *
+     * The [idFn] lambda captures the entity scalar at generation time and is forwarded to
+     * [AggregateRefDelegate] as its `idFn` for lazy resolution. [isOptional] drives
+     * `_isOptional` on the delegate, mirroring the scalar's nullability.
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun getOrComputeToOneRef(
+        refName: String,
+        isOptional: Boolean,
+        idFn: () -> Comparable<Any>?
+    ): AggregateRefDelegate<*, *> {
+        _toOneRefDelegates?.get(refName)?.let { return it }
+        return synchronized(this) {
+            _toOneRefDelegates?.get(refName)
+                ?: (
+                    AggregateRefDelegate<Comparable<Any>, net.transgressoft.lirp.entity.IdentifiableEntity<Comparable<Any>>>(
+                        idFn = idFn,
+                        _isOptional = isOptional
+                    ) as AggregateRefDelegate<*, *>
+                ).also { storeToOneRef(refName, it) }
+        }
+    }
 
     @Volatile
     private var _delegateRegistry: Map<String, LirpDelegate>? = null

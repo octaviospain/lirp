@@ -21,14 +21,17 @@ package net.transgressoft.lirp.entity
  * Defines the action to take on a referenced aggregate entity when the referencing entity is
  * removed from its repository or closed.
  *
- * Configured per reference via [@Aggregate][net.transgressoft.lirp.persistence.Aggregate]:
+ * Configured per reference via [@ToOneAggregate][net.transgressoft.lirp.persistence.ToOneAggregate]
+ * (single-entity FK ref) or [@ToManyAggregates][net.transgressoft.lirp.persistence.ToManyAggregates]
+ * (collection ref):
  *
  * ```kotlin
- * @Aggregate(onDelete = CascadeAction.CASCADE)
+ * @ToOneAggregate(target = Order::class, onDelete = CascadeAction.CASCADE)
  * val order by aggregate<Long, Order> { orderId }
  * ```
  *
- * @see net.transgressoft.lirp.persistence.Aggregate
+ * @see net.transgressoft.lirp.persistence.ToOneAggregate
+ * @see net.transgressoft.lirp.persistence.ToManyAggregates
  */
 enum class CascadeAction {
 

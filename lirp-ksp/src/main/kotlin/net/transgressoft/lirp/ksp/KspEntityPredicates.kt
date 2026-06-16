@@ -115,8 +115,8 @@ internal fun isFxScalarType(type: KSType, visited: MutableSet<String> = mutableS
  *   and `aggregateSet` delegates whose declared types are `List`/`Set`).
  *
  * The remaining set covers ordinary `reactiveProperty(initialValue)`, `@Version`-annotated
- * `var version: Long by reactiveProperty(0L)`, and `@Aggregate` single-ref Id properties — all
- * reactive-backed delegate types.
+ * `var version: Long by reactiveProperty(0L)`, and `@ToOneAggregate` single-ref Id properties — all
+ * reactive-backed delegate types — the last bucket also covers `@ToOneAggregate` single-ref Id properties.
  */
 internal fun isReactivePropertyDelegate(prop: KSPropertyDeclaration): Boolean {
     if (!prop.isDelegated() || !prop.isMutable) return false

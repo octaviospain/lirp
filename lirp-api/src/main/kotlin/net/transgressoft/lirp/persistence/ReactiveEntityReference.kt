@@ -24,7 +24,7 @@ import java.util.Optional
  * A lazily-resolved reference to another aggregate entity stored in a [Registry].
  *
  * Instances are returned by property delegates declared with
- * [@Aggregate][Aggregate] in entity classes. The delegate holds only the raw ID
+ * [@ToOneAggregate][net.transgressoft.lirp.persistence.ToOneAggregate] in entity classes. The delegate holds only the raw ID
  * of the referenced entity; the actual entity lookup is deferred to the first [resolve] call.
  *
  * [resolve] returns [Optional] for Java interoperability — callers do not need Kotlin-specific

@@ -47,7 +47,7 @@ data class JunctionColumnDef(
  * `aggregateSet` collection reference.
  *
  * Generated at compile time by the KSP `TableDefProcessor` as a sibling object of the parent
- * entity's `_LirpTableDef`. One descriptor is emitted per `@Aggregate` collection property; the
+ * entity's `_LirpTableDef`. One descriptor is emitted per `@ToManyAggregates` collection property; the
  * generated object name follows the convention `{ParentSimpleName}_{PropertySimpleName}_LirpJunctionTableDef`.
  *
  * Lives in `lirp-sql` rather than `lirp-api` because junction tables are a SQL-specific concept —
@@ -56,7 +56,7 @@ data class JunctionColumnDef(
  * The descriptor carries the foreign-key cascade policy for both sides:
  * - [parentFkOnDelete] is always [CascadeAction.CASCADE] (housekeeping — when the parent entity is
  *   deleted, the orphaned junction rows are reclaimed by the database itself).
- * - [itemFkOnDelete] mirrors the user-declared `@Aggregate(onDelete = …)` value and translates to
+ * - [itemFkOnDelete] mirrors the user-declared `@ToManyAggregates(onDelete = …)` value and translates to
  *   the SQL `ON DELETE` clause on the item-side foreign key.
  */
 interface JunctionTableDef {
@@ -64,7 +64,7 @@ interface JunctionTableDef {
     /** The junction table name (e.g., `playlist_tracks`). */
     val tableName: String
 
-    /** The SQL table name of the parent entity (the entity owning the `@Aggregate` property). */
+    /** The SQL table name of the parent entity (the entity owning the `@ToManyAggregates` property). */
     val parentTableName: String
 
     /** The SQL table name of the referenced item entity. */
@@ -83,6 +83,6 @@ interface JunctionTableDef {
     /** Always [CascadeAction.CASCADE] — orphaned junction rows are housekeeping. */
     val parentFkOnDelete: CascadeAction
 
-    /** The user-declared `@Aggregate(onDelete = …)` policy applied to the item-side foreign key. */
+    /** The user-declared `@ToManyAggregates(onDelete = …)` policy applied to the item-side foreign key. */
     val itemFkOnDelete: CascadeAction
 }

@@ -25,11 +25,11 @@ import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.google.devtools.ksp.symbol.KSType
 
 /**
- * Analyzes `@Aggregate` properties to produce foreign-key constraints and junction-table
- * descriptors. Handles:
- * - Single-entity aggregates (`aggregate { … }`): resolved to [ForeignKeyMeta] entries that drive
+ * Analyzes aggregate-reference properties (`@ToOneAggregate` / `@ToManyAggregates`) to produce
+ * foreign-key constraints and junction-table descriptors. Handles:
+ * - Single-entity aggregates (`@ToOneAggregate`, `aggregate { … }`): resolved to [ForeignKeyMeta] entries that drive
  *   the `foreignKeys()` override on the parent's `_LirpTableDef`.
- * - Collection aggregates (`aggregateList(…)` / `aggregateSet(…)`): resolved to [JunctionRefInfo]
+ * - Collection aggregates (`@ToManyAggregates`, `aggregateList(…)` / `aggregateSet(…)`): resolved to [JunctionRefInfo]
  *   entries and generates the `{Parent}_{Property}_LirpJunctionTableDef` companion objects.
  *
  * All structural validation (FK-04, FK-05 error codes) is performed here so that the processor
@@ -42,13 +42,13 @@ internal class ForeignKeyAnalyzer(
 ) {
 
     /**
-     * Builds the [ForeignKeyMeta] list for an entity by walking its single-entity `@Aggregate`
+     * Builds the [ForeignKeyMeta] list for an entity by walking its single-entity `@ToOneAggregate`
      * properties. Collection refs are skipped — they are handled by junction-table descriptors.
      *
      * Validates each single-entity ref:
      *  - The lambda body of `aggregate { … }` must be a bare identifier naming the backing scalar.
      *  - The backing scalar property must exist on the same class.
-     *  - `@Aggregate(onDelete = DETACH)` requires the backing scalar to be nullable (a null value signals the relationship is unset).
+     *  - `@ToOneAggregate(onDelete = DETACH)` requires the backing scalar to be nullable (a null value signals the relationship is unset).
      *
      * Drops entries with `onDelete = NONE` — by convention, NONE means "no FK clause at all".
      */
@@ -67,7 +67,7 @@ internal class ForeignKeyAnalyzer(
                 agg.backingScalarName
                     ?: run {
                         logger.error(
-                            "Cannot determine backing scalar for @Aggregate property '$propName'. " +
+                            "Cannot determine backing scalar for @ToOneAggregate property '$propName'. " +
                                 "The aggregate { … } lambda must reference exactly one scalar property.",
                             agg.property
                         )
@@ -77,7 +77,7 @@ internal class ForeignKeyAnalyzer(
             val scalarProp = propertiesByName[scalarName]
             if (scalarProp == null) {
                 logger.error(
-                    "@Aggregate property '$propName' references unknown scalar '$scalarName'.",
+                    "@ToOneAggregate property '$propName' references unknown scalar '$scalarName'.",
                     agg.property
                 )
                 continue
@@ -86,7 +86,7 @@ internal class ForeignKeyAnalyzer(
             val onDelete = agg.onDeleteName
             if (onDelete == "DETACH" && !scalarProp.type.resolve().isMarkedNullable) {
                 logger.error(
-                    "@Aggregate(onDelete = DETACH) on property '$propName' requires a nullable backing scalar. " +
+                    "@ToOneAggregate(onDelete = DETACH) on property '$propName' requires a nullable backing scalar. " +
                         "Make '$scalarName' nullable (e.g., 'Long?') or choose a different CascadeAction " +
                         "(RESTRICT, CASCADE, NONE).",
                     agg.property
@@ -147,7 +147,7 @@ internal class ForeignKeyAnalyzer(
     }
 
     /**
-     * Builds the [JunctionRefInfo] list for one entity by walking its collection-typed `@Aggregate`
+     * Builds the [JunctionRefInfo] list for one entity by walking its collection-typed `@ToManyAggregates`
      * properties.
      *
      * Validates each collection ref:
@@ -178,7 +178,7 @@ internal class ForeignKeyAnalyzer(
 
     /**
      * Emits a `{Parent}_{Property}_LirpJunctionTableDef` object that implements `JunctionTableDef`
-     * for one collection-typed `@Aggregate` property.
+     * for one collection-typed `@ToManyAggregates` property.
      *
      * The descriptor is the SQL-side companion of the parent's `_LirpTableDef` and lives in the
      * same package. Its column shape is fixed: `(parent_id, item_id)` always form the composite
@@ -212,9 +212,9 @@ internal class ForeignKeyAnalyzer(
                 fileName = descriptorName
             )
 
-        // Item-side cascade action defaults to DETACH per @Aggregate's annotation default; that
+        // Item-side cascade action defaults to DETACH per @ToManyAggregates' annotation default; that
         // mirrors the existing in-memory behaviour for collection refs and is what consumers see
-        // when they add @Aggregate without arguments.
+        // when they add @ToManyAggregates without arguments.
         val itemOnDelete = agg.onDeleteName
 
         file.write(
@@ -310,7 +310,7 @@ internal class ForeignKeyAnalyzer(
 
     private fun logFk04MissingBacking(agg: AggregatePropertyMeta, parentSimpleName: String) {
         logger.error(
-            "KSP[FK-04]: @Aggregate collection property '${agg.propertyName}' on " +
+            "KSP[FK-04]: @ToManyAggregates collection property '${agg.propertyName}' on " +
                 "'$parentSimpleName' must be a 'var List<K>'/'var Set<K>' bound to a writable " +
                 "backing field passed as the first positional argument to " +
                 "${if (agg.isOrdered) "aggregateList" else "aggregateSet"}(<field>). " +
@@ -321,7 +321,7 @@ internal class ForeignKeyAnalyzer(
 
     private fun logFk04MissingBackingProp(agg: AggregatePropertyMeta, parentSimpleName: String, backingName: String) {
         logger.error(
-            "KSP[FK-04]: backing field '$backingName' for @Aggregate property " +
+            "KSP[FK-04]: backing field '$backingName' for @ToManyAggregates property " +
                 "'${agg.propertyName}' on '$parentSimpleName' must be a 'var List<K>'/" +
                 "'var Set<K>' declared on the same class.",
             agg.property
@@ -330,7 +330,7 @@ internal class ForeignKeyAnalyzer(
 
     private fun logFk04ImmutableBacking(agg: AggregatePropertyMeta, parentSimpleName: String, backingName: String) {
         logger.error(
-            "KSP[FK-04]: backing field '$backingName' for @Aggregate property " +
+            "KSP[FK-04]: backing field '$backingName' for @ToManyAggregates property " +
                 "'${agg.propertyName}' on '$parentSimpleName' must be a 'var List<K>'/" +
                 "'var Set<K>' (declared 'val').",
             agg.property
@@ -347,7 +347,7 @@ internal class ForeignKeyAnalyzer(
         val isSet = typeFqn == "kotlin.collections.Set" || typeFqn == "kotlin.collections.MutableSet"
         if (agg.isOrdered && !isList) {
             logger.error(
-                "KSP[FK-04]: backing field '$backingName' for @Aggregate property " +
+                "KSP[FK-04]: backing field '$backingName' for @ToManyAggregates property " +
                     "'${agg.propertyName}' on '$parentSimpleName' must be a 'var List<K>' for " +
                     "aggregateList; found '$typeFqn'.",
                 agg.property
@@ -356,7 +356,7 @@ internal class ForeignKeyAnalyzer(
         }
         if (!agg.isOrdered && !isSet) {
             logger.error(
-                "KSP[FK-04]: backing field '$backingName' for @Aggregate property " +
+                "KSP[FK-04]: backing field '$backingName' for @ToManyAggregates property " +
                     "'${agg.propertyName}' on '$parentSimpleName' must be a 'var Set<K>' for " +
                     "aggregateSet; found '$typeFqn'.",
                 agg.property

@@ -192,11 +192,6 @@ public final class net/transgressoft/lirp/event/MutationEvent$Type : java/lang/E
 	public static fun values ()[Lnet/transgressoft/lirp/event/MutationEvent$Type;
 }
 
-public abstract interface annotation class net/transgressoft/lirp/persistence/Aggregate : java/lang/annotation/Annotation {
-	public abstract fun bubbleUp ()Z
-	public abstract fun onDelete ()Lnet/transgressoft/lirp/entity/CascadeAction;
-}
-
 public abstract interface class net/transgressoft/lirp/persistence/AggregateCollectionRef {
 	public abstract fun getReferenceIds ()Ljava/util/Collection;
 	public abstract fun resolveAll ()Ljava/util/Collection;
@@ -477,6 +472,17 @@ public final class net/transgressoft/lirp/persistence/Repository$DefaultImpls {
 	public static fun minus (Lnet/transgressoft/lirp/persistence/Repository;Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
 	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/Repository;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/Repository;Lkotlin/jvm/functions/Function2;Lnet/transgressoft/lirp/event/LirpErrorHandler;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+}
+
+public abstract interface annotation class net/transgressoft/lirp/persistence/ToManyAggregates : java/lang/annotation/Annotation {
+	public abstract fun bubbleUp ()Z
+	public abstract fun onDelete ()Lnet/transgressoft/lirp/entity/CascadeAction;
+}
+
+public abstract interface annotation class net/transgressoft/lirp/persistence/ToOneAggregate : java/lang/annotation/Annotation {
+	public abstract fun bubbleUp ()Z
+	public abstract fun onDelete ()Lnet/transgressoft/lirp/entity/CascadeAction;
+	public abstract fun target ()Ljava/lang/Class;
 }
 
 public abstract interface annotation class net/transgressoft/lirp/persistence/Version : java/lang/annotation/Annotation {

@@ -20,41 +20,40 @@ package net.transgressoft.lirp.persistence
 import net.transgressoft.lirp.entity.CascadeAction
 
 /**
- * Marks a property as an aggregate reference to another [net.transgressoft.lirp.entity.ReactiveEntity].
+ * Marks a collection navigation property as an aggregate reference to a collection of
+ * [net.transgressoft.lirp.entity.ReactiveEntity] instances.
  *
- * At compile time, the LIRP KSP processor scans for `@Aggregate` annotations and generates a
+ * At compile time, the LIRP KSP processor scans for `@ToManyAggregates` annotations and generates a
  * [LirpRefAccessor] implementation per entity class. The generated accessor contains direct
- * property getter lambdas that retrieve the referenced entity's ID — no runtime reflection.
+ * property getter lambdas that retrieve the referenced entities' IDs — no runtime reflection.
  *
  * At runtime, when an entity is first added to a repository, the generated accessor is loaded via
- * a convention-based class lookup (`{EntityClassName}_LirpRefAccessor`) and its [RefEntry] descriptors
- * drive reference resolution, bubble-up wiring, and cascade behavior.
+ * a convention-based class lookup (`{EntityClassName}_LirpRefAccessor`) and its
+ * [CollectionRefEntry][net.transgressoft.lirp.persistence.CollectionRefEntry] descriptors
+ * drive reference resolution and cascade behavior.
  *
  * Uses [AnnotationRetention.BINARY] retention — the annotation is stored in the class file but is
  * not visible to Java runtime reflection scanners. KSP reads annotations directly from source code
  * at compile time, so runtime retention is unnecessary.
  *
  * **Requires the `lirp-ksp` processor** to be applied via the KSP Gradle plugin. Without it,
- * `@Aggregate` annotations have no effect.
+ * `@ToManyAggregates` annotations have no effect.
  *
  * Example:
  * ```kotlin
  * // build.gradle.kts: ksp(project(":lirp-ksp"))
  *
- * class Invoice(override val id: Int, val orderId: Long) : ReactiveEntityBase<Int, Invoice>() {
- *     @Aggregate(bubbleUp = true, onDelete = CascadeAction.DETACH)
- *     val order by aggregate<Long, Order> { orderId }
+ * class Playlist(override val id: Int, val trackIds: List<Int>) : ReactiveEntityBase<Int, Playlist>() {
+ *     @ToManyAggregates(onDelete = CascadeAction.CASCADE)
+ *     val tracks by aggregateList<Int, Track>(trackIds)
  * }
- *
- * // Resolution
- * val resolvedOrder: Optional<Order> = invoice.order.resolve()
  * ```
  *
- * @param bubbleUp When `true`, mutation events from the referenced entity are forwarded to this
+ * @param bubbleUp When `true`, mutation events from referenced entities are forwarded to this
  *   entity's subscribers as [net.transgressoft.lirp.event.AggregateMutationEvent]. Disabled by default.
  * @param onDelete The [CascadeAction] to execute when this entity is removed from its repository.
  *   Defaults to [CascadeAction.DETACH].
  */
 @Target(AnnotationTarget.PROPERTY)
 @Retention(AnnotationRetention.BINARY)
-annotation class Aggregate(val bubbleUp: Boolean = false, val onDelete: CascadeAction = CascadeAction.DETACH)
+annotation class ToManyAggregates(val bubbleUp: Boolean = false, val onDelete: CascadeAction = CascadeAction.DETACH)

@@ -40,7 +40,7 @@ private const val MAX_VIA_DEPTH: Int = 3
  *
  * **Live-read invariant.** The parent collection of foreign keys is read via [KProperty1.get]
  * on every invocation of [matches]; the predicate does not snapshot at construction. After
- * an `@Aggregate(onDelete = DETACH)` lifecycle event reconciles a child's id out of the
+ * a `@ToManyAggregates(onDelete = DETACH)` lifecycle event reconciles a child's id out of the
  * parent's collection — directly in memory, or after a SQL `DETACH` round-trip — the next
  * query reads the updated collection and the detached parent disappears from the result.
  *
@@ -82,7 +82,7 @@ class ViaAnyMatch<TParent : IdentifiableEntity<*>, K : Comparable<K>, TChild : I
  * parent with any unresolved id will not match.
  *
  * **Live-read invariant.** [matches] reads `parentProp.get(t)` on every invocation. After
- * an `@Aggregate(onDelete = DETACH)` lifecycle event reconciles a parent's collection,
+ * a `@ToManyAggregates(onDelete = DETACH)` lifecycle event reconciles a parent's collection,
  * the next query reflects the change immediately — no snapshot is kept at construction.
  *
  * Construction is guarded by a depth-3 limit on nested `Via*` chains.
@@ -121,7 +121,7 @@ class ViaAllMatch<TParent : IdentifiableEntity<*>, K : Comparable<K>, TChild : I
  * (vacuously). Missing children count as non-matching, so they do not disqualify the parent.
  *
  * **Live-read invariant.** [matches] reads `parentProp.get(t)` on every invocation. After
- * an `@Aggregate(onDelete = DETACH)` lifecycle event reconciles a parent's collection,
+ * a `@ToManyAggregates(onDelete = DETACH)` lifecycle event reconciles a parent's collection,
  * subsequent queries reflect the change immediately — no snapshot is kept at construction.
  *
  * Construction is guarded by a depth-3 limit on nested `Via*` chains.
@@ -160,7 +160,7 @@ class ViaNoneMatch<TParent : IdentifiableEntity<*>, K : Comparable<K>, TChild : 
  * [Registry.findById]) returns `false`, excluding the parent from results.
  *
  * **Live-read invariant.** [matches] reads `parentProp.get(t)` on every invocation. After
- * an `@Aggregate(onDelete = DETACH)` lifecycle event nulls a parent's single-ref FK — the
+ * a `@ToOneAggregate(onDelete = DETACH)` lifecycle event nulls a parent's single-ref FK — the
  * SQL layer applies `ON DELETE SET NULL`; consumers driving DETACH in memory must clear
  * the property themselves — subsequent queries observe the null and drop the parent.
  *

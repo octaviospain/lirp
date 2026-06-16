@@ -43,7 +43,7 @@ import org.junit.jupiter.api.DisplayName
  * therefore applies a composite heuristic — `isDelegated && isMutable && !isFxScalarType(value) &&
  * !isKotlinCollectionType(value)` — which admits any `var T by <delegate>` where `T` is a
  * scalar/nullable value type. This covers ordinary `reactiveProperty(...)`, `@Version`, and
- * `@Aggregate` single-ref Id properties (all reactive-backed per RESEARCH.md), and excludes
+ * `@ToOneAggregate` FK scalar Id properties (all reactive-backed), and excludes
  * FxScalar-typed delegates and `aggregateList`/`aggregateSet` collection delegates.
  */
 @OptIn(ExperimentalCompilerApi::class)

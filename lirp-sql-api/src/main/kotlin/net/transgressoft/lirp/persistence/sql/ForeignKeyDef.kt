@@ -23,7 +23,7 @@ import net.transgressoft.lirp.entity.CascadeAction
  * SQL foreign-key descriptor attached to a scalar column of a [SqlTableDef].
  *
  * Generated at compile time by the KSP `TableDefProcessor` for each single-entity
- * `@Aggregate` reference whose [CascadeAction] is not [CascadeAction.NONE]. The
+ * `@ToOneAggregate` reference whose [CascadeAction] is not [CascadeAction.NONE]. The
  * [net.transgressoft.lirp.persistence.sql.ExposedTableInterpreter] consumes these
  * descriptors and emits `REFERENCES … ON DELETE …` constraints on the corresponding
  * Exposed `Column`.
@@ -36,7 +36,7 @@ import net.transgressoft.lirp.entity.CascadeAction
  * @property columnName The name of the column in the parent entity's table that holds the FK.
  * @property referencedTable The name of the referenced (child) entity's table.
  * @property referencedColumn The name of the primary-key column in the referenced table.
- * @property onDelete The cascade policy from the user's `@Aggregate(onDelete = …)` declaration.
+ * @property onDelete The cascade policy from the user's `@ToOneAggregate(onDelete = …)` declaration.
  *   Translated to `ReferenceOption.RESTRICT` / `CASCADE` / `SET_NULL` by the SQL interpreter.
  */
 data class ForeignKeyDef(

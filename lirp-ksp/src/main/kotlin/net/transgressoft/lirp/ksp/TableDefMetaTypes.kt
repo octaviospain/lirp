@@ -80,9 +80,9 @@ internal data class ColumnMeta(
 )
 
 /**
- * Resolved metadata for a single `@Aggregate`-annotated property, capturing the information
- * needed to emit junction-table descriptors (collection refs) and foreign-key constraints
- * (single-entity refs).
+ * Resolved metadata for a single `@ToOneAggregate` / `@ToManyAggregates`-annotated property,
+ * capturing the information needed to emit junction-table descriptors (collection refs) and
+ * foreign-key constraints (single-entity refs).
  */
 internal data class AggregatePropertyMeta(
     val property: KSPropertyDeclaration,
@@ -96,7 +96,7 @@ internal data class AggregatePropertyMeta(
 )
 
 /**
- * Resolved metadata for one collection-typed `@Aggregate` property, used to emit
+ * Resolved metadata for one collection-typed `@ToManyAggregates` property, used to emit
  * `junctionTableDefs`, `junctionAccessors`, and `applyJunctionRows` on the parent's
  * `_LirpTableDef`.
  */
@@ -110,7 +110,7 @@ internal data class JunctionRefInfo(
 )
 
 /**
- * Resolved metadata for a single FK constraint emitted by a single-entity `@Aggregate`
+ * Resolved metadata for a single FK constraint emitted by a single-entity `@ToOneAggregate`
  * property. Carries the local column name, referenced table/column names, and the cascade
  * action string for the generated `ForeignKeyDef`.
  */

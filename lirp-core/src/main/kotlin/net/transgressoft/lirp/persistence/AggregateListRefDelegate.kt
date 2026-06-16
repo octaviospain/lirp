@@ -29,6 +29,14 @@ import kotlin.reflect.KProperty
  *
  * See [AbstractAggregateCollectionRefDelegate] for shared behavior: binding, cascade, and thread safety.
  *
+ * Example:
+ * ```kotlin
+ * class DefaultAudioPlaylist(override val id: Int, val trackIds: List<Int>) : ReactiveEntityBase<Int, DefaultAudioPlaylist>() {
+ *     @ToManyAggregates(onDelete = CascadeAction.DETACH)
+ *     val tracks by aggregateList<Int, AudioTrack>(trackIds)
+ * }
+ * ```
+ *
  * @param K the type of the referenced entity's ID
  * @param E the referenced entity type
  * @param initialIds the list of referenced entity IDs at construction time
@@ -87,12 +95,12 @@ class AggregateListProxy<K : Comparable<K>, E : IdentifiableEntity<K>>
  * time and used for resolution and as the source of [AggregateCollectionRef.referenceIds].
  * Duplicate IDs are preserved; order is maintained.
  *
- * **Requires KSP** — annotate the delegated property with [@Aggregate][Aggregate]
+ * **Requires KSP** — annotate the delegated property with [@ToManyAggregates][ToManyAggregates]
  * so the KSP processor generates the required `{ClassName}_LirpRefAccessor` class.
  *
  * Example:
  * ```kotlin
- * @Aggregate(onDelete = CascadeAction.NONE)
+ * @ToManyAggregates(onDelete = CascadeAction.NONE)
  * @Transient
  * val items by aggregateList<Int, AudioItem>(itemIds)
  * ```

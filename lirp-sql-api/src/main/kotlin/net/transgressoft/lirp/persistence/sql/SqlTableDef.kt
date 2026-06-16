@@ -32,8 +32,8 @@ import org.jetbrains.exposed.v1.core.Table
  * constraints, and junction-table collection references — live on opt-in sub-interfaces:
  *
  * - [VersionedTableDef] — implement when the entity declares a `@Version` column.
- * - [ForeignKeyAware] — implement when the entity declares scalar `@Aggregate` FK references.
- * - [JunctionAware] — implement when the entity declares collection-typed `@Aggregate` references.
+ * - [ForeignKeyAware] — implement when the entity declares scalar `@ToOneAggregate` FK references.
+ * - [JunctionAware] — implement when the entity declares collection-typed `@ToManyAggregates` references.
  *
  * KSP-generated `_LirpTableDef` classes implement the correct sub-interfaces automatically
  * based on the entity's annotations — codegen consumers are unaffected. Only hand-written

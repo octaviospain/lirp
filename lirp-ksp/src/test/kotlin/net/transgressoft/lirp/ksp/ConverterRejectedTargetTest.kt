@@ -26,7 +26,7 @@ import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 
 /**
  * KSP compilation tests for enforcement in [TableDefProcessor]: converters are rejected
- * on primary key columns, `@Version` columns, and `@Aggregate` single-ref FK scalar columns.
+ * on primary key columns, `@Version` columns, and `@ToOneAggregate` FK scalar columns.
  * Each rejection emits a distinct diagnostic naming the property FQN and the kind of column.
  */
 @OptIn(ExperimentalCompilerApi::class)
@@ -106,7 +106,7 @@ class ConverterRejectedTargetTest : StringSpec({
         result.messages shouldContain "test.VersionConverterEntity.version"
     }
 
-    "TableDefProcessor rejects converter on @Aggregate single-ref FK scalar column with a diagnostic naming the property FQN" {
+    "TableDefProcessor rejects converter on @ToOneAggregate single-ref FK scalar column with a diagnostic naming the property FQN" {
         val result =
             KspTestSupport.compile(
                 TableDefProcessorProvider(),
@@ -114,13 +114,13 @@ class ConverterRejectedTargetTest : StringSpec({
                     "AggregateFkConverterEntity.kt",
                     """
                     package test
+                    import net.transgressoft.lirp.entity.CascadeAction
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.Aggregate
                     import net.transgressoft.lirp.persistence.ColumnConverter
                     import net.transgressoft.lirp.persistence.ColumnType
                     import net.transgressoft.lirp.persistence.PersistenceMapping
                     import net.transgressoft.lirp.persistence.PersistenceProperty
-                    import net.transgressoft.lirp.persistence.aggregate
+                    import net.transgressoft.lirp.persistence.ToOneAggregate
 
                     object FkConverter : ColumnConverter<Int, Int> {
                         override val sqlType = ColumnType.IntType
@@ -137,9 +137,8 @@ class ConverterRejectedTargetTest : StringSpec({
                     @PersistenceMapping
                     class Order(override val id: Long, customerId: Int) : ReactiveEntityBase<Long, Order>() {
                         @PersistenceProperty(converter = FkConverter::class)
+                        @ToOneAggregate(target = Customer::class, onDelete = CascadeAction.RESTRICT)
                         var customerId: Int by reactiveProperty(customerId)
-                        @Aggregate
-                        val customer by aggregate<Int, Customer> { customerId }
                         override val uniqueId: String get() = "${'$'}id"
                         override fun clone() = Order(id, customerId)
                     }
@@ -148,7 +147,7 @@ class ConverterRejectedTargetTest : StringSpec({
             )
 
         result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "@Aggregate single-ref FK"
+        result.messages shouldContain "@ToOneAggregate single-ref FK"
         result.messages shouldContain "test.Order.customerId"
     }
 })

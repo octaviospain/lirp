@@ -24,7 +24,7 @@ import net.transgressoft.lirp.entity.ReactiveEntity
  *
  * Emitted on a parent (referencing) entity's publisher when a referenced child entity mutates
  * or a mutable aggregate collection changes, and bubble-up propagation is enabled for that
- * reference (`@Aggregate(bubbleUp = true)`).
+ * reference (`@ToOneAggregate(bubbleUp = true)`).
  *
  * The [entity] represents the **parent** entity at the time the bubble-up event was emitted.
  * Because the parent's own fields do not change during a child mutation or collection change,
@@ -45,8 +45,9 @@ import net.transgressoft.lirp.entity.ReactiveEntity
  * @param K the type of the parent entity's ID, which must be [Comparable]
  * @param R the type of the parent entity
  * @property entity the parent entity reference
- * @property refName the property name of the [@Aggregate][net.transgressoft.lirp.persistence.Aggregate]
- *   annotated property that triggered the bubble-up propagation
+ * @property refName the property name of the [@ToOneAggregate][net.transgressoft.lirp.persistence.ToOneAggregate]
+ *   or [@ToManyAggregates][net.transgressoft.lirp.persistence.ToManyAggregates] annotated property
+ *   that triggered the bubble-up propagation
  * @property childEvent the original event emitted by the referenced child entity or collection
  */
 data class StandardAggregateMutationEvent<K, R>(

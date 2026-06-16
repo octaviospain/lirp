@@ -20,7 +20,7 @@ package net.transgressoft.lirp.persistence
 import net.transgressoft.lirp.entity.CascadeAction
 
 /**
- * Compile-time resolved descriptor for a [@Aggregate][Aggregate] property, pairing
+ * Compile-time resolved descriptor for a [@ToOneAggregate][ToOneAggregate] property, pairing
  * the reference name with a direct ID getter function, a direct delegate getter function, and
  * metadata about the reference's behavior.
  *
@@ -32,9 +32,10 @@ import net.transgressoft.lirp.entity.CascadeAction
  *   type level; all referenced entity IDs must be non-null.
  * @param T The entity type that declares the reference
  * @property refName The name of the reference (defaults to the property name)
- * @property idGetter Direct accessor function for the referenced entity's ID — compiled to a
- *   regular method call accessing the backing field's [AggregateRefDelegate.referenceId], not reflection.
- *   Returns [K] (non-null) since null IDs are not permitted.
+ * @property idGetter Direct accessor function for the FK scalar value — compiled to a
+ *   regular method call accessing the entity's scalar field, not reflection.
+ *   Returns `null` for optional (`nullable`) FK scalars whose current value is `null`, meaning
+ *   this entity currently references nothing. Non-optional entries always return a non-null [K].
  * @property delegateGetter KSP-generated lambda that directly returns the [AggregateRefDelegate]
  *   instance by casting the property value (which at runtime IS the delegate, since
  *   [AggregateRefDelegate.getValue] returns `this`). Used by [RegistryBase] to call
@@ -49,7 +50,7 @@ import net.transgressoft.lirp.entity.CascadeAction
  */
 data class RefEntry<K : Comparable<K>, T>(
     val refName: String,
-    val idGetter: (T) -> K,
+    val idGetter: (T) -> K?,
     val delegateGetter: (T) -> AggregateRefDelegate<*, *>,
     val referencedClass: Class<*>,
     val bubbleUp: Boolean,

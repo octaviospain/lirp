@@ -19,14 +19,14 @@ package net.transgressoft.lirp.persistence.sql
 
 /**
  * Opt-in capability interface for SQL table definitions that declare single-entity foreign-key
- * constraints for scalar `@Aggregate` references.
+ * constraints for scalar `@ToOneAggregate` references.
  *
  * `SqlRepository` checks for this interface with an `as?` cast inside
  * `installEntityForeignKeys()` to install FK constraints after all tables have been created.
- * Entities without scalar `@Aggregate` references should not implement this interface.
+ * Entities without scalar `@ToOneAggregate` references should not implement this interface.
  *
  * KSP-generated `_LirpTableDef` classes implement this interface automatically when the entity
- * declares one or more `@Aggregate` properties with a non-`NONE` cascade action — codegen
+ * declares one or more `@ToOneAggregate` properties with a non-`NONE` cascade action — codegen
  * consumers are unaffected by the segregation. Only hand-written [SqlTableDef] implementers
  * that need FK constraints must add this interface; the compiler guides them to implement the
  * required member.
@@ -34,7 +34,7 @@ package net.transgressoft.lirp.persistence.sql
 fun interface ForeignKeyAware {
 
     /**
-     * Returns the SQL foreign-key descriptors for the single-entity `@Aggregate` references
+     * Returns the SQL foreign-key descriptors for the single-entity `@ToOneAggregate` references
      * declared on this entity, in declaration order.
      *
      * @return The list of foreign-key descriptors. Must not be empty when this interface is implemented.

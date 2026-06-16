@@ -131,27 +131,26 @@ data class Album(
     var title: String,
     // @Indexed: secondary index for O(1) equality lookups on genre
     @Indexed val genre: String,
-    var artistId: Int,
-    initialRating: Double = 0.0
+    initialRating: Double = 0.0,
+    initialArtistId: Int = 0
 ) : ReactiveEntityBase<Int, Album>() {
     var rating: Double by reactiveProperty(initialRating)
 
-    // @Aggregate: declares a cross-entity reference; onDelete sets the cascade mode and
-    // bubbleUp = true propagates child mutations to the artist's subscribers too
-    @Aggregate(bubbleUp = true, onDelete = CascadeAction.DETACH)
-    // @Transient: the resolved reference is computed from artistId, not a stored column
-    @Transient
-    val artist by aggregate<Int, Artist> { artistId }
+    // @ToOneAggregate: declares a single-entity FK reference on the persisted scalar; onDelete
+    // sets the cascade mode and bubbleUp = true propagates child mutations to the album's subscribers.
+    // KSP generates the extension accessor: val Album.artist: ReactiveEntityReference<Int, Artist>
+    @ToOneAggregate(target = Artist::class, bubbleUp = true, onDelete = CascadeAction.DETACH)
+    var artistId: Int by reactiveProperty(initialArtistId)
 
     override val uniqueId = "album-$id"
-    override fun clone() = Album(id, title, genre, artistId, rating)
+    override fun clone() = Album(id, title, genre, rating, artistId)
 }
 
 // @LirpRepository: registers the repository for context wiring and create()-factory codegen
 @LirpRepository
 class AlbumRepository : VolatileRepository<Int, Album>("Albums") {
     fun create(id: Int, title: String, genre: String, artistId: Int): Album =
-        Album(id, title, genre, artistId).also { add(it) }
+        Album(id, title, genre, initialArtistId = artistId).also { add(it) }
 }
 
 val repo = AlbumRepository()
@@ -304,7 +303,7 @@ Deep coverage of the write pipeline, collapse algorithm, transactional guarantee
 - **Transparent SQL persistence** — add an entity, change a property, the database stays in sync automatically
 - **Entity-first reactivity** — `var x by reactiveProperty(init)` notifies subscribers on assignment, zero overhead when unobserved
 - **Two subscription levels** — repository-level `CrudEvent`s and entity-level `MutationEvent`s
-- **DDD aggregate references** — `@Aggregate` with single-entity (`aggregate`, `optionalAggregate`) and collection (`aggregateList`, `aggregateSet`, `mutableAggregateList`, `mutableAggregateSet`) delegates, configurable cascade (DETACH / CASCADE / RESTRICT / NONE) enforced both app-side and at the database layer (FK constraints on scalar refs, junction tables for collection refs)
+- **DDD aggregate references** — cardinality-explicit annotations: `@ToOneAggregate` for single-entity refs — on the persisted FK scalar (KSP generates the navigation extension accessor) or on a `by aggregate { … }` / `by optionalAggregate { … }` delegate when the key is computed rather than a stored scalar; `@ToManyAggregates` on collection navigation properties (`aggregateList` / `aggregateSet`); and `polymorphicAggregate` for exactly-one-of-N typed references. The to-one/to-many split is compiler-enforced — `@ToOneAggregate` on a collection and `@ToManyAggregates` on a single reference are both rejected at build time. All four cascade modes (DETACH / CASCADE / RESTRICT / NONE) are enforced both app-side and at the database layer (FK constraints on scalar refs, junction tables for collection refs)
 - **JSON FK reconciliation** — `JsonFkPolicy.LOG_AND_RECONCILE` (default) silently repairs dangling refs at load; `JsonFkPolicy.STRICT` fails loudly — symmetric to SQL `ON DELETE RESTRICT`
 - **Secondary indexes** — `@Indexed` for O(1) equality lookups
 - **Type-safe Query DSL** — Kotlin-native filtering, ordering, and pagination with automatic index routing
@@ -393,8 +392,16 @@ Individual subscriptions can also carry an independent error handler via
 
 ## Upgrading to v3.0.0
 
-Version 3.0.0 contains breaking changes to the subscription API and the mutation event model. See **[CHANGELOG.md](CHANGELOG.md)** for the full migration guide, including:
+Version 3.0.0 contains breaking changes to the aggregate annotation vocabulary, the subscription
+API, and the mutation event model. See **[CHANGELOG.md](CHANGELOG.md)** for the full migration
+guide, including:
 
+- The single-entity aggregate annotation is replaced by `@ToOneAggregate`, placed on the FK scalar
+  (navigation is then a KSP-generated extension accessor requiring an explicit import) or, for a
+  computed key, on the retained `by aggregate { … }` / `by optionalAggregate { … }` delegate
+- The collection aggregate annotation is renamed to `@ToManyAggregates` (parameters unchanged) and is
+  now collection-only — a single reference annotated with it fails the build with guidance to use
+  `@ToOneAggregate`
 - `subscribe` is now **synchronous** by default — rename all former async `subscribe` call sites to `subscribeAsync`
 - `changes` access arms the replay buffer lazily — touch `publisher.changes` at boot if replay buffering from startup is needed
 - `PropertyChanged` / `BatchChanged` replace `oldEntity` / `newEntity` on mutation events
@@ -410,7 +417,7 @@ The **[LIRP Wiki](https://github.com/octaviospain/lirp/wiki)** is the canonical 
 | [Consuming LIRP](https://github.com/octaviospain/lirp/wiki/Consuming-LIRP) | External-consumer setup: Gradle plugin, Gradle manual, Maven, compatibility matrix, KSP troubleshooting |
 | [Core Concepts](https://github.com/octaviospain/lirp/wiki/Core-Concepts) | Reactive entities, `reactiveProperty()`, lazy publishers, events, subscription patterns, `withEventsDisabled` |
 | [Query DSL](https://github.com/octaviospain/lirp/wiki/Query-DSL) | Type-safe, Kotlin-native query DSL for filtering, ordering, and paginating entities |
-| [DDD & Aggregates](https://github.com/octaviospain/lirp/wiki/DDD-and-Aggregates) | `@Aggregate`, `aggregate`, `optionalAggregate`, collection delegates, cascade, bubble-up, `CollectionChangeEvent`, app-side ↔ SQL FK mapping |
+| [DDD & Aggregates](https://github.com/octaviospain/lirp/wiki/DDD-and-Aggregates) | `@ToOneAggregate`, `@ToManyAggregates`, `polymorphicAggregate`, collection delegates, cascade, bubble-up, `CollectionChangeEvent`, app-side ↔ SQL FK mapping |
 | [Persistence](https://github.com/octaviospain/lirp/wiki/Persistence) | Repository hierarchy, `PersistentRepositoryBase`, debounced write pipeline, deferred loading |
 | [SQL Persistence](https://github.com/octaviospain/lirp/wiki/SQL-Persistence) | `SqlRepository`, entity annotations, type mapping, dialect support, batch SQL, foreign keys & junction tables, deferred FK installation |
 | [Transactional Boundaries](https://github.com/octaviospain/lirp/wiki/Transactional-Boundaries) | Single-aggregate atomicity, `@Version` optimistic locking, `Conflict` event, saga/compensation pattern |
@@ -424,7 +431,7 @@ The **[LIRP Wiki](https://github.com/octaviospain/lirp/wiki)** is the canonical 
 
 | Module | Role |
 |---|---|
-| `lirp-api` | Pure interfaces & contracts: `ReactiveEntity`, `Repository`, event types, annotations (`@PersistenceMapping`, `@Aggregate`, `@Indexed`, `@Version`, `@LirpRepository`). No implementation. |
+| `lirp-api` | Pure interfaces & contracts: `ReactiveEntity`, `Repository`, event types, annotations (`@PersistenceMapping`, `@ToOneAggregate`, `@ToManyAggregates`, `@Indexed`, `@Version`, `@LirpRepository`). No implementation. |
 | `lirp-core` | Reactive entity machinery (`ReactiveEntityBase`, `reactiveProperty`), `VolatileRepository`, `JsonFileRepository`, `LirpEntitySerializer`, `projectionMap`, `LirpContext`, debounced write pipeline. |
 | `lirp-ksp` | KSP processor generating per-entity `<Entity>_LirpTableDef`, `LirpFxScalarAccessor`, repository registration. Drives convention-over-configuration codegen. |
 | `lirp-sql-api` | Pure SQL contracts: `SqlTableDef`, `JunctionAware`, `ForeignKeyAware`, `VersionedTableDef`. Sits between `lirp-api` and `lirp-sql` — no implementation, no Exposed/HikariCP dependency. |

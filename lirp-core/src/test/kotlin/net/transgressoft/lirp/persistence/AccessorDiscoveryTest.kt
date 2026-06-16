@@ -34,7 +34,7 @@ import io.kotest.matchers.types.shouldBeInstanceOf
  * (narrowest scope) but its contract is critical: it must distinguish entities with aggregate ref
  * delegates from those without, so that legitimate plain entities are never rejected.
  *
- * Note: [@Aggregate][Aggregate] uses [AnnotationRetention.BINARY] — invisible to
+ * Note: [@ToOneAggregate][ToOneAggregate] uses [AnnotationRetention.BINARY] — invisible to
  * runtime reflection. The detection therefore inspects JVM backing fields (named `${'$'}delegate`
  * of type [AggregateRefDelegate]) which are always visible regardless of annotation retention.
  */
@@ -127,7 +127,7 @@ internal class PlainEntity(override val id: Int) : ReactiveEntityBase<Int, Plain
 class EntityWithDelegate(override val id: Int, val audioItemId: Int) : ReactiveEntityBase<Int, EntityWithDelegate>() {
     override val uniqueId: String get() = "delegate-$id"
 
-    @Aggregate
+    @ToOneAggregate(target = AudioItem::class)
     val audioItem by aggregate<Int, AudioItem> { audioItemId }
 
     override fun clone() = EntityWithDelegate(id, audioItemId)
@@ -141,7 +141,7 @@ class EntityWithDelegate(override val id: Int, val audioItemId: Int) : ReactiveE
 class EntityWithCollectionDelegate(override val id: Int, val itemIds: List<Int>) : ReactiveEntityBase<Int, EntityWithCollectionDelegate>() {
     override val uniqueId: String get() = "coll-delegate-$id"
 
-    @Aggregate
+    @ToManyAggregates
     val items by aggregateList<Int, AudioItem>(itemIds)
 
     override fun clone() = EntityWithCollectionDelegate(id, itemIds)

@@ -19,7 +19,7 @@ package net.transgressoft.lirp.persistence.json
 
 /**
  * Policy controlling how [JsonFileRepository] handles dangling
- * [@Aggregate][net.transgressoft.lirp.persistence.Aggregate] references discovered while loading
+ * aggregate references (`@ToOneAggregate` / `@ToManyAggregates`) discovered while loading
  * entities from the JSON file.
  *
  * A reference is considered dangling when the referenced entity ID does not resolve to a live
@@ -43,7 +43,7 @@ enum class JsonFkPolicy {
 
     /**
      * Throw [net.transgressoft.lirp.persistence.LirpDeserializationException] on load if any
-     * dangling [@Aggregate][net.transgressoft.lirp.persistence.Aggregate] reference is found.
+     * dangling aggregate reference (`@ToOneAggregate` / `@ToManyAggregates`) is found.
      * Mirrors SQL `ON DELETE RESTRICT` semantics — the file is treated as authoritative and a
      * mismatch with peer registries is surfaced as an error.
      */
