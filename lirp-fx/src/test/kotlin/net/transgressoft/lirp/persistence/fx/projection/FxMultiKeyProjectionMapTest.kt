@@ -33,6 +33,7 @@ import io.kotest.matchers.shouldBe
 import javafx.application.Platform
 import javafx.beans.InvalidationListener
 import javafx.collections.MapChangeListener
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -387,6 +388,92 @@ class FxMultiKeyProjectionMapTest : StringSpec({
 
         projection.close()
         projection.entitySubscriptions.isEmpty() shouldBe true
+    }
+
+    "TransformedFxMultiKeyProjectionMap two-phase dataTransform runs off FX thread and fxFactory runs on FX thread building a real FX value" {
+        val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
+        val dataTransformThreadFlags = CopyOnWriteArrayList<Boolean>()
+        val fxFactoryThreadFlags = CopyOnWriteArrayList<Boolean>()
+
+        val pulseLatch = CountDownLatch(1)
+        val projection =
+            fxMultiKeyProjectionMap(
+                sourceRef = { source },
+                keyExtractor = { it.genres },
+                dataTransform = { _, items ->
+                    dataTransformThreadFlags.add(Platform.isFxApplicationThread())
+                    items.toList()
+                },
+                fxFactory = { genre, items ->
+                    fxFactoryThreadFlags.add(Platform.isFxApplicationThread())
+                    AlbumFxView(genre, items)
+                },
+                dispatchToFxThread = true
+            )
+        projection.addListener(
+            MapChangeListener {
+                pulseLatch.countDown()
+            }
+        )
+
+        // Add item from the test thread so dataTransform runs on the source-event thread (test
+        // thread, off FX thread), while fxFactory runs on the FX thread via Platform.runLater.
+        source.add(0, MutableMultiKeyAudioItem(1, "Track A", setOf("Rock")))
+        pulseLatch.await(5, TimeUnit.SECONDS) shouldBe true
+
+        dataTransformThreadFlags.isNotEmpty() shouldBe true
+        dataTransformThreadFlags.all { !it } shouldBe true
+        fxFactoryThreadFlags.isNotEmpty() shouldBe true
+        fxFactoryThreadFlags.all { it } shouldBe true
+        val view = projection["Rock"] as AlbumFxView
+        view.hasTracks shouldBe true
+    }
+
+    "TransformedFxMultiKeyProjectionMap fxFactory failure in one bucket does not prevent other buckets from flushing" {
+        val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
+        val projection =
+            fxMultiKeyProjectionMap(
+                sourceRef = { source },
+                keyExtractor = { it.genres },
+                dataTransform = { _, items -> items.toList() },
+                fxFactory = { genre, items ->
+                    if (genre == "Jazz") error("injected fxFactory failure")
+                    AlbumFxView(genre, items)
+                },
+                dispatchToFxThread = false
+            )
+        projection.addListener(MapChangeListener { })
+
+        source.add(0, MutableMultiKeyAudioItem(1, "Track A", setOf("Rock", "Jazz")))
+
+        projection.containsKey("Jazz") shouldBe false
+        projection.containsKey("Rock") shouldBe true
+        val view = projection["Rock"] as AlbumFxView
+        view.hasTracks shouldBe true
+    }
+
+    "TransformedFxMultiKeyProjectionMap single valueTransform overload runs off FX thread preserving backward compatibility" {
+        val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
+        val transformedOnFxThread = CopyOnWriteArrayList<Boolean>()
+        val projection =
+            TransformedFxMultiKeyProjectionMap(
+                { source },
+                { it.genres },
+                { pk, items ->
+                    transformedOnFxThread.add(Platform.isFxApplicationThread())
+                    "[$pk:${items.size}]"
+                },
+                false
+            )
+        projection.addListener(MapChangeListener { })
+
+        source.add(0, MutableMultiKeyAudioItem(1, "Track A", setOf("Rock", "Jazz")))
+        source.add(1, MutableMultiKeyAudioItem(2, "Track B", setOf("Rock")))
+
+        transformedOnFxThread.isNotEmpty() shouldBe true
+        transformedOnFxThread.all { !it } shouldBe true
+        projection["Rock"] shouldBe "[Rock:2]"
+        projection["Jazz"] shouldBe "[Jazz:1]"
     }
 
     "FxMultiKeyProjectionMap iterates without ConcurrentModificationException under concurrent multi-key churn"

@@ -121,6 +121,62 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V> fxPro
     TransformedFxProjectionMap(sourceRef, keyExtractor, valueTransform, dispatchToFxThread)
 
 /**
+ * Creates a two-phase value-transformed read-only [ObservableMap] projection that groups entities
+ * from an [FxObservableCollection] source by a secondary key.
+ *
+ * The transform is split into two phases:
+ * - [dataTransform] runs on the **background thread** that delivers source events. It extracts a
+ *   pure intermediate value `D` from the `(PK, List<E>)` bucket. **Must be thread-agnostic** — it
+ *   must not read or write any JavaFX property or node.
+ * - [fxFactory] runs on the **FX Application Thread** inside the flush pulse, once per changed
+ *   bucket. It receives the bucket key and the intermediate `D` produced by [dataTransform], and
+ *   constructs the final `V`. Safe to construct `SimpleSetProperty`, call `.bind(...)`, etc.
+ *
+ * If [fxFactory] throws for a bucket, the failure is logged (bucket key included) and that one
+ * bucket is skipped; the remaining buckets in the same pulse still flush.
+ *
+ * Usage:
+ * ```kotlin
+ * val albumViews by fxProjectionMap(
+ *     ::audioItems,
+ *     AudioItem::albumName,
+ *     dataTransform = { pk, items -> items.map { it.title } },
+ *     fxFactory = { pk, titles -> AlbumFxView(pk, titles) }
+ * )
+ * ```
+ *
+ * @param K the entity ID type
+ * @param PK the projection key type, must be [Comparable]
+ * @param E the entity type
+ * @param D the intermediate data type produced off-thread by [dataTransform]
+ * @param V the transform output type constructed on the FX Application Thread by [fxFactory]
+ * @param sourceRef lambda returning the source [FxObservableCollection]
+ * @param keyExtractor grouping function that extracts the projection key from an entity
+ * @param dataTransform pure off-thread function that extracts an intermediate value from a non-empty bucket;
+ *   must not access JavaFX observables
+ * @param fxFactory FX-thread function that constructs the final `V` from the bucket key and the
+ *   intermediate value produced by [dataTransform]; safe to build JavaFX property bindings here
+ * @param dispatchToFxThread when `true` (default), dispatches notifications to the FX Application Thread;
+ *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
+ * @return a read-only observable projection map delegate that emits values built on the FX Application Thread
+ */
+@Suppress("UNCHECKED_CAST")
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V> fxProjectionMap(
+    sourceRef: () -> FxObservableCollection<K, E>,
+    keyExtractor: (E) -> PK,
+    dataTransform: (PK, List<E>) -> D,
+    fxFactory: (PK, D) -> V,
+    dispatchToFxThread: Boolean = true
+): TransformedFxProjectionMap<K, PK, E, V> =
+    TransformedFxProjectionMap(
+        sourceRef,
+        keyExtractor,
+        dataTransform as (PK, List<E>) -> Any?,
+        fxFactory as (PK, Any?) -> V,
+        dispatchToFxThread
+    )
+
+/**
  * Creates a value-transformed read-only [ObservableMap] projection that groups all entities from a
  * [Registry] by a secondary key, applying [valueTransform] to each bucket.
  *
@@ -153,6 +209,62 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V> regis
     dispatchToFxThread: Boolean = true
 ): TransformedRegistryFxProjectionMap<K, PK, E, V> =
     TransformedRegistryFxProjectionMap(registry, keyExtractor, valueTransform, dispatchToFxThread)
+
+/**
+ * Creates a two-phase value-transformed read-only [ObservableMap] projection that groups all entities
+ * from a [Registry] by a secondary key.
+ *
+ * The transform is split into two phases:
+ * - [dataTransform] runs on the **background thread** that delivers registry events. It extracts a
+ *   pure intermediate value `D` from the `(PK, List<E>)` bucket. **Must be thread-agnostic** — it
+ *   must not read or write any JavaFX property or node.
+ * - [fxFactory] runs on the **FX Application Thread** inside the flush pulse, once per changed
+ *   bucket. It receives the bucket key and the intermediate `D` produced by [dataTransform], and
+ *   constructs the final `V`. Safe to construct `SimpleSetProperty`, call `.bind(...)`, etc.
+ *
+ * If [fxFactory] throws for a bucket, the failure is logged (bucket key included) and that one
+ * bucket is skipped; the remaining buckets in the same pulse still flush.
+ *
+ * Usage:
+ * ```kotlin
+ * val albumViews: ObservableMap<String, AlbumFxView> by registryFxProjectionMap(
+ *     trackRepo,
+ *     { it.albumName },
+ *     dataTransform = { pk, items -> items.map { it.title } },
+ *     fxFactory = { pk, titles -> AlbumFxView(pk, titles) }
+ * )
+ * ```
+ *
+ * @param K the entity ID type
+ * @param PK the projection key type, must be [Comparable]
+ * @param E the entity type
+ * @param D the intermediate data type produced off-thread by [dataTransform]
+ * @param V the transform output type constructed on the FX Application Thread by [fxFactory]
+ * @param registry the source registry to project
+ * @param keyExtractor grouping function that extracts the projection key from an entity
+ * @param dataTransform pure off-thread function that extracts an intermediate value from a non-empty bucket;
+ *   must not access JavaFX observables
+ * @param fxFactory FX-thread function that constructs the final `V` from the bucket key and the
+ *   intermediate value produced by [dataTransform]; safe to build JavaFX property bindings here
+ * @param dispatchToFxThread when `true` (default), dispatches notifications to the FX Application Thread;
+ *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
+ * @return a read-only observable projection map delegate that emits values built on the FX Application Thread
+ */
+@Suppress("UNCHECKED_CAST")
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V> registryFxProjectionMap(
+    registry: Registry<K, E>,
+    keyExtractor: (E) -> PK,
+    dataTransform: (PK, List<E>) -> D,
+    fxFactory: (PK, D) -> V,
+    dispatchToFxThread: Boolean = true
+): TransformedRegistryFxProjectionMap<K, PK, E, V> =
+    TransformedRegistryFxProjectionMap(
+        registry,
+        keyExtractor,
+        dataTransform as (PK, List<E>) -> Any?,
+        fxFactory as (PK, Any?) -> V,
+        dispatchToFxThread
+    )
 
 /**
  * Creates a read-only [ObservableMap] multi-key projection delegate that groups entities from an
@@ -221,6 +333,63 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E, V> fxMultiKeyProjectionMap(
     TransformedFxMultiKeyProjectionMap(sourceRef, keyExtractor, valueTransform, dispatchToFxThread)
 
 /**
+ * Creates a two-phase value-transformed read-only [ObservableMap] multi-key projection delegate that
+ * groups entities from an [FxObservableCollection] source by multiple secondary keys.
+ *
+ * Each entity is placed into every bucket named by a key returned from [keyExtractor]. The transform
+ * is split into two phases:
+ * - [dataTransform] runs on the **background thread** that delivers source events. It extracts a
+ *   pure intermediate value `D` from the `(PK, List<E>)` bucket. **Must be thread-agnostic** — it
+ *   must not read or write any JavaFX property or node.
+ * - [fxFactory] runs on the **FX Application Thread** inside the flush pulse, once per changed
+ *   bucket. It receives the bucket key and the intermediate `D` produced by [dataTransform], and
+ *   constructs the final `V`. Safe to construct `SimpleSetProperty`, call `.bind(...)`, etc.
+ *
+ * If [fxFactory] throws for a bucket, the failure is logged (bucket key included) and that one
+ * bucket is skipped; the remaining buckets in the same pulse still flush.
+ *
+ * Usage:
+ * ```kotlin
+ * val genreViews by fxMultiKeyProjectionMap(
+ *     ::audioItems,
+ *     { it.genres },
+ *     dataTransform = { pk, items -> items.map { it.title } },
+ *     fxFactory = { pk, titles -> GenreFxView(pk, titles) }
+ * )
+ * ```
+ *
+ * @param K the entity ID type
+ * @param PK the projection key type, must be [Comparable]
+ * @param E the entity type, must extend [ReactiveEntity]
+ * @param D the intermediate data type produced off-thread by [dataTransform]
+ * @param V the transform output type constructed on the FX Application Thread by [fxFactory]
+ * @param sourceRef lambda returning the source [FxObservableCollection]
+ * @param keyExtractor function that extracts the set of projection keys from an entity
+ * @param dataTransform pure off-thread function that extracts an intermediate value from a non-empty bucket;
+ *   must not access JavaFX observables
+ * @param fxFactory FX-thread function that constructs the final `V` from the bucket key and the
+ *   intermediate value produced by [dataTransform]; safe to build JavaFX property bindings here
+ * @param dispatchToFxThread when `true` (default), dispatches notifications to the FX Application Thread;
+ *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
+ * @return a read-only multi-key projection map delegate that emits values built on the FX Application Thread
+ */
+@Suppress("UNCHECKED_CAST")
+fun <K : Comparable<K>, PK : Comparable<PK>, E, D, V> fxMultiKeyProjectionMap(
+    sourceRef: () -> FxObservableCollection<K, E>,
+    keyExtractor: (E) -> Collection<PK>,
+    dataTransform: (PK, List<E>) -> D,
+    fxFactory: (PK, D) -> V,
+    dispatchToFxThread: Boolean = true
+): TransformedFxMultiKeyProjectionMap<K, PK, E, V> where E : IdentifiableEntity<K>, E : ReactiveEntity<K, E> =
+    TransformedFxMultiKeyProjectionMap(
+        sourceRef,
+        keyExtractor,
+        dataTransform as (PK, List<E>) -> Any?,
+        fxFactory as (PK, Any?) -> V,
+        dispatchToFxThread
+    )
+
+/**
  * Creates a read-only [ObservableMap] multi-key projection delegate that groups all entities from a
  * [Registry] by multiple secondary keys.
  *
@@ -285,3 +454,60 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V> regis
     dispatchToFxThread: Boolean = true
 ): TransformedRegistryFxMultiKeyProjectionMap<K, PK, E, V> =
     TransformedRegistryFxMultiKeyProjectionMap(registry, keyExtractor, valueTransform, dispatchToFxThread)
+
+/**
+ * Creates a two-phase value-transformed read-only [ObservableMap] multi-key projection delegate that
+ * groups all entities from a [Registry] by multiple secondary keys.
+ *
+ * Each entity is placed into every bucket named by a key returned from [keyExtractor]. The transform
+ * is split into two phases:
+ * - [dataTransform] runs on the **background thread** that delivers registry events. It extracts a
+ *   pure intermediate value `D` from the `(PK, List<E>)` bucket. **Must be thread-agnostic** — it
+ *   must not read or write any JavaFX property or node.
+ * - [fxFactory] runs on the **FX Application Thread** inside the flush pulse, once per changed
+ *   bucket. It receives the bucket key and the intermediate `D` produced by [dataTransform], and
+ *   constructs the final `V`. Safe to construct `SimpleSetProperty`, call `.bind(...)`, etc.
+ *
+ * If [fxFactory] throws for a bucket, the failure is logged (bucket key included) and that one
+ * bucket is skipped; the remaining buckets in the same pulse still flush.
+ *
+ * Usage:
+ * ```kotlin
+ * val genreViews: ObservableMap<String, GenreFxView> by registryFxMultiKeyProjectionMap(
+ *     trackRepo,
+ *     { it.genres },
+ *     dataTransform = { pk, items -> items.map { it.title } },
+ *     fxFactory = { pk, titles -> GenreFxView(pk, titles) }
+ * )
+ * ```
+ *
+ * @param K the entity ID type
+ * @param PK the projection key type, must be [Comparable]
+ * @param E the entity type
+ * @param D the intermediate data type produced off-thread by [dataTransform]
+ * @param V the transform output type constructed on the FX Application Thread by [fxFactory]
+ * @param registry the source registry whose entities are projected
+ * @param keyExtractor function that extracts the set of projection keys from an entity
+ * @param dataTransform pure off-thread function that extracts an intermediate value from a non-empty bucket;
+ *   must not access JavaFX observables
+ * @param fxFactory FX-thread function that constructs the final `V` from the bucket key and the
+ *   intermediate value produced by [dataTransform]; safe to build JavaFX property bindings here
+ * @param dispatchToFxThread when `true` (default), dispatches notifications to the FX Application Thread;
+ *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
+ * @return a read-only multi-key projection map delegate that emits values built on the FX Application Thread
+ */
+@Suppress("UNCHECKED_CAST")
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V> registryFxMultiKeyProjectionMap(
+    registry: Registry<K, E>,
+    keyExtractor: (E) -> Collection<PK>,
+    dataTransform: (PK, List<E>) -> D,
+    fxFactory: (PK, D) -> V,
+    dispatchToFxThread: Boolean = true
+): TransformedRegistryFxMultiKeyProjectionMap<K, PK, E, V> =
+    TransformedRegistryFxMultiKeyProjectionMap(
+        registry,
+        keyExtractor,
+        dataTransform as (PK, List<E>) -> Any?,
+        fxFactory as (PK, Any?) -> V,
+        dispatchToFxThread
+    )
