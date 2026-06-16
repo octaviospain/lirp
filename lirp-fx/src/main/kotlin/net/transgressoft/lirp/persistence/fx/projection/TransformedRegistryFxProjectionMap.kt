@@ -24,12 +24,12 @@ import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.event.StandardCrudEvent
 import net.transgressoft.lirp.persistence.Registry
 import net.transgressoft.lirp.persistence.projection.RegistryProjectionMap
+import io.github.oshai.kotlinlogging.KotlinLogging
 import javafx.application.Platform
 import javafx.beans.InvalidationListener
 import javafx.collections.FXCollections
 import javafx.collections.MapChangeListener
 import javafx.collections.ObservableMap
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentSkipListMap
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.atomic.AtomicBoolean
@@ -40,27 +40,34 @@ import kotlinx.coroutines.launch
 
 /**
  * A read-only [ObservableMap] projection that groups all entities from a [Registry] by a
- * secondary key and applies a [valueTransform] to each bucket, producing `ObservableMap<PK, V>`.
+ * secondary key and applies a two-phase transform to each bucket, producing `ObservableMap<PK, V>`.
  *
  * Entities are grouped by [keyExtractor] into frozen `List<E>` buckets, then each non-empty
- * bucket is passed to [valueTransform] to produce the observable value `V`. The projection
- * stays in sync with the registry: creates, deletes, and key-change Updates re-bucket entities;
- * same-key Updates recompute the transform for the affected bucket.
+ * bucket is passed through two phases to produce the observable value `V`:
  *
- * The [valueTransform] is invoked on the **background thread** (the thread delivering the
- * registry [CrudEvent]), not on the FX Application Thread. The computed `V` is staged in
- * a pending map and applied to the [ObservableMap] in a single [Platform.runLater] call
- * (dispatch mode) or one [ReactiveScope.flowScope] channel action (non-dispatch mode),
- * so all bucket changes from one registry event land in exactly one FX pulse.
+ * 1. **Data extraction** (`dataTransform`, off-thread): runs on the background thread that delivers
+ *    the registry event. Extracts a pure intermediate value from `(PK, List<E>)`. Must not
+ *    read or write any JavaFX property or node.
+ * 2. **FX construction** (`fxFactory`, FX Application Thread): receives the bucket key and the
+ *    intermediate value and constructs the final `V`. Safe to build `SimpleSetProperty`, call
+ *    `.bind(...)`, etc. Invoked exactly once per changed bucket per flush pulse.
  *
- * **Important:** [valueTransform] MUST be a pure, thread-agnostic function. It must not read
- * or write any JavaFX property or node, and must not block the calling thread.
+ * If `fxFactory` throws for a bucket, the failure is logged (bucket key included) and that one
+ * bucket is skipped; the remaining buckets in the same pulse still flush.
  *
- * Buckets that become empty remove their key from the map (transform is not invoked for
+ * The projection stays in sync with the registry: creates, deletes, and key-change Updates
+ * re-bucket entities; same-key Updates recompute the transform for the affected bucket.
+ *
+ * The computed `V` is staged in a pending map and applied to the [ObservableMap] in a single
+ * [Platform.runLater] call (dispatch mode) or one [ReactiveScope.flowScope] channel action
+ * (non-dispatch mode), so all bucket changes from one registry event land in exactly one FX pulse.
+ *
+ * Buckets that become empty remove their key from the map (neither transform phase is invoked for
  * absent buckets). Soft-deleted entities ([SoftDeletable] with non-null [deletedAt]) are
  * excluded from all buckets.
  *
- * The projection initializes lazily on the first [getValue] or [addListener] call.
+ * The projection initializes lazily on the first [getValue] or [addListener] call. The seed loop
+ * runs on the first-access thread: both transform phases are invoked on that thread during seeding.
  *
  * Mutation methods ([put], [remove], [putAll], [clear]) throw [UnsupportedOperationException];
  * all mutations flow through the source registry.
@@ -76,15 +83,23 @@ import kotlinx.coroutines.launch
  * @param V the transform output type
  * @param registry the source registry to project
  * @param keyExtractor grouping function that extracts the projection key from an entity
- * @param valueTransform pure function that maps a non-empty bucket to its display value
+ * @param dataTransform off-thread function that extracts a pure intermediate value from a non-empty
+ *   bucket; must not touch JavaFX observables
+ * @param fxFactory FX-thread function that constructs the final `V` from the bucket key and the
+ *   intermediate value produced by [dataTransform]; safe to build JavaFX property bindings here
  * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
  */
 class TransformedRegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V>(
     private val registry: Registry<K, E>,
     private val keyExtractor: (E) -> PK,
-    private val valueTransform: (PK, List<E>) -> V,
+    private val dataTransform: (PK, List<E>) -> Any?,
+    @Suppress("UNCHECKED_CAST")
+    private val fxFactory: (PK, Any?) -> V,
     val dispatchToFxThread: Boolean = true
 ) : ObservableMap<PK, V>, AutoCloseable {
+
+    private val log = KotlinLogging.logger {}
+
     private val innerObservableMap: ObservableMap<PK, V> =
         FXCollections.observableMap(ConcurrentSkipListMap<PK, V>())
 
@@ -99,11 +114,12 @@ class TransformedRegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>,
     private val initBarrier: CompletableDeferred<Unit>? =
         if (!dispatchToFxThread) CompletableDeferred() else null
 
-    // Pending-flush coalescer — stores precomputed V values for non-empty buckets and tracks
-    // keys of removed (emptied) buckets separately, then flushes both into innerObservableMap
-    // in a single target-thread call per source event burst.
-    // ConcurrentHashMap does not allow null values, so removals are tracked in a separate set.
-    private val pendingUpdates = ConcurrentHashMap<PK, V>()
+    // Pending-flush coalescer — stores precomputed intermediate values (as Any?) for non-empty
+    // buckets and tracks keys of removed (emptied) buckets separately, then flushes both into
+    // innerObservableMap in a single target-thread call per source event burst.
+    // All accesses to pendingUpdates occur inside synchronized(this) blocks, allowing a plain
+    // HashMap that also tolerates null intermediate values from dataTransform.
+    private val pendingUpdates = HashMap<PK, Any?>()
     private val pendingRemovals = CopyOnWriteArraySet<PK>()
     private val flushScheduled = AtomicBoolean(false)
 
@@ -113,6 +129,30 @@ class TransformedRegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>,
     // core's equality guard skips the bucket update (oldEntity === newEntity after in-place write).
     // Without this, a title-only field change would produce no flush and no MapChangeListener call.
     private var updateSubscription: LirpEventSubscription<*, *, *>? = null
+
+    /**
+     * Constructs a single-transform projection. [valueTransform] runs entirely off-thread; an
+     * identity [fxFactory] is supplied so the existing off-thread behavior is preserved exactly.
+     *
+     * @param registry the source registry to project
+     * @param keyExtractor grouping function that extracts the projection key from an entity
+     * @param valueTransform pure off-thread function that maps a non-empty bucket to its display
+     *   value; must not touch JavaFX observables
+     * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
+     */
+    @Suppress("UNCHECKED_CAST")
+    constructor(
+        registry: Registry<K, E>,
+        keyExtractor: (E) -> PK,
+        valueTransform: (PK, List<E>) -> V,
+        dispatchToFxThread: Boolean = true
+    ) : this(
+        registry = registry,
+        keyExtractor = keyExtractor,
+        dataTransform = valueTransform,
+        fxFactory = { _, staged -> staged as V },
+        dispatchToFxThread = dispatchToFxThread
+    )
 
     init {
         mutationChannel?.let { channel ->
@@ -132,27 +172,12 @@ class TransformedRegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>,
             // Trigger core initialization (seeds from registry, subscribes to CrudEvents).
             core.size
 
-            // Seed innerObservableMap by applying the transform to each initial bucket.
-            for (key in core.keys) {
-                val bucket = core.bucketSnapshot(key)
-                if (bucket != null) innerObservableMap[key] = valueTransform(key, bucket)
-            }
+            seedInitialBuckets()
 
             // Wire the coalescer after the initial seed.
             core.addOnBucketsChangedListener(::scheduleFlush)
 
-            // Guarantee MapChangeListener fires for in-place entity mutations. When a field is
-            // assigned on the live entity reference already stored in the bucket, the core skips
-            // the bucket update (equality guard), so onBucketsChanged never fires. This subscription
-            // catches those cases: it precomputes the new V on the background thread and enqueues
-            // a flush so FX listeners observe the updated transform result.
-            updateSubscription =
-                registry.subscribeAsync(CrudEvent.Type.UPDATE) { event ->
-                    if (event is StandardCrudEvent.Update) {
-                        val keysToFlush = event.entities.values.map(keyExtractor).toSet()
-                        if (keysToFlush.isNotEmpty()) scheduleFlushForUpdates(keysToFlush)
-                    }
-                }
+            subscribeToInPlaceUpdates()
 
             initBarrier?.complete(Unit)
             initialized = true
@@ -160,11 +185,46 @@ class TransformedRegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>,
     }
 
     /**
-     * Precomputes the transformed value for each changed key on the background thread and schedules
+     * Seeds [innerObservableMap] by applying both transform phases to each initial bucket on the
+     * first-access thread. A throwing [fxFactory] is logged with the bucket key and that one bucket
+     * is skipped, matching the per-bucket fault isolation of [flush].
+     */
+    private fun seedInitialBuckets() {
+        for (key in core.keys) {
+            val bucket = core.bucketSnapshot(key) ?: continue
+            val d = dataTransform(key, bucket)
+            try {
+                innerObservableMap[key] = fxFactory(key, d)
+            } catch (t: Throwable) {
+                log.error(t) { "fxFactory failed for bucket key=$key during seed; skipping this bucket" }
+            }
+        }
+    }
+
+    /**
+     * Guarantees a [MapChangeListener] fires for in-place entity mutations. When a field is assigned
+     * on the live entity reference already stored in the bucket, the core skips the bucket update
+     * (equality guard), so `onBucketsChanged` never fires. This subscription precomputes the new
+     * intermediate value on the background thread and enqueues a flush so FX listeners observe the
+     * updated transform result.
+     */
+    private fun subscribeToInPlaceUpdates() {
+        updateSubscription =
+            registry.subscribeAsync(CrudEvent.Type.UPDATE) { event ->
+                if (event is StandardCrudEvent.Update) {
+                    val keysToFlush = event.entities.values.map(keyExtractor).toSet()
+                    if (keysToFlush.isNotEmpty()) scheduleFlushForUpdates(keysToFlush)
+                }
+            }
+    }
+
+    /**
+     * Precomputes the intermediate data for each changed key on the background thread and schedules
      * a single flush if none is already pending. Called by the [RegistryProjectionMap] core via
      * `onBucketsChanged` for creates, deletes, and bucket key changes.
      *
-     * The [valueTransform] runs here — on the calling (background) thread — never on the FX thread.
+     * The [dataTransform] runs here — on the calling (background) thread — never on the FX thread.
+     * The [fxFactory] is called later inside [flush] on the FX Application Thread.
      */
     fun scheduleFlush(changedKeys: Set<PK>) {
         val (newUpdates, newRemovals) = computeTransforms(changedKeys)
@@ -172,7 +232,7 @@ class TransformedRegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>,
     }
 
     /**
-     * Precomputes the transformed value for in-place Update events where `onBucketsChanged` was
+     * Precomputes the intermediate data for in-place Update events where `onBucketsChanged` was
      * not called because the core's equality guard detected no structural bucket change.
      * Keys already staged by a concurrent `onBucketsChanged` call are skipped inside the lock
      * to avoid overwriting a newer bucket state with a stale in-place update.
@@ -183,20 +243,20 @@ class TransformedRegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>,
         if (newUpdates.isNotEmpty() || newRemovals.isNotEmpty()) stageAndSchedule(newUpdates, newRemovals)
     }
 
-    private fun computeTransforms(keys: Set<PK>): Pair<Map<PK, V>, Set<PK>> {
-        val updates = mutableMapOf<PK, V>()
+    private fun computeTransforms(keys: Set<PK>): Pair<Map<PK, Any?>, Set<PK>> {
+        val updates = mutableMapOf<PK, Any?>()
         val removals = mutableSetOf<PK>()
         for (key in keys) {
             val bucket = core.bucketSnapshot(key)
-            if (bucket == null) removals += key else updates[key] = valueTransform(key, bucket)
+            if (bucket == null) removals += key else updates[key] = dataTransform(key, bucket)
         }
         return Pair(updates, removals)
     }
 
     // Inside the lock, skip keys that onBucketsChanged has already staged to avoid
     // overwriting a structurally-different bucket update with a stale in-place snapshot.
-    private fun filterCandidates(candidateUpdates: Map<PK, V>, candidateRemovals: Set<PK>): Pair<Map<PK, V>, Set<PK>> {
-        val newUpdates = mutableMapOf<PK, V>()
+    private fun filterCandidates(candidateUpdates: Map<PK, Any?>, candidateRemovals: Set<PK>): Pair<Map<PK, Any?>, Set<PK>> {
+        val newUpdates = mutableMapOf<PK, Any?>()
         val newRemovals = mutableSetOf<PK>()
         synchronized(this) {
             for (key in candidateRemovals) {
@@ -209,7 +269,7 @@ class TransformedRegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>,
         return Pair(newUpdates, newRemovals)
     }
 
-    private fun stageAndSchedule(newUpdates: Map<PK, V>, newRemovals: Set<PK>) {
+    private fun stageAndSchedule(newUpdates: Map<PK, Any?>, newRemovals: Set<PK>) {
         val shouldSchedule: Boolean
         // Stage the computed results into the shared pending structures atomically with respect to
         // flush(). Without this lock, a removal written to pendingRemovals after flush() clears
@@ -234,7 +294,7 @@ class TransformedRegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>,
     }
 
     private fun flush() {
-        val updates: Map<PK, V>
+        val updates: Map<PK, Any?>
         val removals: Set<PK>
         // Drain both pending structures and reset the gate atomically so a concurrent scheduleFlush
         // arriving between the two clear() calls cannot be lost. Without this lock a removal
@@ -251,8 +311,12 @@ class TransformedRegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>,
         for (key in removals) {
             innerObservableMap.remove(key)
         }
-        for ((key, value) in updates) {
-            innerObservableMap[key] = value
+        for ((key, d) in updates) {
+            try {
+                innerObservableMap[key] = fxFactory(key, d)
+            } catch (t: Throwable) {
+                log.error(t) { "fxFactory failed for bucket key=$key; skipping this bucket" }
+            }
         }
     }
 

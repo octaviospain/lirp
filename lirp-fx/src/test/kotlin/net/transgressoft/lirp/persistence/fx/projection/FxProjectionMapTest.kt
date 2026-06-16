@@ -35,6 +35,7 @@ import javafx.application.Platform
 import javafx.beans.InvalidationListener
 import javafx.collections.MapChangeListener
 import javafx.collections.ObservableMap
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -616,6 +617,113 @@ class FxProjectionMapTest : StringSpec({
         transformOnFxThread.all { !it } shouldBe true
         listenerOnFxThread.isNotEmpty() shouldBe true
         listenerOnFxThread.all { it } shouldBe true
+    }
+
+    "TransformedFxProjectionMap two-phase dataTransform runs off FX thread and fxFactory runs on FX thread building a real FX value" {
+        val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
+        val dataTransformThreadFlags = CopyOnWriteArrayList<Boolean>()
+        val fxFactoryThreadFlags = CopyOnWriteArrayList<Boolean>()
+
+        val pulseLatch = CountDownLatch(1)
+        val projection =
+            fxProjectionMap(
+                sourceRef = { source },
+                keyExtractor = { it.albumName },
+                dataTransform = { _, items ->
+                    dataTransformThreadFlags.add(Platform.isFxApplicationThread())
+                    items.toList()
+                },
+                fxFactory = { albumName, items ->
+                    fxFactoryThreadFlags.add(Platform.isFxApplicationThread())
+                    AlbumFxView(albumName, items)
+                },
+                dispatchToFxThread = true
+            )
+        projection.addListener(
+            MapChangeListener {
+                pulseLatch.countDown()
+            }
+        )
+
+        source.add(0, FxAudioItem(1, "Track A", "Jazz"))
+        pulseLatch.await(5, TimeUnit.SECONDS) shouldBe true
+
+        dataTransformThreadFlags.isNotEmpty() shouldBe true
+        dataTransformThreadFlags.all { !it } shouldBe true
+        fxFactoryThreadFlags.isNotEmpty() shouldBe true
+        fxFactoryThreadFlags.all { it } shouldBe true
+        val view = projection["Jazz"] as AlbumFxView
+        view.hasTracks shouldBe true
+    }
+
+    "TransformedFxProjectionMap fxFactory failure in one bucket does not prevent other buckets from flushing" {
+        val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
+        val projection =
+            fxProjectionMap(
+                sourceRef = { source },
+                keyExtractor = { it.albumName },
+                dataTransform = { _, items -> items.toList() },
+                fxFactory = { albumName, items ->
+                    if (albumName == "Jazz") error("injected fxFactory failure")
+                    AlbumFxView(albumName, items)
+                },
+                dispatchToFxThread = false
+            )
+        projection.addListener(MapChangeListener { })
+
+        source.add(0, FxAudioItem(1, "Track A", "Jazz"))
+        source.add(1, FxAudioItem(2, "Track B", "Rock"))
+
+        projection.containsKey("Jazz") shouldBe false
+        projection.containsKey("Rock") shouldBe true
+        val view = projection["Rock"] as AlbumFxView
+        view.hasTracks shouldBe true
+    }
+
+    "TransformedFxProjectionMap fxFactory failure during initial seed skips only that bucket and leaves the projection usable" {
+        val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
+        source.add(0, FxAudioItem(1, "Track A", "Jazz"))
+        source.add(1, FxAudioItem(2, "Track B", "Rock"))
+
+        val projection =
+            fxProjectionMap(
+                sourceRef = { source },
+                keyExtractor = { it.albumName },
+                dataTransform = { _, items -> items.toList() },
+                fxFactory = { albumName, items ->
+                    if (albumName == "Jazz") error("injected fxFactory failure during seed")
+                    AlbumFxView(albumName, items)
+                },
+                dispatchToFxThread = false
+            )
+
+        // First access triggers the lazy seed loop; a throwing fxFactory must not escape it.
+        projection.containsKey("Rock") shouldBe true
+        projection.containsKey("Jazz") shouldBe false
+        (projection["Rock"] as AlbumFxView).hasTracks shouldBe true
+    }
+
+    "TransformedFxProjectionMap single valueTransform overload runs off FX thread preserving backward compatibility" {
+        val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
+        val transformedOnFxThread = CopyOnWriteArrayList<Boolean>()
+        val projection =
+            TransformedFxProjectionMap(
+                { source },
+                { it.albumName },
+                { pk, items ->
+                    transformedOnFxThread.add(Platform.isFxApplicationThread())
+                    FxAlbumBucket(pk, items.map { it.title }.sorted())
+                },
+                false
+            )
+        projection.addListener(MapChangeListener { })
+
+        source.add(0, FxAudioItem(1, "Track A", "Jazz"))
+        source.add(1, FxAudioItem(2, "Track B", "Jazz"))
+
+        transformedOnFxThread.isNotEmpty() shouldBe true
+        transformedOnFxThread.all { !it } shouldBe true
+        projection["Jazz"] shouldBe FxAlbumBucket("Jazz", listOf("Track A", "Track B"))
     }
 
     "FxProjectionMap iterates without ConcurrentModificationException under concurrent reader and writer stress"

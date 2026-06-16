@@ -27,6 +27,9 @@ def fxPlatform = osName.contains('mac') ? (isArm64 ? 'mac-aarch64' : 'mac') : os
 dependencies {
     api project(path: ':lirp-core')
 
+    implementation libs.kotlin.logging
+    implementation libs.slf4j.api
+
     compileOnly "org.openjfx:javafx-base:21:${fxPlatform}"
     compileOnly "org.openjfx:javafx-graphics:21:${fxPlatform}"
 

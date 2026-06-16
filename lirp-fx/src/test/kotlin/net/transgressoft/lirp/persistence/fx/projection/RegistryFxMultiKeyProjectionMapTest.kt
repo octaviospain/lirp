@@ -31,6 +31,7 @@ import io.kotest.matchers.shouldBe
 import javafx.application.Platform
 import javafx.collections.MapChangeListener
 import java.time.Instant
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -340,5 +341,111 @@ class RegistryFxMultiKeyProjectionMapTest : StringSpec({
 
         projection.containsKey("Rock") shouldBe true
         projection.containsKey("Jazz") shouldBe false
+    }
+
+    "TransformedRegistryFxMultiKeyProjectionMap two-phase dataTransform runs off FX thread and fxFactory runs on FX thread building a real FX value" {
+        val dataTransformThreadFlags = CopyOnWriteArrayList<Boolean>()
+        val fxFactoryThreadFlags = CopyOnWriteArrayList<Boolean>()
+
+        val pulseLatch = CountDownLatch(1)
+        val projection =
+            registryFxMultiKeyProjectionMap(
+                trackRepo,
+                { it.genres },
+                dataTransform = { _, items ->
+                    dataTransformThreadFlags.add(Platform.isFxApplicationThread())
+                    items.toList()
+                },
+                fxFactory = { genre, items ->
+                    fxFactoryThreadFlags.add(Platform.isFxApplicationThread())
+                    AlbumFxView(genre, items)
+                },
+                dispatchToFxThread = true
+            )
+        projection.addListener(
+            MapChangeListener {
+                pulseLatch.countDown()
+            }
+        )
+
+        // Create the entity from the test thread so dataTransform runs on the background
+        // registry-event coroutine (off FX thread), and fxFactory runs on the FX thread via
+        // Platform.runLater inside flush().
+        trackRepo.create(1, "Track A", setOf("Rock"))
+        pulseLatch.await(5, TimeUnit.SECONDS) shouldBe true
+
+        dataTransformThreadFlags.isNotEmpty() shouldBe true
+        dataTransformThreadFlags.all { !it } shouldBe true
+        fxFactoryThreadFlags.isNotEmpty() shouldBe true
+        fxFactoryThreadFlags.all { it } shouldBe true
+        val view = projection["Rock"] as AlbumFxView
+        view.hasTracks shouldBe true
+    }
+
+    "TransformedRegistryFxMultiKeyProjectionMap fxFactory failure in one bucket does not prevent other buckets from flushing" {
+        val projection =
+            registryFxMultiKeyProjectionMap(
+                trackRepo,
+                { it.genres },
+                dataTransform = { _, items -> items.toList() },
+                fxFactory = { genre, items ->
+                    if (genre == "Jazz") error("injected fxFactory failure")
+                    AlbumFxView(genre, items)
+                },
+                dispatchToFxThread = false
+            )
+        projection.addListener(MapChangeListener { })
+
+        trackRepo.create(1, "Track A", setOf("Rock", "Jazz"))
+        reactive.advance()
+
+        projection.containsKey("Jazz") shouldBe false
+        projection.containsKey("Rock") shouldBe true
+        val view = projection["Rock"] as AlbumFxView
+        view.hasTracks shouldBe true
+    }
+
+    "TransformedRegistryFxMultiKeyProjectionMap fxFactory failure during initial seed skips only that bucket and leaves the projection usable" {
+        trackRepo.create(1, "Track A", setOf("Rock", "Jazz"))
+
+        val projection =
+            registryFxMultiKeyProjectionMap(
+                trackRepo,
+                { it.genres },
+                dataTransform = { _, items -> items.toList() },
+                fxFactory = { genre, items ->
+                    if (genre == "Jazz") error("injected fxFactory failure during seed")
+                    AlbumFxView(genre, items)
+                },
+                dispatchToFxThread = false
+            )
+
+        // First access triggers the lazy seed loop; a throwing fxFactory must not escape it.
+        projection.containsKey("Rock") shouldBe true
+        projection.containsKey("Jazz") shouldBe false
+        (projection["Rock"] as AlbumFxView).hasTracks shouldBe true
+    }
+
+    "TransformedRegistryFxMultiKeyProjectionMap single valueTransform overload runs off FX thread preserving backward compatibility" {
+        val transformedOnFxThread = CopyOnWriteArrayList<Boolean>()
+        trackRepo.create(1, "Track A", setOf("Rock"))
+        trackRepo.create(2, "Track B", setOf("Rock", "Jazz"))
+
+        val projection =
+            TransformedRegistryFxMultiKeyProjectionMap(
+                trackRepo,
+                { it.genres },
+                { pk, items ->
+                    transformedOnFxThread.add(Platform.isFxApplicationThread())
+                    "[$pk:${items.size}]"
+                },
+                false
+            )
+        projection.addListener(MapChangeListener { })
+
+        transformedOnFxThread.isNotEmpty() shouldBe true
+        transformedOnFxThread.all { !it } shouldBe true
+        projection["Rock"] shouldBe "[Rock:2]"
+        projection["Jazz"] shouldBe "[Jazz:1]"
     }
 })

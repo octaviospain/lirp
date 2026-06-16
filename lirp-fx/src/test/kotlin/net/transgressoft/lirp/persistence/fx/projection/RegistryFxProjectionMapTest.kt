@@ -33,6 +33,7 @@ import javafx.application.Platform
 import javafx.beans.InvalidationListener
 import javafx.collections.MapChangeListener
 import java.time.Instant
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -575,5 +576,119 @@ class RegistryFxProjectionMapTest : StringSpec({
 
         projection.containsKey("Rock") shouldBe false
         projection.size shouldBe 1
+    }
+
+    "TransformedRegistryFxProjectionMap two-phase dataTransform runs off FX thread and fxFactory runs on FX thread building a real FX value" {
+        val dataTransformThreadFlags = CopyOnWriteArrayList<Boolean>()
+        val fxFactoryThreadFlags = CopyOnWriteArrayList<Boolean>()
+
+        val pulseLatch = CountDownLatch(1)
+        val projection =
+            registryFxProjectionMap(
+                trackRepo,
+                AudioItem::albumName,
+                dataTransform = { _, items ->
+                    dataTransformThreadFlags.add(Platform.isFxApplicationThread())
+                    items.toList()
+                },
+                fxFactory = { albumName, items ->
+                    fxFactoryThreadFlags.add(Platform.isFxApplicationThread())
+                    AlbumFxView(albumName, items)
+                },
+                dispatchToFxThread = true
+            )
+        projection.addListener(
+            MapChangeListener {
+                pulseLatch.countDown()
+            }
+        )
+
+        // Create the entity from the test thread (not the FX thread) so dataTransform runs
+        // on the background registry-event coroutine (off FX thread), and fxFactory runs on
+        // the FX thread via Platform.runLater inside flush().
+        trackRepo.create(1, "Track A", "Jazz")
+        pulseLatch.await(5, TimeUnit.SECONDS) shouldBe true
+
+        dataTransformThreadFlags.isNotEmpty() shouldBe true
+        dataTransformThreadFlags.all { !it } shouldBe true
+        fxFactoryThreadFlags.isNotEmpty() shouldBe true
+        fxFactoryThreadFlags.all { it } shouldBe true
+        val view = projection["Jazz"] as AlbumFxView
+        view.hasTracks shouldBe true
+    }
+
+    "TransformedRegistryFxProjectionMap fxFactory failure in one bucket does not prevent other buckets from flushing" {
+        val projection =
+            registryFxProjectionMap(
+                trackRepo,
+                AudioItem::albumName,
+                dataTransform = { _, items -> items.toList() },
+                fxFactory = { albumName, items ->
+                    if (albumName == "Jazz") error("injected fxFactory failure")
+                    AlbumFxView(albumName, items)
+                },
+                dispatchToFxThread = false
+            )
+        projection.addListener(MapChangeListener { })
+
+        trackRepo.create(1, "Track A", "Jazz")
+        trackRepo.create(2, "Track B", "Rock")
+        reactive.advance()
+
+        projection.containsKey("Jazz") shouldBe false
+        projection.containsKey("Rock") shouldBe true
+        val view = projection["Rock"] as AlbumFxView
+        view.hasTracks shouldBe true
+    }
+
+    "TransformedRegistryFxProjectionMap fxFactory failure during initial seed skips only that bucket and leaves the projection usable" {
+        trackRepo.create(1, "Track A", "Jazz")
+        trackRepo.create(2, "Track B", "Rock")
+
+        val projection =
+            registryFxProjectionMap(
+                trackRepo,
+                AudioItem::albumName,
+                dataTransform = { _, items -> items.toList() },
+                fxFactory = { albumName, items ->
+                    if (albumName == "Jazz") error("injected fxFactory failure during seed")
+                    AlbumFxView(albumName, items)
+                },
+                dispatchToFxThread = false
+            )
+
+        // First access triggers the lazy seed loop. A throwing fxFactory must not escape
+        // initialize() nor leave the projection half-wired with the core already subscribed.
+        projection.containsKey("Rock") shouldBe true
+        projection.containsKey("Jazz") shouldBe false
+        (projection["Rock"] as AlbumFxView).hasTracks shouldBe true
+
+        // The projection is fully initialized: a post-seed change still flushes normally.
+        trackRepo.create(3, "Track C", "Rock")
+        reactive.advance()
+        (projection["Rock"] as AlbumFxView).hasTracks shouldBe true
+    }
+
+    "TransformedRegistryFxProjectionMap single valueTransform overload runs off FX thread preserving backward compatibility" {
+        val transformedOnFxThread = CopyOnWriteArrayList<Boolean>()
+        val projection =
+            TransformedRegistryFxProjectionMap(
+                trackRepo,
+                AudioItem::albumName,
+                { pk, items ->
+                    transformedOnFxThread.add(Platform.isFxApplicationThread())
+                    RegistryAlbumBucket(pk, items.map { it.title }.sorted())
+                },
+                false
+            )
+        projection.addListener(MapChangeListener { })
+
+        trackRepo.create(1, "Track A", "Jazz")
+        trackRepo.create(2, "Track B", "Jazz")
+        reactive.advance()
+
+        transformedOnFxThread.isNotEmpty() shouldBe true
+        transformedOnFxThread.all { !it } shouldBe true
+        projection["Jazz"] shouldBe RegistryAlbumBucket("Jazz", listOf("Track A", "Track B"))
     }
 })

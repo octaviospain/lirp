@@ -64,6 +64,14 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
 
 ### Added
 
+- **Two-phase FX-safe value transform** — new `dataTransform` / `fxFactory` overloads on
+  `fxProjectionMap`, `registryFxProjectionMap`, `fxMultiKeyProjectionMap`, and
+  `registryFxMultiKeyProjectionMap` split bucket projection into an off-thread data-extraction
+  step (`dataTransform`) and an on-FX-thread construction step (`fxFactory`), making it safe
+  to build `SimpleSetProperty` / `ReadOnlyBooleanWrapper` values in the factory. A `fxFactory`
+  failure is logged with the bucket key and skipped so the remaining buckets in the same pulse
+  still flush. The existing single-`valueTransform` overloads are unaffected ([#256](https://github.com/octaviospain/lirp/issues/256)).
+
 - **`@ToOneAggregate`** — new annotation for FK scalar properties that replaces the hand-written
   companion `val` pattern. Place `@ToOneAggregate(target = TargetClass::class, onDelete = …)` on a
   scalar property whose name ends in `Id` (e.g. `var labelId: Int?`). KSP generates a
