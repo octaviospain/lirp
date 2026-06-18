@@ -264,7 +264,7 @@ class RegistryFxMultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E 
     /**
      * Returns `this` projection map, initializing the registry subscription on the first call.
      *
-     * Implements Kotlin `by`-delegation: `val byGenre: ObservableMap<String, List<E>> by registryFxMultiKeyProjectionMap(...)`.
+     * Implements Kotlin `by`-delegation: `val byGenre: ObservableMap<String, List<E>> by registryFxMultiKeyProjection(...)`.
      */
     operator fun getValue(thisRef: Any?, property: KProperty<*>): RegistryFxMultiKeyProjectionMap<K, PK, E> {
         initialize()

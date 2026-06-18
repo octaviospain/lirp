@@ -28,7 +28,7 @@ import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 
 /**
- * Integration tests verifying that [fxProjectionMap] correctly groups and updates entities
+ * Integration tests verifying that [fxProjection] correctly groups and updates entities
  * sourced from [FxAggregateList] collections backed by VolatileRepository-stored entities.
  *
  * Covers initial grouping, add propagation, and remove propagation.
@@ -46,7 +46,7 @@ class FxProjectionMapIntegrationTest : StringSpec({
         LirpContext.default.close()
     }
 
-    "fxProjectionMap groups entities added through VolatileRepository by albumName" {
+    "fxProjection groups entities added through VolatileRepository by albumName" {
         val trackRepo = FxAudioItemVolatileRepository()
         val track1 = trackRepo.create(1, "Song A", "Jazz")
         val track2 = trackRepo.create(2, "Song B", "Jazz")
@@ -59,14 +59,14 @@ class FxProjectionMapIntegrationTest : StringSpec({
         playlist.audioItems.add(track2)
         playlist.audioItems.add(track3)
 
-        val map by fxProjectionMap(playlist::audioItems, AudioItem::albumName, false)
+        val map by fxProjection(playlist::audioItems, AudioItem::albumName, false)
 
         map.size shouldBe 2
         map["Jazz"]!!.size shouldBe 2
         map["Rock"]!!.size shouldBe 1
     }
 
-    "fxProjectionMap updates when entity is added to VolatileRepository aggregate list" {
+    "fxProjection updates when entity is added to VolatileRepository aggregate list" {
         val trackRepo = FxAudioItemVolatileRepository()
         val track1 = trackRepo.create(1, "Song A", "Jazz")
 
@@ -75,7 +75,7 @@ class FxProjectionMapIntegrationTest : StringSpec({
 
         playlist.audioItems.add(track1)
 
-        val map by fxProjectionMap(playlist::audioItems, AudioItem::albumName, false)
+        val map by fxProjection(playlist::audioItems, AudioItem::albumName, false)
 
         map["Jazz"]!!.size shouldBe 1
 
@@ -85,7 +85,7 @@ class FxProjectionMapIntegrationTest : StringSpec({
         map["Jazz"]!!.size shouldBe 2
     }
 
-    "fxProjectionMap updates when entity is removed from VolatileRepository aggregate list" {
+    "fxProjection updates when entity is removed from VolatileRepository aggregate list" {
         val trackRepo = FxAudioItemVolatileRepository()
         val track1 = trackRepo.create(1, "Song A", "Jazz")
         val track2 = trackRepo.create(2, "Song B", "Jazz")
@@ -96,7 +96,7 @@ class FxProjectionMapIntegrationTest : StringSpec({
         playlist.audioItems.add(track1)
         playlist.audioItems.add(track2)
 
-        val map by fxProjectionMap(playlist::audioItems, AudioItem::albumName, false)
+        val map by fxProjection(playlist::audioItems, AudioItem::albumName, false)
 
         map["Jazz"]!!.size shouldBe 2
 
@@ -105,7 +105,7 @@ class FxProjectionMapIntegrationTest : StringSpec({
         map["Jazz"]!!.size shouldBe 1
     }
 
-    "fxProjectionMap removes bucket when last entity for a key is removed" {
+    "fxProjection removes bucket when last entity for a key is removed" {
         val trackRepo = FxAudioItemVolatileRepository()
         val track1 = trackRepo.create(1, "Song A", "Jazz")
         val track2 = trackRepo.create(2, "Song B", "Rock")
@@ -116,7 +116,7 @@ class FxProjectionMapIntegrationTest : StringSpec({
         playlist.audioItems.add(track1)
         playlist.audioItems.add(track2)
 
-        val map by fxProjectionMap(playlist::audioItems, AudioItem::albumName, false)
+        val map by fxProjection(playlist::audioItems, AudioItem::albumName, false)
 
         map.size shouldBe 2
 
@@ -126,7 +126,7 @@ class FxProjectionMapIntegrationTest : StringSpec({
         map.size shouldBe 1
     }
 
-    "fxProjectionMap groups entities across multiple albums from VolatileRepository" {
+    "fxProjection groups entities across multiple albums from VolatileRepository" {
         val trackRepo = FxAudioItemVolatileRepository()
         val track1 = trackRepo.create(1, "Song A", "Jazz")
         val track2 = trackRepo.create(2, "Song B", "Rock")
@@ -138,7 +138,7 @@ class FxProjectionMapIntegrationTest : StringSpec({
 
         playlist.audioItems.addAll(listOf(track1, track2, track3, track4))
 
-        val map by fxProjectionMap(playlist::audioItems, AudioItem::albumName, false)
+        val map by fxProjection(playlist::audioItems, AudioItem::albumName, false)
 
         map.size shouldBe 3
         map["Jazz"]!!.size shouldBe 2

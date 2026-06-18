@@ -316,7 +316,7 @@ Deep coverage of the write pipeline, collapse algorithm, transactional guarantee
 - **JSON persistence** — debounced file writes via `JsonFileRepository`, zero-reflection `LirpEntitySerializer`
 - **Repository-as-factory** — typed `create()` methods with automatic `@LirpRepository` registration
 - **JavaFX integration** (`lirp-fx`) — `fxAggregateList`/`fxAggregateSet` bridging lirp collections with `ObservableList`/`ObservableSet`, scalar delegates (`fxString`, `fxInteger`, etc.), read-only `ObservableMap` projections
-- **Non-FX projection maps** — `projectionMap` (aggregate source) and `registryProjectionMap` (whole-registry source) in `lirp-core` group entities into a `Map<PK, List<E>>` with no JavaFX dependency. An optional value-transform (`{ pk, items -> V }`) maps each bucket to a derived value, recomputed only for affected buckets, and a multi-key extractor (`multiKeyProjectionMap`) places one entity in every bucket its key set yields. Registry-backed projections are `AutoCloseable`
+- **Non-FX projection maps** — `projection` (aggregate source) and `registryProjection` (whole-registry source) in `lirp-core` group entities into a `Map<PK, List<E>>` with no JavaFX dependency. An optional value-transform (`{ pk, items -> V }`) maps each bucket to a derived value, recomputed only for affected buckets, and a multi-key extractor (`multiKeyProjection`) places one entity in every bucket its key set yields. Registry-backed projections are `AutoCloseable`
 - **Full Java interoperability**
 
 ## Limitations and Design Trade-offs
@@ -423,7 +423,7 @@ The **[LIRP Wiki](https://github.com/octaviospain/lirp/wiki)** is the canonical 
 | [Transactional Boundaries](https://github.com/octaviospain/lirp/wiki/Transactional-Boundaries) | Single-aggregate atomicity, `@Version` optimistic locking, `Conflict` event, saga/compensation pattern |
 | [JSON Persistence](https://github.com/octaviospain/lirp/wiki/JSON-Persistence) | `JsonFileRepository`, `LirpEntitySerializer`, polymorphic serializers, deferred loading, `JsonFkPolicy` reconciliation |
 | [JavaFX Integration](https://github.com/octaviospain/lirp/wiki/JavaFX-Integration) | `lirp-fx`, `fxAggregateList`/`fxAggregateSet`, scalar delegates, dual notification, FX thread dispatch |
-| [Projection Maps](https://github.com/octaviospain/lirp/wiki/Projection-Maps) | `projectionMap`/`registryProjectionMap` and `fxProjectionMap`/`registryFxProjectionMap` — read-only grouped views, with value-transform and multi-key variants |
+| [Projection Maps](https://github.com/octaviospain/lirp/wiki/Projection-Maps) | `projection`/`registryProjection` and `fxProjection`/`registryFxProjection` — read-only grouped views, with value-transform and multi-key variants |
 | [Java Interop](https://github.com/octaviospain/lirp/wiki/Java-Interop) | Full Java examples for entities, repositories, subscriptions, collection events |
 | [Architecture Overview](https://github.com/octaviospain/lirp/wiki/Architecture-Overview) | Entity hierarchy, event flow, module dependency, repository lifecycle diagrams |
 
@@ -432,7 +432,7 @@ The **[LIRP Wiki](https://github.com/octaviospain/lirp/wiki)** is the canonical 
 | Module | Role |
 |---|---|
 | `lirp-api` | Pure interfaces & contracts: `ReactiveEntity`, `Repository`, event types, annotations (`@PersistenceMapping`, `@ToOneAggregate`, `@ToManyAggregates`, `@Indexed`, `@Version`, `@LirpRepository`). No implementation. |
-| `lirp-core` | Reactive entity machinery (`ReactiveEntityBase`, `reactiveProperty`), `VolatileRepository`, `JsonFileRepository`, `LirpEntitySerializer`, `projectionMap`, `LirpContext`, debounced write pipeline. |
+| `lirp-core` | Reactive entity machinery (`ReactiveEntityBase`, `reactiveProperty`), `VolatileRepository`, `JsonFileRepository`, `LirpEntitySerializer`, `projection`, `LirpContext`, debounced write pipeline. |
 | `lirp-ksp` | KSP processor generating per-entity `<Entity>_LirpTableDef`, `LirpFxScalarAccessor`, repository registration. Drives convention-over-configuration codegen. |
 | `lirp-sql-api` | Pure SQL contracts: `SqlTableDef`, `JunctionAware`, `ForeignKeyAware`, `VersionedTableDef`. Sits between `lirp-api` and `lirp-sql` — no implementation, no Exposed/HikariCP dependency. |
 | `lirp-sql` | `SqlRepository` built on JetBrains Exposed + HikariCP. Supports PostgreSQL/MySQL/MariaDB/SQLite (MS SQL/Oracle untested). |

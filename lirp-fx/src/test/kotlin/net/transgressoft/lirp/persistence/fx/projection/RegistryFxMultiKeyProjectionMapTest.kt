@@ -351,7 +351,7 @@ class RegistryFxMultiKeyProjectionMapTest : StringSpec({
 
         val pulseLatch = CountDownLatch(1)
         val projection =
-            registryFxMultiKeyProjectionMap(
+            registryFxMultiKeyProjection(
                 trackRepo,
                 { it.genres },
                 dataTransform = { _, items ->
@@ -386,7 +386,7 @@ class RegistryFxMultiKeyProjectionMapTest : StringSpec({
 
     "TransformedRegistryFxMultiKeyProjectionMap fxFactory failure in one bucket does not prevent other buckets from flushing" {
         val projection =
-            registryFxMultiKeyProjectionMap(
+            registryFxMultiKeyProjection(
                 trackRepo,
                 { it.genres },
                 dataTransform = { _, items -> items.toList() },
@@ -411,7 +411,7 @@ class RegistryFxMultiKeyProjectionMapTest : StringSpec({
         trackRepo.create(1, "Track A", setOf("Rock", "Jazz"))
 
         val projection =
-            registryFxMultiKeyProjectionMap(
+            registryFxMultiKeyProjection(
                 trackRepo,
                 { it.genres },
                 dataTransform = { _, items -> items.toList() },
@@ -456,7 +456,7 @@ class RegistryFxMultiKeyProjectionMapTest : StringSpec({
         trackRepo.create(2, "Track B", setOf("Jazz"))
 
         val projection =
-            registryFxMultiKeyProjectionMap(trackRepo, { it.genres }, { pk, items -> "$pk:${items.size}" }, false)
+            registryFxMultiKeyProjection(trackRepo, { it.genres }, { pk, items -> "$pk:${items.size}" }, false)
 
         val replayed = mutableMapOf<String, Pair<String?, String?>>()
         projection.addOnEntriesChangedListener { changes ->
@@ -470,7 +470,7 @@ class RegistryFxMultiKeyProjectionMapTest : StringSpec({
 
     "TransformedRegistryFxMultiKeyProjectionMap addOnEntriesChangedListener emits multi-key fan-out in a single batch" {
         val projection =
-            registryFxMultiKeyProjectionMap(trackRepo, { it.genres }, { pk, items -> "$pk:${items.size}" }, false)
+            registryFxMultiKeyProjection(trackRepo, { it.genres }, { pk, items -> "$pk:${items.size}" }, false)
 
         val invocationCount = AtomicInteger(0)
         val lastBatchKeys = mutableListOf<String>()
@@ -492,7 +492,7 @@ class RegistryFxMultiKeyProjectionMapTest : StringSpec({
         reactive.advance()
 
         val projection =
-            registryFxMultiKeyProjectionMap(trackRepo, { it.genres }, { pk, items -> "$pk:${items.size}" }, false)
+            registryFxMultiKeyProjection(trackRepo, { it.genres }, { pk, items -> "$pk:${items.size}" }, false)
 
         val changesLog = mutableListOf<ProjectionEntryChange<String, String>>()
         val handle = projection.addOnEntriesChangedListener { changes -> changesLog.addAll(changes) }

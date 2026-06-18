@@ -540,7 +540,7 @@ class TransformedFxMultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>,
      * Returns `this` projection map, initializing the source subscription on the first call.
      *
      * Implements Kotlin `by`-delegation:
-     * `val byGenre: ObservableMap<String, GenreStats> by fxMultiKeyProjectionMap(src, keys, transform)`.
+     * `val byGenre: ObservableMap<String, GenreStats> by fxMultiKeyProjection(src, keys, transform)`.
      */
     operator fun getValue(thisRef: Any?, property: KProperty<*>): TransformedFxMultiKeyProjectionMap<K, PK, E, V> {
         initialize()

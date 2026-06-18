@@ -398,7 +398,7 @@ class FxMultiKeyProjectionMapTest : StringSpec({
 
         val pulseLatch = CountDownLatch(1)
         val projection =
-            fxMultiKeyProjectionMap(
+            fxMultiKeyProjection(
                 sourceRef = { source },
                 keyExtractor = { it.genres },
                 dataTransform = { _, items ->
@@ -433,7 +433,7 @@ class FxMultiKeyProjectionMapTest : StringSpec({
     "TransformedFxMultiKeyProjectionMap fxFactory failure in one bucket does not prevent other buckets from flushing" {
         val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
         val projection =
-            fxMultiKeyProjectionMap(
+            fxMultiKeyProjection(
                 sourceRef = { source },
                 keyExtractor = { it.genres },
                 dataTransform = { _, items -> items.toList() },

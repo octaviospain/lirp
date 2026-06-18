@@ -343,7 +343,7 @@ class RegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identi
     /**
      * Returns `this` projection map, initializing the registry subscription on the first call.
      *
-     * Implements Kotlin `by`-delegation: `val byAlbum: ObservableMap<String, List<AudioItem>> by registryFxProjectionMap(...)`.
+     * Implements Kotlin `by`-delegation: `val byAlbum: ObservableMap<String, List<AudioItem>> by registryFxProjection(...)`.
      */
     operator fun getValue(thisRef: Any?, property: KProperty<*>): RegistryFxProjectionMap<K, PK, E> {
         initialize()

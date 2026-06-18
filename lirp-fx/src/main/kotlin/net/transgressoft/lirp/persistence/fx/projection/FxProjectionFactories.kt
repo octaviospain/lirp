@@ -39,7 +39,7 @@ import javafx.collections.ObservableMap
  *
  * Usage:
  * ```kotlin
- * val audioItemsByAlbum by fxProjectionMap(::audioItems, AudioItem::albumName)
+ * val audioItemsByAlbum by fxProjection(::audioItems, AudioItem::albumName)
  * ```
  *
  * @param K the entity ID type
@@ -51,7 +51,7 @@ import javafx.collections.ObservableMap
  *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
  * @return a read-only projection map delegate incrementally updated from the source collection
  */
-fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> fxProjectionMap(
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> fxProjection(
     sourceRef: () -> FxObservableCollection<K, E>,
     keyExtractor: (E) -> PK,
     dispatchToFxThread: Boolean = true
@@ -68,7 +68,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> fxProjec
  *
  * Usage:
  * ```kotlin
- * val itemsByAlbum: ObservableMap<String, List<AudioItem>> by registryFxProjectionMap(trackRepo) { it.albumName }
+ * val itemsByAlbum: ObservableMap<String, List<AudioItem>> by registryFxProjection(trackRepo) { it.albumName }
  * ```
  *
  * @param K the entity ID type
@@ -80,7 +80,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> fxProjec
  *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
  * @return a read-only observable projection map delegate incrementally updated from the registry
  */
-fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryFxProjectionMap(
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryFxProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> PK,
     dispatchToFxThread: Boolean = true
@@ -98,7 +98,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registry
  *
  * Usage:
  * ```kotlin
- * val albumStats by fxProjectionMap(::audioItems, AudioItem::albumName) { pk, items ->
+ * val albumStats by fxProjection(::audioItems, AudioItem::albumName) { pk, items ->
  *     AlbumStats(pk, items.size)
  * }
  * ```
@@ -117,7 +117,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registry
  *   its [addOnEntriesChangedListener][ObservableProjectionMap.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
  */
-fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> fxProjectionMap(
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> fxProjection(
     sourceRef: () -> FxObservableCollection<K, E>,
     keyExtractor: (E) -> PK,
     valueTransform: (PK, List<E>) -> V,
@@ -142,7 +142,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  *
  * Usage:
  * ```kotlin
- * val albumViews by fxProjectionMap(
+ * val albumViews by fxProjection(
  *     ::audioItems,
  *     AudioItem::albumName,
  *     dataTransform = { pk, items -> items.map { it.title } },
@@ -169,7 +169,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
  */
 @Suppress("UNCHECKED_CAST")
-fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : Any> fxProjectionMap(
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : Any> fxProjection(
     sourceRef: () -> FxObservableCollection<K, E>,
     keyExtractor: (E) -> PK,
     dataTransform: (PK, List<E>) -> D,
@@ -194,7 +194,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : A
  *
  * Usage:
  * ```kotlin
- * val albumStats: ObservableMap<String, AlbumStats> by registryFxProjectionMap(trackRepo, { it.albumName }) { pk, items ->
+ * val albumStats: ObservableMap<String, AlbumStats> by registryFxProjection(trackRepo, { it.albumName }) { pk, items ->
  *     AlbumStats(pk, items.size)
  * }
  * ```
@@ -213,7 +213,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : A
  *   its [addOnEntriesChangedListener][ObservableProjectionMap.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
  */
-fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> registryFxProjectionMap(
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> registryFxProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> PK,
     valueTransform: (PK, List<E>) -> V,
@@ -238,7 +238,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  *
  * Usage:
  * ```kotlin
- * val albumViews: ObservableMap<String, AlbumFxView> by registryFxProjectionMap(
+ * val albumViews: ObservableMap<String, AlbumFxView> by registryFxProjection(
  *     trackRepo,
  *     { it.albumName },
  *     dataTransform = { pk, items -> items.map { it.title } },
@@ -265,7 +265,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
  */
 @Suppress("UNCHECKED_CAST")
-fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : Any> registryFxProjectionMap(
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : Any> registryFxProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> PK,
     dataTransform: (PK, List<E>) -> D,
@@ -287,12 +287,12 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : A
  * Each entity is placed into every bucket named by a key returned from [keyExtractor]. An entity
  * with genres `{Rock, Jazz}` appears in both the `"Rock"` and `"Jazz"` buckets.
  *
- * Uses a distinct factory name to avoid overload-resolution ambiguity with [fxProjectionMap]
+ * Uses a distinct factory name to avoid overload-resolution ambiguity with [fxProjection]
  * when the lambda returns `Collection<PK>` rather than a single `PK`.
  *
  * Usage:
  * ```kotlin
- * val itemsByGenre by fxMultiKeyProjectionMap(::audioItems) { it.genres }
+ * val itemsByGenre by fxMultiKeyProjection(::audioItems) { it.genres }
  * ```
  *
  * @param K the entity ID type
@@ -304,7 +304,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : A
  *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
  * @return a read-only multi-key projection map delegate incrementally updated from the source collection
  */
-fun <K : Comparable<K>, PK : Comparable<PK>, E> fxMultiKeyProjectionMap(
+fun <K : Comparable<K>, PK : Comparable<PK>, E> fxMultiKeyProjection(
     sourceRef: () -> FxObservableCollection<K, E>,
     keyExtractor: (E) -> Collection<PK>,
     dispatchToFxThread: Boolean = true
@@ -322,7 +322,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E> fxMultiKeyProjectionMap(
  *
  * Usage:
  * ```kotlin
- * val genreStats by fxMultiKeyProjectionMap(::audioItems, { it.genres }) { pk, items ->
+ * val genreStats by fxMultiKeyProjection(::audioItems, { it.genres }) { pk, items ->
  *     GenreStats(pk, items.size)
  * }
  * ```
@@ -341,7 +341,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E> fxMultiKeyProjectionMap(
  *   its [addOnEntriesChangedListener][ObservableProjectionMap.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
  */
-fun <K : Comparable<K>, PK : Comparable<PK>, E, V : Any> fxMultiKeyProjectionMap(
+fun <K : Comparable<K>, PK : Comparable<PK>, E, V : Any> fxMultiKeyProjection(
     sourceRef: () -> FxObservableCollection<K, E>,
     keyExtractor: (E) -> Collection<PK>,
     valueTransform: (PK, List<E>) -> V,
@@ -367,7 +367,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E, V : Any> fxMultiKeyProjectionMap
  *
  * Usage:
  * ```kotlin
- * val genreViews by fxMultiKeyProjectionMap(
+ * val genreViews by fxMultiKeyProjection(
  *     ::audioItems,
  *     { it.genres },
  *     dataTransform = { pk, items -> items.map { it.title } },
@@ -394,7 +394,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E, V : Any> fxMultiKeyProjectionMap
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
  */
 @Suppress("UNCHECKED_CAST")
-fun <K : Comparable<K>, PK : Comparable<PK>, E, D, V : Any> fxMultiKeyProjectionMap(
+fun <K : Comparable<K>, PK : Comparable<PK>, E, D, V : Any> fxMultiKeyProjection(
     sourceRef: () -> FxObservableCollection<K, E>,
     keyExtractor: (E) -> Collection<PK>,
     dataTransform: (PK, List<E>) -> D,
@@ -417,12 +417,12 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E, D, V : Any> fxMultiKeyProjection
  * key-set changes are handled natively with add-before-remove ordering — no per-entity subscriptions
  * are needed.
  *
- * Uses a distinct factory name to avoid overload-resolution ambiguity with [registryFxProjectionMap]
+ * Uses a distinct factory name to avoid overload-resolution ambiguity with [registryFxProjection]
  * when the lambda returns `Collection<PK>` rather than a single `PK`.
  *
  * Usage:
  * ```kotlin
- * val itemsByGenre: ObservableMap<String, List<AudioItem>> by registryFxMultiKeyProjectionMap(trackRepo) { it.genres }
+ * val itemsByGenre: ObservableMap<String, List<AudioItem>> by registryFxMultiKeyProjection(trackRepo) { it.genres }
  * ```
  *
  * @param K the entity ID type
@@ -434,7 +434,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E, D, V : Any> fxMultiKeyProjection
  *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
  * @return a read-only multi-key projection map delegate incrementally updated from the registry
  */
-fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryFxMultiKeyProjectionMap(
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryFxMultiKeyProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> Collection<PK>,
     dispatchToFxThread: Boolean = true
@@ -451,7 +451,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registry
  *
  * Usage:
  * ```kotlin
- * val genreStats: ObservableMap<String, GenreStats> by registryFxMultiKeyProjectionMap(trackRepo, { it.genres }) { pk, items ->
+ * val genreStats: ObservableMap<String, GenreStats> by registryFxMultiKeyProjection(trackRepo, { it.genres }) { pk, items ->
  *     GenreStats(pk, items.size)
  * }
  * ```
@@ -470,7 +470,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registry
  *   its [addOnEntriesChangedListener][ObservableProjectionMap.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
  */
-fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> registryFxMultiKeyProjectionMap(
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> registryFxMultiKeyProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> Collection<PK>,
     valueTransform: (PK, List<E>) -> V,
@@ -496,7 +496,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  *
  * Usage:
  * ```kotlin
- * val genreViews: ObservableMap<String, GenreFxView> by registryFxMultiKeyProjectionMap(
+ * val genreViews: ObservableMap<String, GenreFxView> by registryFxMultiKeyProjection(
  *     trackRepo,
  *     { it.genres },
  *     dataTransform = { pk, items -> items.map { it.title } },
@@ -523,7 +523,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
  */
 @Suppress("UNCHECKED_CAST")
-fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : Any> registryFxMultiKeyProjectionMap(
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : Any> registryFxMultiKeyProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> Collection<PK>,
     dataTransform: (PK, List<E>) -> D,

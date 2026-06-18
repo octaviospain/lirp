@@ -1146,14 +1146,14 @@ public final class net/transgressoft/lirp/persistence/projection/ProjectionEntry
 }
 
 public final class net/transgressoft/lirp/persistence/projection/ProjectionFactoriesKt {
-	public static final fun multiKeyProjectionMap (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/projection/MultiKeyProjectionMap;
-	public static final fun multiKeyProjectionMap (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static final fun projectionMap (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/projection/ProjectionMap;
-	public static final fun projectionMap (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static final fun registryMultiKeyProjectionMap (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/projection/MultiKeyRegistryProjectionMap;
-	public static final fun registryMultiKeyProjectionMap (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static final fun registryProjectionMap (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/projection/RegistryProjectionMap;
-	public static final fun registryProjectionMap (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
+	public static final fun multiKeyProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/projection/MultiKeyProjectionMap;
+	public static final fun multiKeyProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
+	public static final fun projection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/projection/ProjectionMap;
+	public static final fun projection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
+	public static final fun registryMultiKeyProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/projection/MultiKeyRegistryProjectionMap;
+	public static final fun registryMultiKeyProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
+	public static final fun registryProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/projection/RegistryProjectionMap;
+	public static final fun registryProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
 }
 
 public final class net/transgressoft/lirp/persistence/projection/ProjectionMap : kotlin/collections/AbstractMap {

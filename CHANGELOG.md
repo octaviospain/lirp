@@ -29,7 +29,7 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
   (FX) project a `Registry`'s entities into buckets, complementing the existing aggregate-source
   projections. Registry-backed projections are `AutoCloseable` so their registry subscription can
   be released. A `SoftDeletable` contract lets soft-deleted entities be filtered out of buckets.
-- **Per-bucket value-transform** — new 4-argument `projectionMap` / `registryProjectionMap`
+- **Per-bucket value-transform** — new 4-argument `projection` / `registryProjection`
   overloads return a derived `Map<PK, V>`, recomputing the transform only for the buckets affected
   by each delta. Registry-source transform factories return `CloseableProjectionMap<PK, V>` (a
   `Map` that is also `AutoCloseable`). The corresponding FX types `TransformedFxProjectionMap` /
@@ -42,10 +42,10 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
   transiently absent from all buckets.
 - **Observable value-transform projections** — `ObservableProjectionMap<PK, V>` and
   `addOnEntriesChangedListener` are now available on all four core value-transform projection maps
-  (`projectionMap`, `registryProjectionMap`, `multiKeyProjectionMap`, `registryMultiKeyProjectionMap`
+  (`projection`, `registryProjection`, `multiKeyProjection`, `registryMultiKeyProjection`
   with a trailing `valueTransform` lambda) **and** on all four FX value-transform projection maps
-  (`fxProjectionMap`, `registryFxProjectionMap`, `fxMultiKeyProjectionMap`,
-  `registryFxMultiKeyProjectionMap` with a trailing `valueTransform` lambda). Each listener invocation
+  (`fxProjection`, `registryFxProjection`, `fxMultiKeyProjection`,
+  `registryFxMultiKeyProjection` with a trailing `valueTransform` lambda). Each listener invocation
   receives a batched `List<ProjectionEntryChange<PK, V>>` carrying the old **and** new transformed
   value per key (add / replace / remove), so a consumer can drive a CRUD-style event stream directly
   from projection changes without maintaining its own diff cache. Registration replays the current
@@ -81,8 +81,8 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
 ### Added
 
 - **Two-phase FX-safe value transform** — new `dataTransform` / `fxFactory` overloads on
-  `fxProjectionMap`, `registryFxProjectionMap`, `fxMultiKeyProjectionMap`, and
-  `registryFxMultiKeyProjectionMap` split bucket projection into an off-thread data-extraction
+  `fxProjection`, `registryFxProjection`, `fxMultiKeyProjection`, and
+  `registryFxMultiKeyProjection` split bucket projection into an off-thread data-extraction
   step (`dataTransform`) and an on-FX-thread construction step (`fxFactory`), making it safe
   to build `SimpleSetProperty` / `ReadOnlyBooleanWrapper` values in the factory. A `fxFactory`
   failure is logged with the bucket key and skipped so the remaining buckets in the same pulse
@@ -304,7 +304,7 @@ If replay buffering from startup is required, access `publisher.changes` once du
 | 2.x | 3.0.0 |
 |-----|-------|
 | `net.transgressoft.lirp.persistence.ProjectionMap` | `net.transgressoft.lirp.persistence.projection.ProjectionMap` |
-| `net.transgressoft.lirp.persistence.projectionMap` | `net.transgressoft.lirp.persistence.projection.projectionMap` |
+| `net.transgressoft.lirp.persistence.projection` | `net.transgressoft.lirp.persistence.projection.projection` |
 | `net.transgressoft.lirp.persistence.CoreFactories` | `net.transgressoft.lirp.persistence.projection.ProjectionFactories` |
 
 ### FX projection imports (Kotlin)
@@ -313,8 +313,8 @@ If replay buffering from startup is required, access `publisher.changes` once du
 |-----|-------|
 | `net.transgressoft.lirp.persistence.fx.FxProjectionMap` | `net.transgressoft.lirp.persistence.fx.projection.FxProjectionMap` |
 | `net.transgressoft.lirp.persistence.fx.RegistryFxProjectionMap` | `net.transgressoft.lirp.persistence.fx.projection.RegistryFxProjectionMap` |
-| `net.transgressoft.lirp.persistence.fx.fxProjectionMap` | `net.transgressoft.lirp.persistence.fx.projection.fxProjectionMap` |
-| `net.transgressoft.lirp.persistence.fx.registryFxProjectionMap` | `net.transgressoft.lirp.persistence.fx.projection.registryFxProjectionMap` |
+| `net.transgressoft.lirp.persistence.fx.fxProjection` | `net.transgressoft.lirp.persistence.fx.projection.fxProjection` |
+| `net.transgressoft.lirp.persistence.fx.registryFxProjection` | `net.transgressoft.lirp.persistence.fx.projection.registryFxProjection` |
 
 The new `*MultiKey*` and `Transformed*` FX types live in the same `…fx.projection` package.
 
@@ -322,8 +322,8 @@ The new `*MultiKey*` and `Transformed*` FX types live in the same `…fx.project
 
 | 2.x | 3.0.0 |
 |-----|-------|
-| `FxProperties.fxProjectionMap(…)` | `FxProjections.fxProjectionMap(…)` |
-| `FxProperties.registryFxProjectionMap(…)` | `FxProjections.registryFxProjectionMap(…)` |
+| `FxProperties.fxProjection(…)` | `FxProjections.fxProjection(…)` |
+| `FxProperties.registryFxProjection(…)` | `FxProjections.registryFxProjection(…)` |
 
 Scalar and aggregate factories (`FxProperties.fxString`, `FxProperties.fxAggregateList`, …) are
 unchanged.

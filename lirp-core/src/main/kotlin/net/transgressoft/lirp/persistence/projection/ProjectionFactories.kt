@@ -35,7 +35,7 @@ import net.transgressoft.lirp.persistence.Registry
  *
  * Usage:
  * ```kotlin
- * val audioItemsByTitle by projectionMap(::audioItems) { it.title }
+ * val audioItemsByTitle by projection(::audioItems) { it.title }
  * ```
  *
  * @param K the entity ID type, must be [Comparable]
@@ -45,7 +45,7 @@ import net.transgressoft.lirp.persistence.Registry
  * @param keyExtractor trailing-lambda grouping function that extracts the projection key from an entity
  * @return a [ProjectionMap] delegate grouping entities by [keyExtractor]
  */
-fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> projectionMap(
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> projection(
     sourceRef: () -> AggregateCollectionRef<K, E>,
     keyExtractor: (E) -> PK
 ): ProjectionMap<K, PK, E> = ProjectionMap(sourceRef, keyExtractor)
@@ -63,7 +63,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> projecti
  *
  * Usage:
  * ```kotlin
- * val itemsByAlbum by registryProjectionMap(trackRepo) { it.albumName }
+ * val itemsByAlbum by registryProjection(trackRepo) { it.albumName }
  * ```
  *
  * @param K the entity ID type, must be [Comparable]
@@ -73,7 +73,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> projecti
  * @param keyExtractor trailing-lambda grouping function that extracts the projection key from an entity
  * @return a [RegistryProjectionMap] delegate grouping registry entities by [keyExtractor]
  */
-fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryProjectionMap(
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> PK
 ): RegistryProjectionMap<K, PK, E> = RegistryProjectionMap(registry, keyExtractor)
@@ -91,7 +91,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registry
  *
  * Usage:
  * ```kotlin
- * val trackCountByTitle = projectionMap(::audioItems) { it.title } { pk, items -> "${pk}:${items.size}" }
+ * val trackCountByTitle = projection(::audioItems) { it.title } { pk, items -> "${pk}:${items.size}" }
  * ```
  *
  * **Weak cross-key consistency:** Two consecutive reads on different keys are NOT a single
@@ -112,7 +112,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registry
  *   emits per-key old/new transformed values; [close][CloseableProjectionMap.close] is a no-op for this
  *   aggregate-source variant (no source subscription to release)
  */
-fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> projectionMap(
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> projection(
     sourceRef: () -> AggregateCollectionRef<K, E>,
     keyExtractor: (E) -> PK,
     valueTransform: (PK, List<E>) -> V
@@ -131,7 +131,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  *
  * Usage:
  * ```kotlin
- * val summaryByAlbum = registryProjectionMap(trackRepo) { it.albumName } { pk, items -> AlbumSummary(pk, items.size) }
+ * val summaryByAlbum = registryProjection(trackRepo) { it.albumName } { pk, items -> AlbumSummary(pk, items.size) }
  * ```
  *
  * **Weak cross-key consistency:** Two consecutive reads on different keys are NOT a single
@@ -151,7 +151,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  *   [keyExtractor]; its [addOnEntriesChangedListener][ObservableProjectionMap.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values; [close][CloseableProjectionMap.close] releases the registry subscription
  */
-fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> registryProjectionMap(
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> registryProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> PK,
     valueTransform: (PK, List<E>) -> V
@@ -179,7 +179,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  * @param keyExtractor trailing-lambda that extracts a collection of projection keys from an entity
  * @return a [MultiKeyProjectionMap] delegate grouping entities by every key in [keyExtractor]
  */
-fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> multiKeyProjectionMap(
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> multiKeyProjection(
     sourceRef: () -> AggregateCollectionRef<K, E>,
     keyExtractor: (E) -> Collection<PK>
 ): MultiKeyProjectionMap<K, PK, E> = MultiKeyProjectionMap(sourceRef, keyExtractor)
@@ -210,7 +210,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> multiKey
  *   emits per-key old/new transformed values; [close][CloseableProjectionMap.close] is a no-op for this
  *   aggregate-source variant (no source subscription to release)
  */
-fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> multiKeyProjectionMap(
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> multiKeyProjection(
     sourceRef: () -> AggregateCollectionRef<K, E>,
     keyExtractor: (E) -> Collection<PK>,
     valueTransform: (PK, List<E>) -> V
@@ -240,7 +240,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  * @param keyExtractor trailing-lambda that extracts a collection of projection keys from an entity
  * @return a [MultiKeyRegistryProjectionMap] delegate grouping registry entities by every key in [keyExtractor]
  */
-fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryMultiKeyProjectionMap(
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryMultiKeyProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> Collection<PK>
 ): MultiKeyRegistryProjectionMap<K, PK, E> = MultiKeyRegistryProjectionMap(registry, keyExtractor)
@@ -272,7 +272,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registry
  *   emits per-key old/new transformed values, and [close][CloseableProjectionMap.close] releases the
  *   registry subscription
  */
-fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> registryMultiKeyProjectionMap(
+fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> registryMultiKeyProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> Collection<PK>,
     valueTransform: (PK, List<E>) -> V

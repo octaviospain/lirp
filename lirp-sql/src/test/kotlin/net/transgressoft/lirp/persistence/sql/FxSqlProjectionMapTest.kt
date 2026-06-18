@@ -20,14 +20,14 @@ package net.transgressoft.lirp.persistence.sql
 import net.transgressoft.lirp.persistence.RegistryBase
 import net.transgressoft.lirp.persistence.fx.FxToolkitInit
 import net.transgressoft.lirp.persistence.fx.fxAggregateList
-import net.transgressoft.lirp.persistence.fx.projection.fxProjectionMap
+import net.transgressoft.lirp.persistence.fx.projection.fxProjection
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import java.util.UUID
 
 /**
- * Integration tests verifying that [fxProjectionMap] correctly groups entities from
+ * Integration tests verifying that [fxProjection] correctly groups entities from
  * an [net.transgressoft.lirp.persistence.fx.FxAggregateList] holding references to
  * entities loaded from a [SqlRepository].
  *
@@ -49,7 +49,7 @@ internal class FxSqlProjectionMapTest : StringSpec({
         RegistryBase.deregisterRepository(FxSqlTestEntity::class.java)
     }
 
-    "fxProjectionMap groups SQL-persisted entities by groupProperty" {
+    "fxProjection groups SQL-persisted entities by groupProperty" {
         val jdbcUrl = freshJdbcUrl()
         val itemRepo = FxSqlTestItemRepository(jdbcUrl)
         val entityRepo = FxSqlTestEntityRepository(jdbcUrl)
@@ -65,7 +65,7 @@ internal class FxSqlProjectionMapTest : StringSpec({
         list.addAll(listOf(entity1, entity2, entity3))
 
         val projection =
-            fxProjectionMap<Int, String, FxSqlTestEntity>(
+            fxProjection<Int, String, FxSqlTestEntity>(
                 { list },
                 { it.groupProperty.get() },
                 false
@@ -79,7 +79,7 @@ internal class FxSqlProjectionMapTest : StringSpec({
         itemRepo.close()
     }
 
-    "fxProjectionMap updates when entity is added after SQL persistence" {
+    "fxProjection updates when entity is added after SQL persistence" {
         val jdbcUrl = freshJdbcUrl()
         val itemRepo = FxSqlTestItemRepository(jdbcUrl)
         val entityRepo = FxSqlTestEntityRepository(jdbcUrl)
@@ -91,7 +91,7 @@ internal class FxSqlProjectionMapTest : StringSpec({
         list.add(entity1)
 
         val projection =
-            fxProjectionMap<Int, String, FxSqlTestEntity>(
+            fxProjection<Int, String, FxSqlTestEntity>(
                 { list },
                 { it.groupProperty.get() },
                 false
@@ -109,7 +109,7 @@ internal class FxSqlProjectionMapTest : StringSpec({
         itemRepo.close()
     }
 
-    "fxProjectionMap reloads and groups entities from SQL round-trip" {
+    "fxProjection reloads and groups entities from SQL round-trip" {
         val jdbcUrl = freshJdbcUrl()
         var itemRepo = FxSqlTestItemRepository(jdbcUrl)
         var entityRepo = FxSqlTestEntityRepository(jdbcUrl)
@@ -129,7 +129,7 @@ internal class FxSqlProjectionMapTest : StringSpec({
         list.addAll(reloaded)
 
         val projection =
-            fxProjectionMap<Int, String, FxSqlTestEntity>(
+            fxProjection<Int, String, FxSqlTestEntity>(
                 { list },
                 { it.groupProperty.get() },
                 false

@@ -27,7 +27,7 @@ package net.transgressoft.lirp.persistence.projection
  *
  * Usable with `use { ... }` for scoped lifetimes:
  * ```kotlin
- * registryProjectionMap(trackRepo) { it.albumName } { pk, items -> AlbumSummary(pk, items.size) }
+ * registryProjection(trackRepo) { it.albumName } { pk, items -> AlbumSummary(pk, items.size) }
  *     .use { summaryByAlbum -> /* read summaryByAlbum */ }
  * ```
  *

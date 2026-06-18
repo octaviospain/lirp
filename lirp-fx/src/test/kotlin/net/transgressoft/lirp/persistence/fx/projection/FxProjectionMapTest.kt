@@ -627,7 +627,7 @@ class FxProjectionMapTest : StringSpec({
 
         val pulseLatch = CountDownLatch(1)
         val projection =
-            fxProjectionMap(
+            fxProjection(
                 sourceRef = { source },
                 keyExtractor = { it.albumName },
                 dataTransform = { _, items ->
@@ -660,7 +660,7 @@ class FxProjectionMapTest : StringSpec({
     "TransformedFxProjectionMap fxFactory failure in one bucket does not prevent other buckets from flushing" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
         val projection =
-            fxProjectionMap(
+            fxProjection(
                 sourceRef = { source },
                 keyExtractor = { it.albumName },
                 dataTransform = { _, items -> items.toList() },
@@ -687,7 +687,7 @@ class FxProjectionMapTest : StringSpec({
         source.add(1, FxAudioItem(2, "Track B", "Rock"))
 
         val projection =
-            fxProjectionMap(
+            fxProjection(
                 sourceRef = { source },
                 keyExtractor = { it.albumName },
                 dataTransform = { _, items -> items.toList() },
@@ -772,29 +772,29 @@ class FxProjectionMapTest : StringSpec({
 
     /**
      * Compile-time overload resolution test: all four identity/transform factory forms for
-     * [fxProjectionMap] and [fxMultiKeyProjectionMap] resolve without ambiguity in the same scope.
+     * [fxProjection] and [fxMultiKeyProjection] resolve without ambiguity in the same scope.
      * The returned objects are typed correctly — identity forms return the released map types;
      * transform forms return [ObservableMap] typed to the value `V`. The primary value of this
      * test is that it compiles, proving no overload ambiguity.
      */
-    "factory overload resolution — all four fxProjectionMap / fxMultiKeyProjectionMap forms resolve without ambiguity" {
+    "factory overload resolution — all four fxProjection / fxMultiKeyProjection forms resolve without ambiguity" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
         val mkSource = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
 
         // identity forms — return released concrete types (ABI check: 3-arg signature unchanged)
         val identityMap: FxProjectionMap<Int, String, AudioItem> =
-            fxProjectionMap(sourceRef = { source }, keyExtractor = { it.albumName }, dispatchToFxThread = false)
+            fxProjection(sourceRef = { source }, keyExtractor = { it.albumName }, dispatchToFxThread = false)
         val transformMap: ObservableProjectionMap<String, FxAlbumBucket> =
-            fxProjectionMap(
+            fxProjection(
                 sourceRef = { source },
                 keyExtractor = { it.albumName },
                 valueTransform = { pk, items -> FxAlbumBucket(pk, items.map { it.title }) },
                 dispatchToFxThread = false
             )
         val mkIdentityMap: FxMultiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem> =
-            fxMultiKeyProjectionMap(sourceRef = { mkSource }, keyExtractor = { it.genres }, dispatchToFxThread = false)
+            fxMultiKeyProjection(sourceRef = { mkSource }, keyExtractor = { it.genres }, dispatchToFxThread = false)
         val mkTransformMap: ObservableProjectionMap<String, FxAlbumBucket> =
-            fxMultiKeyProjectionMap(
+            fxMultiKeyProjection(
                 sourceRef = { mkSource },
                 keyExtractor = { it.genres },
                 valueTransform = { pk, items -> FxAlbumBucket(pk, items.map { it.title }) },
