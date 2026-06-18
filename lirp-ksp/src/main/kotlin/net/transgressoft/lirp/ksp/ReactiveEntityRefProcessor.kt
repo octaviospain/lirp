@@ -24,12 +24,14 @@ import com.google.devtools.ksp.processing.Resolver
 import com.google.devtools.ksp.processing.SymbolProcessor
 import com.google.devtools.ksp.symbol.FileLocation
 import com.google.devtools.ksp.symbol.KSAnnotated
+import com.google.devtools.ksp.symbol.KSAnnotation
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.symbol.KSTypeAlias
 import com.google.devtools.ksp.validate
 import java.io.File
+import java.io.OutputStream
 
 private const val TO_MANY_AGGREGATES_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.ToManyAggregates"
 private const val TO_ONE_AGGREGATE_ANNOTATION_FQN = "net.transgressoft.lirp.persistence.ToOneAggregate"
@@ -38,6 +40,9 @@ private const val REACTIVE_ENTITY_REFERENCE_FQN = "net.transgressoft.lirp.persis
 private const val AGGREGATE_COLLECTION_REF_FQN = "net.transgressoft.lirp.persistence.AggregateCollectionRef"
 private const val AGGREGATE_LIST_REF_DELEGATE_FQN = "net.transgressoft.lirp.persistence.AggregateListRefDelegate"
 private const val AGGREGATE_SET_REF_DELEGATE_FQN = "net.transgressoft.lirp.persistence.AggregateSetRefDelegate"
+
+/** Separator between generated `RefEntry` / `CollectionRefEntry` entries inside a `listOf(...)` block. */
+private const val ENTRY_SEPARATOR = ",\n        "
 private val STDLIB_COLLECTION_FQNS =
     setOf(
         "kotlin.collections.MutableList",
@@ -165,7 +170,7 @@ class ReactiveEntityRefProcessor(
             val hasPolymorphic =
                 classDecl.getAllProperties().any { prop ->
                     val text = readSourceLines(prop, linesAfter = 1) ?: return@any false
-                    text.contains("polymorphicAggregate(")
+                    text.contains(POLYMORPHIC_AGGREGATE_CALL)
                 }
             if (hasPolymorphic) result.add(classDecl)
         }
@@ -179,7 +184,6 @@ class ReactiveEntityRefProcessor(
     private fun classifyProperties(
         properties: List<KSPropertyDeclaration>,
         ownerDecl: KSClassDeclaration,
-        singleEntries: MutableList<RefPropertyMeta>,
         collectionMetas: MutableList<CollectionRefPropertyMeta>
     ) {
         val className = ownerDecl.jvmBinaryName()
@@ -308,44 +312,75 @@ class ReactiveEntityRefProcessor(
                 }
 
         if (isDelegateVal) {
-            // Delegate-val form: @ToOneAggregate(target = X::class, ...) val x by aggregate<K, X> { ... }
-            // No Id-suffix required. No extension accessor emitted. RefEntry uses delegate-based idGetter.
+            addDelegateValToOneEntry(prop, className, propName, annotation, targetDecl, toOneEntries)
+        } else {
+            addScalarFkToOneEntry(prop, className, propName, annotation, targetDecl, ownerDecl, toOneEntries)
+        }
+    }
 
-            // Validate that the declared target matches the actual entity type carried by the delegate's
-            // type arguments (e.g. aggregate<K, X> must agree with target = X::class). A mismatch means
-            // the RefEntry would silently cascade/bubble-up to the wrong entity class.
-            val delegateEntityFqn = findReferencedClassFqnFromType(prop.type.resolve())
-            val annotationTargetFqn = targetDecl.qualifiedName?.asString() ?: targetDecl.simpleName.asString()
-            if (delegateEntityFqn != null && delegateEntityFqn != annotationTargetFqn) {
-                logger.error(
-                    "@ToOneAggregate 'target' '$annotationTargetFqn' does not match the delegate's entity type " +
-                        "'$delegateEntityFqn' on '$className.$propName'. " +
-                        "Align target with the type argument of aggregate<K, E>.",
-                    prop
-                )
-                return
-            }
-
-            val bubbleUp = annotation.arguments.firstOrNull { it.name?.asString() == "bubbleUp" }?.value as? Boolean ?: false
-            val onDeleteArg = annotation.arguments.firstOrNull { it.name?.asString() == "onDelete" }
-            val cascadeActionName = if (onDeleteArg != null) extractCascadeActionName(onDeleteArg.value) else "DETACH"
-
-            toOneEntries.add(
-                ToOneRefPropertyMeta(
-                    scalarName = propName,
-                    accessorName = propName,
-                    referencedClassFqn = annotationTargetFqn,
-                    bubbleUp = bubbleUp,
-                    cascadeAction = cascadeActionName,
-                    isOptional = false,
-                    isDelegateVal = true
-                )
+    /**
+     * Handles the delegate-val form `@ToOneAggregate(target = X::class) val x by aggregate<K, X> { ... }`:
+     * no `Id` suffix required, no extension accessor emitted, and the generated `RefEntry` reads the id
+     * via the existing delegate. Validates that the annotation `target` agrees with the entity type
+     * carried by the delegate's type arguments before adding a [ToOneRefPropertyMeta] to [toOneEntries];
+     * a mismatch is reported and no entry is added.
+     */
+    private fun addDelegateValToOneEntry(
+        prop: KSPropertyDeclaration,
+        className: String,
+        propName: String,
+        annotation: KSAnnotation,
+        targetDecl: KSClassDeclaration,
+        toOneEntries: MutableList<ToOneRefPropertyMeta>
+    ) {
+        // Validate that the declared target matches the actual entity type carried by the delegate's
+        // type arguments (e.g. aggregate<K, X> must agree with target = X::class). A mismatch means
+        // the RefEntry would silently cascade/bubble-up to the wrong entity class.
+        val delegateEntityFqn = findReferencedClassFqnFromType(prop.type.resolve())
+        val annotationTargetFqn = targetDecl.qualifiedName?.asString() ?: targetDecl.simpleName.asString()
+        if (delegateEntityFqn != null && delegateEntityFqn != annotationTargetFqn) {
+            logger.error(
+                "@ToOneAggregate 'target' '$annotationTargetFqn' does not match the delegate's entity type " +
+                    "'$delegateEntityFqn' on '$className.$propName'. " +
+                    "Align target with the type argument of aggregate<K, E>.",
+                prop
             )
             return
         }
 
-        // Scalar FK path below — diagnostic (a) only applies here, not to delegate-val form.
+        val bubbleUp = annotation.arguments.firstOrNull { it.name?.asString() == "bubbleUp" }?.value as? Boolean ?: false
+        val onDeleteArg = annotation.arguments.firstOrNull { it.name?.asString() == "onDelete" }
+        val cascadeActionName = if (onDeleteArg != null) extractCascadeActionName(onDeleteArg.value) else "DETACH"
 
+        toOneEntries.add(
+            ToOneRefPropertyMeta(
+                scalarName = propName,
+                accessorName = propName,
+                referencedClassFqn = annotationTargetFqn,
+                bubbleUp = bubbleUp,
+                cascadeAction = cascadeActionName,
+                isOptional = false,
+                isDelegateVal = true
+            )
+        )
+    }
+
+    /**
+     * Handles the scalar-FK form `@ToOneAggregate(target = X::class) var xId: K`. Runs the four
+     * scalar-only diagnostics — target must carry `@PersistenceMapping` and extend `ReactiveEntity`,
+     * the property must not be collection-typed, the scalar base type must match the target PK type,
+     * and the scalar must end with `Id` without colliding with an existing `@ToManyAggregates`
+     * accessor — emitting a compile error and returning without an entry on the first violation.
+     */
+    private fun addScalarFkToOneEntry(
+        prop: KSPropertyDeclaration,
+        className: String,
+        propName: String,
+        annotation: KSAnnotation,
+        targetDecl: KSClassDeclaration,
+        ownerDecl: KSClassDeclaration,
+        toOneEntries: MutableList<ToOneRefPropertyMeta>
+    ) {
         // Diagnostic (a): target must carry @PersistenceMapping and extend ReactiveEntity.
         val hasPersistenceMapping =
             targetDecl.annotations.any {
@@ -468,7 +503,7 @@ class ReactiveEntityRefProcessor(
         var deferred = false
         for (prop in classDecl.getAllProperties()) {
             val quickText = readSourceLines(prop, linesAfter = 1) ?: continue
-            if (!quickText.contains("polymorphicAggregate(")) continue
+            if (!quickText.contains(POLYMORPHIC_AGGREGATE_CALL)) continue
             // Read to end of file so the balanced-paren walk always reaches the closing ')',
             // regardless of arm count or formatting.
             val fullText = readSourceFromProperty(prop) ?: continue
@@ -487,55 +522,81 @@ class ReactiveEntityRefProcessor(
                 continue
             }
             val armMatches = POLYMORPHIC_ARM_REGEX.findAll(boundedText).toList()
-            val labels = armMatches.map { it.groupValues[3] }
-            val duplicates = labels.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
-            if (duplicates.isNotEmpty()) {
-                logger.error("Property '$className.$propName' has duplicate polymorphic arm label(s): $duplicates.", prop)
-                continue
-            }
-            val invalid = labels.filterNot { isValidArmLabel(it) }
-            if (invalid.isNotEmpty()) {
-                logger.error(
-                    "Property '$className.$propName' has polymorphic arm label(s) that are not valid Kotlin identifiers: " +
-                        "$invalid. Labels become generated data class names and must match [A-Za-z_][A-Za-z_0-9]*.",
-                    prop
-                )
-                continue
-            }
-            val armsForProperty = mutableListOf<PolymorphicArmRefMeta>()
-            var propertyDeferred = false
-            for (m in armMatches) {
-                val eTypeName = m.groupValues[2].trim()
-                val label = m.groupValues[3]
-                val onDelete = m.groupValues[4].takeIf { it.isNotEmpty() } ?: "DETACH"
-                val scalarName = armScalarFromPath(m.groupValues[5])
-                val referencedFqn = resolveArmTargetFqn(eTypeName, prop, resolver)
-                if (referencedFqn == null) {
-                    // Defer the whole property rather than emitting a partial arm set: a missing arm here
-                    // would leave the _LirpRefAccessor out of sync with the table definition's per-arm
-                    // foreign keys after multi-round symbol resolution.
-                    unableToProcess.add(prop)
-                    propertyDeferred = true
-                    break
-                }
-                armsForProperty.add(
-                    PolymorphicArmRefMeta(
-                        refName = "$propName.$label",
-                        polymorphicPropName = propName,
-                        armLabel = label,
-                        armScalarName = scalarName,
-                        referencedClassFqn = referencedFqn,
-                        cascadeAction = onDelete
-                    )
-                )
-            }
-            if (propertyDeferred) {
+            if (!validatePolymorphicArmLabels(armMatches.map { it.groupValues[3] }, className, propName, prop)) continue
+            val armsForProperty = buildArmsForProperty(armMatches, prop, propName, resolver, unableToProcess)
+            if (armsForProperty == null) {
                 deferred = true
                 continue
             }
             result.addAll(armsForProperty)
         }
         return deferred
+    }
+
+    /**
+     * Validates that the arm [labels] of a single polymorphic property are distinct and are legal
+     * Kotlin identifiers — each label becomes a generated data class name. Emits a [KSPLogger.error]
+     * and returns `false` on the first violation, `true` when all labels are valid.
+     */
+    private fun validatePolymorphicArmLabels(
+        labels: List<String>,
+        className: String,
+        propName: String,
+        prop: KSPropertyDeclaration
+    ): Boolean {
+        val duplicates = labels.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+        if (duplicates.isNotEmpty()) {
+            logger.error("Property '$className.$propName' has duplicate polymorphic arm label(s): $duplicates.", prop)
+            return false
+        }
+        val invalid = labels.filterNot { isValidArmLabel(it) }
+        if (invalid.isNotEmpty()) {
+            logger.error(
+                "Property '$className.$propName' has polymorphic arm label(s) that are not valid Kotlin identifiers: " +
+                    "$invalid. Labels become generated data class names and must match [A-Za-z_][A-Za-z_0-9]*.",
+                prop
+            )
+            return false
+        }
+        return true
+    }
+
+    /**
+     * Builds the [PolymorphicArmRefMeta] list for one polymorphic property from its [armMatches].
+     * Returns `null` — and registers [prop] in [unableToProcess] — when any arm's target type is not
+     * resolvable this round, so the caller defers the whole property rather than emitting a partial
+     * arm set that would drift from the table definition's per-arm foreign keys.
+     */
+    private fun buildArmsForProperty(
+        armMatches: List<MatchResult>,
+        prop: KSPropertyDeclaration,
+        propName: String,
+        resolver: Resolver,
+        unableToProcess: MutableList<KSAnnotated>
+    ): List<PolymorphicArmRefMeta>? {
+        val armsForProperty = mutableListOf<PolymorphicArmRefMeta>()
+        for (m in armMatches) {
+            val eTypeName = m.groupValues[2].trim()
+            val label = m.groupValues[3]
+            val onDelete = m.groupValues[4].takeIf { it.isNotEmpty() } ?: "DETACH"
+            val scalarName = armScalarFromPath(m.groupValues[5])
+            val referencedFqn =
+                resolveArmTargetFqn(eTypeName, prop, resolver) ?: run {
+                    unableToProcess.add(prop)
+                    return null
+                }
+            armsForProperty.add(
+                PolymorphicArmRefMeta(
+                    refName = "$propName.$label",
+                    polymorphicPropName = propName,
+                    armLabel = label,
+                    armScalarName = scalarName,
+                    referencedClassFqn = referencedFqn,
+                    cascadeAction = onDelete
+                )
+            )
+        }
+        return armsForProperty
     }
 
     /**
@@ -572,7 +633,7 @@ class ReactiveEntityRefProcessor(
      * performing a balanced-parenthesis walk starting at the first `(` after `polymorphicAggregate`.
      */
     private fun extractPolymorphicAggregateSpan(text: String): String =
-        extractBalancedCallSpan(text, "polymorphicAggregate(")
+        extractBalancedCallSpan(text, POLYMORPHIC_AGGREGATE_CALL)
 
     private fun generateAccessor(
         classDecl: KSClassDeclaration,
@@ -597,10 +658,10 @@ class ReactiveEntityRefProcessor(
         val kotlinClassName = classDecl.kotlinNestedName()
         val accessorName = "$className${LirpGenNames.REF_ACCESSOR_SUFFIX}"
 
-        val singleEntries = mutableListOf<RefPropertyMeta>()
+        val singleEntries = emptyList<RefPropertyMeta>()
         val collectionMetas = mutableListOf<CollectionRefPropertyMeta>()
         val toOneEntries = mutableListOf<ToOneRefPropertyMeta>()
-        classifyProperties(properties, classDecl, singleEntries, collectionMetas)
+        classifyProperties(properties, classDecl, collectionMetas)
         classifyToOneProperties(toOneProperties, classDecl, toOneEntries)
 
         // Synthesise per-arm RefEntry metadata for polymorphicAggregate() properties. These carry no
@@ -636,13 +697,49 @@ class ReactiveEntityRefProcessor(
                 .filter { it.contains('.') }
                 .sorted()
 
+        val entriesCode = buildSingleEntriesCode(singleEntries, polymorphicArmEntries, toOneEntries)
+        val collectionEntriesCode = buildCollectionEntriesCode(collectionMetas)
+
+        writeAccessorFile(
+            file = file,
+            packageName = packageName,
+            className = className,
+            kotlinClassName = kotlinClassName,
+            accessorName = accessorName,
+            visibility = visibility,
+            allReferencedFqns = allReferencedFqns,
+            entriesCode = entriesCode,
+            collectionEntriesCode = collectionEntriesCode,
+            collectionMetas = collectionMetas,
+            toOneEntries = toOneEntries
+        )
+
+        logger.info("Generated $packageName.$accessorName for $className")
+
+        // Emit extension accessor only for scalar @ToOneAggregate entries (not delegate-val — those already have the navigation val).
+        val scalarToOneEntries = toOneEntries.filter { !it.isDelegateVal }
+        if (scalarToOneEntries.isNotEmpty()) {
+            emitToOneExtAccessor(classDecl, kotlinClassName, packageName, visibility, scalarToOneEntries)
+        }
+    }
+
+    /**
+     * Builds the combined `RefEntry` source for the single-valued `entries` list: standard single
+     * refs, per-arm polymorphic refs, and `@ToOneAggregate` refs, in that order. Blank sections are
+     * dropped so the joined output never contains an empty entry slot.
+     */
+    private fun buildSingleEntriesCode(
+        singleEntries: List<RefPropertyMeta>,
+        polymorphicArmEntries: List<PolymorphicArmRefMeta>,
+        toOneEntries: List<ToOneRefPropertyMeta>
+    ): String {
         // Build RefEntry named constructor calls with delegateGetter and typed idGetter.
         // Since AggregateRefDelegate.getValue() returns `this`, accessing `it.propName` at runtime
         // returns the delegate itself typed as ReactiveEntityReference<K, E>. Casting to
         // AggregateRefDelegate<*, *> is safe — the only aggregate<K,E> implementation is
         // AggregateRefDelegate. The UNCHECKED_CAST suppression is placed on each RefEntry call.
         val standardEntriesCode =
-            singleEntries.joinToString(",\n        ") { meta ->
+            singleEntries.joinToString(ENTRY_SEPARATOR) { meta ->
                 val referencedSimpleName = meta.referencedClassFqn.substringAfterLast('.')
                 """
                 @Suppress("UNCHECKED_CAST")
@@ -662,7 +759,7 @@ class ReactiveEntityRefProcessor(
         // and cast to AggregateRefDelegate<*, *>. Both casts are suppressed because the arm delegate
         // is always an AggregateRefDelegate and the K type is erased at this star-projection level.
         val armEntriesCode =
-            polymorphicArmEntries.joinToString(",\n        ") { meta ->
+            polymorphicArmEntries.joinToString(ENTRY_SEPARATOR) { meta ->
                 val referencedSimpleName = meta.referencedClassFqn.substringAfterLast('.')
                 """
                 @Suppress("UNCHECKED_CAST")
@@ -681,7 +778,7 @@ class ReactiveEntityRefProcessor(
         // - Delegate-val: idGetter reads referenceId from the existing delegate; delegateGetter casts directly.
         // - Scalar FK: idGetter reads the FK scalar; delegateGetter creates/retrieves via getOrComputeToOneRef.
         val toOneEntriesCode =
-            toOneEntries.joinToString(",\n        ") { meta ->
+            toOneEntries.joinToString(ENTRY_SEPARATOR) { meta ->
                 val referencedSimpleName = meta.referencedClassFqn.substringAfterLast('.')
                 if (meta.isDelegateVal) {
                     """
@@ -722,28 +819,49 @@ class ReactiveEntityRefProcessor(
                 if (armEntriesCode.isNotBlank()) add(armEntriesCode)
                 if (toOneEntriesCode.isNotBlank()) add(toOneEntriesCode)
             }
-        val entriesCode = allSingleEntryParts.joinToString(",\n        ")
+        return allSingleEntryParts.joinToString(ENTRY_SEPARATOR)
+    }
 
-        val collectionEntriesCode =
-            collectionMetas.joinToString(",\n        ") { meta ->
-                val referencedSimpleName = meta.referencedClassFqn.substringAfterLast('.')
-                """
-                @Suppress("UNCHECKED_CAST")
-                CollectionRefEntry(
-                    refName = "${meta.refName}",
-                    idsGetter = { (it.${meta.propertyName} as AggregateCollectionRef<*, *>).referenceIds },
-                    delegateGetter = { it.${meta.propertyName} as AggregateCollectionRef<*, *> },
-                    referencedClass = $referencedSimpleName::class.java,
-                    cascadeAction = CascadeAction.${meta.cascadeAction},
-                    isOrdered = ${meta.isOrdered}
-                )
-                """.trimIndent()
-            }
+    /** Builds the `CollectionRefEntry` source for the `collectionEntries` list from [collectionMetas]. */
+    private fun buildCollectionEntriesCode(collectionMetas: List<CollectionRefPropertyMeta>): String =
+        collectionMetas.joinToString(ENTRY_SEPARATOR) { meta ->
+            val referencedSimpleName = meta.referencedClassFqn.substringAfterLast('.')
+            """
+            @Suppress("UNCHECKED_CAST")
+            CollectionRefEntry(
+                refName = "${meta.refName}",
+                idsGetter = { (it.${meta.propertyName} as AggregateCollectionRef<*, *>).referenceIds },
+                delegateGetter = { it.${meta.propertyName} as AggregateCollectionRef<*, *> },
+                referencedClass = $referencedSimpleName::class.java,
+                cascadeAction = CascadeAction.${meta.cascadeAction},
+                isOrdered = ${meta.isOrdered}
+            )
+            """.trimIndent()
+        }
 
+    /**
+     * Writes the `_LirpRefAccessor` source: package, imports, the generated KDoc header, the
+     * `entries` and `collectionEntries` properties (each `emptyList()` when its section is blank),
+     * and the `cancelAllBubbleUp` override. The accessor-name set for [toOneEntries] scalar refs lets
+     * `cancelAllBubbleUp` avoid allocating a to-one delegate that was never created.
+     */
+    private fun writeAccessorFile(
+        file: OutputStream,
+        packageName: String,
+        className: String,
+        kotlinClassName: String,
+        accessorName: String,
+        visibility: String,
+        allReferencedFqns: List<String>,
+        entriesCode: String,
+        collectionEntriesCode: String,
+        collectionMetas: List<CollectionRefPropertyMeta>,
+        toOneEntries: List<ToOneRefPropertyMeta>
+    ) {
         // Set of accessor names for scalar @ToOneAggregate entries — used in cancelAllBubbleUp to avoid
         // allocating a new delegate when none was created yet (e.g. entity closed before repo bind).
         // Delegate-val entries are excluded: their delegates are accessed directly without getOrComputeToOneRef.
-        val toOneRefNames = toOneEntries.filter { !it.isDelegateVal }.map { "\"${it.accessorName}\"" }.joinToString(", ")
+        val toOneRefNames = toOneEntries.filter { !it.isDelegateVal }.joinToString(", ") { "\"${it.accessorName}\"" }
         val cancelAllBubbleUpCode =
             """
             override fun cancelAllBubbleUp(entity: $kotlinClassName) {
@@ -801,14 +919,6 @@ class ReactiveEntityRefProcessor(
             }.toByteArray()
         )
         file.close()
-
-        logger.info("Generated $packageName.$accessorName for $className")
-
-        // Emit extension accessor only for scalar @ToOneAggregate entries (not delegate-val — those already have the navigation val).
-        val scalarToOneEntries = toOneEntries.filter { !it.isDelegateVal }
-        if (scalarToOneEntries.isNotEmpty()) {
-            emitToOneExtAccessor(classDecl, kotlinClassName, packageName, visibility, scalarToOneEntries)
-        }
     }
 
     /**

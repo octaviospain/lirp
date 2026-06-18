@@ -23,6 +23,7 @@ import net.transgressoft.lirp.persistence.MultiKeyAudioItemVolatileRepository
 import net.transgressoft.lirp.persistence.MutableMultiKeyAudioItem
 import net.transgressoft.lirp.persistence.SoftDeletableMultiKeyAudioItemRepo
 import net.transgressoft.lirp.persistence.fx.FxToolkitInit
+import net.transgressoft.lirp.persistence.projection.ProjectionEntryChange
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
@@ -30,6 +31,7 @@ import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import javafx.application.Platform
 import javafx.collections.MapChangeListener
+import javafx.collections.ObservableMap
 import java.time.Instant
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
@@ -362,7 +364,7 @@ class RegistryFxMultiKeyProjectionMapTest : StringSpec({
                 },
                 dispatchToFxThread = true
             )
-        projection.addListener(
+        (projection as ObservableMap<String, AlbumFxView>).addListener(
             MapChangeListener {
                 pulseLatch.countDown()
             }
@@ -394,7 +396,7 @@ class RegistryFxMultiKeyProjectionMapTest : StringSpec({
                 },
                 dispatchToFxThread = false
             )
-        projection.addListener(MapChangeListener { })
+        (projection as ObservableMap<String, AlbumFxView>).addListener(MapChangeListener { })
 
         trackRepo.create(1, "Track A", setOf("Rock", "Jazz"))
         reactive.advance()
@@ -447,5 +449,59 @@ class RegistryFxMultiKeyProjectionMapTest : StringSpec({
         transformedOnFxThread.all { !it } shouldBe true
         projection["Rock"] shouldBe "[Rock:2]"
         projection["Jazz"] shouldBe "[Jazz:1]"
+    }
+
+    "TransformedRegistryFxMultiKeyProjectionMap addOnEntriesChangedListener replays current entries as adds on registration" {
+        trackRepo.create(1, "Track A", setOf("Rock", "Jazz"))
+        trackRepo.create(2, "Track B", setOf("Jazz"))
+
+        val projection =
+            registryFxMultiKeyProjectionMap(trackRepo, { it.genres }, { pk, items -> "$pk:${items.size}" }, false)
+
+        val replayed = mutableMapOf<String, Pair<String?, String?>>()
+        projection.addOnEntriesChangedListener { changes ->
+            changes.forEach { replayed[it.key] = it.oldValue to it.newValue }
+        }
+
+        replayed.keys shouldBe setOf("Rock", "Jazz")
+        replayed["Rock"] shouldBe (null to "Rock:1")
+        replayed["Jazz"] shouldBe (null to "Jazz:2")
+    }
+
+    "TransformedRegistryFxMultiKeyProjectionMap addOnEntriesChangedListener emits multi-key fan-out in a single batch" {
+        val projection =
+            registryFxMultiKeyProjectionMap(trackRepo, { it.genres }, { pk, items -> "$pk:${items.size}" }, false)
+
+        val invocationCount = AtomicInteger(0)
+        val lastBatchKeys = mutableListOf<String>()
+        projection.addOnEntriesChangedListener { changes ->
+            invocationCount.incrementAndGet()
+            lastBatchKeys.addAll(changes.map { it.key })
+        }
+
+        // entity with two genres causes both buckets to be created in a single flush pulse
+        trackRepo.create(1, "Track A", setOf("Rock", "Jazz"))
+        reactive.advance()
+
+        invocationCount.get() shouldBe 1
+        lastBatchKeys.toSet() shouldBe setOf("Rock", "Jazz")
+    }
+
+    "TransformedRegistryFxMultiKeyProjectionMap addOnEntriesChangedListener stops delivering after handle is closed" {
+        trackRepo.create(1, "Track A", setOf("Rock"))
+        reactive.advance()
+
+        val projection =
+            registryFxMultiKeyProjectionMap(trackRepo, { it.genres }, { pk, items -> "$pk:${items.size}" }, false)
+
+        val changesLog = mutableListOf<ProjectionEntryChange<String, String>>()
+        val handle = projection.addOnEntriesChangedListener { changes -> changesLog.addAll(changes) }
+        changesLog.clear()
+
+        handle.close()
+        trackRepo.create(2, "Track B", setOf("Jazz"))
+        reactive.advance()
+
+        changesLog shouldBe emptyList()
     }
 })

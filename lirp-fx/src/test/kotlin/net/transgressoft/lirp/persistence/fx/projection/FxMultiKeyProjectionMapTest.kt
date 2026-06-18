@@ -33,6 +33,7 @@ import io.kotest.matchers.shouldBe
 import javafx.application.Platform
 import javafx.beans.InvalidationListener
 import javafx.collections.MapChangeListener
+import javafx.collections.ObservableMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -410,7 +411,7 @@ class FxMultiKeyProjectionMapTest : StringSpec({
                 },
                 dispatchToFxThread = true
             )
-        projection.addListener(
+        (projection as ObservableMap<String, AlbumFxView>).addListener(
             MapChangeListener {
                 pulseLatch.countDown()
             }
@@ -442,7 +443,7 @@ class FxMultiKeyProjectionMapTest : StringSpec({
                 },
                 dispatchToFxThread = false
             )
-        projection.addListener(MapChangeListener { })
+        (projection as ObservableMap<String, AlbumFxView>).addListener(MapChangeListener { })
 
         source.add(0, MutableMultiKeyAudioItem(1, "Track A", setOf("Rock", "Jazz")))
 

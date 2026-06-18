@@ -40,6 +40,22 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
   FX) place an entity into every bucket its `Collection<PK>` key-set extractor yields, using a
   reverse index and add-before-remove ordering so a key-set change never leaves an entity
   transiently absent from all buckets.
+- **Observable value-transform projections** — `ObservableProjectionMap<PK, V>` and
+  `addOnEntriesChangedListener` are now available on all four core value-transform projection maps
+  (`projectionMap`, `registryProjectionMap`, `multiKeyProjectionMap`, `registryMultiKeyProjectionMap`
+  with a trailing `valueTransform` lambda) **and** on all four FX value-transform projection maps
+  (`fxProjectionMap`, `registryFxProjectionMap`, `fxMultiKeyProjectionMap`,
+  `registryFxMultiKeyProjectionMap` with a trailing `valueTransform` lambda). Each listener invocation
+  receives a batched `List<ProjectionEntryChange<PK, V>>` carrying the old **and** new transformed
+  value per key (add / replace / remove), so a consumer can drive a CRUD-style event stream directly
+  from projection changes without maintaining its own diff cache. Registration replays the current
+  entries as adds so a late subscriber observes full state. FX value-transform maps expose
+  `addOnEntriesChangedListener` alongside their existing `ObservableMap`/`MapChangeListener` surface,
+  giving a single core-level listener API across both layers. Identity projection maps (the four
+  non-value-transform variants) deliberately do not implement this interface — see the wiki for the
+  rationale. The transform output type `V` on every value-transform factory is now constrained to
+  `V : Any`, so the add/replace/remove encoding of `ProjectionEntryChange` cannot be confused with an
+  absent key. See [#260](https://github.com/octaviospain/lirp/issues/260).
 - **FX single-pulse batching** — the FX projection maps coalesce all bucket changes from one source
   event into a single `Platform.runLater` pulse, so bound UI controls never observe an intermediate
   inconsistent state.

@@ -26,6 +26,8 @@ import net.transgressoft.lirp.persistence.FxObservableCollection
 import net.transgressoft.lirp.persistence.fx.FxAggregateList
 import net.transgressoft.lirp.persistence.fx.FxAggregateSet
 import net.transgressoft.lirp.persistence.projection.MultiKeyProjectionMap
+import net.transgressoft.lirp.persistence.projection.ObservableProjectionMap
+import net.transgressoft.lirp.persistence.projection.ProjectionEntryChange
 import io.github.oshai.kotlinlogging.KotlinLogging
 import javafx.application.Platform
 import javafx.beans.InvalidationListener
@@ -35,6 +37,7 @@ import javafx.collections.ObservableMap
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentSkipListMap
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.reflect.KProperty
@@ -77,6 +80,12 @@ import kotlinx.coroutines.launch
  * The seed loop runs on the first-access thread: both transform phases are invoked on that thread
  * during seeding.
  *
+ * In addition to the [ObservableMap] surface, this class implements [ObservableProjectionMap]:
+ * [addOnEntriesChangedListener] replays the current entries on registration (each with a null
+ * [ProjectionEntryChange.oldValue]) and then emits a batched [ProjectionEntryChange] list on each
+ * subsequent [flush] pulse, with old values snapshotted from [innerObservableMap] before mutation.
+ * The [close] method cancels all entity subscriptions and clears entries-changed listeners.
+ *
  * Mutation methods ([put], [remove], [putAll], [clear]) throw [UnsupportedOperationException];
  * all mutations flow through the source collection.
  *
@@ -100,12 +109,14 @@ class TransformedFxMultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>,
     @Suppress("UNCHECKED_CAST")
     private val fxFactory: (PK, Any?) -> V,
     val dispatchToFxThread: Boolean = true
-) : ObservableMap<PK, V>, AutoCloseable where E : IdentifiableEntity<K>, E : ReactiveEntity<K, E> {
+) : ObservableMap<PK, V>, AutoCloseable, ObservableProjectionMap<PK, V> where E : IdentifiableEntity<K>, E : ReactiveEntity<K, E> {
 
     private val log = KotlinLogging.logger {}
 
     private val innerObservableMap: ObservableMap<PK, V> =
         FXCollections.observableMap(ConcurrentSkipListMap<PK, V>())
+
+    private val entriesChangedListeners = CopyOnWriteArrayList<(List<ProjectionEntryChange<PK, V>>) -> Unit>()
 
     @Volatile
     private var initialized = false
@@ -325,41 +336,129 @@ class TransformedFxMultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>,
     }
 
     private fun flush() {
-        val updates: Map<PK, Any?>
-        val removals: Set<PK>
-        // Drain both pending structures and reset the gate atomically with scheduleFlush's staging.
-        synchronized(this) {
-            updates = HashMap(pendingUpdates)
-            pendingUpdates.clear()
-            removals = HashSet(pendingRemovals)
-            pendingRemovals.clear()
-            flushScheduled.set(false)
-        }
-        for (key in removals) {
-            innerObservableMap.remove(key)
-        }
+        // Drain, mutate innerObservableMap, build the delta batch, and snapshot the recipient set
+        // all under one monitor (the same one addOnEntriesChangedListener registers under), then
+        // fire the batch outside the lock. flush() is single-thread-confined — it runs only on the
+        // FX Application Thread (dispatch mode) or the single flowScope channel consumer (otherwise),
+        // so two flushes never interleave. The only contender is a concurrent registration; making
+        // the map mutation and the recipient snapshot atomic with respect to registration guarantees
+        // each new listener either appears in this flush's recipients (and its replay reflects the
+        // pre-flush state) or does not (and its replay reflects the post-flush state) — never both.
+        val recipients: List<(List<ProjectionEntryChange<PK, V>>) -> Unit>
+        val changes =
+            synchronized(this) {
+                val updates = HashMap(pendingUpdates)
+                pendingUpdates.clear()
+                val removals = HashSet(pendingRemovals)
+                pendingRemovals.clear()
+                flushScheduled.set(false)
+
+                require(removals.none { it in updates.keys }) { "key staged as both removal and update" }
+
+                val oldValues = snapshotOldValues(removals, updates.keys)
+                val newValues = applyMutations(removals, updates)
+                recipients = entriesChangedListeners.toList()
+                buildChanges(removals, oldValues, newValues)
+            }
+        if (changes.isNotEmpty()) notifyListeners(recipients, changes)
+    }
+
+    // Captures each affected key's transformed value before innerObservableMap is mutated, so the
+    // emitted batch can carry the pre-flush old value. Runs inside the flush monitor, before applyMutations.
+    private fun snapshotOldValues(removals: Set<PK>, updatedKeys: Set<PK>): Map<PK, V?> {
+        val oldValues = mutableMapOf<PK, V?>()
+        for (key in removals) oldValues[key] = innerObservableMap[key]
+        for (key in updatedKeys) oldValues[key] = innerObservableMap[key]
+        return oldValues
+    }
+
+    // Applies drained removals and updates to innerObservableMap, invoking fxFactory per updated
+    // bucket and skipping any bucket whose fxFactory throws. Returns the recomputed values by key.
+    private fun applyMutations(removals: Set<PK>, updates: Map<PK, Any?>): Map<PK, V> {
+        for (key in removals) innerObservableMap.remove(key)
+        val newValues = mutableMapOf<PK, V>()
         for ((key, d) in updates) {
             try {
-                innerObservableMap[key] = fxFactory(key, d)
+                val v = fxFactory(key, d)
+                innerObservableMap[key] = v
+                newValues[key] = v
             } catch (t: Throwable) {
                 log.error(t) { "fxFactory failed for bucket key=$key; skipping this bucket" }
+            }
+        }
+        return newValues
+    }
+
+    // Builds the batched delta list: a removal whose prior value was present becomes a remove change;
+    // a recomputed bucket whose value actually changed becomes an add/replace change (no-op recomputes
+    // are suppressed).
+    private fun buildChanges(
+        removals: Set<PK>,
+        oldValues: Map<PK, V?>,
+        newValues: Map<PK, V>
+    ): List<ProjectionEntryChange<PK, V>> =
+        buildList {
+            for (key in removals) {
+                val old = oldValues[key]
+                if (old != null) add(ProjectionEntryChange(key, old, null))
+            }
+            for (key in newValues.keys) {
+                val new = newValues.getValue(key)
+                if (new != oldValues[key]) add(ProjectionEntryChange(key, oldValues[key], new))
+            }
+        }
+
+    private fun notifyListeners(
+        recipients: List<(List<ProjectionEntryChange<PK, V>>) -> Unit>,
+        changes: List<ProjectionEntryChange<PK, V>>
+    ) {
+        for (recipient in recipients) {
+            try {
+                recipient(changes)
+            } catch (t: Throwable) {
+                log.error(t) { "entries-changed listener failed; skipping" }
             }
         }
     }
 
     /**
-     * Cancels all per-entity mutation subscriptions and releases resources. Safe to call before
-     * the first access (no-op when not yet initialized). After closing, in-place entity mutations
-     * no longer trigger re-bucketing.
+     * Cancels all per-entity mutation subscriptions, clears entries-changed listeners, and releases
+     * resources. Safe to call before the first access (no-op when not yet initialized). After
+     * closing, in-place entity mutations no longer trigger re-bucketing and no further
+     * entry-change batches are fired.
      */
     override fun close() {
         synchronized(initLock) {
+            entriesChangedListeners.clear()
             for (subscription in entitySubscriptions.values) {
                 subscription.cancel()
             }
             entitySubscriptions.clear()
             entityBuckets.clear()
         }
+    }
+
+    /**
+     * Registers [listener] to receive batched per-entry value changes after each flush pulse.
+     *
+     * On registration the listener is invoked synchronously with the current entries as adds
+     * (each with a null [ProjectionEntryChange.oldValue]), then on every subsequent flush.
+     * The returned [AutoCloseable] deregisters the listener when closed.
+     */
+    override fun addOnEntriesChangedListener(
+        listener: (List<ProjectionEntryChange<PK, V>>) -> Unit
+    ): AutoCloseable {
+        initialize()
+        // Add the listener and snapshot the replay batch under the same monitor flush() mutates
+        // under, so registration is atomic with respect to a concurrent flush. Fire the replay
+        // after the lock is released so user code never runs while the monitor is held.
+        val initial: List<ProjectionEntryChange<PK, V>> =
+            synchronized(this) {
+                entriesChangedListeners.add(listener)
+                innerObservableMap.map { (k, v) -> ProjectionEntryChange(k, null, v) }
+            }
+        if (initial.isNotEmpty()) notifyListeners(listOf(listener), initial)
+        return AutoCloseable { entriesChangedListeners.remove(listener) }
     }
 
     // ObservableMap<PK, V> — read operations delegate to innerObservableMap after initialization

@@ -18,7 +18,9 @@
 package net.transgressoft.lirp.persistence.projection
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
+import io.github.oshai.kotlinlogging.KotlinLogging
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * A read-only value-transformed view of a [MultiKeyRegistryProjectionMap] that derives a `Map<PK, V>`
@@ -30,6 +32,11 @@ import java.util.concurrent.ConcurrentHashMap
  * signal to maintain an internal `ConcurrentHashMap<PK, V>` transform cache. When a bucket is
  * emptied and its key is removed from the backing map, the corresponding key is also removed from
  * this view — the transform is never called over an empty list.
+ *
+ * Because the cache holds the previous transformed value per key, this decorator can report both the
+ * old and the new value for every changed key. It therefore implements [ObservableProjectionMap]:
+ * [addOnEntriesChangedListener] emits batched [ProjectionEntryChange] deltas (add / replace / remove),
+ * letting a consumer drive a CRUD-style event stream directly without keeping its own diff cache.
  *
  * **Weak cross-key consistency:** Two consecutive `get()` calls for different keys are NOT
  * a single snapshot. Iteration via [entries], [keys], or [values] is CME-free (backed by
@@ -51,7 +58,9 @@ import java.util.concurrent.ConcurrentHashMap
 internal class TransformedMultiKeyRegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V>(
     private val backing: MultiKeyRegistryProjectionMap<K, PK, E>,
     private val valueTransform: (PK, List<E>) -> V
-) : AbstractMap<PK, V>(), AutoCloseable by backing, CloseableProjectionMap<PK, V> {
+) : AbstractMap<PK, V>(), AutoCloseable by backing, ObservableProjectionMap<PK, V> {
+
+    private val log = KotlinLogging.logger {}
 
     private val transformCache = ConcurrentHashMap<PK, V>()
 
@@ -63,6 +72,8 @@ internal class TransformedMultiKeyRegistryProjectionMap<K : Comparable<K>, PK : 
     @Volatile
     private var seedingThread: Thread? = null
 
+    private val entriesChangedListeners = CopyOnWriteArrayList<(List<ProjectionEntryChange<PK, V>>) -> Unit>()
+
     init {
         backing.addOnBucketsChangedListener { changedKeys ->
             // The backing map fires this synchronously, on the seeding thread, while building its
@@ -72,13 +83,61 @@ internal class TransformedMultiKeyRegistryProjectionMap<K : Comparable<K>, PK : 
             // thread) run the hook normally and are never dropped, because they block on cacheLock
             // until the seed completes and then recompute from the live bucket snapshot.
             if (Thread.currentThread() !== seedingThread) {
-                synchronized(cacheLock) {
-                    for (key in changedKeys) {
-                        val bucket = backing.bucketSnapshot(key)
-                        if (bucket == null) transformCache.remove(key)
-                        else transformCache[key] = valueTransform(key, bucket)
+                // Mutate the cache and snapshot the recipient set under cacheLock so the cache
+                // state and the listener set advance atomically; the user callbacks fire after the
+                // lock is released so arbitrary listener code never runs while the lock is held.
+                val recipients: List<(List<ProjectionEntryChange<PK, V>>) -> Unit>
+                val changes =
+                    synchronized(cacheLock) {
+                        val built =
+                            buildList<ProjectionEntryChange<PK, V>> {
+                                for (key in changedKeys) {
+                                    val bucket = backing.bucketSnapshot(key)
+                                    val oldValue = transformCache[key]
+                                    if (bucket == null) {
+                                        if (oldValue != null) {
+                                            transformCache.remove(key)
+                                            add(ProjectionEntryChange(key, oldValue, null))
+                                        }
+                                    } else {
+                                        val newValue = valueTransform(key, bucket)
+                                        transformCache[key] = newValue
+                                        if (newValue != oldValue) add(ProjectionEntryChange(key, oldValue, newValue))
+                                    }
+                                }
+                            }
+                        recipients = entriesChangedListeners.toList()
+                        built
                     }
-                }
+                if (changes.isNotEmpty()) notifyListeners(recipients, changes)
+            }
+        }
+    }
+
+    override fun addOnEntriesChangedListener(listener: (List<ProjectionEntryChange<PK, V>>) -> Unit): AutoCloseable {
+        // Register the listener and snapshot the replay batch under cacheLock so a concurrent delta
+        // cannot interleave between the snapshot and the registration: the delta blocks on cacheLock,
+        // and because the listener is already in the set its delta is delivered strictly after this
+        // replay. The replay itself fires after the lock is released so user code never runs under it.
+        val initial: List<ProjectionEntryChange<PK, V>> =
+            synchronized(cacheLock) {
+                initializeCache()
+                entriesChangedListeners.add(listener)
+                transformCache.map { (key, value) -> ProjectionEntryChange(key, null, value) }
+            }
+        if (initial.isNotEmpty()) notifyListeners(listOf(listener), initial)
+        return AutoCloseable { entriesChangedListeners.remove(listener) }
+    }
+
+    private fun notifyListeners(
+        recipients: List<(List<ProjectionEntryChange<PK, V>>) -> Unit>,
+        changes: List<ProjectionEntryChange<PK, V>>
+    ) {
+        for (recipient in recipients) {
+            try {
+                recipient(changes)
+            } catch (t: Throwable) {
+                log.error(t) { "entries-changed listener failed; skipping" }
             }
         }
     }

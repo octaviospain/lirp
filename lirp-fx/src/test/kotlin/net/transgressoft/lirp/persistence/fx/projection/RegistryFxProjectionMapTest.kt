@@ -24,14 +24,17 @@ import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.SoftDeletableMutableAudioItem
 import net.transgressoft.lirp.persistence.fx.FxToolkitInit
+import net.transgressoft.lirp.persistence.projection.ProjectionEntryChange
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import javafx.application.Platform
 import javafx.beans.InvalidationListener
 import javafx.collections.MapChangeListener
+import javafx.collections.ObservableMap
 import java.time.Instant
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
@@ -597,7 +600,7 @@ class RegistryFxProjectionMapTest : StringSpec({
                 },
                 dispatchToFxThread = true
             )
-        projection.addListener(
+        (projection as ObservableMap<String, AlbumFxView>).addListener(
             MapChangeListener {
                 pulseLatch.countDown()
             }
@@ -629,7 +632,7 @@ class RegistryFxProjectionMapTest : StringSpec({
                 },
                 dispatchToFxThread = false
             )
-        projection.addListener(MapChangeListener { })
+        (projection as ObservableMap<String, AlbumFxView>).addListener(MapChangeListener { })
 
         trackRepo.create(1, "Track A", "Jazz")
         trackRepo.create(2, "Track B", "Rock")
@@ -690,5 +693,180 @@ class RegistryFxProjectionMapTest : StringSpec({
         transformedOnFxThread.isNotEmpty() shouldBe true
         transformedOnFxThread.all { !it } shouldBe true
         projection["Jazz"] shouldBe RegistryAlbumBucket("Jazz", listOf("Track A", "Track B"))
+    }
+
+    "TransformedRegistryFxProjectionMap addOnEntriesChangedListener replays current entries as adds on registration" {
+        trackRepo.create(1, "Track A", "Jazz")
+        trackRepo.create(2, "Track B", "Jazz")
+        trackRepo.create(3, "Track C", "Rock")
+
+        val projection =
+            registryFxProjectionMap(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, false)
+
+        val replayed = mutableMapOf<String, Pair<String?, String?>>()
+        projection.addOnEntriesChangedListener { changes ->
+            changes.forEach { replayed[it.key] = it.oldValue to it.newValue }
+        }
+
+        replayed.keys shouldBe setOf("Jazz", "Rock")
+        replayed["Jazz"] shouldBe (null to "Jazz:2")
+        replayed["Rock"] shouldBe (null to "Rock:1")
+    }
+
+    "TransformedRegistryFxProjectionMap addOnEntriesChangedListener emits add, replace and remove deltas" {
+        trackRepo.create(1, "Track A", "Rock")
+        reactive.advance()
+
+        val projection =
+            registryFxProjectionMap(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, false)
+
+        val changesLog = mutableListOf<Triple<String, String?, String?>>()
+        projection.addOnEntriesChangedListener { changes ->
+            changes.forEach { changesLog += Triple(it.key, it.oldValue, it.newValue) }
+        }
+        changesLog.clear() // drop initial replay
+
+        val itemB = trackRepo.create(2, "Track B", "Jazz")
+        reactive.advance()
+        trackRepo.create(3, "Track C", "Rock")
+        reactive.advance()
+        trackRepo.remove(itemB)
+        reactive.advance()
+
+        changesLog.any { it.first == "Jazz" && it.second == null && it.third == "Jazz:1" } shouldBe true
+        changesLog.any { it.first == "Rock" && it.second == "Rock:1" && it.third == "Rock:2" } shouldBe true
+        changesLog.any { it.first == "Jazz" && it.second == "Jazz:1" && it.third == null } shouldBe true
+    }
+
+    "TransformedRegistryFxProjectionMap addOnEntriesChangedListener fires single-pulse batch with both old and new key when entity re-keys" {
+        val item = trackRepo.create(1, "Track A", "Rock")
+        reactive.advance()
+
+        val projection =
+            registryFxProjectionMap(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, false)
+
+        val invocationCount = AtomicInteger(0)
+        val lastBatchKeys = mutableListOf<String>()
+        projection.addOnEntriesChangedListener { changes ->
+            invocationCount.incrementAndGet()
+            lastBatchKeys.addAll(changes.map { it.key })
+        }
+        // drop replay
+        invocationCount.set(0)
+        lastBatchKeys.clear()
+
+        // re-key: entity moves from "Rock" to "Jazz"
+        val oldSnapshot = item.clone()
+        (item as MutableAudioItem).albumName = "Jazz"
+        trackRepo.emitAsync(StandardCrudEvent.Update(item, oldSnapshot))
+        reactive.advance()
+
+        // Both the removed key (Rock) and added key (Jazz) fire in a single flush pulse
+        invocationCount.get() shouldBe 1
+        lastBatchKeys.toSet() shouldBe setOf("Rock", "Jazz")
+    }
+
+    "TransformedRegistryFxProjectionMap addOnEntriesChangedListener stops delivering after handle is closed" {
+        trackRepo.create(1, "Track A", "Rock")
+        reactive.advance()
+
+        val projection =
+            registryFxProjectionMap(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, false)
+
+        val changesLog = mutableListOf<ProjectionEntryChange<String, String>>()
+        val handle = projection.addOnEntriesChangedListener { changes -> changesLog.addAll(changes) }
+        changesLog.clear()
+
+        handle.close()
+        trackRepo.create(2, "Track B", "Jazz")
+        reactive.advance()
+
+        changesLog shouldBe emptyList()
+    }
+
+    "TransformedRegistryFxProjectionMap close clears entries-changed listeners" {
+        trackRepo.create(1, "Track A", "Rock")
+        reactive.advance()
+
+        val projection =
+            registryFxProjectionMap(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, false)
+
+        val changesLog = mutableListOf<ProjectionEntryChange<String, String>>()
+        projection.addOnEntriesChangedListener { changes -> changesLog.addAll(changes) }
+        changesLog.clear()
+
+        projection.close()
+        trackRepo.create(2, "Track B", "Jazz")
+        reactive.advance()
+
+        changesLog shouldBe emptyList()
+    }
+
+    "TransformedRegistryFxProjectionMap addOnEntriesChangedListener never stages a key as both removal and update on remove then re-add" {
+        val item = trackRepo.create(1, "Track A", "Rock")
+        reactive.advance()
+
+        val projection =
+            registryFxProjectionMap(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, false)
+
+        val deltas = mutableListOf<Triple<String, String?, String?>>()
+        projection.addOnEntriesChangedListener { changes ->
+            // flush()'s disjointness require throws if a pulse ever stages a key as both a removal
+            // and an update; every delivered batch reaching here proves the staging kept them
+            // mutually exclusive. Each emitted change is internally coherent (oldValue != newValue).
+            changes.forEach {
+                it.oldValue shouldNotBe it.newValue
+                deltas += Triple(it.key, it.oldValue, it.newValue)
+            }
+        }
+        deltas.clear()
+
+        // Empty the only Rock entity, then re-add two more in the same window.
+        trackRepo.remove(item)
+        trackRepo.create(2, "Track B", "Rock")
+        trackRepo.create(3, "Track C", "Rock")
+        reactive.advance()
+
+        // The require never tripped, and the bucket settles at the re-added pair.
+        deltas.last { it.first == "Rock" }.third shouldBe "Rock:2"
+        projection["Rock"] shouldBe "Rock:2"
+    }
+
+    "TransformedRegistryFxProjectionMap addOnEntriesChangedListener fires no delta when an in-place update leaves the transformed value unchanged" {
+        val item = trackRepo.create(1, "Track A", "Jazz") as MutableAudioItem
+        reactive.advance()
+
+        // The transform ignores the title, so a title-only update recomputes the same value.
+        val projection =
+            registryFxProjectionMap(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, false)
+
+        val changesLog = mutableListOf<ProjectionEntryChange<String, String>>()
+        projection.addOnEntriesChangedListener { changes -> changesLog.addAll(changes) }
+        changesLog.clear()
+
+        val oldSnapshot = item.clone()
+        item.title = "Renamed Track"
+        trackRepo.emitAsync(StandardCrudEvent.Update(item, oldSnapshot))
+        reactive.advance()
+
+        changesLog shouldBe emptyList()
+    }
+
+    "TransformedRegistryFxProjectionMap addOnEntriesChangedListener isolates a throwing listener so others still receive the batch" {
+        trackRepo.create(1, "Track A", "Rock")
+        reactive.advance()
+
+        val projection =
+            registryFxProjectionMap(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, false)
+
+        val secondListenerKeys = mutableListOf<String>()
+        projection.addOnEntriesChangedListener { error("listener boom") }
+        projection.addOnEntriesChangedListener { changes -> secondListenerKeys.addAll(changes.map { it.key }) }
+        secondListenerKeys.clear()
+
+        trackRepo.create(2, "Track B", "Jazz")
+        reactive.advance()
+
+        secondListenerKeys shouldBe listOf("Jazz")
     }
 })

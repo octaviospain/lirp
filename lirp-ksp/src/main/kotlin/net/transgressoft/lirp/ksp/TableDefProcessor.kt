@@ -132,32 +132,7 @@ class TableDefProcessor(
             val foreignKeys = sqlTableDefAvailable.let { foreignKeyAnalyzer.collectForeignKeys(classDecl, aggregates) }
             val junctionRefs =
                 if (sqlTableDefAvailable) foreignKeyAnalyzer.collectJunctionRefs(classDecl, aggregates) else emptyList()
-            // Backing collection fields for @ToManyAggregates collection refs are never SQL columns —
-            // they are the in-memory mirror of junction-table rows. Exclude them from column
-            // collection so the column-type mapper doesn't emit "Unsupported column type
-            // 'kotlin.collections.List'" errors.
-            // Also exclude polymorphicAggregate delegate properties (PolymorphicAggregateDelegate
-            // type) so the column mapper does not attempt to emit a column for the delegate itself.
-            val polymorphicPropNames =
-                classDecl.getAllProperties()
-                    .filter { prop ->
-                        val text = readSourceLines(prop, linesAfter = 1) ?: return@filter false
-                        text.contains("polymorphicAggregate(")
-                    }
-                    .map { it.simpleName.asString() }
-                    .toSet()
-            // Delegate-val @ToOneAggregate properties (e.g. `val label by aggregate<K, E> { labelId }`)
-            // are not SQL columns — the delegate property name resolves to AggregateRefDelegate, not a
-            // scalar type. Detect them by the fact that propertyName != backingScalarName (the
-            // backingScalarName was extracted from the lambda body and differs from the delegate val name).
-            val toOneDelegateValNames =
-                aggregates.filter { !it.isCollection && it.backingScalarName != null && it.backingScalarName != it.propertyName }
-                    .map { it.propertyName }
-                    .toSet()
-            val excludedBackingFields =
-                aggregates.mapNotNullTo(mutableSetOf()) { if (it.isCollection) it.backingCollectionName else null } +
-                    polymorphicPropNames +
-                    toOneDelegateValNames
+            val excludedBackingFields = buildExcludedBackingFields(classDecl, aggregates)
             // inputs: backing scalar names for single-entity aggregates (FK columns). These are
             // excluded from converter routing because the FK column type is dictated by the
             // referenced entity's primary key type, not by a domain-to-scalar converter.
@@ -195,29 +170,65 @@ class TableDefProcessor(
                 }
             }
 
-            // Emit one sealed-union file per polymorphicAggregate property whose arms were all
-            // resolved in this round. Properties with unresolved arms were already deferred above
-            // and will not appear in polymorphicArmsByClass for this class.
-            val resolvedPolymorphicArms = polymorphicArmsByClass[classDecl]
-            if (!resolvedPolymorphicArms.isNullOrEmpty()) {
-                val packageName = classDecl.packageName.asString()
-                val entitySimpleName = classDecl.simpleName.asString()
-                val sourceFile = classDecl.containingFile ?: continue
-                for ((propName, arms) in resolvedPolymorphicArms) {
-                    PolymorphicRefEmitter.emitSealedUnion(
-                        packageName = packageName,
-                        entitySimpleName = entitySimpleName,
-                        propertyName = propName,
-                        arms = arms,
-                        codeGenerator = codeGenerator,
-                        sourceFile = sourceFile,
-                        logger = logger
-                    )
-                }
-            }
+            emitResolvedPolymorphicSealedUnions(classDecl)
         }
 
         return unableToProcess
+    }
+
+    /**
+     * Computes the property names that must be excluded from SQL column collection for [classDecl]:
+     * - backing collection fields of `@ToManyAggregates` collection refs (in-memory mirrors of
+     *   junction-table rows, never columns; emitting them would trip the column-type mapper on
+     *   `kotlin.collections.List`),
+     * - `polymorphicAggregate` delegate properties (the delegate type itself is not a column), and
+     * - delegate-val `@ToOneAggregate` properties (`val label by aggregate<K, E> { labelId }`),
+     *   detected by the backing scalar name differing from the delegate val name.
+     */
+    private fun buildExcludedBackingFields(
+        classDecl: KSClassDeclaration,
+        aggregates: List<AggregatePropertyMeta>
+    ): Set<String> {
+        val polymorphicPropNames =
+            classDecl.getAllProperties()
+                .filter { prop ->
+                    val text = readSourceLines(prop, linesAfter = 1) ?: return@filter false
+                    text.contains(POLYMORPHIC_AGGREGATE_CALL)
+                }
+                .map { it.simpleName.asString() }
+                .toSet()
+        val toOneDelegateValNames =
+            aggregates.filter { !it.isCollection && it.backingScalarName != null && it.backingScalarName != it.propertyName }
+                .map { it.propertyName }
+                .toSet()
+        return aggregates.mapNotNullTo(mutableSetOf()) { if (it.isCollection) it.backingCollectionName else null } +
+            polymorphicPropNames +
+            toOneDelegateValNames
+    }
+
+    /**
+     * Emits one sealed-union file per `polymorphicAggregate` property of [classDecl] whose arms were
+     * all resolved in this round. Properties with unresolved arms were deferred during
+     * [collectAggregateProperties] and do not appear in [polymorphicArmsByClass]. No-op when the
+     * class has no resolved arms or no containing source file.
+     */
+    private fun emitResolvedPolymorphicSealedUnions(classDecl: KSClassDeclaration) {
+        val resolvedPolymorphicArms = polymorphicArmsByClass[classDecl]
+        if (resolvedPolymorphicArms.isNullOrEmpty()) return
+        val packageName = classDecl.packageName.asString()
+        val entitySimpleName = classDecl.simpleName.asString()
+        val sourceFile = classDecl.containingFile ?: return
+        for ((propName, arms) in resolvedPolymorphicArms) {
+            PolymorphicRefEmitter.emitSealedUnion(
+                packageName = packageName,
+                entitySimpleName = entitySimpleName,
+                propertyName = propName,
+                arms = arms,
+                codeGenerator = codeGenerator,
+                sourceFile = sourceFile,
+                logger = logger
+            )
+        }
     }
 
     /**
@@ -294,88 +305,118 @@ class TableDefProcessor(
             byClass.getOrPut(parent) { mutableListOf() }.add(meta)
         }
 
-        // Scan all entity classes for polymorphicAggregate() declarations. These properties have no
-        // no aggregate annotation, so they are invisible to the annotation-based pass above.
+        collectPolymorphicArms(resolver, classes, unableToProcess, byClass)
+        return byClass
+    }
+
+    /**
+     * Scans every entity class in [classes] for `polymorphicAggregate()` declarations — which carry
+     * no aggregate annotation and are therefore invisible to the annotation-based passes — and
+     * records the synthesised per-arm metadata into [byClass] and [polymorphicArmsByClass]. Each
+     * property is delegated to [processPolymorphicProperty].
+     */
+    private fun collectPolymorphicArms(
+        resolver: Resolver,
+        classes: Set<KSClassDeclaration>,
+        unableToProcess: MutableList<KSAnnotated>,
+        byClass: MutableMap<KSClassDeclaration, MutableList<AggregatePropertyMeta>>
+    ) {
         for (classDecl in classes) {
             for (prop in classDecl.getAllProperties()) {
-                // Quick pre-filter: read minimal context to check for the factory keyword before
-                // spending more lines on scanning.
-                val quickText = readSourceLines(prop, linesAfter = 1) ?: continue
-                if (!quickText.contains("polymorphicAggregate(")) continue
-                // Read from the property line to end of file so the balanced-paren walk in
-                // extractPolymorphicAggregateSpan always reaches the closing ')', regardless of arm
-                // count or formatting. A fixed line window truncated 6+-arm or multiline declarations.
-                val fullText = readSourceFromProperty(prop) ?: continue
-                // Bound the scan to the contiguous polymorphicAggregate(...) span to avoid bleeding
-                // into adjacent property declarations.
-                val boundedText = extractPolymorphicAggregateSpan(fullText)
-                val entityFqn = classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString()
-                val propName = prop.simpleName.asString()
-                // The exactly-one pre-persist gate lives on ReactiveEntityBase; a polymorphicAggregate
-                // property on a plain IdentifiableEntity would persist with no enforcement. The Kotlin
-                // compiler already rejects this (polymorphicAggregate's provideDelegate requires a
-                // ReactiveEntityBase receiver), but assert it here so the unenforceable configuration
-                // can never slip through codegen unflagged.
-                if (!extendsReactiveEntityBase(classDecl)) {
-                    logger.error(
-                        "Property '$entityFqn.$propName' declares a polymorphicAggregate but '$entityFqn' does not extend " +
-                            "ReactiveEntityBase; the exactly-one-non-null invariant cannot be enforced before persistence.",
-                        prop
-                    )
-                    continue
-                }
-                // Fail loud on arm declarations the regex cannot parse rather than silently dropping
-                // them from FK / sealed-union generation while the runtime delegate keeps them.
-                val unparseable = unparseableArmCalls(boundedText, ARM_REGEX)
-                if (unparseable.isNotEmpty()) {
-                    logger.error(
-                        "Property '$entityFqn.$propName' has polymorphic arm declaration(s) the processor cannot parse: " +
-                            unparseable.joinToString("; ") + ". Use arm<K, E>(\"label\"[, CascadeAction.X]) { scalar }.",
-                        prop
-                    )
-                    continue
-                }
-                val armMetas = extractArmMetas(boundedText)
-                if (armMetas.isEmpty()) continue
-                if (!validateArmLabels(armMetas.map { it.label }, entityFqn, propName, prop)) continue
-                var anyDeferred = false
-                val resolvedArms = mutableListOf<ArmTextMeta>()
-                for (armMeta in armMetas) {
-                    val referencedClass = resolveArmTargetClass(armMeta.eTypeName, prop, resolver)
-                    if (referencedClass == null) {
-                        // Unresolved target — defer via the existing multi-round mechanism (T-71-06).
-                        unableToProcess.add(prop)
-                        deferredRecords.add(Triple(entityFqn, propName, "arm target type '${armMeta.eTypeName}'"))
-                        anyDeferred = true
-                        break
-                    }
-                    val resolvedFqn = referencedClass.qualifiedName?.asString() ?: armMeta.eTypeName
-                    resolvedArms.add(armMeta.copy(entityFqn = resolvedFqn))
-                    byClass.getOrPut(classDecl) { mutableListOf() }.add(
-                        AggregatePropertyMeta(
-                            property = prop,
-                            propertyName = propName,
-                            isCollection = false,
-                            isOrdered = false,
-                            onDeleteName = armMeta.onDeleteName,
-                            referencedClass = referencedClass,
-                            backingScalarName = armMeta.scalarName,
-                            backingCollectionName = null
-                        )
-                    )
-                }
-                // If any arm deferred, remove any partial arms added for this property so the entity
-                // is re-processed cleanly in the next round without duplicate entries.
-                if (anyDeferred) {
-                    byClass[classDecl]?.removeIf { it.property == prop }
-                    polymorphicArmsByClass[classDecl]?.remove(propName)
-                } else if (resolvedArms.isNotEmpty()) {
-                    // All arms resolved — store the FQN-enriched metas for sealed-union emission.
-                    polymorphicArmsByClass.getOrPut(classDecl) { mutableMapOf() }[propName] = resolvedArms
-                }
+                processPolymorphicProperty(classDecl, prop, resolver, unableToProcess, byClass)
             }
         }
-        return byClass
+    }
+
+    /**
+     * Processes a single property that may declare a `polymorphicAggregate(...)`. Returns without
+     * effect when the property is not polymorphic, its source is unavailable, or a diagnostic was
+     * emitted (unenforceable receiver, unparseable arm, invalid labels). When all arms resolve, the
+     * FQN-enriched metas are stored for sealed-union emission; when any arm target is unresolvable,
+     * the property is deferred and its partial arms are removed so the next round retries cleanly.
+     */
+    private fun processPolymorphicProperty(
+        classDecl: KSClassDeclaration,
+        prop: KSPropertyDeclaration,
+        resolver: Resolver,
+        unableToProcess: MutableList<KSAnnotated>,
+        byClass: MutableMap<KSClassDeclaration, MutableList<AggregatePropertyMeta>>
+    ) {
+        // Quick pre-filter: read minimal context to check for the factory keyword before
+        // spending more lines on scanning.
+        val quickText = readSourceLines(prop, linesAfter = 1) ?: return
+        if (!quickText.contains(POLYMORPHIC_AGGREGATE_CALL)) return
+        // Read from the property line to end of file so the balanced-paren walk in
+        // extractPolymorphicAggregateSpan always reaches the closing ')', regardless of arm
+        // count or formatting. A fixed line window truncated 6+-arm or multiline declarations.
+        val fullText = readSourceFromProperty(prop) ?: return
+        // Bound the scan to the contiguous polymorphicAggregate(...) span to avoid bleeding
+        // into adjacent property declarations.
+        val boundedText = extractPolymorphicAggregateSpan(fullText)
+        val entityFqn = classDecl.qualifiedName?.asString() ?: classDecl.simpleName.asString()
+        val propName = prop.simpleName.asString()
+        // The exactly-one pre-persist gate lives on ReactiveEntityBase; a polymorphicAggregate
+        // property on a plain IdentifiableEntity would persist with no enforcement. The Kotlin
+        // compiler already rejects this (polymorphicAggregate's provideDelegate requires a
+        // ReactiveEntityBase receiver), but assert it here so the unenforceable configuration
+        // can never slip through codegen unflagged.
+        if (!extendsReactiveEntityBase(classDecl)) {
+            logger.error(
+                "Property '$entityFqn.$propName' declares a polymorphicAggregate but '$entityFqn' does not extend " +
+                    "ReactiveEntityBase; the exactly-one-non-null invariant cannot be enforced before persistence.",
+                prop
+            )
+            return
+        }
+        // Fail loud on arm declarations the regex cannot parse rather than silently dropping
+        // them from FK / sealed-union generation while the runtime delegate keeps them.
+        val unparseable = unparseableArmCalls(boundedText, ARM_REGEX)
+        if (unparseable.isNotEmpty()) {
+            logger.error(
+                "Property '$entityFqn.$propName' has polymorphic arm declaration(s) the processor cannot parse: " +
+                    unparseable.joinToString("; ") + ". Use arm<K, E>(\"label\"[, CascadeAction.X]) { scalar }.",
+                prop
+            )
+            return
+        }
+        val armMetas = extractArmMetas(boundedText)
+        if (armMetas.isEmpty()) return
+        if (!validateArmLabels(armMetas.map { it.label }, entityFqn, propName, prop)) return
+        var anyDeferred = false
+        val resolvedArms = mutableListOf<ArmTextMeta>()
+        for (armMeta in armMetas) {
+            val referencedClass = resolveArmTargetClass(armMeta.eTypeName, prop, resolver)
+            if (referencedClass == null) {
+                // Unresolved target — defer via the existing multi-round mechanism.
+                unableToProcess.add(prop)
+                deferredRecords.add(Triple(entityFqn, propName, "arm target type '${armMeta.eTypeName}'"))
+                anyDeferred = true
+                break
+            }
+            val resolvedFqn = referencedClass.qualifiedName?.asString() ?: armMeta.eTypeName
+            resolvedArms.add(armMeta.copy(entityFqn = resolvedFqn))
+            byClass.getOrPut(classDecl) { mutableListOf() }.add(
+                AggregatePropertyMeta(
+                    property = prop,
+                    propertyName = propName,
+                    isCollection = false,
+                    isOrdered = false,
+                    onDeleteName = armMeta.onDeleteName,
+                    referencedClass = referencedClass,
+                    backingScalarName = armMeta.scalarName,
+                    backingCollectionName = null
+                )
+            )
+        }
+        // If any arm deferred, remove any partial arms added for this property so the entity
+        // is re-processed cleanly in the next round without duplicate entries.
+        if (anyDeferred) {
+            byClass[classDecl]?.removeIf { it.property == prop }
+            polymorphicArmsByClass[classDecl]?.remove(propName)
+        } else if (resolvedArms.isNotEmpty()) {
+            // All arms resolved — store the FQN-enriched metas for sealed-union emission.
+            polymorphicArmsByClass.getOrPut(classDecl) { mutableMapOf() }[propName] = resolvedArms
+        }
     }
 
     /**
@@ -385,7 +426,7 @@ class TableDefProcessor(
      * property declarations that may also contain `arm(` or `{`.
      */
     private fun extractPolymorphicAggregateSpan(text: String): String =
-        extractBalancedCallSpan(text, "polymorphicAggregate(")
+        extractBalancedCallSpan(text, POLYMORPHIC_AGGREGATE_CALL)
 
     /**
      * Parses source text for `arm<K, E>("label") { scalar }` calls and returns a list of

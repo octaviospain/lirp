@@ -29,9 +29,13 @@ import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.maps.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -644,6 +648,244 @@ internal class ProjectionMapTest : StringSpec({
 
         projection.isEmpty() shouldBe true
     }
+
+    "projectionMap valueTransform replays current entries as adds when a listener registers" {
+        val t1 = trackRepo.create(1, "Jazz")
+        val t2 = trackRepo.create(2, "Jazz")
+        val t3 = trackRepo.create(3, "Rock")
+        val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id, t3.id)).also(playlistRepo::add)
+
+        val transformed =
+            projectionMap<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
+                "$pk:${items.size}"
+            }
+
+        val replayed = mutableMapOf<String, Pair<String?, String?>>()
+        transformed.addOnEntriesChangedListener { changes ->
+            changes.forEach { replayed[it.key] = it.oldValue to it.newValue }
+        }
+
+        // Each current entry is replayed as an add (oldValue == null) so a late subscriber sees full state.
+        replayed.keys shouldBe setOf("Jazz", "Rock")
+        replayed["Jazz"] shouldBe (null to "Jazz:2")
+        replayed["Rock"] shouldBe (null to "Rock:1")
+    }
+
+    "projectionMap valueTransform emits add, replace and remove entry changes on deltas" {
+        val t1 = trackRepo.create(1, "Rock")
+        val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id)).also(playlistRepo::add)
+
+        val transformed =
+            projectionMap<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
+                "$pk:${items.size}"
+            }
+
+        val changesLog = mutableListOf<Triple<String, String?, String?>>()
+        transformed.addOnEntriesChangedListener { changes ->
+            changes.forEach { changesLog += Triple(it.key, it.oldValue, it.newValue) }
+        }
+        changesLog.clear() // drop the initial replay of the seeded "Rock" bucket
+
+        val t2 = trackRepo.create(2, "Jazz")
+        playlist.audioItems.add(t2) // add a new bucket
+
+        val t3 = trackRepo.create(3, "Rock")
+        playlist.audioItems.add(t3) // recompute an existing bucket
+
+        playlist.audioItems.remove(t2) // empty and drop the Jazz bucket
+
+        changesLog shouldContainExactly
+            listOf(
+                Triple("Jazz", null, "Jazz:1"),
+                Triple("Rock", "Rock:1", "Rock:2"),
+                Triple("Jazz", "Jazz:1", null)
+            )
+    }
+
+    "projectionMap valueTransform stops delivering entry changes after the listener handle is closed" {
+        val t1 = trackRepo.create(1, "Rock")
+        val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id)).also(playlistRepo::add)
+
+        val transformed =
+            projectionMap<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
+                "$pk:${items.size}"
+            }
+
+        val changesLog = mutableListOf<Triple<String, String?, String?>>()
+        val handle =
+            transformed.addOnEntriesChangedListener { changes ->
+                changes.forEach { changesLog += Triple(it.key, it.oldValue, it.newValue) }
+            }
+        changesLog.clear()
+
+        handle.close()
+        val t2 = trackRepo.create(2, "Jazz")
+        playlist.audioItems.add(t2)
+
+        changesLog shouldBe emptyList()
+    }
+
+    "multiKeyProjectionMap valueTransform replays current entries as adds when a listener registers" {
+        val item1 = multiKeyRepo.create(1, "Track One", setOf("Rock", "Jazz"))
+        val item2 = multiKeyRepo.create(2, "Track Two", setOf("Jazz"))
+        val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id, item2.id))
+        mkPlaylistRepo.add(mkPlaylist)
+
+        val transformed =
+            multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem, String>(
+                { mkPlaylist.audioItems },
+                { it.genres }
+            ) { pk, items -> "$pk:${items.size}" }
+
+        val replayed = mutableMapOf<String, Pair<String?, String?>>()
+        transformed.addOnEntriesChangedListener { changes ->
+            changes.forEach { replayed[it.key] = it.oldValue to it.newValue }
+        }
+
+        // Each current entry is replayed as an add (oldValue == null) so a late subscriber sees full state.
+        replayed.keys shouldBe setOf("Rock", "Jazz")
+        replayed["Rock"] shouldBe (null to "Rock:1")
+        replayed["Jazz"] shouldBe (null to "Jazz:2")
+    }
+
+    "multiKeyProjectionMap valueTransform emits add, replace and remove entry changes on deltas" {
+        val item1 = multiKeyRepo.create(1, "Track One", setOf("Rock"))
+        val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id))
+        mkPlaylistRepo.add(mkPlaylist)
+
+        val transformed =
+            multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem, String>(
+                { mkPlaylist.audioItems },
+                { it.genres }
+            ) { pk, items -> "$pk:${items.size}" }
+
+        val changesLog = mutableListOf<Triple<String, String?, String?>>()
+        transformed.addOnEntriesChangedListener { changes ->
+            changes.forEach { changesLog += Triple(it.key, it.oldValue, it.newValue) }
+        }
+        changesLog.clear() // drop the initial replay of the seeded "Rock" bucket
+
+        val item2 = multiKeyRepo.create(2, "Track Two", setOf("Jazz"))
+        mkPlaylist.audioItems.add(item2) // add a new bucket
+
+        val item3 = multiKeyRepo.create(3, "Track Three", setOf("Rock"))
+        mkPlaylist.audioItems.add(item3) // recompute an existing bucket
+
+        mkPlaylist.audioItems.remove(item2) // empty and drop the Jazz bucket
+
+        changesLog shouldContainExactly
+            listOf(
+                Triple("Jazz", null, "Jazz:1"),
+                Triple("Rock", "Rock:1", "Rock:2"),
+                Triple("Jazz", "Jazz:1", null)
+            )
+    }
+
+    "multiKeyProjectionMap valueTransform stops delivering entry changes after the listener handle is closed" {
+        val item1 = multiKeyRepo.create(1, "Track One", setOf("Rock"))
+        val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id))
+        mkPlaylistRepo.add(mkPlaylist)
+
+        val transformed =
+            multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem, String>(
+                { mkPlaylist.audioItems },
+                { it.genres }
+            ) { pk, items -> "$pk:${items.size}" }
+
+        val changesLog = mutableListOf<Triple<String, String?, String?>>()
+        val handle =
+            transformed.addOnEntriesChangedListener { changes ->
+                changes.forEach { changesLog += Triple(it.key, it.oldValue, it.newValue) }
+            }
+        changesLog.clear()
+
+        handle.close()
+        val item2 = multiKeyRepo.create(2, "Track Two", setOf("Jazz"))
+        mkPlaylist.audioItems.add(item2)
+
+        changesLog shouldBe emptyList()
+    }
+
+    "multiKeyProjectionMap valueTransform fires no delta when entity key-extractor returns empty set" {
+        val item1 = multiKeyRepo.create(1, "No Genre Track", emptySet())
+        val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id))
+        mkPlaylistRepo.add(mkPlaylist)
+
+        val transformed =
+            multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem, String>(
+                { mkPlaylist.audioItems },
+                { it.genres }
+            ) { pk, items -> "$pk:${items.size}" }
+
+        var listenerCallCount = 0
+        transformed.addOnEntriesChangedListener { batch -> listenerCallCount += batch.size }
+
+        // The replay on register must be zero since no bucket was created.
+        listenerCallCount shouldBe 0
+
+        // Adding another entity with empty genres also fires no delta.
+        val item2 = multiKeyRepo.create(2, "Another No Genre Track", emptySet())
+        mkPlaylist.audioItems.add(item2)
+
+        listenerCallCount shouldBe 0
+    }
+
+    "projectionMap valueTransform observes each bucket create exactly once with replay never preceded by a delta under stress"
+        .config(tags = setOf(Stress)) {
+            val seedSize = 40
+            val addCount = 400
+
+            val seedTracks = (1..seedSize).map { i -> trackRepo.create(i, "Seed-$i") }
+            val playlist = DefaultAudioPlaylist(1, "Stress", seedTracks.map { it.id }).also(playlistRepo::add)
+
+            val transformed =
+                projectionMap<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
+                    "$pk:${items.size}"
+                }
+            transformed.size shouldBe seedSize
+
+            val perKeyAddObservations = ConcurrentHashMap<String, AtomicInteger>()
+            val seenAsAdd = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+            val sawDeltaBeforeReplay = AtomicBoolean(false)
+
+            // The MutableAggregateList serializes mutations internally, so a single writer adds new
+            // distinct-title buckets while a registrar registers a listener concurrently. Each
+            // bucket's transform delta fires synchronously on the writer thread under the cache lock;
+            // registration replays under the same lock — so a new listener must see each bucket as a
+            // single add (replay or first delta) and never a replace/remove before its replay add.
+            val registrarStarted = CountDownLatch(1)
+            val writer =
+                Thread {
+                    registrarStarted.await()
+                    for (i in 1..addCount) {
+                        playlist.audioItems.add(trackRepo.create(seedSize + i, "New-$i"))
+                    }
+                }
+            val registrar =
+                Thread {
+                    registrarStarted.countDown()
+                    transformed.addOnEntriesChangedListener { changes ->
+                        for (change in changes) {
+                            if (change.oldValue == null) {
+                                seenAsAdd.add(change.key)
+                                perKeyAddObservations.computeIfAbsent(change.key) { AtomicInteger(0) }.incrementAndGet()
+                            } else if (change.key !in seenAsAdd) {
+                                sawDeltaBeforeReplay.set(true)
+                            }
+                        }
+                    }
+                }
+
+            writer.start()
+            registrar.start()
+            writer.join()
+            registrar.join()
+
+            sawDeltaBeforeReplay.get() shouldBe false
+            // Every seed bucket and every added bucket is observed as an add exactly once.
+            perKeyAddObservations.size shouldBe seedSize + addCount
+            perKeyAddObservations.values.all { it.get() == 1 } shouldBe true
+        }
 
     "ProjectionMap iterates without ConcurrentModificationException under concurrent reader and writer stress"
         .config(tags = setOf(Stress)) {
