@@ -18,8 +18,8 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.persistence.projection.ProjectionMap
-import net.transgressoft.lirp.persistence.projection.multiKeyProjectionMap
-import net.transgressoft.lirp.persistence.projection.projectionMap
+import net.transgressoft.lirp.persistence.projection.multiKeyProjection
+import net.transgressoft.lirp.persistence.projection.projection
 import net.transgressoft.lirp.testing.Stress
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.core.annotation.DisplayName
@@ -95,7 +95,7 @@ internal class ProjectionMapTest : StringSpec({
         val t2 = trackRepo.create(2, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id)).also(playlistRepo::add)
 
-        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        val projection = projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
         projection.size shouldBe 2
 
         val t3 = trackRepo.create(3, "Jazz")
@@ -110,7 +110,7 @@ internal class ProjectionMapTest : StringSpec({
         val t2 = trackRepo.create(2, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id)).also(playlistRepo::add)
 
-        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        val projection = projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
         projection.containsKey("Rock") shouldBe true
 
         playlist.audioItems.remove(t2)
@@ -125,7 +125,7 @@ internal class ProjectionMapTest : StringSpec({
         val t3 = trackRepo.create(3, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id, t3.id)).also(playlistRepo::add)
 
-        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        val projection = projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
 
         playlist.audioItems.remove(t1)
 
@@ -139,7 +139,7 @@ internal class ProjectionMapTest : StringSpec({
         val t2 = trackRepo.create(2, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id)).also(playlistRepo::add)
 
-        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        val projection = projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
         projection["Jazz"]!!.size shouldBe 1
 
         // Mutate the grouping field BEFORE removing from source
@@ -159,7 +159,7 @@ internal class ProjectionMapTest : StringSpec({
         val t3 = trackRepo.create(3, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id, t3.id)).also(playlistRepo::add)
 
-        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        val projection = projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
         projection["Jazz"]!!.size shouldBe 2
 
         // Mutate t1's grouping key, then remove from source. handleRemoved looks under "Classical",
@@ -182,7 +182,7 @@ internal class ProjectionMapTest : StringSpec({
         val t4 = trackRepo.create(4, "Jazz")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id, t3.id, t4.id)).also(playlistRepo::add)
 
-        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        val projection = projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
 
         projection.keys.toList() shouldContainExactly listOf("Blues", "Classical", "Jazz", "Rock")
     }
@@ -192,7 +192,7 @@ internal class ProjectionMapTest : StringSpec({
         val t2 = trackRepo.create(2, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id)).also(playlistRepo::add)
 
-        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        val projection = projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
         projection.size shouldBe 2
 
         playlist.audioItems.clear()
@@ -203,7 +203,7 @@ internal class ProjectionMapTest : StringSpec({
     "ProjectionMap fires onChange callback when projection changes on add" {
         val t1 = trackRepo.create(1, "Jazz")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id)).also(playlistRepo::add)
-        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        val projection = projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
 
         // trigger initialization before registering callback so auto-subscription is active
         projection["Jazz"]!!.size shouldBe 1
@@ -226,7 +226,7 @@ internal class ProjectionMapTest : StringSpec({
     "ProjectionMap fires onChange callback when projection changes on remove" {
         val t1 = trackRepo.create(1, "Jazz")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id)).also(playlistRepo::add)
-        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        val projection = projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
 
         // trigger initialization then register callback
         projection["Jazz"]!!.size shouldBe 1
@@ -242,7 +242,7 @@ internal class ProjectionMapTest : StringSpec({
     "ProjectionMap two independent addOnBucketsChangedListener registrations both fire for one mutation" {
         val t1 = trackRepo.create(1, "Jazz")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id)).also(playlistRepo::add)
-        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        val projection = projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
 
         projection["Jazz"]!!.size shouldBe 1
 
@@ -261,7 +261,7 @@ internal class ProjectionMapTest : StringSpec({
     "ProjectionMap closing one addOnBucketsChangedListener registration leaves the other active" {
         val t1 = trackRepo.create(1, "Jazz")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id)).also(playlistRepo::add)
-        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        val projection = projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
 
         projection["Jazz"]!!.size shouldBe 1
 
@@ -284,7 +284,7 @@ internal class ProjectionMapTest : StringSpec({
         val p2 = DefaultAudioPlaylist(2, "Rock Playlist").also(playlistRepo::add)
         val parent = DefaultAudioPlaylist(10, "Parent", emptyList(), setOf(p1.id, p2.id)).also(playlistRepo::add)
 
-        val projection = projectionMap<Int, String, MutableAudioPlaylist>({ parent.playlists }, { it.name })
+        val projection = projection<Int, String, MutableAudioPlaylist>({ parent.playlists }, { it.name })
         projection.size shouldBe 2
 
         parent.playlists.remove(p2)
@@ -298,7 +298,7 @@ internal class ProjectionMapTest : StringSpec({
         val t2 = trackRepo.create(2, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id)).also(playlistRepo::add)
 
-        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        val projection = projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
 
         val entries = projection.entries
         entries.size shouldBe 2
@@ -312,7 +312,7 @@ internal class ProjectionMapTest : StringSpec({
         val t3 = trackRepo.create(3, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id, t3.id)).also(playlistRepo::add)
 
-        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        val projection = projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
 
         val values = projection.values
         values.size shouldBe 2
@@ -325,7 +325,7 @@ internal class ProjectionMapTest : StringSpec({
         val t2 = trackRepo.create(2, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id)).also(playlistRepo::add)
 
-        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        val projection = projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
 
         projection.containsValue(listOf(t1)) shouldBe true
         projection.containsValue(listOf(t2)) shouldBe true
@@ -336,7 +336,7 @@ internal class ProjectionMapTest : StringSpec({
         val p1 = DefaultAudioPlaylist(1, "Jazz Playlist").also(playlistRepo::add)
         val p2 = DefaultAudioPlaylist(2, "Rock Playlist").also(playlistRepo::add)
         val parent = DefaultAudioPlaylist(10, "Parent", emptyList(), setOf(p1.id, p2.id)).also(playlistRepo::add)
-        val projection = projectionMap<Int, String, MutableAudioPlaylist>({ parent.playlists }, { it.name })
+        val projection = projection<Int, String, MutableAudioPlaylist>({ parent.playlists }, { it.name })
 
         projection.size shouldBe 2
 
@@ -352,7 +352,7 @@ internal class ProjectionMapTest : StringSpec({
     "ProjectionMap fires onChange callback on MutableAggregateSet add" {
         val p1 = DefaultAudioPlaylist(1, "Jazz Playlist").also(playlistRepo::add)
         val parent = DefaultAudioPlaylist(10, "Parent", emptyList(), setOf(p1.id)).also(playlistRepo::add)
-        val projection = projectionMap<Int, String, MutableAudioPlaylist>({ parent.playlists }, { it.name })
+        val projection = projection<Int, String, MutableAudioPlaylist>({ parent.playlists }, { it.name })
 
         projection.size shouldBe 1
 
@@ -372,7 +372,7 @@ internal class ProjectionMapTest : StringSpec({
         val seedTracks = (1..totalItems).map { i -> trackRepo.create(i, titles[i % titles.size]) }
         val playlist = DefaultAudioPlaylist(1, "Test", emptyList()).also(playlistRepo::add)
 
-        val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        val projection = projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
         // Trigger init before writer starts so the source-callback subscription is live.
         projection.size shouldBe 0
 
@@ -414,7 +414,7 @@ internal class ProjectionMapTest : StringSpec({
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id, t3.id)).also(playlistRepo::add)
 
         val transformed =
-            projectionMap<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
+            projection<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
                 "$pk:${items.size}"
             }
 
@@ -431,7 +431,7 @@ internal class ProjectionMapTest : StringSpec({
         var jazzTransformCount = 0
         var rockTransformCount = 0
         val transformed =
-            projectionMap<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
+            projection<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
                 if (pk == "Jazz") jazzTransformCount++ else rockTransformCount++
                 "$pk:${items.size}"
             }
@@ -458,7 +458,7 @@ internal class ProjectionMapTest : StringSpec({
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id)).also(playlistRepo::add)
 
         val transformed =
-            projectionMap<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
+            projection<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
                 "$pk:${items.size}"
             }
 
@@ -481,7 +481,7 @@ internal class ProjectionMapTest : StringSpec({
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id, item2.id))
         mkPlaylistRepo.add(mkPlaylist)
 
-        val projection = multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
+        val projection = multiKeyProjection<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
 
         projection["Rock"]!!.size shouldBe 1
         projection["Jazz"]!!.size shouldBe 2
@@ -494,7 +494,7 @@ internal class ProjectionMapTest : StringSpec({
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id, item2.id))
         mkPlaylistRepo.add(mkPlaylist)
 
-        val projection = multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
+        val projection = multiKeyProjection<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
         projection["Rock"]!!.size shouldBe 1
         projection["Jazz"]!!.size shouldBe 2
 
@@ -512,7 +512,7 @@ internal class ProjectionMapTest : StringSpec({
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id, item2.id))
         mkPlaylistRepo.add(mkPlaylist)
 
-        val projection = multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
+        val projection = multiKeyProjection<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
         projection.size shouldBe 2
 
         mkPlaylist.audioItems.clear()
@@ -525,7 +525,7 @@ internal class ProjectionMapTest : StringSpec({
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id))
         mkPlaylistRepo.add(mkPlaylist)
 
-        val projection = multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
+        val projection = multiKeyProjection<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
 
         projection.isEmpty() shouldBe true
     }
@@ -536,7 +536,7 @@ internal class ProjectionMapTest : StringSpec({
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id, item2.id))
         mkPlaylistRepo.add(mkPlaylist)
 
-        val projection = multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
+        val projection = multiKeyProjection<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
 
         projection.size shouldBe 2
         projection.containsKey("Rock") shouldBe true
@@ -547,14 +547,14 @@ internal class ProjectionMapTest : StringSpec({
         projection.entries.size shouldBe 2
     }
 
-    "multiKeyProjectionMap with valueTransform produces Map<PK, V> with transformed bucket values" {
+    "multiKeyProjection with valueTransform produces Map<PK, V> with transformed bucket values" {
         val item1 = multiKeyRepo.create(1, "Track One", setOf("Rock", "Jazz"))
         val item2 = multiKeyRepo.create(2, "Track Two", setOf("Jazz"))
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id, item2.id))
         mkPlaylistRepo.add(mkPlaylist)
 
         val transformed =
-            multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem, String>(
+            multiKeyProjection<Int, String, MutableMultiKeyAudioItem, String>(
                 { mkPlaylist.audioItems },
                 { it.genres }
             ) { pk, items ->
@@ -572,13 +572,13 @@ internal class ProjectionMapTest : StringSpec({
         transformed.values.toSet() shouldBe setOf("Rock:1", "Jazz:2")
     }
 
-    "multiKeyProjectionMap with valueTransform removes emptied genre bucket from transformed view" {
+    "multiKeyProjection with valueTransform removes emptied genre bucket from transformed view" {
         val item1 = multiKeyRepo.create(1, "Track One", setOf("Rock", "Jazz"))
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id))
         mkPlaylistRepo.add(mkPlaylist)
 
         val transformed =
-            multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem, String>(
+            multiKeyProjection<Int, String, MutableMultiKeyAudioItem, String>(
                 { mkPlaylist.audioItems },
                 { it.genres }
             ) { pk, items ->
@@ -600,7 +600,7 @@ internal class ProjectionMapTest : StringSpec({
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item.id))
         mkPlaylistRepo.add(mkPlaylist)
 
-        val projection = multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
+        val projection = multiKeyProjection<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
         projection["Rock"]!!.size shouldBe 1
         projection["Jazz"]!!.size shouldBe 1
 
@@ -621,7 +621,7 @@ internal class ProjectionMapTest : StringSpec({
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item.id))
         mkPlaylistRepo.add(mkPlaylist)
 
-        val projection = multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
+        val projection = multiKeyProjection<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
         projection["Rock"]!!.first().title shouldBe "Old Title"
 
         // Mutate a non-key field while keeping a key (Rock) unchanged so the unchanged-bucket branch
@@ -640,7 +640,7 @@ internal class ProjectionMapTest : StringSpec({
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item.id))
         mkPlaylistRepo.add(mkPlaylist)
 
-        val projection = multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
+        val projection = multiKeyProjection<Int, String, MutableMultiKeyAudioItem>({ mkPlaylist.audioItems }) { it.genres }
         projection.size shouldBe 2
 
         item.genres = emptySet()
@@ -649,14 +649,14 @@ internal class ProjectionMapTest : StringSpec({
         projection.isEmpty() shouldBe true
     }
 
-    "projectionMap valueTransform replays current entries as adds when a listener registers" {
+    "projection valueTransform replays current entries as adds when a listener registers" {
         val t1 = trackRepo.create(1, "Jazz")
         val t2 = trackRepo.create(2, "Jazz")
         val t3 = trackRepo.create(3, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id, t3.id)).also(playlistRepo::add)
 
         val transformed =
-            projectionMap<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
+            projection<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
                 "$pk:${items.size}"
             }
 
@@ -671,12 +671,12 @@ internal class ProjectionMapTest : StringSpec({
         replayed["Rock"] shouldBe (null to "Rock:1")
     }
 
-    "projectionMap valueTransform emits add, replace and remove entry changes on deltas" {
+    "projection valueTransform emits add, replace and remove entry changes on deltas" {
         val t1 = trackRepo.create(1, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id)).also(playlistRepo::add)
 
         val transformed =
-            projectionMap<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
+            projection<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
                 "$pk:${items.size}"
             }
 
@@ -702,12 +702,12 @@ internal class ProjectionMapTest : StringSpec({
             )
     }
 
-    "projectionMap valueTransform stops delivering entry changes after the listener handle is closed" {
+    "projection valueTransform stops delivering entry changes after the listener handle is closed" {
         val t1 = trackRepo.create(1, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id)).also(playlistRepo::add)
 
         val transformed =
-            projectionMap<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
+            projection<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
                 "$pk:${items.size}"
             }
 
@@ -725,14 +725,14 @@ internal class ProjectionMapTest : StringSpec({
         changesLog shouldBe emptyList()
     }
 
-    "multiKeyProjectionMap valueTransform replays current entries as adds when a listener registers" {
+    "multiKeyProjection valueTransform replays current entries as adds when a listener registers" {
         val item1 = multiKeyRepo.create(1, "Track One", setOf("Rock", "Jazz"))
         val item2 = multiKeyRepo.create(2, "Track Two", setOf("Jazz"))
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id, item2.id))
         mkPlaylistRepo.add(mkPlaylist)
 
         val transformed =
-            multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem, String>(
+            multiKeyProjection<Int, String, MutableMultiKeyAudioItem, String>(
                 { mkPlaylist.audioItems },
                 { it.genres }
             ) { pk, items -> "$pk:${items.size}" }
@@ -748,13 +748,13 @@ internal class ProjectionMapTest : StringSpec({
         replayed["Jazz"] shouldBe (null to "Jazz:2")
     }
 
-    "multiKeyProjectionMap valueTransform emits add, replace and remove entry changes on deltas" {
+    "multiKeyProjection valueTransform emits add, replace and remove entry changes on deltas" {
         val item1 = multiKeyRepo.create(1, "Track One", setOf("Rock"))
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id))
         mkPlaylistRepo.add(mkPlaylist)
 
         val transformed =
-            multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem, String>(
+            multiKeyProjection<Int, String, MutableMultiKeyAudioItem, String>(
                 { mkPlaylist.audioItems },
                 { it.genres }
             ) { pk, items -> "$pk:${items.size}" }
@@ -781,13 +781,13 @@ internal class ProjectionMapTest : StringSpec({
             )
     }
 
-    "multiKeyProjectionMap valueTransform stops delivering entry changes after the listener handle is closed" {
+    "multiKeyProjection valueTransform stops delivering entry changes after the listener handle is closed" {
         val item1 = multiKeyRepo.create(1, "Track One", setOf("Rock"))
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id))
         mkPlaylistRepo.add(mkPlaylist)
 
         val transformed =
-            multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem, String>(
+            multiKeyProjection<Int, String, MutableMultiKeyAudioItem, String>(
                 { mkPlaylist.audioItems },
                 { it.genres }
             ) { pk, items -> "$pk:${items.size}" }
@@ -806,13 +806,13 @@ internal class ProjectionMapTest : StringSpec({
         changesLog shouldBe emptyList()
     }
 
-    "multiKeyProjectionMap valueTransform fires no delta when entity key-extractor returns empty set" {
+    "multiKeyProjection valueTransform fires no delta when entity key-extractor returns empty set" {
         val item1 = multiKeyRepo.create(1, "No Genre Track", emptySet())
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id))
         mkPlaylistRepo.add(mkPlaylist)
 
         val transformed =
-            multiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem, String>(
+            multiKeyProjection<Int, String, MutableMultiKeyAudioItem, String>(
                 { mkPlaylist.audioItems },
                 { it.genres }
             ) { pk, items -> "$pk:${items.size}" }
@@ -830,7 +830,7 @@ internal class ProjectionMapTest : StringSpec({
         listenerCallCount shouldBe 0
     }
 
-    "projectionMap valueTransform observes each bucket create exactly once with replay never preceded by a delta under stress"
+    "projection valueTransform observes each bucket create exactly once with replay never preceded by a delta under stress"
         .config(tags = setOf(Stress)) {
             val seedSize = 40
             val addCount = 400
@@ -839,7 +839,7 @@ internal class ProjectionMapTest : StringSpec({
             val playlist = DefaultAudioPlaylist(1, "Stress", seedTracks.map { it.id }).also(playlistRepo::add)
 
             val transformed =
-                projectionMap<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
+                projection<Int, String, AudioItem, String>({ playlist.audioItems }, { it.title }) { pk, items ->
                     "$pk:${items.size}"
                 }
             transformed.size shouldBe seedSize
@@ -896,7 +896,7 @@ internal class ProjectionMapTest : StringSpec({
             val seedTracks = (1..seedSize).map { i -> trackRepo.create(i, "Title-${i % 8}") }
             val playlist = DefaultAudioPlaylist(1, "Stress", seedTracks.map { it.id }).also(playlistRepo::add)
 
-            val projection = projectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+            val projection = projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
             // Trigger init so the source-callback subscription is live before writers start.
             projection.size shouldBe 8
 

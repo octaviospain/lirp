@@ -274,7 +274,7 @@ class MultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identifi
     /**
      * Returns `this` projection map, initializing the source state on the first call.
      *
-     * Implements Kotlin `by`-delegation: `val grouped by multiKeyProjectionMap(::audioItems) { it.genres }`.
+     * Implements Kotlin `by`-delegation: `val grouped by multiKeyProjection(::audioItems) { it.genres }`.
      */
     operator fun getValue(thisRef: Any?, property: KProperty<*>): MultiKeyProjectionMap<K, PK, E> {
         initialize()

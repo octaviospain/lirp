@@ -171,7 +171,7 @@ class ProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEnti
     /**
      * Returns `this` projection map, initializing the source state on the first call.
      *
-     * Implements Kotlin `by`-delegation: `val grouped by projectionMap(::items) { it.key }`.
+     * Implements Kotlin `by`-delegation: `val grouped by projection(::items) { it.key }`.
      */
     operator fun getValue(thisRef: Any?, property: KProperty<*>): ProjectionMap<K, PK, E> {
         initialize()

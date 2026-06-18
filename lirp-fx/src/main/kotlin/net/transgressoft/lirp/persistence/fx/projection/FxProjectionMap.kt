@@ -357,7 +357,7 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
     /**
      * Returns `this` projection map, initializing the source subscription on the first call.
      *
-     * Implements Kotlin `by`-delegation: `val byAlbum: ObservableMap<String, List<AudioItem>> by fxProjectionMap(...)`.
+     * Implements Kotlin `by`-delegation: `val byAlbum: ObservableMap<String, List<AudioItem>> by fxProjection(...)`.
      */
     operator fun getValue(thisRef: Any?, property: KProperty<*>): FxProjectionMap<K, PK, E> {
         initialize()

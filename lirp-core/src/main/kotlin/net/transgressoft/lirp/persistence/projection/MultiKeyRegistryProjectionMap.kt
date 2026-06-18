@@ -269,7 +269,7 @@ class MultiKeyRegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : 
     /**
      * Returns `this` projection map, initializing the registry state on the first call.
      *
-     * Implements Kotlin `by`-delegation: `val grouped by registryMultiKeyProjectionMap(repo) { it.genres }`.
+     * Implements Kotlin `by`-delegation: `val grouped by registryMultiKeyProjection(repo) { it.genres }`.
      */
     operator fun getValue(thisRef: Any?, property: KProperty<*>): MultiKeyRegistryProjectionMap<K, PK, E> {
         initialize()

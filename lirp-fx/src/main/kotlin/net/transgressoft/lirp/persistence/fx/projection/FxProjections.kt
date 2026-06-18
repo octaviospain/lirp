@@ -25,8 +25,8 @@ import net.transgressoft.lirp.persistence.Registry
 /**
  * Java-facing static factory methods for all lirp-fx projection map types.
  *
- * Kotlin callers prefer the top-level functions in this package (`fxProjectionMap`,
- * `registryFxProjectionMap`, `fxMultiKeyProjectionMap`, `registryFxMultiKeyProjectionMap`).
+ * Kotlin callers prefer the top-level functions in this package (`fxProjection`,
+ * `registryFxProjection`, `fxMultiKeyProjection`, `registryFxMultiKeyProjection`).
  * Java callers use this object's `@JvmStatic` methods to avoid Kotlin top-level function call syntax.
  *
  * Scalar and collection delegates ([net.transgressoft.lirp.persistence.fx.FxProperties]) are kept
@@ -47,7 +47,7 @@ object FxProjections {
      */
     @JvmStatic
     @JvmOverloads
-    fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> fxProjectionMap(
+    fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> fxProjection(
         sourceRef: () -> FxObservableCollection<K, E>,
         keyExtractor: (E) -> PK,
         dispatchToFxThread: Boolean = true
@@ -67,7 +67,7 @@ object FxProjections {
      * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
      */
     @JvmStatic
-    fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V> fxProjectionMap(
+    fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V> fxProjection(
         sourceRef: () -> FxObservableCollection<K, E>,
         keyExtractor: (E) -> PK,
         valueTransform: (PK, List<E>) -> V,
@@ -87,7 +87,7 @@ object FxProjections {
      */
     @JvmStatic
     @JvmOverloads
-    fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryFxProjectionMap(
+    fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryFxProjection(
         registry: Registry<K, E>,
         keyExtractor: (E) -> PK,
         dispatchToFxThread: Boolean = true
@@ -108,7 +108,7 @@ object FxProjections {
      * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
      */
     @JvmStatic
-    fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V> registryFxProjectionMap(
+    fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V> registryFxProjection(
         registry: Registry<K, E>,
         keyExtractor: (E) -> PK,
         valueTransform: (PK, List<E>) -> V,
@@ -129,7 +129,7 @@ object FxProjections {
      */
     @JvmStatic
     @JvmOverloads
-    fun <K : Comparable<K>, PK : Comparable<PK>, E> fxMultiKeyProjectionMap(
+    fun <K : Comparable<K>, PK : Comparable<PK>, E> fxMultiKeyProjection(
         sourceRef: () -> FxObservableCollection<K, E>,
         keyExtractor: (E) -> Collection<PK>,
         dispatchToFxThread: Boolean = true
@@ -150,7 +150,7 @@ object FxProjections {
      * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
      */
     @JvmStatic
-    fun <K : Comparable<K>, PK : Comparable<PK>, E, V> fxMultiKeyProjectionMap(
+    fun <K : Comparable<K>, PK : Comparable<PK>, E, V> fxMultiKeyProjection(
         sourceRef: () -> FxObservableCollection<K, E>,
         keyExtractor: (E) -> Collection<PK>,
         valueTransform: (PK, List<E>) -> V,
@@ -171,7 +171,7 @@ object FxProjections {
      */
     @JvmStatic
     @JvmOverloads
-    fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryFxMultiKeyProjectionMap(
+    fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryFxMultiKeyProjection(
         registry: Registry<K, E>,
         keyExtractor: (E) -> Collection<PK>,
         dispatchToFxThread: Boolean = true
@@ -192,7 +192,7 @@ object FxProjections {
      * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
      */
     @JvmStatic
-    fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V> registryFxMultiKeyProjectionMap(
+    fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V> registryFxMultiKeyProjection(
         registry: Registry<K, E>,
         keyExtractor: (E) -> Collection<PK>,
         valueTransform: (PK, List<E>) -> V,
