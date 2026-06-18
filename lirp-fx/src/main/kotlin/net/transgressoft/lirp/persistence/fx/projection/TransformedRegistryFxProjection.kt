@@ -97,7 +97,7 @@ import kotlinx.coroutines.launch
  *   intermediate value produced by [dataTransform]; safe to build JavaFX property bindings here
  * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
  */
-class TransformedRegistryFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V>(
+class TransformedRegistryFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>(
     private val registry: Registry<K, E>,
     private val keyExtractor: (E) -> PK,
     private val dataTransform: (PK, List<E>) -> Any?,

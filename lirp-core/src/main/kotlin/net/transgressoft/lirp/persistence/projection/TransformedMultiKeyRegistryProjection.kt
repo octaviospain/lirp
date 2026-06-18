@@ -55,7 +55,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  * @param valueTransform function applied to each `(PK, List<E>)` bucket to produce a `V` value;
  *   invoked only for buckets whose contents changed in a given delta
  */
-internal class TransformedMultiKeyRegistryProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V>(
+internal class TransformedMultiKeyRegistryProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>(
     private val backing: MultiKeyRegistryProjection<K, PK, E>,
     private val valueTransform: (PK, List<E>) -> V
 ) : AbstractMap<PK, V>(), AutoCloseable by backing, ObservableProjection<PK, V> {

@@ -42,4 +42,4 @@ import javafx.collections.ObservableMap
  * @param PK the projection key type
  * @param V the transformed value type
  */
-interface FxObservableProjection<PK, V> : ObservableMap<PK, V>, ObservableProjection<PK, V>
+interface FxObservableProjection<PK, V : Any> : ObservableMap<PK, V>, ObservableProjection<PK, V>
