@@ -213,7 +213,7 @@ class TableDefProcessor(
      * class has no resolved arms or no containing source file.
      */
     private fun emitResolvedPolymorphicSealedUnions(classDecl: KSClassDeclaration) {
-        val resolvedPolymorphicArms = polymorphicArmsByClass[classDecl]
+        val resolvedPolymorphicArms: Map<String, List<ArmTextMeta>>? = polymorphicArmsByClass[classDecl]
         if (resolvedPolymorphicArms.isNullOrEmpty()) return
         val packageName = classDecl.packageName.asString()
         val entitySimpleName = classDecl.simpleName.asString()

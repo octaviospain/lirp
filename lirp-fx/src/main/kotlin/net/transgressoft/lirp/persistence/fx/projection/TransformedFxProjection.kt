@@ -73,8 +73,9 @@ import kotlinx.coroutines.launch
  * subsequent [flush] pulse, with old values snapshotted from [innerObservableMap] before mutation.
  * The [close] method clears all entries-changed listeners.
  *
- * The projection initializes lazily on the first [getValue] or [addListener] call. The seed loop
- * runs on the first-access thread: both transform phases are invoked on that thread during seeding.
+ * The projection initializes lazily on the first [getValue] or [addListener] call. During seeding
+ * `dataTransform` runs on the first-access thread, while `fxFactory` runs on the FX Application Thread
+ * (marshalled there when dispatching and first access is off that thread), preserving the two-phase contract.
  *
  * Mutation methods ([put], [remove], [putAll], [clear]) throw [UnsupportedOperationException];
  * all mutations flow through the source collection.
@@ -113,6 +114,11 @@ class TransformedFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identi
 
     @Volatile
     private var initialized = false
+
+    // Lifecycle flag honored by scheduleFlush, flush, and addOnEntriesChangedListener under the flush
+    // monitor. Once set by close(), staging stops, no pending flush delivers, and registration is refused.
+    @Volatile
+    private var closed = false
 
     private val initLock = Any()
 
@@ -227,12 +233,18 @@ class TransformedFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identi
             val key = keyExtractor(element)
             backingMap[key] = freezeBucket((backingMap[key] ?: emptyList()) + element)
         }
-        for ((key, bucket) in backingMap) {
-            val d = dataTransform(key, bucket)
-            try {
-                innerObservableMap[key] = fxFactory(key, d)
-            } catch (t: Throwable) {
-                log.error(t) { "fxFactory failed for bucket key=$key during seed; skipping this bucket" }
+        // dataTransform runs off the FX thread (the first-access thread); fxFactory and the map
+        // mutation are marshalled to the FX Application Thread when dispatching, honoring the
+        // two-phase contract even when first access happens off the FX thread.
+        val staged = LinkedHashMap<PK, Any?>()
+        for ((key, bucket) in backingMap) staged[key] = dataTransform(key, bucket)
+        runSeedOnFxThread(dispatchToFxThread) {
+            for ((key, d) in staged) {
+                try {
+                    innerObservableMap[key] = fxFactory(key, d)
+                } catch (t: Throwable) {
+                    log.error(t) { "fxFactory failed for bucket key=$key during seed; skipping this bucket" }
+                }
             }
         }
     }
@@ -304,6 +316,7 @@ class TransformedFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identi
         // while flushScheduled is still true, so compareAndSet(false,true) fails and no new
         // runLater is scheduled — the removal is silently dropped until the next event.
         synchronized(this) {
+            if (closed) return
             for (key in newRemovals) {
                 pendingUpdates.remove(key)
                 pendingRemovals.add(key)
@@ -332,6 +345,7 @@ class TransformedFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identi
         val recipients: List<(List<ProjectionEntryChange<PK, V>>) -> Unit>
         val changes =
             synchronized(this) {
+                if (closed) return
                 val updates = HashMap(pendingUpdates)
                 pendingUpdates.clear()
                 val removals = HashSet(pendingRemovals)
@@ -455,12 +469,23 @@ class TransformedFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identi
     /**
      * Removes the change listener registered on the source collection and clears all entries-changed
      * listeners, so the source no longer retains or feeds this projection after close.
+     *
+     * Marking the projection closed, draining the pending-flush state, and clearing the listeners all
+     * happen atomically under the flush monitor, so a flush already in flight delivers nothing after
+     * close returns and a concurrent registration cannot survive. Idempotent.
      */
     override fun close() {
+        synchronized(this) {
+            if (closed) return
+            closed = true
+            pendingUpdates.clear()
+            pendingRemovals.clear()
+            flushScheduled.set(false)
+            entriesChangedListeners.clear()
+        }
         synchronized(initLock) {
             detachSourceListener?.invoke()
             detachSourceListener = null
-            entriesChangedListeners.clear()
         }
     }
 
@@ -480,6 +505,7 @@ class TransformedFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identi
         // after the lock is released so user code never runs while the monitor is held.
         val initial: List<ProjectionEntryChange<PK, V>> =
             synchronized(this) {
+                if (closed) return AutoCloseable { }
                 entriesChangedListeners.add(listener)
                 innerObservableMap.map { (k, v) -> ProjectionEntryChange(k, null, v) }
             }

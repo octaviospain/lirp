@@ -72,8 +72,9 @@ import kotlinx.coroutines.launch
  * [ProjectionEntryChange.oldValue]) and then emits a batched [ProjectionEntryChange] list on each
  * subsequent [flush] pulse, with old values snapshotted from [innerObservableMap] before mutation.
  *
- * The projection initializes lazily on the first [getValue] or [addListener] call. The seed loop
- * runs on the first-access thread: both transform phases are invoked on that thread during seeding.
+ * The projection initializes lazily on the first [getValue] or [addListener] call. During seeding
+ * `dataTransform` runs on the first-access thread, while `fxFactory` runs on the FX Application Thread
+ * (marshalled there when dispatching and first access is off that thread), preserving the two-phase contract.
  *
  * Mutation methods ([put], [remove], [putAll], [clear]) throw [UnsupportedOperationException];
  * all mutations flow through the source registry.
@@ -109,6 +110,11 @@ class TransformedRegistryFxMultiKeyProjection<K : Comparable<K>, PK : Comparable
 
     @Volatile
     private var initialized = false
+
+    // Lifecycle flag honored by scheduleFlush, flush, and addOnEntriesChangedListener under the flush
+    // monitor. Once set by close(), staging stops, no pending flush delivers, and registration is refused.
+    @Volatile
+    private var closed = false
 
     private val initLock = Any()
 
@@ -169,28 +175,45 @@ class TransformedRegistryFxMultiKeyProjection<K : Comparable<K>, PK : Comparable
         if (initialized) return
         synchronized(initLock) {
             if (initialized) return
+
+            // Wire the buckets-changed listener BEFORE triggering core initialization so a registry
+            // mutation landing in the seed window is not lost; the seed itself is applied directly below.
+            val seedWindow = FxSeedWindowBuffer<PK>(::scheduleFlush)
+            core.addOnBucketsChangedListener(seedWindow::onBucketsChanged)
+
             // Trigger core initialization (seeds from registry, subscribes to CrudEvents).
-            // onBucketsChanged is left unset during this phase so the initial seed does not
-            // schedule a flush — the seed is applied directly to innerObservableMap below.
             core.size
 
-            // Seed innerObservableMap by applying both transform phases to each initial bucket.
-            for (key in core.keys) {
-                val bucket = core.bucketSnapshot(key) ?: continue
-                val d = dataTransform(key, bucket)
+            seedInitialBuckets()
+
+            seedWindow.drainAndReconcile()
+
+            initBarrier?.complete(Unit)
+            initialized = true
+        }
+    }
+
+    /**
+     * Seeds [innerObservableMap] from the initial buckets. [dataTransform] runs on the first-access
+     * thread; [fxFactory] and the map mutation are marshalled to the FX Application Thread when
+     * dispatching, so the two-phase contract holds even when first access happens off the FX thread.
+     * A throwing [fxFactory] is logged with the bucket key and that one bucket is skipped, matching
+     * the per-bucket fault isolation of [flush].
+     */
+    private fun seedInitialBuckets() {
+        val staged = LinkedHashMap<PK, Any?>()
+        for (key in core.keys) {
+            val bucket = core.bucketSnapshot(key) ?: continue
+            staged[key] = dataTransform(key, bucket)
+        }
+        runSeedOnFxThread(dispatchToFxThread) {
+            for ((key, d) in staged) {
                 try {
                     innerObservableMap[key] = fxFactory(key, d)
                 } catch (t: Throwable) {
                     log.error(t) { "fxFactory failed for bucket key=$key during seed; skipping this bucket" }
                 }
             }
-
-            // Wire the coalescer after the initial seed so that only incremental (post-init) changes
-            // go through scheduleFlush.
-            core.addOnBucketsChangedListener(::scheduleFlush)
-
-            initBarrier?.complete(Unit)
-            initialized = true
         }
     }
 
@@ -217,6 +240,7 @@ class TransformedRegistryFxMultiKeyProjection<K : Comparable<K>, PK : Comparable
         // while flushScheduled is still true, so compareAndSet(false,true) fails and no new
         // runLater is scheduled — the removal is silently dropped until the next event.
         synchronized(this) {
+            if (closed) return
             for (key in newRemovals) {
                 pendingUpdates.remove(key)
                 pendingRemovals.add(key)
@@ -245,6 +269,7 @@ class TransformedRegistryFxMultiKeyProjection<K : Comparable<K>, PK : Comparable
         val recipients: List<(List<ProjectionEntryChange<PK, V>>) -> Unit>
         val changes =
             synchronized(this) {
+                if (closed) return
                 val updates = HashMap(pendingUpdates)
                 pendingUpdates.clear()
                 val removals = HashSet(pendingRemovals)
@@ -326,8 +351,15 @@ class TransformedRegistryFxMultiKeyProjection<K : Comparable<K>, PK : Comparable
      * longer receives updates and no further entry-change batches are fired.
      */
     override fun close() {
-        synchronized(initLock) {
+        synchronized(this) {
+            if (closed) return
+            closed = true
+            pendingUpdates.clear()
+            pendingRemovals.clear()
+            flushScheduled.set(false)
             entriesChangedListeners.clear()
+        }
+        synchronized(initLock) {
             core.close()
         }
     }
@@ -348,6 +380,7 @@ class TransformedRegistryFxMultiKeyProjection<K : Comparable<K>, PK : Comparable
         // after the lock is released so user code never runs while the monitor is held.
         val initial: List<ProjectionEntryChange<PK, V>> =
             synchronized(this) {
+                if (closed) return AutoCloseable { }
                 entriesChangedListeners.add(listener)
                 innerObservableMap.map { (k, v) -> ProjectionEntryChange(k, null, v) }
             }

@@ -880,4 +880,62 @@ class FxProjectionTest : StringSpec({
         mkTransformMap.containsKey("Rock") shouldBe true
         mkTransformMap["Rock"] shouldBe FxAlbumBucket("Rock", listOf("Track A"))
     }
+
+    "TransformedFxProjection seed runs fxFactory on the FX thread when first access is off the FX thread" {
+        val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
+        source.add(0, FxAudioItem(1, "Track A", "Jazz"))
+        source.add(1, FxAudioItem(2, "Track B", "Rock"))
+
+        val dataTransformOnFx = CopyOnWriteArrayList<Boolean>()
+        val fxFactoryOnFx = CopyOnWriteArrayList<Boolean>()
+        val projection =
+            fxProjection(
+                sourceRef = { source },
+                keyExtractor = { it.albumName },
+                dataTransform = { _, items ->
+                    dataTransformOnFx.add(Platform.isFxApplicationThread())
+                    items.toList()
+                },
+                fxFactory = { albumName, items ->
+                    fxFactoryOnFx.add(Platform.isFxApplicationThread())
+                    AlbumFxView(albumName, items)
+                },
+                dispatchToFxThread = true
+            )
+
+        // First access on a background (non-FX) thread must still seed fxFactory on the FX thread.
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            executor.submit { projection.size }.get(5, TimeUnit.SECONDS)
+        } finally {
+            executor.shutdownNow()
+        }
+
+        dataTransformOnFx.isNotEmpty() shouldBe true
+        dataTransformOnFx.all { !it } shouldBe true
+        fxFactoryOnFx.isNotEmpty() shouldBe true
+        fxFactoryOnFx.all { it } shouldBe true
+    }
+
+    "TransformedFxProjection close refuses new entries-changed registration and delivers nothing after" {
+        val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
+        source.add(0, FxAudioItem(1, "Track A", "Jazz"))
+        val projection =
+            fxProjection(sourceRef = { source }, keyExtractor = { it.albumName }, valueTransform = {
+                pk,
+                items
+                ->
+                "$pk:${items.size}"
+            }, dispatchToFxThread = false)
+        projection.containsKey("Jazz") shouldBe true
+
+        projection.close()
+
+        val keys = mutableListOf<String>()
+        projection.addOnEntriesChangedListener { changes -> keys.addAll(changes.map { it.key }) }
+        keys shouldBe emptyList() // registration after close replays nothing
+
+        source.add(1, FxAudioItem(2, "Track B", "Rock"))
+        keys shouldBe emptyList() // and delivers nothing after
+    }
 })

@@ -541,4 +541,21 @@ class FxMultiKeyProjectionTest : StringSpec({
                 allBucketedIds.contains(item.id) shouldBe true
             }
         }
+
+    "TransformedFxMultiKeyProjection close refuses new entries-changed registration and delivers nothing after" {
+        val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
+        val projection = fxMultiKeyProjection({ source }, { it.genres }, { pk, items -> "$pk:${items.size}" }, false)
+        projection.addListener(MapChangeListener { }) // first access wires the source callback
+        source.add(0, MutableMultiKeyAudioItem(1, "Track A", setOf("Rock")))
+        projection.containsKey("Rock") shouldBe true
+
+        projection.close()
+
+        val keys = mutableListOf<String>()
+        projection.addOnEntriesChangedListener { changes -> keys.addAll(changes.map { it.key }) }
+        keys shouldBe emptyList() // registration after close replays nothing
+
+        source.add(1, MutableMultiKeyAudioItem(2, "Track B", setOf("Jazz")))
+        keys shouldBe emptyList() // and delivers nothing after
+    }
 })

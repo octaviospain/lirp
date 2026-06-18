@@ -77,8 +77,9 @@ import kotlinx.coroutines.launch
  *
  * Buckets that become empty remove their key from the map (neither transform phase is invoked for
  * absent buckets). The projection initializes lazily on the first [getValue] or [addListener] call.
- * The seed loop runs on the first-access thread: both transform phases are invoked on that thread
- * during seeding.
+ * During seeding `dataTransform` runs on the first-access thread, while `fxFactory` runs on the FX
+ * Application Thread (marshalled there when dispatching and first access is off that thread),
+ * preserving the two-phase contract.
  *
  * In addition to the [ObservableMap] surface, this class implements [ObservableProjection]:
  * [addOnEntriesChangedListener] replays the current entries on registration (each with a null
@@ -120,6 +121,11 @@ class TransformedFxMultiKeyProjection<K : Comparable<K>, PK : Comparable<PK>, E,
 
     @Volatile
     private var initialized = false
+
+    // Lifecycle flag honored by stageAndSchedule, flush, and addOnEntriesChangedListener under the flush
+    // monitor. Once set by close(), staging stops, no pending flush delivers, and registration is refused.
+    @Volatile
+    private var closed = false
 
     private val initLock = Any()
 
@@ -213,26 +219,38 @@ class TransformedFxMultiKeyProjection<K : Comparable<K>, PK : Comparable<PK>, E,
             // subscribes to source collection changes, and populates the reverse index.
             core.size
 
-            // Seed innerObservableMap from the core's freshly built state, seed the reverse
-            // index, and subscribe each initially-bucketed entity to its mutation events.
-            for (key in core.keys) {
-                val bucket = core.bucketSnapshot(key) ?: continue
-                val d = dataTransform(key, bucket)
+            seedInitialBuckets()
+
+            initBarrier?.complete(Unit)
+            initialized = true
+        }
+    }
+
+    /**
+     * Seeds the reverse index, subscribes each initially-bucketed entity, and applies both transform
+     * phases to each initial bucket. [dataTransform] runs on the first-access thread; [fxFactory] and
+     * the map mutation are marshalled to the FX Application Thread when dispatching, so the two-phase
+     * contract holds even when first access happens off the FX thread. A throwing [fxFactory] is logged
+     * with the bucket key and that one bucket is skipped, matching the per-bucket fault isolation of [flush].
+     */
+    private fun seedInitialBuckets() {
+        val staged = LinkedHashMap<PK, Any?>()
+        for (key in core.keys) {
+            val bucket = core.bucketSnapshot(key) ?: continue
+            staged[key] = dataTransform(key, bucket)
+            for (entity in bucket) {
+                entityBuckets.computeIfAbsent(entity.id) { Collections.newSetFromMap(ConcurrentHashMap()) }.add(key)
+                if (!entitySubscriptions.containsKey(entity.id)) subscribeEntity(entity)
+            }
+        }
+        runSeedOnFxThread(dispatchToFxThread) {
+            for ((key, d) in staged) {
                 try {
                     innerObservableMap[key] = fxFactory(key, d)
                 } catch (t: Throwable) {
                     log.error(t) { "fxFactory failed for bucket key=$key during seed; skipping this bucket" }
                 }
-                for (entity in bucket) {
-                    entityBuckets.computeIfAbsent(entity.id) { Collections.newSetFromMap(ConcurrentHashMap()) }.add(key)
-                    if (!entitySubscriptions.containsKey(entity.id)) {
-                        subscribeEntity(entity)
-                    }
-                }
             }
-
-            initBarrier?.complete(Unit)
-            initialized = true
         }
     }
 
@@ -319,6 +337,7 @@ class TransformedFxMultiKeyProjection<K : Comparable<K>, PK : Comparable<PK>, E,
         // while flushScheduled is still true, so compareAndSet(false,true) fails and no new
         // runLater is scheduled — the removal is silently dropped until the next event.
         synchronized(this) {
+            if (closed) return
             for (key in newRemovals) {
                 pendingUpdates.remove(key)
                 pendingRemovals.add(key)
@@ -347,6 +366,7 @@ class TransformedFxMultiKeyProjection<K : Comparable<K>, PK : Comparable<PK>, E,
         val recipients: List<(List<ProjectionEntryChange<PK, V>>) -> Unit>
         val changes =
             synchronized(this) {
+                if (closed) return
                 val updates = HashMap(pendingUpdates)
                 pendingUpdates.clear()
                 val removals = HashSet(pendingRemovals)
@@ -428,8 +448,15 @@ class TransformedFxMultiKeyProjection<K : Comparable<K>, PK : Comparable<PK>, E,
      * entry-change batches are fired.
      */
     override fun close() {
-        synchronized(initLock) {
+        synchronized(this) {
+            if (closed) return
+            closed = true
+            pendingUpdates.clear()
+            pendingRemovals.clear()
+            flushScheduled.set(false)
             entriesChangedListeners.clear()
+        }
+        synchronized(initLock) {
             for (subscription in entitySubscriptions.values) {
                 subscription.cancel()
             }
@@ -454,6 +481,7 @@ class TransformedFxMultiKeyProjection<K : Comparable<K>, PK : Comparable<PK>, E,
         // after the lock is released so user code never runs while the monitor is held.
         val initial: List<ProjectionEntryChange<PK, V>> =
             synchronized(this) {
+                if (closed) return AutoCloseable { }
                 entriesChangedListeners.add(listener)
                 innerObservableMap.map { (k, v) -> ProjectionEntryChange(k, null, v) }
             }

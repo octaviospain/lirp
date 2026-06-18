@@ -35,6 +35,7 @@ import javafx.collections.ObservableMap
 import java.time.Instant
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -503,5 +504,57 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
         reactive.advance()
 
         changesLog shouldBe emptyList()
+    }
+
+    "TransformedRegistryFxMultiKeyProjection seed runs fxFactory on the FX thread when first access is off the FX thread" {
+        trackRepo.create(1, "Track A", setOf("Rock", "Jazz"))
+
+        val dataTransformOnFx = CopyOnWriteArrayList<Boolean>()
+        val fxFactoryOnFx = CopyOnWriteArrayList<Boolean>()
+        val projection =
+            registryFxMultiKeyProjection(
+                trackRepo,
+                { it.genres },
+                dataTransform = { _, items ->
+                    dataTransformOnFx.add(Platform.isFxApplicationThread())
+                    items.toList()
+                },
+                fxFactory = { genre, items ->
+                    fxFactoryOnFx.add(Platform.isFxApplicationThread())
+                    AlbumFxView(genre, items)
+                },
+                dispatchToFxThread = true
+            )
+
+        // First access on a background (non-FX) thread must still seed fxFactory on the FX thread.
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            executor.submit { (projection as ObservableMap<String, AlbumFxView>).size }.get(5, TimeUnit.SECONDS)
+        } finally {
+            executor.shutdownNow()
+        }
+
+        dataTransformOnFx.isNotEmpty() shouldBe true
+        dataTransformOnFx.all { !it } shouldBe true
+        fxFactoryOnFx.isNotEmpty() shouldBe true
+        fxFactoryOnFx.all { it } shouldBe true
+    }
+
+    "TransformedRegistryFxMultiKeyProjection close refuses new entries-changed registration and delivers nothing after" {
+        trackRepo.create(1, "Track A", setOf("Rock"))
+        reactive.advance()
+        val projection =
+            registryFxMultiKeyProjection(trackRepo, { it.genres }, { pk, items -> "$pk:${items.size}" }, false)
+        projection.containsKey("Rock") shouldBe true
+
+        projection.close()
+
+        val keys = mutableListOf<String>()
+        projection.addOnEntriesChangedListener { changes -> keys.addAll(changes.map { it.key }) }
+        keys shouldBe emptyList() // registration after close replays nothing
+
+        trackRepo.create(2, "Track B", setOf("Jazz"))
+        reactive.advance()
+        keys shouldBe emptyList() // and delivers nothing after
     }
 })
