@@ -43,6 +43,16 @@ private const val AGGREGATE_SET_REF_DELEGATE_FQN = "net.transgressoft.lirp.persi
 
 /** Separator between generated `RefEntry` / `CollectionRefEntry` entries inside a `listOf(...)` block. */
 private const val ENTRY_SEPARATOR = ",\n        "
+
+/**
+ * Matches the delegate-val form of a `@ToOneAggregate` property — `... by aggregate { ... }`,
+ * `by aggregate<...>`, `by optionalAggregate ...`, or `by mutableAggregate ...` (with or without a
+ * space before the lambda brace) — so it can be told apart from a scalar FK. Anchored on the `by`
+ * delegation keyword of the declaration itself, the pattern does not match a bare `aggregate(...)`
+ * factory call that merely appears on a neighbouring line.
+ */
+internal val TO_ONE_DELEGATE_VAL_REGEX =
+    Regex("""\bby\s+(?:aggregate|optionalAggregate|mutableAggregate)(?:\s*\{|<)""")
 private val STDLIB_COLLECTION_FQNS =
     setOf(
         "kotlin.collections.MutableList",
@@ -286,16 +296,12 @@ class ReactiveEntityRefProcessor(
         // at runtime via the existing delegate). Source-text scanning is required because KSP type
         // resolution resolves `val x by aggregate<K, X> { ... }` to AggregateRefDelegate, and we
         // cannot distinguish it from a scalar FK by type alone at this point.
-        val sourceText = readSourceLines(prop, linesBefore = 0, linesAfter = 2)
-        val isDelegateVal =
-            sourceText != null &&
-                (
-                    sourceText.contains("aggregate {") ||
-                        sourceText.contains("aggregate<") ||
-                        sourceText.contains("optionalAggregate") ||
-                        sourceText.contains("mutableAggregate{") ||
-                        sourceText.contains("mutableAggregate<")
-                )
+        // Read only the annotated declaration line — no trailing-line bleed. KSP locates a property at
+        // its `val`/`var` declaration, which carries the `by <factory>` delegation for the delegate-val
+        // form. Reading following lines would let a scalar FK immediately followed by a delegate-val
+        // aggregate property pick up that next line's `by aggregate { ... }` and be misclassified.
+        val sourceText = readSourceLines(prop, linesBefore = 0, linesAfter = 0)
+        val isDelegateVal = sourceText != null && TO_ONE_DELEGATE_VAL_REGEX.containsMatchIn(sourceText)
 
         // Extract target: KClass<*> annotation argument via the confirmed KSType cast pattern.
         val targetArg =

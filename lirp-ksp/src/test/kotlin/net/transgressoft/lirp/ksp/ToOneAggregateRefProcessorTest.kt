@@ -591,4 +591,87 @@ internal class ToOneAggregateRefProcessorTest : FunSpec({
         result.messages shouldContain "AudioItem"
         result.messages shouldContain "AudioTrack"
     }
+
+    test("ReactiveEntityRefProcessor keeps a scalar FK scalar when immediately followed by a delegate-val aggregate property") {
+        // Regression: detection previously scanned trailing lines, so a scalar FK whose declaration is
+        // immediately followed by `val x by aggregate<...> { ... }` had that next line pulled in and was
+        // misclassified as a delegate-val — generating delegate code (`it.companyId.referenceId`) against
+        // a plain scalar. The scalar must keep its scalar idGetter while the delegate-val keeps its own.
+        val result =
+            KspTestSupport.compile(
+                ReactiveEntityRefProcessorProvider(),
+                SourceFile.kotlin(
+                    "AdjacentRefsEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.PersistenceMapping
+                    import net.transgressoft.lirp.persistence.ToOneAggregate
+                    import net.transgressoft.lirp.persistence.aggregate
+
+                    @PersistenceMapping
+                    class Company(override val id: Int) : ReactiveEntityBase<Int, Company>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = Company(id)
+                    }
+
+                    @PersistenceMapping
+                    class AudioTrack(override val id: Int) : ReactiveEntityBase<Int, AudioTrack>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = AudioTrack(id)
+                    }
+
+                    @PersistenceMapping
+                    class Vehicle(
+                        override val id: Int,
+                        companyId: Int,
+                        var audioTrackId: Int
+                    ) : ReactiveEntityBase<Int, Vehicle>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = Vehicle(id, companyId, audioTrackId)
+
+                        @ToOneAggregate(target = Company::class)
+                        var companyId: Int by reactiveProperty(companyId)
+                        @ToOneAggregate(target = AudioTrack::class)
+                        val audioTrack by aggregate<Int, AudioTrack> { audioTrackId }
+                    }
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("Vehicle_LirpRefAccessor.kt")
+        // companyId stays a scalar FK: scalar cast idGetter, not the delegate's `referenceId` form
+        // (a misclassification would emit `idGetter = { it.companyId.referenceId }` instead).
+        content shouldContain "refName = \"company\""
+        content shouldContain "idGetter = { it.companyId as Comparable<Any> }"
+        // audioTrack is correctly the delegate-val.
+        content shouldContain "refName = \"audioTrack\""
+        content shouldContain "idGetter = { it.audioTrack.referenceId }"
+    }
+
+    test("delegate-val detection regex matches every by-delegation form, with or without a space before the brace") {
+        // mutableAggregate is a forward-looking guard (no single-ref factory exists yet), so its
+        // detection — including the spaced `mutableAggregate {` form missed by the old substring check
+        // — is verified directly against the regex rather than through a compilation that cannot exist.
+        val delegateForms =
+            listOf(
+                "val x by aggregate<Int, X> { xId }",
+                "val x by aggregate { xId }",
+                "val x by optionalAggregate<Int, X> { xId }",
+                "val x by optionalAggregate { xId }",
+                "val x by mutableAggregate<Int, X> { xId }",
+                "val x by mutableAggregate { xId }",
+                "val x by mutableAggregate{ xId }"
+            )
+        delegateForms.forEach { it to TO_ONE_DELEGATE_VAL_REGEX.containsMatchIn(it) shouldBe (it to true) }
+
+        val scalarForms =
+            listOf(
+                "var companyId: Int by reactiveProperty(companyId)",
+                "var companyId: Int? by reactiveProperty(companyId)",
+                "val items by aggregateList<Int, X>(itemIds)"
+            )
+        scalarForms.forEach { it to TO_ONE_DELEGATE_VAL_REGEX.containsMatchIn(it) shouldBe (it to false) }
+    }
 })
