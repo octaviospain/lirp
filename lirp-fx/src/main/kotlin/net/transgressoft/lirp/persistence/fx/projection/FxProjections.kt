@@ -67,7 +67,7 @@ object FxProjections {
      * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
      */
     @JvmStatic
-    fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V> fxProjection(
+    fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> fxProjection(
         sourceRef: () -> FxObservableCollection<K, E>,
         keyExtractor: (E) -> PK,
         valueTransform: (PK, List<E>) -> V,
@@ -108,7 +108,7 @@ object FxProjections {
      * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
      */
     @JvmStatic
-    fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V> registryFxProjection(
+    fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> registryFxProjection(
         registry: Registry<K, E>,
         keyExtractor: (E) -> PK,
         valueTransform: (PK, List<E>) -> V,
@@ -150,7 +150,7 @@ object FxProjections {
      * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
      */
     @JvmStatic
-    fun <K : Comparable<K>, PK : Comparable<PK>, E, V> fxMultiKeyProjection(
+    fun <K : Comparable<K>, PK : Comparable<PK>, E, V : Any> fxMultiKeyProjection(
         sourceRef: () -> FxObservableCollection<K, E>,
         keyExtractor: (E) -> Collection<PK>,
         valueTransform: (PK, List<E>) -> V,
@@ -192,7 +192,7 @@ object FxProjections {
      * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
      */
     @JvmStatic
-    fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V> registryFxMultiKeyProjection(
+    fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> registryFxMultiKeyProjection(
         registry: Registry<K, E>,
         keyExtractor: (E) -> Collection<PK>,
         valueTransform: (PK, List<E>) -> V,

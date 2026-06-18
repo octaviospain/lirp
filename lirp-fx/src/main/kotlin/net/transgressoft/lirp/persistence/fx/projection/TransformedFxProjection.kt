@@ -91,7 +91,7 @@ import kotlinx.coroutines.launch
  *   intermediate value produced by [dataTransform]; safe to build JavaFX property bindings here
  * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
  */
-class TransformedFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V>(
+class TransformedFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>(
     private val sourceRef: () -> FxObservableCollection<K, E>,
     private val keyExtractor: (E) -> PK,
     private val dataTransform: (PK, List<E>) -> Any?,
@@ -130,6 +130,10 @@ class TransformedFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identi
     private val pendingUpdates = HashMap<PK, Any?>()
     private val pendingRemovals = CopyOnWriteArraySet<PK>()
     private val flushScheduled = AtomicBoolean(false)
+
+    // Removes the change listener registered on the source collection. Invoked from close() so the
+    // source stops retaining and feeding this projection once it is no longer needed.
+    private var detachSourceListener: (() -> Unit)? = null
 
     /**
      * Constructs a single-transform projection. [valueTransform] runs entirely off-thread; an
@@ -187,8 +191,8 @@ class TransformedFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identi
     @Suppress("UNCHECKED_CAST")
     private fun subscribeToList(source: FxAggregateList<*, *>) {
         val typedSource = source as FxAggregateList<K, E>
-        typedSource.addListener(
-            ListChangeListener { change ->
+        val listener =
+            ListChangeListener<E> { change ->
                 val changedKeys = mutableSetOf<PK>()
                 while (change.next()) {
                     if (change.wasAdded()) changedKeys += handleAdded(change.addedSubList as List<E>)
@@ -196,7 +200,8 @@ class TransformedFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identi
                 }
                 if (changedKeys.isNotEmpty()) scheduleFlush(changedKeys)
             }
-        )
+        typedSource.addListener(listener)
+        detachSourceListener = { typedSource.removeListener(listener) }
         val initialElements = typedSource.toList().ifEmpty { typedSource.innerProxy.resolveAll().toList() }
         populateInitialState(initialElements)
     }
@@ -204,14 +209,15 @@ class TransformedFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identi
     @Suppress("UNCHECKED_CAST")
     private fun subscribeToSet(source: FxAggregateSet<*, *>) {
         val typedSource = source as FxAggregateSet<K, E>
-        typedSource.addListener(
-            SetChangeListener { change ->
+        val listener =
+            SetChangeListener<E> { change ->
                 val changedKeys = mutableSetOf<PK>()
                 if (change.wasAdded()) changedKeys += handleAdded(listOf(change.elementAdded as E))
                 if (change.wasRemoved()) changedKeys += handleRemoved(listOf(change.elementRemoved as E))
                 if (changedKeys.isNotEmpty()) scheduleFlush(changedKeys)
             }
-        )
+        typedSource.addListener(listener)
+        detachSourceListener = { typedSource.removeListener(listener) }
         val initialElements = typedSource.toList().ifEmpty { typedSource.innerProxy.resolveAll().toList() }
         populateInitialState(initialElements)
     }
@@ -447,11 +453,15 @@ class TransformedFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identi
     }
 
     /**
-     * Clears all entries-changed listeners. The aggregate source backing this projection is not
-     * closeable, so no subscription cancellation is performed beyond listener cleanup.
+     * Removes the change listener registered on the source collection and clears all entries-changed
+     * listeners, so the source no longer retains or feeds this projection after close.
      */
     override fun close() {
-        entriesChangedListeners.clear()
+        synchronized(initLock) {
+            detachSourceListener?.invoke()
+            detachSourceListener = null
+            entriesChangedListeners.clear()
+        }
     }
 
     /**

@@ -32,7 +32,7 @@ package net.transgressoft.lirp.persistence.projection
  * @param oldValue the transformed value before the change, or null when the key was added
  * @param newValue the transformed value after the change, or null when the key was removed
  */
-data class ProjectionEntryChange<PK, V>(val key: PK, val oldValue: V?, val newValue: V?) {
+data class ProjectionEntryChange<PK, V : Any>(val key: PK, val oldValue: V?, val newValue: V?) {
     init {
         require(oldValue != null || newValue != null) {
             "ProjectionEntryChange requires at least one of oldValue/newValue to be non-null (key=$key)"
@@ -87,7 +87,7 @@ data class ProjectionEntryChange<PK, V>(val key: PK, val oldValue: V?, val newVa
  * @param PK the projection key type
  * @param V the transformed value type
  */
-interface ObservableProjection<PK, V> : CloseableProjection<PK, V> {
+interface ObservableProjection<PK, V : Any> : CloseableProjection<PK, V> {
 
     /**
      * Registers [listener] to receive batched per-entry value changes after each projection delta.

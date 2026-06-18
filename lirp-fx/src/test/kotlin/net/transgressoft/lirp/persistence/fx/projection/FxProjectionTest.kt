@@ -598,6 +598,25 @@ class FxProjectionTest : StringSpec({
         count shouldBe 1
     }
 
+    "TransformedFxProjection close detaches the source listener so later source mutations are ignored" {
+        val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
+        val projection =
+            TransformedFxProjection(
+                { source },
+                { it.albumName },
+                { pk, items -> FxAlbumBucket(pk, items.map { it.title }) },
+                false
+            )
+        source.add(0, FxAudioItem(1, "Track A", "Jazz"))
+        projection["Jazz"] shouldBe FxAlbumBucket("Jazz", listOf("Track A"))
+
+        projection.close()
+
+        // After close the source no longer feeds the projection — the bucket stays as it was
+        source.add(1, FxAudioItem(2, "Track B", "Jazz"))
+        projection["Jazz"] shouldBe FxAlbumBucket("Jazz", listOf("Track A"))
+    }
+
     "TransformedFxProjection valueTransform runs off FX Application Thread" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
         val transformThreads = mutableListOf<Boolean>()
