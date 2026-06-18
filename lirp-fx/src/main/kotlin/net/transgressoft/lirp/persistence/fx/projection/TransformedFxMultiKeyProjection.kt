@@ -109,7 +109,7 @@ class TransformedFxMultiKeyProjection<K : Comparable<K>, PK : Comparable<PK>, E,
     @Suppress("UNCHECKED_CAST")
     private val fxFactory: (PK, Any?) -> V,
     val dispatchToFxThread: Boolean = true
-) : ObservableMap<PK, V>, AutoCloseable, ObservableProjection<PK, V> where E : IdentifiableEntity<K>, E : ReactiveEntity<K, E> {
+) : FxObservableProjection<PK, V> where E : IdentifiableEntity<K>, E : ReactiveEntity<K, E> {
 
     private val log = KotlinLogging.logger {}
 

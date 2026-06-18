@@ -98,7 +98,7 @@ class TransformedRegistryFxMultiKeyProjection<K : Comparable<K>, PK : Comparable
     @Suppress("UNCHECKED_CAST")
     private val fxFactory: (PK, Any?) -> V,
     val dispatchToFxThread: Boolean = true
-) : ObservableMap<PK, V>, AutoCloseable, ObservableProjection<PK, V> {
+) : FxObservableProjection<PK, V> {
 
     private val log = KotlinLogging.logger {}
 

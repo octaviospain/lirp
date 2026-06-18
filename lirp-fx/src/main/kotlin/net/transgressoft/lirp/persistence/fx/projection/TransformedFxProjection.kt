@@ -98,7 +98,7 @@ class TransformedFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identi
     @Suppress("UNCHECKED_CAST")
     private val fxFactory: (PK, Any?) -> V,
     val dispatchToFxThread: Boolean = true
-) : ObservableMap<PK, V>, ObservableProjection<PK, V> {
+) : FxObservableProjection<PK, V> {
 
     private val log = KotlinLogging.logger {}
 

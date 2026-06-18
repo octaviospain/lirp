@@ -24,6 +24,7 @@ import net.transgressoft.lirp.persistence.fx.FxToolkitInit
 import net.transgressoft.lirp.persistence.fx.fxAggregateList
 import net.transgressoft.lirp.persistence.fx.fxAggregateSet
 import net.transgressoft.lirp.persistence.projection.ObservableProjection
+import net.transgressoft.lirp.persistence.projection.ProjectionEntryChange
 import net.transgressoft.lirp.testing.Stress
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldNotThrowAny
@@ -441,6 +442,37 @@ class FxProjectionTest : StringSpec({
         projection["Jazz"] shouldBe FxAlbumBucket("Jazz", listOf("Track A", "Track B"))
         projection["Rock"] shouldBe FxAlbumBucket("Rock", listOf("Track C"))
         projection.size shouldBe 2
+    }
+
+    "fxProjection factory return type exposes both the ObservableMap and the entries-changed surfaces without a cast" {
+        val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
+        // The static return type carries both subscription styles — neither needs a downcast
+        val projection: FxObservableProjection<String, FxAlbumBucket> =
+            fxProjection(
+                { source },
+                { it.albumName },
+                { pk, items -> FxAlbumBucket(pk, items.map { it.title }) },
+                false
+            )
+
+        source.add(0, FxAudioItem(1, "Track A", "Jazz"))
+
+        val mapChanges = AtomicInteger(0)
+        val entriesDeltas = CopyOnWriteArrayList<List<ProjectionEntryChange<String, FxAlbumBucket>>>()
+        projection.addListener(MapChangeListener { mapChanges.incrementAndGet() })
+        val handle = projection.addOnEntriesChangedListener { entriesDeltas.add(it) }
+
+        // The entries-changed surface replays current entries as adds on registration
+        entriesDeltas.single().single().key shouldBe "Jazz"
+        entriesDeltas.single().single().oldValue shouldBe null
+
+        source.add(1, FxAudioItem(2, "Track C", "Rock"))
+
+        // The ObservableMap surface fired its pulse for the same mutation
+        mapChanges.get() shouldBe 1
+        entriesDeltas.last().single().key shouldBe "Rock"
+
+        handle.close()
     }
 
     "TransformedFxProjection fires exactly one MapChangeListener pulse per source event" {
