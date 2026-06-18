@@ -34,6 +34,7 @@ import java.time.Instant
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -767,6 +768,311 @@ internal class RegistryProjectionMapTest : StringSpec({
 
         transformed.containsKey("Rock") shouldBe false
         transformed.isEmpty() shouldBe true
+    }
+
+    "registryMultiKeyProjectionMap valueTransform replays current entries as adds when a listener registers" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        multiKeyRepo.create(1, "Track A", setOf("Rock", "Jazz"))
+        multiKeyRepo.create(2, "Track B", setOf("Jazz"))
+        reactive.advance()
+
+        val transformed =
+            registryMultiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem, String>(
+                multiKeyRepo,
+                { it.genres }
+            ) { pk, items -> "$pk:${items.size}" }
+
+        val replayed = mutableMapOf<String, Pair<String?, String?>>()
+        transformed.addOnEntriesChangedListener { changes ->
+            changes.forEach { replayed[it.key] = it.oldValue to it.newValue }
+        }
+
+        // Each current entry is replayed as an add (oldValue == null) so a late subscriber sees full state.
+        replayed.keys shouldBe setOf("Rock", "Jazz")
+        replayed["Rock"] shouldBe (null to "Rock:1")
+        replayed["Jazz"] shouldBe (null to "Jazz:2")
+    }
+
+    "registryMultiKeyProjectionMap valueTransform emits add, replace and remove entry changes on deltas" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        multiKeyRepo.create(1, "Track A", setOf("Rock"))
+        reactive.advance()
+
+        val transformed =
+            registryMultiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem, String>(
+                multiKeyRepo,
+                { it.genres }
+            ) { pk, items -> "$pk:${items.size}" }
+
+        val changesLog = mutableListOf<Triple<String, String?, String?>>()
+        transformed.addOnEntriesChangedListener { changes ->
+            changes.forEach { changesLog += Triple(it.key, it.oldValue, it.newValue) }
+        }
+        changesLog.clear() // drop the initial replay of the seeded "Rock" bucket
+
+        val itemB = multiKeyRepo.create(2, "Track B", setOf("Jazz")) // add a new bucket
+        reactive.advance()
+        multiKeyRepo.create(3, "Track C", setOf("Rock")) // recompute an existing bucket
+        reactive.advance()
+        multiKeyRepo.remove(itemB) // empty and drop the Jazz bucket
+        reactive.advance()
+
+        changesLog shouldContainExactly
+            listOf(
+                Triple("Jazz", null, "Jazz:1"),
+                Triple("Rock", "Rock:1", "Rock:2"),
+                Triple("Jazz", "Jazz:1", null)
+            )
+    }
+
+    "registryMultiKeyProjectionMap valueTransform stops delivering entry changes after the listener handle is closed" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        multiKeyRepo.create(1, "Track A", setOf("Rock"))
+        reactive.advance()
+
+        val transformed =
+            registryMultiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem, String>(
+                multiKeyRepo,
+                { it.genres }
+            ) { pk, items -> "$pk:${items.size}" }
+
+        val changesLog = mutableListOf<Triple<String, String?, String?>>()
+        val handle =
+            transformed.addOnEntriesChangedListener { changes ->
+                changes.forEach { changesLog += Triple(it.key, it.oldValue, it.newValue) }
+            }
+        changesLog.clear()
+
+        handle.close()
+        multiKeyRepo.create(2, "Track B", setOf("Jazz"))
+        reactive.advance()
+
+        changesLog shouldBe emptyList()
+    }
+
+    "registryProjectionMap valueTransform replays current entries as adds when a listener registers" {
+        trackRepo.create(1, "Track A", "Rock")
+        trackRepo.create(2, "Track B", "Jazz")
+        trackRepo.create(3, "Track C", "Jazz")
+        reactive.advance()
+
+        val transformed =
+            registryProjectionMap<Int, String, AudioItem, String>(trackRepo, { it.albumName }) { pk, items ->
+                "$pk:${items.size}"
+            }
+
+        val replayed = mutableMapOf<String, Pair<String?, String?>>()
+        transformed.addOnEntriesChangedListener { changes ->
+            changes.forEach { replayed[it.key] = it.oldValue to it.newValue }
+        }
+
+        // Each current entry is replayed as an add (oldValue == null) so a late subscriber sees full state.
+        replayed.keys shouldBe setOf("Rock", "Jazz")
+        replayed["Rock"] shouldBe (null to "Rock:1")
+        replayed["Jazz"] shouldBe (null to "Jazz:2")
+    }
+
+    "registryProjectionMap valueTransform emits add, replace and remove entry changes on deltas" {
+        trackRepo.create(1, "Track A", "Rock")
+        reactive.advance()
+
+        val transformed =
+            registryProjectionMap<Int, String, AudioItem, String>(trackRepo, { it.albumName }) { pk, items ->
+                "$pk:${items.size}"
+            }
+
+        val changesLog = mutableListOf<Triple<String, String?, String?>>()
+        transformed.addOnEntriesChangedListener { changes ->
+            changes.forEach { changesLog += Triple(it.key, it.oldValue, it.newValue) }
+        }
+        changesLog.clear() // drop the initial replay of the seeded "Rock" bucket
+
+        val itemB = trackRepo.create(2, "Track B", "Jazz") // add a new bucket
+        reactive.advance()
+        trackRepo.create(3, "Track C", "Rock") // recompute an existing bucket
+        reactive.advance()
+        trackRepo.remove(itemB) // empty and drop the Jazz bucket
+        reactive.advance()
+
+        changesLog shouldContainExactly
+            listOf(
+                Triple("Jazz", null, "Jazz:1"),
+                Triple("Rock", "Rock:1", "Rock:2"),
+                Triple("Jazz", "Jazz:1", null)
+            )
+    }
+
+    "registryProjectionMap valueTransform stops delivering entry changes after the listener handle is closed" {
+        trackRepo.create(1, "Track A", "Rock")
+        reactive.advance()
+
+        val transformed =
+            registryProjectionMap<Int, String, AudioItem, String>(trackRepo, { it.albumName }) { pk, items ->
+                "$pk:${items.size}"
+            }
+
+        val changesLog = mutableListOf<Triple<String, String?, String?>>()
+        val handle =
+            transformed.addOnEntriesChangedListener { changes ->
+                changes.forEach { changesLog += Triple(it.key, it.oldValue, it.newValue) }
+            }
+        changesLog.clear()
+
+        handle.close()
+        trackRepo.create(2, "Track B", "Jazz")
+        reactive.advance()
+
+        changesLog shouldBe emptyList()
+    }
+
+    "registryProjectionMap valueTransform delivers deltas to two listeners independently" {
+        trackRepo.create(1, "Track A", "Rock")
+        reactive.advance()
+
+        val transformed =
+            registryProjectionMap<Int, String, AudioItem, String>(trackRepo, { it.albumName }) { pk, items ->
+                "$pk:${items.size}"
+            }
+
+        val log1 = mutableListOf<Pair<String, String?>>()
+        val log2 = mutableListOf<Pair<String, String?>>()
+        transformed.addOnEntriesChangedListener { changes ->
+            changes.forEach { log1 += it.key to it.newValue }
+        }
+        transformed.addOnEntriesChangedListener { changes ->
+            changes.forEach { log2 += it.key to it.newValue }
+        }
+        log1.clear()
+        log2.clear()
+
+        trackRepo.create(2, "Track B", "Jazz")
+        reactive.advance()
+
+        log1.size shouldBe 1
+        log1[0] shouldBe ("Jazz" to "Jazz:1")
+        log2.size shouldBe 1
+        log2[0] shouldBe ("Jazz" to "Jazz:1")
+    }
+
+    "registryProjectionMap valueTransform and repository subscribe deliver distinct events without double-delivery and close composition is clean" {
+        trackRepo.create(1, "Track A", "Rock")
+        reactive.advance()
+
+        val transformed =
+            registryProjectionMap<Int, String, AudioItem, String>(trackRepo, { it.albumName }) { pk, items ->
+                "$pk:${items.size}"
+            }
+
+        val repoEventCount = AtomicInteger(0)
+        val projectionDeltaCount = AtomicInteger(0)
+
+        // Repository CrudEvent subscription counts entity-level events
+        val repoSubscription = trackRepo.subscribe { repoEventCount.incrementAndGet() }
+        // Projection listener counts bucket-level delta batches
+        transformed.addOnEntriesChangedListener { _ -> projectionDeltaCount.incrementAndGet() }
+
+        // drop replay from initial listener registration
+        projectionDeltaCount.set(0)
+        repoEventCount.set(0)
+
+        // perform create/update/remove
+        val item2 = trackRepo.create(2, "Track B", "Jazz")
+        reactive.advance()
+        trackRepo.create(3, "Track C", "Rock")
+        reactive.advance()
+        trackRepo.remove(item2)
+        reactive.advance()
+
+        // Three entity-level events: 3 creates + 1 remove = 4 repo events total minus the initial above = 3
+        // Two distinct bucket keys affected: Jazz and Rock (not both on every event)
+        // The projection sees bucket deltas, not entity events — counts differ
+        repoEventCount.get() shouldBe 3
+        // projection fires once per flush (one per reactive.advance()) for affected buckets
+        projectionDeltaCount.get() shouldBe 3
+
+        // Close the projection: projection listener must receive no more deltas
+        transformed.close()
+        projectionDeltaCount.set(0)
+        repoEventCount.set(0)
+
+        trackRepo.create(4, "Track D", "Pop")
+        reactive.advance()
+
+        // Repository subscription still alive after projection close
+        repoEventCount.get() shouldBe 1
+        // Projection listener receives nothing after close
+        projectionDeltaCount.get() shouldBe 0
+
+        repoSubscription.cancel()
+    }
+
+    "registryProjectionMap valueTransform fires no delta when an in-place update leaves the transformed value unchanged" {
+        val item = trackRepo.create(1, "Track A", "Rock") as MutableAudioItem
+        reactive.advance()
+
+        // The transform ignores the title, so a title-only update recomputes the same value.
+        val transformed =
+            registryProjectionMap<Int, String, AudioItem, String>(trackRepo, { it.albumName }) { pk, items ->
+                "$pk:${items.size}"
+            }
+
+        val changesLog = mutableListOf<Triple<String, String?, String?>>()
+        transformed.addOnEntriesChangedListener { changes ->
+            changes.forEach { changesLog += Triple(it.key, it.oldValue, it.newValue) }
+        }
+        changesLog.clear()
+
+        val oldSnapshot = item.clone()
+        item.title = "Renamed Track"
+        trackRepo.emitAsync(StandardCrudEvent.Update(item, oldSnapshot))
+        reactive.advance()
+
+        changesLog shouldBe emptyList()
+    }
+
+    "registryProjectionMap valueTransform isolates a throwing listener so a second listener still receives the batch" {
+        trackRepo.create(1, "Track A", "Rock")
+        reactive.advance()
+
+        val transformed =
+            registryProjectionMap<Int, String, AudioItem, String>(trackRepo, { it.albumName }) { pk, items ->
+                "$pk:${items.size}"
+            }
+
+        val secondListenerKeys = mutableListOf<String>()
+        transformed.addOnEntriesChangedListener { error("listener boom") }
+        transformed.addOnEntriesChangedListener { changes -> secondListenerKeys.addAll(changes.map { it.key }) }
+        secondListenerKeys.clear()
+
+        trackRepo.create(2, "Track B", "Jazz")
+        reactive.advance()
+
+        secondListenerKeys shouldBe listOf("Jazz")
+    }
+
+    "registryProjectionMap valueTransform replays full current state before any subsequent delta on registration" {
+        trackRepo.create(1, "Track A", "Rock")
+        trackRepo.create(2, "Track B", "Jazz")
+        reactive.advance()
+
+        val transformed =
+            registryProjectionMap<Int, String, AudioItem, String>(trackRepo, { it.albumName }) { pk, items ->
+                "$pk:${items.size}"
+            }
+
+        val ordered = mutableListOf<Triple<String, String?, String?>>()
+        transformed.addOnEntriesChangedListener { changes ->
+            changes.forEach { ordered += Triple(it.key, it.oldValue, it.newValue) }
+        }
+
+        // The replay (all adds, oldValue == null) is delivered before the post-registration delta.
+        trackRepo.create(3, "Track C", "Rock")
+        reactive.advance()
+
+        val replaySize = 2
+        ordered.take(replaySize).all { it.second == null } shouldBe true
+        ordered.take(replaySize).map { it.first }.toSet() shouldBe setOf("Rock", "Jazz")
+        ordered.drop(replaySize) shouldContainExactly listOf(Triple("Rock", "Rock:1", "Rock:2"))
     }
 
     "MultiKeyRegistryProjectionMap iterates without ConcurrentModificationException under concurrent key-set churn stress"

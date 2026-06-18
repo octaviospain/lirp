@@ -23,6 +23,7 @@ import net.transgressoft.lirp.persistence.fx.FxAudioItem
 import net.transgressoft.lirp.persistence.fx.FxToolkitInit
 import net.transgressoft.lirp.persistence.fx.fxAggregateList
 import net.transgressoft.lirp.persistence.fx.fxAggregateSet
+import net.transgressoft.lirp.persistence.projection.ObservableProjectionMap
 import net.transgressoft.lirp.testing.Stress
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldNotThrowAny
@@ -639,7 +640,7 @@ class FxProjectionMapTest : StringSpec({
                 },
                 dispatchToFxThread = true
             )
-        projection.addListener(
+        (projection as ObservableMap<String, AlbumFxView>).addListener(
             MapChangeListener {
                 pulseLatch.countDown()
             }
@@ -669,7 +670,7 @@ class FxProjectionMapTest : StringSpec({
                 },
                 dispatchToFxThread = false
             )
-        projection.addListener(MapChangeListener { })
+        (projection as ObservableMap<String, AlbumFxView>).addListener(MapChangeListener { })
 
         source.add(0, FxAudioItem(1, "Track A", "Jazz"))
         source.add(1, FxAudioItem(2, "Track B", "Rock"))
@@ -783,7 +784,7 @@ class FxProjectionMapTest : StringSpec({
         // identity forms — return released concrete types (ABI check: 3-arg signature unchanged)
         val identityMap: FxProjectionMap<Int, String, AudioItem> =
             fxProjectionMap(sourceRef = { source }, keyExtractor = { it.albumName }, dispatchToFxThread = false)
-        val transformMap: TransformedFxProjectionMap<Int, String, AudioItem, FxAlbumBucket> =
+        val transformMap: ObservableProjectionMap<String, FxAlbumBucket> =
             fxProjectionMap(
                 sourceRef = { source },
                 keyExtractor = { it.albumName },
@@ -792,7 +793,7 @@ class FxProjectionMapTest : StringSpec({
             )
         val mkIdentityMap: FxMultiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem> =
             fxMultiKeyProjectionMap(sourceRef = { mkSource }, keyExtractor = { it.genres }, dispatchToFxThread = false)
-        val mkTransformMap: TransformedFxMultiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem, FxAlbumBucket> =
+        val mkTransformMap: ObservableProjectionMap<String, FxAlbumBucket> =
             fxMultiKeyProjectionMap(
                 sourceRef = { mkSource },
                 keyExtractor = { it.genres },
@@ -802,10 +803,10 @@ class FxProjectionMapTest : StringSpec({
 
         // the released 3-arg form returns FxProjectionMap (ABI check)
         identityMap.shouldBeInstanceOf<FxProjectionMap<Int, String, AudioItem>>()
-        // transform forms are ObservableMap-typed
-        transformMap.shouldBeInstanceOf<ObservableMap<*, *>>()
+        // transform forms are ObservableProjectionMap-typed (also ObservableMap at runtime)
+        transformMap.shouldBeInstanceOf<ObservableProjectionMap<*, *>>()
         mkIdentityMap.shouldBeInstanceOf<ObservableMap<*, *>>()
-        mkTransformMap.shouldBeInstanceOf<ObservableMap<*, *>>()
+        mkTransformMap.shouldBeInstanceOf<ObservableProjectionMap<*, *>>()
 
         // Exercise the identity map: add an item to source, then access the projection — the
         // first access triggers initialize() which seeds from the source's current contents
@@ -819,7 +820,7 @@ class FxProjectionMapTest : StringSpec({
 
         // Exercise multi-key maps: initialize them first via addListener, then add items
         mkIdentityMap.addListener(MapChangeListener { })
-        mkTransformMap.addListener(MapChangeListener { })
+        (mkTransformMap as ObservableMap<String, FxAlbumBucket>).addListener(MapChangeListener { })
         val mkItem = MutableMultiKeyAudioItem(1, "Track A", setOf("Rock", "Jazz"))
         mkSource.add(0, mkItem)
         mkIdentityMap.containsKey("Rock") shouldBe true
