@@ -34,4 +34,4 @@ package net.transgressoft.lirp.persistence.projection
  * @param PK the projection key type
  * @param V the transformed value type
  */
-interface CloseableProjectionMap<PK, V> : Map<PK, V>, AutoCloseable
+interface CloseableProjection<PK, V> : Map<PK, V>, AutoCloseable

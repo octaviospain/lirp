@@ -23,7 +23,7 @@ import net.transgressoft.lirp.persistence.AggregateCollectionRef
 import net.transgressoft.lirp.persistence.FxObservableCollection
 import net.transgressoft.lirp.persistence.fx.FxAggregateList
 import net.transgressoft.lirp.persistence.fx.FxAggregateSet
-import net.transgressoft.lirp.persistence.projection.ProjectionMap
+import net.transgressoft.lirp.persistence.projection.Projection
 import javafx.application.Platform
 import javafx.beans.InvalidationListener
 import javafx.collections.FXCollections
@@ -48,7 +48,7 @@ import kotlinx.coroutines.launch
  * [ConcurrentSkipListMap] (wrapped by [FXCollections.observableMap]), so keys are always
  * iterated in natural sorted order with CME-free iteration under concurrent reads.
  *
- * A hold on a core [ProjectionMap] wires the `onBucketsChanged` seam to the pending-flush
+ * A hold on a core [Projection] wires the `onBucketsChanged` seam to the pending-flush
  * coalescer. All bucket changes produced by a single source event are collected into a pending
  * key set and flushed to the [ObservableMap] in exactly one [Platform.runLater] call
  * (dispatch mode) or one [ReactiveScope.flowScope] channel action (non-dispatch mode).
@@ -76,7 +76,7 @@ import kotlinx.coroutines.launch
  * @param keyExtractor grouping function that extracts the projection key from an entity
  * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
  */
-class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
+class FxProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
     private val sourceRef: () -> FxObservableCollection<K, E>,
     private val keyExtractor: (E) -> PK,
     val dispatchToFxThread: Boolean = true
@@ -108,8 +108,8 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
     // arrive through the core engine's hook. Direct FxObservableCollection mutations are
     // handled via the FxAggregateList/FxAggregateSet listener subscriptions below.
     @Suppress("UNCHECKED_CAST")
-    private val core: ProjectionMap<K, PK, E> =
-        ProjectionMap(
+    private val core: Projection<K, PK, E> =
+        Projection(
             { sourceRef() as AggregateCollectionRef<K, E> },
             keyExtractor
         )
@@ -138,7 +138,7 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
                 is FxAggregateSet<*, *> -> subscribeToSet(source)
                 else ->
                     error(
-                        "FxProjectionMap requires an FxObservableCollection source, " +
+                        "FxProjection requires an FxObservableCollection source, " +
                             "but received: ${source::class.qualifiedName}"
                     )
             }
@@ -147,7 +147,7 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
         }
     }
 
-    // Safe: FxProjectionMap is constructed with a source typed as FxAggregateList<K, E>.
+    // Safe: FxProjection is constructed with a source typed as FxAggregateList<K, E>.
     @Suppress("UNCHECKED_CAST")
     private fun subscribeToList(source: FxAggregateList<*, *>) {
         val typedSource = source as FxAggregateList<K, E>
@@ -165,7 +165,7 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
         populateInitialState(initialElements)
     }
 
-    // Safe: FxProjectionMap is constructed with a source typed as FxAggregateSet<K, E>.
+    // Safe: FxProjection is constructed with a source typed as FxAggregateSet<K, E>.
     @Suppress("UNCHECKED_CAST")
     private fun subscribeToSet(source: FxAggregateSet<*, *>) {
         val typedSource = source as FxAggregateSet<K, E>
@@ -333,7 +333,7 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
     override fun clear() = throw UnsupportedOperationException(READ_ONLY_MESSAGE)
 
     companion object {
-        private const val READ_ONLY_MESSAGE = "FxProjectionMap is read-only"
+        private const val READ_ONLY_MESSAGE = "FxProjection is read-only"
     }
 
     // Listener methods delegate to innerObservableMap; addListener also triggers initialization
@@ -359,7 +359,7 @@ class FxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEn
      *
      * Implements Kotlin `by`-delegation: `val byAlbum: ObservableMap<String, List<AudioItem>> by fxProjection(...)`.
      */
-    operator fun getValue(thisRef: Any?, property: KProperty<*>): FxProjectionMap<K, PK, E> {
+    operator fun getValue(thisRef: Any?, property: KProperty<*>): FxProjection<K, PK, E> {
         initialize()
         return this
     }

@@ -30,7 +30,7 @@ import kotlin.reflect.KProperty
  * A read-only grouped view that derives a `Map<PK, List<E>>` from a [Registry] source,
  * placing each entity under every bucket key that [keyExtractor] returns for it.
  *
- * Unlike [RegistryProjectionMap] (one entity per bucket), a multi-key projection places
+ * Unlike [RegistryProjection] (one entity per bucket), a multi-key projection places
  * the same entity into multiple buckets simultaneously. A `MutableMultiKeyAudioItem` with
  * genres `{Rock, Jazz}` appears in both the `"Rock"` and `"Jazz"` buckets.
  *
@@ -71,7 +71,7 @@ import kotlin.reflect.KProperty
  * @param keyExtractor function that extracts the set of projection keys from an entity;
  *   each returned key names one bucket the entity belongs to
  */
-class MultiKeyRegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
+class MultiKeyRegistryProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
     private val registry: Registry<K, E>,
     private val keyExtractor: (E) -> Collection<PK>
 ) : AbstractMap<PK, List<E>>(), AutoCloseable {
@@ -79,7 +79,7 @@ class MultiKeyRegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : 
     // Bucket engine — stores one List<E> per PK bucket key in a ConcurrentSkipListMap.
     // All per-key bucket ops are driven explicitly through the silent batch primitives; the
     // ProjectionCore keyExtractor is never invoked.
-    private val core = ProjectionCore<K, PK, E> { error("ProjectionCore keyExtractor must not be called in MultiKeyRegistryProjectionMap") }
+    private val core = ProjectionCore<K, PK, E> { error("ProjectionCore keyExtractor must not be called in MultiKeyRegistryProjection") }
 
     /**
      * Reverse index: entity id → the current set of bucket keys it occupies.
@@ -271,7 +271,7 @@ class MultiKeyRegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : 
      *
      * Implements Kotlin `by`-delegation: `val grouped by registryMultiKeyProjection(repo) { it.genres }`.
      */
-    operator fun getValue(thisRef: Any?, property: KProperty<*>): MultiKeyRegistryProjectionMap<K, PK, E> {
+    operator fun getValue(thisRef: Any?, property: KProperty<*>): MultiKeyRegistryProjection<K, PK, E> {
         initialize()
         return this
     }

@@ -26,14 +26,14 @@ import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 
 /**
- * Tests for [FxProjectionMap] covering key-change scenarios. Closes coverage Gap 2 from the
- * CONCERNS.md audit: the [FxProjectionMap.removeFromAnyBucket] fallback path was untested.
+ * Tests for [FxProjection] covering key-change scenarios. Closes coverage Gap 2 from the
+ * CONCERNS.md audit: the [FxProjection.removeFromAnyBucket] fallback path was untested.
  *
  * The fallback is triggered when an entity's projection key is mutated while the entity is
  * still in the source collection, causing [handleRemoved] to look up the new key (which has
  * no bucket) and fall through to a linear scan to find and remove the entity by reference.
  */
-class FxProjectionMapKeyChangeTest : StringSpec({
+class FxProjectionKeyChangeTest : StringSpec({
 
     reactiveScope()
 
@@ -41,9 +41,9 @@ class FxProjectionMapKeyChangeTest : StringSpec({
         FxToolkitInit.ensureInitialized()
     }
 
-    "FxProjectionMap reflects new bucket after entity key changes and is removed then re-added" {
+    "FxProjection reflects new bucket after entity key changes and is removed then re-added" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         source.add(0, FxAudioItem(1, "Track A", "Jazz"))
         projection["Jazz"]!!.size shouldBe 1
@@ -60,9 +60,9 @@ class FxProjectionMapKeyChangeTest : StringSpec({
         projection["Rock"]!![0].id shouldBe 1
     }
 
-    "FxProjectionMap removeFromAnyBucket handles key change during remove" {
+    "FxProjection removeFromAnyBucket handles key change during remove" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         source.add(0, FxAudioItem(1, "Track A", "Jazz"))
         projection["Jazz"]!!.size shouldBe 1
@@ -79,9 +79,9 @@ class FxProjectionMapKeyChangeTest : StringSpec({
         projection.isEmpty() shouldBe true
     }
 
-    "FxProjectionMap handles key change with multiple items in the same bucket" {
+    "FxProjection handles key change with multiple items in the same bucket" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         source.addAll(
             listOf(

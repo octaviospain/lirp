@@ -35,7 +35,7 @@ import net.transgressoft.lirp.persistence.Registry
 object FxProjections {
 
     /**
-     * Creates an [FxProjectionMap] that groups entities from any [FxObservableCollection]
+     * Creates an [FxProjection] that groups entities from any [FxObservableCollection]
      * source by a projection key.
      *
      * @param K the entity ID type
@@ -51,10 +51,10 @@ object FxProjections {
         sourceRef: () -> FxObservableCollection<K, E>,
         keyExtractor: (E) -> PK,
         dispatchToFxThread: Boolean = true
-    ): FxProjectionMap<K, PK, E> = FxProjectionMap(sourceRef, keyExtractor, dispatchToFxThread)
+    ): FxProjection<K, PK, E> = FxProjection(sourceRef, keyExtractor, dispatchToFxThread)
 
     /**
-     * Creates a value-transformed [TransformedFxProjectionMap] that groups entities from an
+     * Creates a value-transformed [TransformedFxProjection] that groups entities from an
      * [FxObservableCollection] source by a secondary key, applying [valueTransform] to each bucket.
      *
      * @param K the entity ID type
@@ -72,11 +72,11 @@ object FxProjections {
         keyExtractor: (E) -> PK,
         valueTransform: (PK, List<E>) -> V,
         dispatchToFxThread: Boolean = true
-    ): TransformedFxProjectionMap<K, PK, E, V> =
-        TransformedFxProjectionMap(sourceRef, keyExtractor, valueTransform, dispatchToFxThread)
+    ): TransformedFxProjection<K, PK, E, V> =
+        TransformedFxProjection(sourceRef, keyExtractor, valueTransform, dispatchToFxThread)
 
     /**
-     * Creates a [RegistryFxProjectionMap] that groups all entities from a [Registry] by a secondary key.
+     * Creates a [RegistryFxProjection] that groups all entities from a [Registry] by a secondary key.
      *
      * @param K the entity ID type
      * @param PK the projection key type
@@ -91,11 +91,11 @@ object FxProjections {
         registry: Registry<K, E>,
         keyExtractor: (E) -> PK,
         dispatchToFxThread: Boolean = true
-    ): RegistryFxProjectionMap<K, PK, E> =
-        RegistryFxProjectionMap(registry, keyExtractor, dispatchToFxThread)
+    ): RegistryFxProjection<K, PK, E> =
+        RegistryFxProjection(registry, keyExtractor, dispatchToFxThread)
 
     /**
-     * Creates a value-transformed [TransformedRegistryFxProjectionMap] that groups all entities from a
+     * Creates a value-transformed [TransformedRegistryFxProjection] that groups all entities from a
      * [Registry] by a secondary key, applying [valueTransform] to each bucket.
      *
      * @param K the entity ID type
@@ -113,11 +113,11 @@ object FxProjections {
         keyExtractor: (E) -> PK,
         valueTransform: (PK, List<E>) -> V,
         dispatchToFxThread: Boolean = true
-    ): TransformedRegistryFxProjectionMap<K, PK, E, V> =
-        TransformedRegistryFxProjectionMap(registry, keyExtractor, valueTransform, dispatchToFxThread)
+    ): TransformedRegistryFxProjection<K, PK, E, V> =
+        TransformedRegistryFxProjection(registry, keyExtractor, valueTransform, dispatchToFxThread)
 
     /**
-     * Creates a [FxMultiKeyProjectionMap] that groups entities from an [FxObservableCollection] source
+     * Creates a [FxMultiKeyProjection] that groups entities from an [FxObservableCollection] source
      * by multiple secondary keys. Each entity appears in every bucket named by the keys it returns.
      *
      * @param K the entity ID type
@@ -133,11 +133,11 @@ object FxProjections {
         sourceRef: () -> FxObservableCollection<K, E>,
         keyExtractor: (E) -> Collection<PK>,
         dispatchToFxThread: Boolean = true
-    ): FxMultiKeyProjectionMap<K, PK, E> where E : IdentifiableEntity<K>, E : ReactiveEntity<K, E> =
-        FxMultiKeyProjectionMap(sourceRef, keyExtractor, dispatchToFxThread)
+    ): FxMultiKeyProjection<K, PK, E> where E : IdentifiableEntity<K>, E : ReactiveEntity<K, E> =
+        FxMultiKeyProjection(sourceRef, keyExtractor, dispatchToFxThread)
 
     /**
-     * Creates a value-transformed [TransformedFxMultiKeyProjectionMap] that groups entities from an
+     * Creates a value-transformed [TransformedFxMultiKeyProjection] that groups entities from an
      * [FxObservableCollection] source by multiple secondary keys, applying [valueTransform] to each bucket.
      *
      * @param K the entity ID type
@@ -155,11 +155,11 @@ object FxProjections {
         keyExtractor: (E) -> Collection<PK>,
         valueTransform: (PK, List<E>) -> V,
         dispatchToFxThread: Boolean = true
-    ): TransformedFxMultiKeyProjectionMap<K, PK, E, V> where E : IdentifiableEntity<K>, E : ReactiveEntity<K, E> =
-        TransformedFxMultiKeyProjectionMap(sourceRef, keyExtractor, valueTransform, dispatchToFxThread)
+    ): TransformedFxMultiKeyProjection<K, PK, E, V> where E : IdentifiableEntity<K>, E : ReactiveEntity<K, E> =
+        TransformedFxMultiKeyProjection(sourceRef, keyExtractor, valueTransform, dispatchToFxThread)
 
     /**
-     * Creates a [RegistryFxMultiKeyProjectionMap] that groups all entities from a [Registry] by multiple
+     * Creates a [RegistryFxMultiKeyProjection] that groups all entities from a [Registry] by multiple
      * secondary keys. Each entity appears in every bucket named by the keys it returns.
      *
      * @param K the entity ID type
@@ -175,11 +175,11 @@ object FxProjections {
         registry: Registry<K, E>,
         keyExtractor: (E) -> Collection<PK>,
         dispatchToFxThread: Boolean = true
-    ): RegistryFxMultiKeyProjectionMap<K, PK, E> =
-        RegistryFxMultiKeyProjectionMap(registry, keyExtractor, dispatchToFxThread)
+    ): RegistryFxMultiKeyProjection<K, PK, E> =
+        RegistryFxMultiKeyProjection(registry, keyExtractor, dispatchToFxThread)
 
     /**
-     * Creates a value-transformed [TransformedRegistryFxMultiKeyProjectionMap] that groups all entities
+     * Creates a value-transformed [TransformedRegistryFxMultiKeyProjection] that groups all entities
      * from a [Registry] by multiple secondary keys, applying [valueTransform] to each bucket.
      *
      * @param K the entity ID type
@@ -197,6 +197,6 @@ object FxProjections {
         keyExtractor: (E) -> Collection<PK>,
         valueTransform: (PK, List<E>) -> V,
         dispatchToFxThread: Boolean = true
-    ): TransformedRegistryFxMultiKeyProjectionMap<K, PK, E, V> =
-        TransformedRegistryFxMultiKeyProjectionMap(registry, keyExtractor, valueTransform, dispatchToFxThread)
+    ): TransformedRegistryFxMultiKeyProjection<K, PK, E, V> =
+        TransformedRegistryFxMultiKeyProjection(registry, keyExtractor, valueTransform, dispatchToFxThread)
 }

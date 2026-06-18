@@ -1076,10 +1076,10 @@ public final class net/transgressoft/lirp/persistence/json/primitives/ReactiveSt
 	public fun getEntries ()Ljava/util/List;
 }
 
-public abstract interface class net/transgressoft/lirp/persistence/projection/CloseableProjectionMap : java/lang/AutoCloseable, java/util/Map, kotlin/jvm/internal/markers/KMappedMarker {
+public abstract interface class net/transgressoft/lirp/persistence/projection/CloseableProjection : java/lang/AutoCloseable, java/util/Map, kotlin/jvm/internal/markers/KMappedMarker {
 }
 
-public final class net/transgressoft/lirp/persistence/projection/MultiKeyProjectionMap : kotlin/collections/AbstractMap {
+public final class net/transgressoft/lirp/persistence/projection/MultiKeyProjection : kotlin/collections/AbstractMap {
 	public fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;)V
 	public final fun addOnBucketsChangedListener (Lkotlin/jvm/functions/Function1;)Ljava/lang/AutoCloseable;
 	public final fun addOnChangeListener (Lkotlin/jvm/functions/Function1;)Ljava/lang/AutoCloseable;
@@ -1097,12 +1097,12 @@ public final class net/transgressoft/lirp/persistence/projection/MultiKeyProject
 	public final synthetic fun getOrDefault (Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
 	public final fun getOrDefault (Ljava/lang/Object;Ljava/util/List;)Ljava/util/List;
 	public fun getSize ()I
-	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/projection/MultiKeyProjectionMap;
+	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/projection/MultiKeyProjection;
 	public fun getValues ()Ljava/util/Collection;
 	public fun isEmpty ()Z
 }
 
-public final class net/transgressoft/lirp/persistence/projection/MultiKeyRegistryProjectionMap : kotlin/collections/AbstractMap, java/lang/AutoCloseable {
+public final class net/transgressoft/lirp/persistence/projection/MultiKeyRegistryProjection : kotlin/collections/AbstractMap, java/lang/AutoCloseable {
 	public fun <init> (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;)V
 	public final fun addOnBucketsChangedListener (Lkotlin/jvm/functions/Function1;)Ljava/lang/AutoCloseable;
 	public final fun addOnChangeListener (Lkotlin/jvm/functions/Function1;)Ljava/lang/AutoCloseable;
@@ -1121,13 +1121,36 @@ public final class net/transgressoft/lirp/persistence/projection/MultiKeyRegistr
 	public final synthetic fun getOrDefault (Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
 	public final fun getOrDefault (Ljava/lang/Object;Ljava/util/List;)Ljava/util/List;
 	public fun getSize ()I
-	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/projection/MultiKeyRegistryProjectionMap;
+	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/projection/MultiKeyRegistryProjection;
 	public fun getValues ()Ljava/util/Collection;
 	public fun isEmpty ()Z
 }
 
-public abstract interface class net/transgressoft/lirp/persistence/projection/ObservableProjectionMap : net/transgressoft/lirp/persistence/projection/CloseableProjectionMap {
+public abstract interface class net/transgressoft/lirp/persistence/projection/ObservableProjection : net/transgressoft/lirp/persistence/projection/CloseableProjection {
 	public abstract fun addOnEntriesChangedListener (Lkotlin/jvm/functions/Function1;)Ljava/lang/AutoCloseable;
+}
+
+public final class net/transgressoft/lirp/persistence/projection/Projection : kotlin/collections/AbstractMap {
+	public fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;)V
+	public final fun addOnBucketsChangedListener (Lkotlin/jvm/functions/Function1;)Ljava/lang/AutoCloseable;
+	public final fun addOnChangeListener (Lkotlin/jvm/functions/Function1;)Ljava/lang/AutoCloseable;
+	public final fun bucketSnapshot (Ljava/lang/Comparable;)Ljava/util/List;
+	public fun containsKey (Ljava/lang/Comparable;)Z
+	public final fun containsKey (Ljava/lang/Object;)Z
+	public final fun containsValue (Ljava/lang/Object;)Z
+	public fun containsValue (Ljava/util/List;)Z
+	public fun get (Ljava/lang/Comparable;)Ljava/util/List;
+	public final synthetic fun get (Ljava/lang/Object;)Ljava/lang/Object;
+	public final fun get (Ljava/lang/Object;)Ljava/util/List;
+	public fun getEntries ()Ljava/util/Set;
+	public fun getKeys ()Ljava/util/Set;
+	public fun getOrDefault (Ljava/lang/Comparable;Ljava/util/List;)Ljava/util/List;
+	public final synthetic fun getOrDefault (Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
+	public final fun getOrDefault (Ljava/lang/Object;Ljava/util/List;)Ljava/util/List;
+	public fun getSize ()I
+	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/projection/Projection;
+	public fun getValues ()Ljava/util/Collection;
+	public fun isEmpty ()Z
 }
 
 public final class net/transgressoft/lirp/persistence/projection/ProjectionEntryChange {
@@ -1146,40 +1169,17 @@ public final class net/transgressoft/lirp/persistence/projection/ProjectionEntry
 }
 
 public final class net/transgressoft/lirp/persistence/projection/ProjectionFactoriesKt {
-	public static final fun multiKeyProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/projection/MultiKeyProjectionMap;
-	public static final fun multiKeyProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static final fun projection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/projection/ProjectionMap;
-	public static final fun projection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static final fun registryMultiKeyProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/projection/MultiKeyRegistryProjectionMap;
-	public static final fun registryMultiKeyProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static final fun registryProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/projection/RegistryProjectionMap;
-	public static final fun registryProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
+	public static final fun multiKeyProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/projection/MultiKeyProjection;
+	public static final fun multiKeyProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjection;
+	public static final fun projection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/projection/Projection;
+	public static final fun projection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjection;
+	public static final fun registryMultiKeyProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/projection/MultiKeyRegistryProjection;
+	public static final fun registryMultiKeyProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjection;
+	public static final fun registryProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/projection/RegistryProjection;
+	public static final fun registryProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjection;
 }
 
-public final class net/transgressoft/lirp/persistence/projection/ProjectionMap : kotlin/collections/AbstractMap {
-	public fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;)V
-	public final fun addOnBucketsChangedListener (Lkotlin/jvm/functions/Function1;)Ljava/lang/AutoCloseable;
-	public final fun addOnChangeListener (Lkotlin/jvm/functions/Function1;)Ljava/lang/AutoCloseable;
-	public final fun bucketSnapshot (Ljava/lang/Comparable;)Ljava/util/List;
-	public fun containsKey (Ljava/lang/Comparable;)Z
-	public final fun containsKey (Ljava/lang/Object;)Z
-	public final fun containsValue (Ljava/lang/Object;)Z
-	public fun containsValue (Ljava/util/List;)Z
-	public fun get (Ljava/lang/Comparable;)Ljava/util/List;
-	public final synthetic fun get (Ljava/lang/Object;)Ljava/lang/Object;
-	public final fun get (Ljava/lang/Object;)Ljava/util/List;
-	public fun getEntries ()Ljava/util/Set;
-	public fun getKeys ()Ljava/util/Set;
-	public fun getOrDefault (Ljava/lang/Comparable;Ljava/util/List;)Ljava/util/List;
-	public final synthetic fun getOrDefault (Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
-	public final fun getOrDefault (Ljava/lang/Object;Ljava/util/List;)Ljava/util/List;
-	public fun getSize ()I
-	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/projection/ProjectionMap;
-	public fun getValues ()Ljava/util/Collection;
-	public fun isEmpty ()Z
-}
-
-public final class net/transgressoft/lirp/persistence/projection/RegistryProjectionMap : kotlin/collections/AbstractMap, java/lang/AutoCloseable {
+public final class net/transgressoft/lirp/persistence/projection/RegistryProjection : kotlin/collections/AbstractMap, java/lang/AutoCloseable {
 	public fun <init> (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;)V
 	public final fun addOnBucketsChangedListener (Lkotlin/jvm/functions/Function1;)Ljava/lang/AutoCloseable;
 	public final fun addOnChangeListener (Lkotlin/jvm/functions/Function1;)Ljava/lang/AutoCloseable;
@@ -1198,7 +1198,7 @@ public final class net/transgressoft/lirp/persistence/projection/RegistryProject
 	public final synthetic fun getOrDefault (Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
 	public final fun getOrDefault (Ljava/lang/Object;Ljava/util/List;)Ljava/util/List;
 	public fun getSize ()I
-	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/projection/RegistryProjectionMap;
+	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/projection/RegistryProjection;
 	public fun getValues ()Ljava/util/Collection;
 	public fun isEmpty ()Z
 }

@@ -23,9 +23,9 @@ import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.event.StandardCrudEvent
 import net.transgressoft.lirp.persistence.Registry
-import net.transgressoft.lirp.persistence.projection.ObservableProjectionMap
+import net.transgressoft.lirp.persistence.projection.ObservableProjection
 import net.transgressoft.lirp.persistence.projection.ProjectionEntryChange
-import net.transgressoft.lirp.persistence.projection.RegistryProjectionMap
+import net.transgressoft.lirp.persistence.projection.RegistryProjection
 import io.github.oshai.kotlinlogging.KotlinLogging
 import javafx.application.Platform
 import javafx.beans.InvalidationListener
@@ -65,7 +65,7 @@ import kotlinx.coroutines.launch
  * [Platform.runLater] call (dispatch mode) or one [ReactiveScope.flowScope] channel action
  * (non-dispatch mode), so all bucket changes from one registry event land in exactly one FX pulse.
  *
- * In addition to the [ObservableMap] surface, this class implements [ObservableProjectionMap]:
+ * In addition to the [ObservableMap] surface, this class implements [ObservableProjection]:
  * [addOnEntriesChangedListener] replays the current entries on registration (each with a null
  * [ProjectionEntryChange.oldValue]) and then emits a batched [ProjectionEntryChange] list on each
  * subsequent [flush] pulse, with old values snapshotted from [innerObservableMap] before mutation.
@@ -97,14 +97,14 @@ import kotlinx.coroutines.launch
  *   intermediate value produced by [dataTransform]; safe to build JavaFX property bindings here
  * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
  */
-class TransformedRegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V>(
+class TransformedRegistryFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V>(
     private val registry: Registry<K, E>,
     private val keyExtractor: (E) -> PK,
     private val dataTransform: (PK, List<E>) -> Any?,
     @Suppress("UNCHECKED_CAST")
     private val fxFactory: (PK, Any?) -> V,
     val dispatchToFxThread: Boolean = true
-) : ObservableMap<PK, V>, AutoCloseable, ObservableProjectionMap<PK, V> {
+) : ObservableMap<PK, V>, AutoCloseable, ObservableProjection<PK, V> {
 
     private val log = KotlinLogging.logger {}
 
@@ -133,7 +133,7 @@ class TransformedRegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>,
     private val pendingRemovals = CopyOnWriteArraySet<PK>()
     private val flushScheduled = AtomicBoolean(false)
 
-    private val core: RegistryProjectionMap<K, PK, E> = RegistryProjectionMap(registry, keyExtractor)
+    private val core: RegistryProjection<K, PK, E> = RegistryProjection(registry, keyExtractor)
 
     // Subscription that triggers a transform recompute for in-place entity mutations where the
     // core's equality guard skips the bucket update (oldEntity === newEntity after in-place write).
@@ -230,7 +230,7 @@ class TransformedRegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>,
 
     /**
      * Precomputes the intermediate data for each changed key on the background thread and schedules
-     * a single flush if none is already pending. Called by the [RegistryProjectionMap] core via
+     * a single flush if none is already pending. Called by the [RegistryProjection] core via
      * `onBucketsChanged` for creates, deletes, and bucket key changes.
      *
      * The [dataTransform] runs here — on the calling (background) thread — never on the FX thread.
@@ -485,7 +485,7 @@ class TransformedRegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>,
     override fun clear() = throw UnsupportedOperationException(READ_ONLY_MESSAGE)
 
     companion object {
-        private const val READ_ONLY_MESSAGE = "TransformedRegistryFxProjectionMap is read-only"
+        private const val READ_ONLY_MESSAGE = "TransformedRegistryFxProjection is read-only"
     }
 
     override fun addListener(listener: MapChangeListener<in PK, in V>) {
@@ -507,9 +507,9 @@ class TransformedRegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>,
     /**
      * Returns `this` projection map, initializing the registry subscription on the first call.
      *
-     * Implements Kotlin `by`-delegation: `val byAlbum: ObservableMap<String, AlbumSet> by transformedRegistryFxProjectionMap(...)`.
+     * Implements Kotlin `by`-delegation: `val byAlbum: ObservableMap<String, AlbumSet> by transformedRegistryFxProjection(...)`.
      */
-    operator fun getValue(thisRef: Any?, property: KProperty<*>): TransformedRegistryFxProjectionMap<K, PK, E, V> {
+    operator fun getValue(thisRef: Any?, property: KProperty<*>): TransformedRegistryFxProjection<K, PK, E, V> {
         initialize()
         return this
     }

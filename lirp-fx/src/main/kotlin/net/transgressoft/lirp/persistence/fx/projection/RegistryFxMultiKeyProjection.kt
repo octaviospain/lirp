@@ -20,7 +20,7 @@ package net.transgressoft.lirp.persistence.fx.projection
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.persistence.Registry
-import net.transgressoft.lirp.persistence.projection.MultiKeyRegistryProjectionMap
+import net.transgressoft.lirp.persistence.projection.MultiKeyRegistryProjection
 import javafx.application.Platform
 import javafx.beans.InvalidationListener
 import javafx.collections.FXCollections
@@ -38,11 +38,11 @@ import kotlinx.coroutines.launch
  * A read-only [ObservableMap] projection that groups all entities from a [Registry] by multiple
  * secondary keys, with all bucket mutations dispatched to the JavaFX Application Thread.
  *
- * Unlike [RegistryFxProjectionMap] (one entity per bucket), this map places each entity under
+ * Unlike [RegistryFxProjection] (one entity per bucket), this map places each entity under
  * every bucket key that [keyExtractor] returns for it. A `MutableMultiKeyAudioItem` with genres
  * `{Rock, Jazz}` appears in both the `"Rock"` and `"Jazz"` buckets.
  *
- * Delegates all bucketing and soft-delete filtering to a core [MultiKeyRegistryProjectionMap],
+ * Delegates all bucketing and soft-delete filtering to a core [MultiKeyRegistryProjection],
  * wiring its `onBucketsChanged` hook to a pending-flush coalescer that batches all bucket changes
  * from one registry event into a single [Platform.runLater] call (dispatch mode) or one
  * [ReactiveScope.flowScope] channel action (non-dispatch mode).
@@ -68,7 +68,7 @@ import kotlinx.coroutines.launch
  *   each returned key names one bucket the entity belongs to
  * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
  */
-class RegistryFxMultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
+class RegistryFxMultiKeyProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
     private val registry: Registry<K, E>,
     private val keyExtractor: (E) -> Collection<PK>,
     val dispatchToFxThread: Boolean = true
@@ -93,8 +93,8 @@ class RegistryFxMultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E 
     private val pendingKeys = Collections.synchronizedSet(LinkedHashSet<PK>())
     private val flushScheduled = AtomicBoolean(false)
 
-    private val core: MultiKeyRegistryProjectionMap<K, PK, E> =
-        MultiKeyRegistryProjectionMap(registry, keyExtractor)
+    private val core: MultiKeyRegistryProjection<K, PK, E> =
+        MultiKeyRegistryProjection(registry, keyExtractor)
 
     init {
         mutationChannel?.let { channel ->
@@ -240,7 +240,7 @@ class RegistryFxMultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E 
     override fun clear() = throw UnsupportedOperationException(READ_ONLY_MESSAGE)
 
     companion object {
-        private const val READ_ONLY_MESSAGE = "RegistryFxMultiKeyProjectionMap is read-only"
+        private const val READ_ONLY_MESSAGE = "RegistryFxMultiKeyProjection is read-only"
     }
 
     // Listener methods delegate to innerObservableMap; addListener also triggers initialization
@@ -266,7 +266,7 @@ class RegistryFxMultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E 
      *
      * Implements Kotlin `by`-delegation: `val byGenre: ObservableMap<String, List<E>> by registryFxMultiKeyProjection(...)`.
      */
-    operator fun getValue(thisRef: Any?, property: KProperty<*>): RegistryFxMultiKeyProjectionMap<K, PK, E> {
+    operator fun getValue(thisRef: Any?, property: KProperty<*>): RegistryFxMultiKeyProjection<K, PK, E> {
         initialize()
         return this
     }

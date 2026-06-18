@@ -55,7 +55,7 @@ import kotlin.reflect.KProperty
  * not appear in the projection until the affected entity receives a subsequent event. This mirrors
  * the weakly-consistent contract of the underlying [java.util.concurrent.ConcurrentSkipListMap] iteration.
  *
- * **Thread safety:** same weakly-consistent contract as [ProjectionMap] — iteration is
+ * **Thread safety:** same weakly-consistent contract as [Projection] — iteration is
  * CME-free via [java.util.concurrent.ConcurrentSkipListMap]; compound read-modify-write of a
  * single bucket is not cross-thread atomic.
  *
@@ -65,7 +65,7 @@ import kotlin.reflect.KProperty
  * @param registry the source registry whose entities are projected
  * @param keyExtractor grouping function that extracts the projection key from an entity
  */
-class RegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
+class RegistryProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
     private val registry: Registry<K, E>,
     private val keyExtractor: (E) -> PK
 ) : AbstractMap<PK, List<E>>(), AutoCloseable {
@@ -258,7 +258,7 @@ class RegistryProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identifi
      *
      * Implements Kotlin `by`-delegation: `val grouped by registryProjection(repo) { it.key }`.
      */
-    operator fun getValue(thisRef: Any?, property: KProperty<*>): RegistryProjectionMap<K, PK, E> {
+    operator fun getValue(thisRef: Any?, property: KProperty<*>): RegistryProjection<K, PK, E> {
         initialize()
         return this
     }

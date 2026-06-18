@@ -295,7 +295,7 @@ class SoftDeletableMultiKeyAudioItemRepo internal constructor(context: LirpConte
 /**
  * Simple playlist aggregate that holds [MutableMultiKeyAudioItem] entities via a
  * [MutableAggregateList]. Used in multi-key aggregate-source projection tests to verify
- * that [MultiKeyProjectionMap] correctly buckets entities under every genre key.
+ * that [MultiKeyProjection] correctly buckets entities under every genre key.
  */
 class MultiKeyAudioPlaylist(
     override val id: Int,

@@ -17,7 +17,7 @@
 
 package net.transgressoft.lirp.persistence
 
-import net.transgressoft.lirp.persistence.projection.ProjectionMap
+import net.transgressoft.lirp.persistence.projection.Projection
 import net.transgressoft.lirp.persistence.projection.multiKeyProjection
 import net.transgressoft.lirp.persistence.projection.projection
 import net.transgressoft.lirp.testing.Stress
@@ -40,11 +40,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
- * Tests for [ProjectionMap], verifying grouping behavior, incremental auto-updates from
+ * Tests for [Projection], verifying grouping behavior, incremental auto-updates from
  * mutable aggregate sources, sorted key ordering, onChange callback, and lazy initialization semantics.
  */
-@DisplayName("ProjectionMap")
-internal class ProjectionMapTest : StringSpec({
+@DisplayName("Projection")
+internal class ProjectionTest : StringSpec({
 
     lateinit var ctx: LirpContext
     lateinit var trackRepo: AudioItemVolatileRepository
@@ -64,33 +64,33 @@ internal class ProjectionMapTest : StringSpec({
         ctx.close()
     }
 
-    "ProjectionMap groups entities by key extractor into buckets" {
+    "Projection groups entities by key extractor into buckets" {
         val t1 = trackRepo.create(1, "Jazz")
         val t2 = trackRepo.create(2, "Jazz")
         val t3 = trackRepo.create(3, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id, t3.id)).also(playlistRepo::add)
 
-        val itemsByTitle by ProjectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        val itemsByTitle by Projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
 
         itemsByTitle.size shouldBe 2
         itemsByTitle["Jazz"]!!.size shouldBe 2
         itemsByTitle["Rock"]!!.size shouldBe 1
     }
 
-    "ProjectionMap builds initial state from source contents on first access" {
+    "Projection builds initial state from source contents on first access" {
         val t1 = trackRepo.create(1, "Pop")
         val t2 = trackRepo.create(2, "Jazz")
         val t3 = trackRepo.create(3, "Pop")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id, t3.id)).also(playlistRepo::add)
 
-        val itemsByTitle by ProjectionMap<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
+        val itemsByTitle by Projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
 
         itemsByTitle.size shouldBe 2
         itemsByTitle["Pop"]!!.size shouldBe 2
         itemsByTitle["Jazz"]!!.size shouldBe 1
     }
 
-    "ProjectionMap auto-updates bucket when entity added to source" {
+    "Projection auto-updates bucket when entity added to source" {
         val t1 = trackRepo.create(1, "Jazz")
         val t2 = trackRepo.create(2, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id)).also(playlistRepo::add)
@@ -105,7 +105,7 @@ internal class ProjectionMapTest : StringSpec({
         projection["Jazz"]!! shouldContainExactlyInAnyOrder listOf(t1, t3)
     }
 
-    "ProjectionMap auto-removes empty bucket when last entity removed from source" {
+    "Projection auto-removes empty bucket when last entity removed from source" {
         val t1 = trackRepo.create(1, "Jazz")
         val t2 = trackRepo.create(2, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id)).also(playlistRepo::add)
@@ -119,7 +119,7 @@ internal class ProjectionMapTest : StringSpec({
         projection.size shouldBe 1
     }
 
-    "ProjectionMap auto-updates bucket without removing on partial remove" {
+    "Projection auto-updates bucket without removing on partial remove" {
         val t1 = trackRepo.create(1, "Jazz")
         val t2 = trackRepo.create(2, "Jazz")
         val t3 = trackRepo.create(3, "Rock")
@@ -134,7 +134,7 @@ internal class ProjectionMapTest : StringSpec({
         projection["Jazz"]!! shouldContainExactly listOf(t2)
     }
 
-    "ProjectionMap removes entity from original bucket when grouping key changed before removal" {
+    "Projection removes entity from original bucket when grouping key changed before removal" {
         val t1 = trackRepo.create(1, "Jazz")
         val t2 = trackRepo.create(2, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id)).also(playlistRepo::add)
@@ -153,7 +153,7 @@ internal class ProjectionMapTest : StringSpec({
         projection.containsKey("Rock") shouldBe true
     }
 
-    "ProjectionMap keeps remaining bucket members when fallback removal leaves the bucket non-empty" {
+    "Projection keeps remaining bucket members when fallback removal leaves the bucket non-empty" {
         val t1 = trackRepo.create(1, "Jazz")
         val t2 = trackRepo.create(2, "Jazz")
         val t3 = trackRepo.create(3, "Rock")
@@ -175,7 +175,7 @@ internal class ProjectionMapTest : StringSpec({
         projection.size shouldBe 2
     }
 
-    "ProjectionMap keys are in natural sorted order" {
+    "Projection keys are in natural sorted order" {
         val t1 = trackRepo.create(1, "Rock")
         val t2 = trackRepo.create(2, "Classical")
         val t3 = trackRepo.create(3, "Blues")
@@ -187,7 +187,7 @@ internal class ProjectionMapTest : StringSpec({
         projection.keys.toList() shouldContainExactly listOf("Blues", "Classical", "Jazz", "Rock")
     }
 
-    "ProjectionMap auto-clears when source collection is cleared" {
+    "Projection auto-clears when source collection is cleared" {
         val t1 = trackRepo.create(1, "Jazz")
         val t2 = trackRepo.create(2, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id)).also(playlistRepo::add)
@@ -200,7 +200,7 @@ internal class ProjectionMapTest : StringSpec({
         projection.shouldBeEmpty()
     }
 
-    "ProjectionMap fires onChange callback when projection changes on add" {
+    "Projection fires onChange callback when projection changes on add" {
         val t1 = trackRepo.create(1, "Jazz")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id)).also(playlistRepo::add)
         val projection = projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
@@ -223,7 +223,7 @@ internal class ProjectionMapTest : StringSpec({
         lastMapSnapshot!!["Rock"]!!.size shouldBe 1
     }
 
-    "ProjectionMap fires onChange callback when projection changes on remove" {
+    "Projection fires onChange callback when projection changes on remove" {
         val t1 = trackRepo.create(1, "Jazz")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id)).also(playlistRepo::add)
         val projection = projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
@@ -239,7 +239,7 @@ internal class ProjectionMapTest : StringSpec({
         callbackFiredCount shouldBe 1
     }
 
-    "ProjectionMap two independent addOnBucketsChangedListener registrations both fire for one mutation" {
+    "Projection two independent addOnBucketsChangedListener registrations both fire for one mutation" {
         val t1 = trackRepo.create(1, "Jazz")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id)).also(playlistRepo::add)
         val projection = projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
@@ -258,7 +258,7 @@ internal class ProjectionMapTest : StringSpec({
         secondFired shouldBe 1
     }
 
-    "ProjectionMap closing one addOnBucketsChangedListener registration leaves the other active" {
+    "Projection closing one addOnBucketsChangedListener registration leaves the other active" {
         val t1 = trackRepo.create(1, "Jazz")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id)).also(playlistRepo::add)
         val projection = projection<Int, String, AudioItem>({ playlist.audioItems }, { it.title })
@@ -279,7 +279,7 @@ internal class ProjectionMapTest : StringSpec({
         secondFired shouldBe 1
     }
 
-    "ProjectionMap with MutableAggregateSet auto-updates on add and remove" {
+    "Projection with MutableAggregateSet auto-updates on add and remove" {
         val p1 = DefaultAudioPlaylist(1, "Jazz Playlist").also(playlistRepo::add)
         val p2 = DefaultAudioPlaylist(2, "Rock Playlist").also(playlistRepo::add)
         val parent = DefaultAudioPlaylist(10, "Parent", emptyList(), setOf(p1.id, p2.id)).also(playlistRepo::add)
@@ -293,7 +293,7 @@ internal class ProjectionMapTest : StringSpec({
         projection.containsKey("Rock Playlist") shouldBe false
     }
 
-    "ProjectionMap entries contains all key-value pairs after population" {
+    "Projection entries contains all key-value pairs after population" {
         val t1 = trackRepo.create(1, "Jazz")
         val t2 = trackRepo.create(2, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id)).also(playlistRepo::add)
@@ -306,7 +306,7 @@ internal class ProjectionMapTest : StringSpec({
         entries.first { it.key == "Jazz" }.value shouldContainExactly listOf(t1)
     }
 
-    "ProjectionMap values contains all bucket lists" {
+    "Projection values contains all bucket lists" {
         val t1 = trackRepo.create(1, "Jazz")
         val t2 = trackRepo.create(2, "Jazz")
         val t3 = trackRepo.create(3, "Rock")
@@ -320,7 +320,7 @@ internal class ProjectionMapTest : StringSpec({
         values.any { it.size == 1 } shouldBe true
     }
 
-    "ProjectionMap containsValue returns true for a matching bucket" {
+    "Projection containsValue returns true for a matching bucket" {
         val t1 = trackRepo.create(1, "Jazz")
         val t2 = trackRepo.create(2, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id)).also(playlistRepo::add)
@@ -332,7 +332,7 @@ internal class ProjectionMapTest : StringSpec({
         projection.containsValue(listOf(t1, t2)) shouldBe false
     }
 
-    "ProjectionMap fires onChange callback on MutableAggregateSet remove" {
+    "Projection fires onChange callback on MutableAggregateSet remove" {
         val p1 = DefaultAudioPlaylist(1, "Jazz Playlist").also(playlistRepo::add)
         val p2 = DefaultAudioPlaylist(2, "Rock Playlist").also(playlistRepo::add)
         val parent = DefaultAudioPlaylist(10, "Parent", emptyList(), setOf(p1.id, p2.id)).also(playlistRepo::add)
@@ -349,7 +349,7 @@ internal class ProjectionMapTest : StringSpec({
         projection.containsKey("Jazz Playlist") shouldBe false
     }
 
-    "ProjectionMap fires onChange callback on MutableAggregateSet add" {
+    "Projection fires onChange callback on MutableAggregateSet add" {
         val p1 = DefaultAudioPlaylist(1, "Jazz Playlist").also(playlistRepo::add)
         val parent = DefaultAudioPlaylist(10, "Parent", emptyList(), setOf(p1.id)).also(playlistRepo::add)
         val projection = projection<Int, String, MutableAudioPlaylist>({ parent.playlists }, { it.name })
@@ -366,7 +366,7 @@ internal class ProjectionMapTest : StringSpec({
         lastSnapshot!!.containsKey("Rock Playlist") shouldBe true
     }
 
-    "ProjectionMap reflects writer state in reader iteration after writer completes" {
+    "Projection reflects writer state in reader iteration after writer completes" {
         val titles = listOf("Alpha", "Bravo", "Charlie", "Delta")
         val totalItems = 200
         val seedTracks = (1..totalItems).map { i -> trackRepo.create(i, titles[i % titles.size]) }
@@ -407,7 +407,7 @@ internal class ProjectionMapTest : StringSpec({
         }
     }
 
-    "ProjectionMap with valueTransform produces Map<PK, V> with correct transformed values for each bucket" {
+    "Projection with valueTransform produces Map<PK, V> with correct transformed values for each bucket" {
         val t1 = trackRepo.create(1, "Jazz")
         val t2 = trackRepo.create(2, "Jazz")
         val t3 = trackRepo.create(3, "Rock")
@@ -423,7 +423,7 @@ internal class ProjectionMapTest : StringSpec({
         transformed.size shouldBe 2
     }
 
-    "ProjectionMap with valueTransform recomputes only the affected bucket on a delta" {
+    "Projection with valueTransform recomputes only the affected bucket on a delta" {
         val t1 = trackRepo.create(1, "Jazz")
         val t2 = trackRepo.create(2, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id)).also(playlistRepo::add)
@@ -452,7 +452,7 @@ internal class ProjectionMapTest : StringSpec({
         rockTransformCount shouldBe rockCountAfterInit
     }
 
-    "ProjectionMap with valueTransform removes emptied bucket key from transformed view" {
+    "Projection with valueTransform removes emptied bucket key from transformed view" {
         val t1 = trackRepo.create(1, "Jazz")
         val t2 = trackRepo.create(2, "Rock")
         val playlist = DefaultAudioPlaylist(1, "Test", listOf(t1.id, t2.id)).also(playlistRepo::add)
@@ -475,7 +475,7 @@ internal class ProjectionMapTest : StringSpec({
     // Multi-key projection (PROJ-04) — aggregate source
     // -------------------------------------------------------------------------
 
-    "MultiKeyProjectionMap places entity in every genre bucket" {
+    "MultiKeyProjection places entity in every genre bucket" {
         val item1 = multiKeyRepo.create(1, "Track One", setOf("Rock", "Jazz"))
         val item2 = multiKeyRepo.create(2, "Track Two", setOf("Jazz"))
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id, item2.id))
@@ -488,7 +488,7 @@ internal class ProjectionMapTest : StringSpec({
         projection["Rock"]!!.first().id shouldBe 1
     }
 
-    "MultiKeyProjectionMap removes entity from all genre buckets when removed from source" {
+    "MultiKeyProjection removes entity from all genre buckets when removed from source" {
         val item1 = multiKeyRepo.create(1, "Track One", setOf("Rock", "Jazz"))
         val item2 = multiKeyRepo.create(2, "Track Two", setOf("Jazz"))
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id, item2.id))
@@ -506,7 +506,7 @@ internal class ProjectionMapTest : StringSpec({
         projection["Jazz"]!!.first().id shouldBe 2
     }
 
-    "MultiKeyProjectionMap auto-clears and rebuilds when source is cleared" {
+    "MultiKeyProjection auto-clears and rebuilds when source is cleared" {
         val item1 = multiKeyRepo.create(1, "Track One", setOf("Rock", "Jazz"))
         val item2 = multiKeyRepo.create(2, "Track Two", setOf("Jazz"))
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id, item2.id))
@@ -520,7 +520,7 @@ internal class ProjectionMapTest : StringSpec({
         projection.isEmpty() shouldBe true
     }
 
-    "MultiKeyProjectionMap places entity with empty genres in zero buckets" {
+    "MultiKeyProjection places entity with empty genres in zero buckets" {
         val item1 = multiKeyRepo.create(1, "No Genre Track", emptySet())
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id))
         mkPlaylistRepo.add(mkPlaylist)
@@ -530,7 +530,7 @@ internal class ProjectionMapTest : StringSpec({
         projection.isEmpty() shouldBe true
     }
 
-    "MultiKeyProjectionMap exposes correct read-only accessors" {
+    "MultiKeyProjection exposes correct read-only accessors" {
         val item1 = multiKeyRepo.create(1, "Track One", setOf("Rock", "Jazz"))
         val item2 = multiKeyRepo.create(2, "Track Two", setOf("Jazz"))
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item1.id, item2.id))
@@ -595,7 +595,7 @@ internal class ProjectionMapTest : StringSpec({
         transformed.isEmpty() shouldBe true
     }
 
-    "MultiKeyProjectionMap reconciles key-set delta when an already-bucketed entity is re-added" {
+    "MultiKeyProjection reconciles key-set delta when an already-bucketed entity is re-added" {
         val item = multiKeyRepo.create(1, "Track One", setOf("Rock", "Jazz"))
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item.id))
         mkPlaylistRepo.add(mkPlaylist)
@@ -616,7 +616,7 @@ internal class ProjectionMapTest : StringSpec({
         projection["Indie"]!!.first().id shouldBe item.id
     }
 
-    "MultiKeyProjectionMap re-add reconcile replaces unchanged-key content and does not orphan the entity" {
+    "MultiKeyProjection re-add reconcile replaces unchanged-key content and does not orphan the entity" {
         val item = multiKeyRepo.create(1, "Old Title", setOf("Rock", "Jazz"))
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item.id))
         mkPlaylistRepo.add(mkPlaylist)
@@ -635,7 +635,7 @@ internal class ProjectionMapTest : StringSpec({
         projection.containsKey("Jazz") shouldBe false
     }
 
-    "MultiKeyProjectionMap re-add reconcile to empty key set removes the entity from all buckets" {
+    "MultiKeyProjection re-add reconcile to empty key set removes the entity from all buckets" {
         val item = multiKeyRepo.create(1, "Track One", setOf("Rock", "Jazz"))
         val mkPlaylist = MultiKeyAudioPlaylist(1, "Test", listOf(item.id))
         mkPlaylistRepo.add(mkPlaylist)
@@ -887,7 +887,7 @@ internal class ProjectionMapTest : StringSpec({
             perKeyAddObservations.values.all { it.get() == 1 } shouldBe true
         }
 
-    "ProjectionMap iterates without ConcurrentModificationException under concurrent reader and writer stress"
+    "Projection iterates without ConcurrentModificationException under concurrent reader and writer stress"
         .config(tags = setOf(Stress)) {
             val totalMutations = 5000
             val readerIterations = 1000

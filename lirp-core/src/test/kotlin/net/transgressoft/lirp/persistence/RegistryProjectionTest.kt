@@ -18,7 +18,7 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.event.StandardCrudEvent
-import net.transgressoft.lirp.persistence.projection.RegistryProjectionMap
+import net.transgressoft.lirp.persistence.projection.RegistryProjection
 import net.transgressoft.lirp.persistence.projection.registryMultiKeyProjection
 import net.transgressoft.lirp.persistence.projection.registryProjection
 import net.transgressoft.lirp.testing.ReactiveScopeSerialization
@@ -39,15 +39,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
- * Tests for [RegistryProjectionMap], verifying registry-source grouping behavior, incremental
+ * Tests for [RegistryProjection], verifying registry-source grouping behavior, incremental
  * updates via CrudEvent subscription, reverse-index re-bucketing on key change, soft-delete
  * filtering, onChange callback, sorted key ordering, and concurrent CME-free iteration.
  *
  * Update events are fired manually via `emitAsync` on the repository, mirroring the behaviour
  * of persistent repositories that subscribe to entity mutations internally.
  */
-@DisplayName("RegistryProjectionMap")
-internal class RegistryProjectionMapTest : StringSpec({
+@DisplayName("RegistryProjection")
+internal class RegistryProjectionTest : StringSpec({
 
     val reactive = reactiveScope()
 
@@ -467,7 +467,7 @@ internal class RegistryProjectionMapTest : StringSpec({
         transformed.containsKey("Indie") shouldBe false
     }
 
-    "MultiKeyRegistryProjectionMap close stops the projection from reflecting subsequent mutations" {
+    "MultiKeyRegistryProjection close stops the projection from reflecting subsequent mutations" {
         val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
         multiKeyRepo.create(1, "Track A", setOf("Rock", "Jazz"))
         val projection = registryMultiKeyProjection(multiKeyRepo) { it.genres }
@@ -483,14 +483,14 @@ internal class RegistryProjectionMapTest : StringSpec({
         projection["Rock"]!!.size shouldBe 1
     }
 
-    "MultiKeyRegistryProjectionMap close before first access is a no-op and does not throw" {
+    "MultiKeyRegistryProjection close before first access is a no-op and does not throw" {
         val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
         val projection = registryMultiKeyProjection(multiKeyRepo) { it.genres }
 
         shouldNotThrowAny { projection.close() }
     }
 
-    "MultiKeyRegistryProjectionMap leaves unchanged keys with identical content untouched on a key-set shrink Update" {
+    "MultiKeyRegistryProjection leaves unchanged keys with identical content untouched on a key-set shrink Update" {
         val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
         val item = multiKeyRepo.create(1, "Track A", setOf("Rock", "Jazz", "Indie"))
         reactive.advance()
@@ -514,7 +514,7 @@ internal class RegistryProjectionMapTest : StringSpec({
         projection.size shouldBe 1
     }
 
-    "MultiKeyRegistryProjectionMap replaces content in unchanged keys while shrinking the key set on Update" {
+    "MultiKeyRegistryProjection replaces content in unchanged keys while shrinking the key set on Update" {
         val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
         val item = multiKeyRepo.create(1, "Old Title", setOf("Rock", "Jazz"))
         reactive.advance()
@@ -613,7 +613,7 @@ internal class RegistryProjectionMapTest : StringSpec({
     // Multi-key projection (PROJ-04) — registry source
     // -------------------------------------------------------------------------
 
-    "MultiKeyRegistryProjectionMap places entity in every genre bucket on Create" {
+    "MultiKeyRegistryProjection places entity in every genre bucket on Create" {
         val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
         multiKeyRepo.create(1, "Double-Genre Track", setOf("Rock", "Jazz"))
 
@@ -626,7 +626,7 @@ internal class RegistryProjectionMapTest : StringSpec({
         projection["Jazz"]!!.first().id shouldBe 1
     }
 
-    "MultiKeyRegistryProjectionMap adds new genre bucket and removes stale bucket on key-set Update" {
+    "MultiKeyRegistryProjection adds new genre bucket and removes stale bucket on key-set Update" {
         val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
         val item = multiKeyRepo.create(1, "Track A", setOf("Rock", "Jazz"))
         val anotherItem = multiKeyRepo.create(2, "Track B", setOf("Rock"))
@@ -650,7 +650,7 @@ internal class RegistryProjectionMapTest : StringSpec({
         projection["Rock"]!!.any { it.id == item.id } shouldBe true
     }
 
-    "MultiKeyRegistryProjectionMap places entity in zero buckets when keyExtractor returns empty set" {
+    "MultiKeyRegistryProjection places entity in zero buckets when keyExtractor returns empty set" {
         val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
         multiKeyRepo.create(1, "No-Genre Track", emptySet())
         reactive.advance()
@@ -660,7 +660,7 @@ internal class RegistryProjectionMapTest : StringSpec({
         projection.isEmpty() shouldBe true
     }
 
-    "MultiKeyRegistryProjectionMap removes entity from all buckets on Update to empty genre set" {
+    "MultiKeyRegistryProjection removes entity from all buckets on Update to empty genre set" {
         val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
         val item = multiKeyRepo.create(1, "Track", setOf("Rock", "Jazz"))
         reactive.advance()
@@ -678,7 +678,7 @@ internal class RegistryProjectionMapTest : StringSpec({
         projection.isEmpty() shouldBe true
     }
 
-    "MultiKeyRegistryProjectionMap deduplicates repeated genres before bucketing" {
+    "MultiKeyRegistryProjection deduplicates repeated genres before bucketing" {
         val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
 
         val projection = registryMultiKeyProjection<Int, String, MutableMultiKeyAudioItem>(multiKeyRepo) { it.genres }
@@ -701,7 +701,7 @@ internal class RegistryProjectionMapTest : StringSpec({
         dupeProjection.size shouldBe 2
     }
 
-    "MultiKeyRegistryProjectionMap removes soft-deleted entity from ALL genre buckets" {
+    "MultiKeyRegistryProjection removes soft-deleted entity from ALL genre buckets" {
         val softRepo = SoftDeletableMultiKeyAudioItemRepo(ctx)
         val item = softRepo.create(1, "Multi-Genre Track", setOf("Rock", "Jazz", "Indie"))
         reactive.advance()
@@ -1075,7 +1075,7 @@ internal class RegistryProjectionMapTest : StringSpec({
         ordered.drop(replaySize) shouldContainExactly listOf(Triple("Rock", "Rock:1", "Rock:2"))
     }
 
-    "MultiKeyRegistryProjectionMap iterates without ConcurrentModificationException under concurrent key-set churn stress"
+    "MultiKeyRegistryProjection iterates without ConcurrentModificationException under concurrent key-set churn stress"
         .config(tags = setOf(Stress)) {
             extension(ReactiveScopeSerialization)
 

@@ -43,15 +43,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
- * Tests for [FxMultiKeyProjectionMap], verifying multi-key grouped projection from an aggregate
+ * Tests for [FxMultiKeyProjection], verifying multi-key grouped projection from an aggregate
  * source, single-pulse batching via the pending-flush coalescer, per-entity mutation subscription
  * lifecycle, and in-place re-bucketing via [reconcile].
  *
  * All tests use `dispatchToFxThread = false` except the explicit FX-thread dispatch test, to
  * avoid [Platform.runLater] timing issues in the test harness.
  */
-@DisplayName("FxMultiKeyProjectionMap")
-class FxMultiKeyProjectionMapTest : StringSpec({
+@DisplayName("FxMultiKeyProjection")
+class FxMultiKeyProjectionTest : StringSpec({
 
     val reactive = reactiveScope()
 
@@ -71,9 +71,9 @@ class FxMultiKeyProjectionMapTest : StringSpec({
         LirpContext.default.close()
     }
 
-    "FxMultiKeyProjectionMap places an FX audio item with two genres into both buckets" {
+    "FxMultiKeyProjection places an FX audio item with two genres into both buckets" {
         val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
-        val projection = FxMultiKeyProjectionMap({ source }, { it.genres }, false)
+        val projection = FxMultiKeyProjection({ source }, { it.genres }, false)
         projection.addListener(MapChangeListener { })
 
         val item = MutableMultiKeyAudioItem(1, "Track A", setOf("Rock", "Jazz"))
@@ -87,9 +87,9 @@ class FxMultiKeyProjectionMapTest : StringSpec({
         projection["Jazz"]!![0].id shouldBe 1
     }
 
-    "FxMultiKeyProjectionMap mutating the genre set in place fires a single pulse adding the new bucket and removing the old" {
+    "FxMultiKeyProjection mutating the genre set in place fires a single pulse adding the new bucket and removing the old" {
         val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
-        val projection = FxMultiKeyProjectionMap({ source }, { it.genres }, false)
+        val projection = FxMultiKeyProjection({ source }, { it.genres }, false)
         val pulseCount = AtomicInteger(0)
         projection.addListener(MapChangeListener { pulseCount.incrementAndGet() })
 
@@ -115,9 +115,9 @@ class FxMultiKeyProjectionMapTest : StringSpec({
         pulseCount.get() shouldBe 2
     }
 
-    "FxMultiKeyProjectionMap the item is never absent from all genre buckets during a re-bucket" {
+    "FxMultiKeyProjection the item is never absent from all genre buckets during a re-bucket" {
         val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
-        val projection = FxMultiKeyProjectionMap({ source }, { it.genres }, false)
+        val projection = FxMultiKeyProjection({ source }, { it.genres }, false)
 
         val bucketsAtFlushTime = mutableListOf<Set<String>>()
         projection.addListener(
@@ -146,9 +146,9 @@ class FxMultiKeyProjectionMapTest : StringSpec({
         projection.containsKey("Jazz") shouldBe false
     }
 
-    "FxMultiKeyProjectionMap subscription lifecycle — no pulse fires after entity leaves all buckets" {
+    "FxMultiKeyProjection subscription lifecycle — no pulse fires after entity leaves all buckets" {
         val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
-        val projection = FxMultiKeyProjectionMap({ source }, { it.genres }, false)
+        val projection = FxMultiKeyProjection({ source }, { it.genres }, false)
         val pulseCount = AtomicInteger(0)
         projection.addListener(MapChangeListener { pulseCount.incrementAndGet() })
 
@@ -169,9 +169,9 @@ class FxMultiKeyProjectionMapTest : StringSpec({
         pulseCount.get() shouldBe 0
     }
 
-    "FxMultiKeyProjectionMap empty key set — entity placed in zero buckets, no error" {
+    "FxMultiKeyProjection empty key set — entity placed in zero buckets, no error" {
         val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
-        val projection = FxMultiKeyProjectionMap({ source }, { it.genres }, false)
+        val projection = FxMultiKeyProjection({ source }, { it.genres }, false)
         projection.addListener(MapChangeListener { })
 
         val item = MutableMultiKeyAudioItem(1, "Track A", emptySet())
@@ -181,9 +181,9 @@ class FxMultiKeyProjectionMapTest : StringSpec({
         projection.size shouldBe 0
     }
 
-    "FxMultiKeyProjectionMap close cancels all entity subscriptions" {
+    "FxMultiKeyProjection close cancels all entity subscriptions" {
         val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
-        val projection = FxMultiKeyProjectionMap({ source }, { it.genres }, false)
+        val projection = FxMultiKeyProjection({ source }, { it.genres }, false)
         projection.addListener(MapChangeListener { })
 
         val item1 = MutableMultiKeyAudioItem(1, "Track A", setOf("Rock"))
@@ -198,9 +198,9 @@ class FxMultiKeyProjectionMapTest : StringSpec({
         projection.entitySubscriptions.isEmpty() shouldBe true
     }
 
-    "FxMultiKeyProjectionMap dispatches MapChangeListener on FX Application Thread" {
+    "FxMultiKeyProjection dispatches MapChangeListener on FX Application Thread" {
         val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = true)
-        val projection = FxMultiKeyProjectionMap({ source }, { it.genres }, true)
+        val projection = FxMultiKeyProjection({ source }, { it.genres }, true)
         val onFxThread = mutableListOf<Boolean>()
         val latch = CountDownLatch(1)
 
@@ -223,9 +223,9 @@ class FxMultiKeyProjectionMapTest : StringSpec({
         onFxThread.all { it } shouldBe true
     }
 
-    "FxMultiKeyProjectionMap removeListener stops MapChangeListener and InvalidationListener" {
+    "FxMultiKeyProjection removeListener stops MapChangeListener and InvalidationListener" {
         val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
-        val projection = FxMultiKeyProjectionMap({ source }, { it.genres }, false)
+        val projection = FxMultiKeyProjection({ source }, { it.genres }, false)
 
         var changeCount = 0
         val mapListener = MapChangeListener<String, List<MutableMultiKeyAudioItem>> { changeCount++ }
@@ -249,9 +249,9 @@ class FxMultiKeyProjectionMapTest : StringSpec({
         invalidCount shouldBe 1
     }
 
-    "FxMultiKeyProjectionMap containsValue returns true for a matching bucket and mutation methods throw" {
+    "FxMultiKeyProjection containsValue returns true for a matching bucket and mutation methods throw" {
         val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
-        val projection = FxMultiKeyProjectionMap({ source }, { it.genres }, false)
+        val projection = FxMultiKeyProjection({ source }, { it.genres }, false)
         projection.addListener(MapChangeListener { })
 
         val item = MutableMultiKeyAudioItem(1, "Track A", setOf("Rock"))
@@ -266,10 +266,10 @@ class FxMultiKeyProjectionMapTest : StringSpec({
         shouldThrow<UnsupportedOperationException> { projection.clear() }
     }
 
-    "TransformedFxMultiKeyProjectionMap maps multi-key bucket to transformed value" {
+    "TransformedFxMultiKeyProjection maps multi-key bucket to transformed value" {
         val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
         val projection =
-            TransformedFxMultiKeyProjectionMap(
+            TransformedFxMultiKeyProjection(
                 { source },
                 { it.genres },
                 { pk, items -> "[$pk:${items.size}]" },
@@ -287,10 +287,10 @@ class FxMultiKeyProjectionMapTest : StringSpec({
         projection.size shouldBe 2
     }
 
-    "TransformedFxMultiKeyProjectionMap fires MapChangeListener when item is removed" {
+    "TransformedFxMultiKeyProjection fires MapChangeListener when item is removed" {
         val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
         val projection =
-            TransformedFxMultiKeyProjectionMap(
+            TransformedFxMultiKeyProjection(
                 { source },
                 { it.genres },
                 { pk, items -> "[$pk:${items.size}]" },
@@ -309,10 +309,10 @@ class FxMultiKeyProjectionMapTest : StringSpec({
         projection.containsKey("Rock") shouldBe false
     }
 
-    "TransformedFxMultiKeyProjectionMap in-place genre mutation updates transformed value" {
+    "TransformedFxMultiKeyProjection in-place genre mutation updates transformed value" {
         val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
         val projection =
-            TransformedFxMultiKeyProjectionMap(
+            TransformedFxMultiKeyProjection(
                 { source },
                 { it.genres },
                 { pk, items -> "[$pk:${items.size}]" },
@@ -334,10 +334,10 @@ class FxMultiKeyProjectionMapTest : StringSpec({
         projection.containsKey("Jazz") shouldBe false
     }
 
-    "TransformedFxMultiKeyProjectionMap exposes read-only keys, values, entries, containsValue, and isEmpty" {
+    "TransformedFxMultiKeyProjection exposes read-only keys, values, entries, containsValue, and isEmpty" {
         val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
         val projection =
-            TransformedFxMultiKeyProjectionMap(
+            TransformedFxMultiKeyProjection(
                 { source },
                 { it.genres },
                 { pk, items -> "[$pk:${items.size}]" },
@@ -357,10 +357,10 @@ class FxMultiKeyProjectionMapTest : StringSpec({
         projection.isEmpty() shouldBe false
     }
 
-    "TransformedFxMultiKeyProjectionMap mutation methods throw UnsupportedOperationException" {
+    "TransformedFxMultiKeyProjection mutation methods throw UnsupportedOperationException" {
         val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
         val projection =
-            TransformedFxMultiKeyProjectionMap(
+            TransformedFxMultiKeyProjection(
                 { source },
                 { it.genres },
                 { pk, items -> "[$pk:${items.size}]" },
@@ -372,10 +372,10 @@ class FxMultiKeyProjectionMapTest : StringSpec({
         shouldThrow<UnsupportedOperationException> { projection.clear() }
     }
 
-    "TransformedFxMultiKeyProjectionMap close cancels all entity subscriptions" {
+    "TransformedFxMultiKeyProjection close cancels all entity subscriptions" {
         val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
         val projection =
-            TransformedFxMultiKeyProjectionMap(
+            TransformedFxMultiKeyProjection(
                 { source },
                 { it.genres },
                 { pk, items -> "[$pk:${items.size}]" },
@@ -391,7 +391,7 @@ class FxMultiKeyProjectionMapTest : StringSpec({
         projection.entitySubscriptions.isEmpty() shouldBe true
     }
 
-    "TransformedFxMultiKeyProjectionMap two-phase dataTransform runs off FX thread and fxFactory runs on FX thread building a real FX value" {
+    "TransformedFxMultiKeyProjection two-phase dataTransform runs off FX thread and fxFactory runs on FX thread building a real FX value" {
         val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
         val dataTransformThreadFlags = CopyOnWriteArrayList<Boolean>()
         val fxFactoryThreadFlags = CopyOnWriteArrayList<Boolean>()
@@ -430,7 +430,7 @@ class FxMultiKeyProjectionMapTest : StringSpec({
         view.hasTracks shouldBe true
     }
 
-    "TransformedFxMultiKeyProjectionMap fxFactory failure in one bucket does not prevent other buckets from flushing" {
+    "TransformedFxMultiKeyProjection fxFactory failure in one bucket does not prevent other buckets from flushing" {
         val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
         val projection =
             fxMultiKeyProjection(
@@ -453,11 +453,11 @@ class FxMultiKeyProjectionMapTest : StringSpec({
         view.hasTracks shouldBe true
     }
 
-    "TransformedFxMultiKeyProjectionMap single valueTransform overload runs off FX thread preserving backward compatibility" {
+    "TransformedFxMultiKeyProjection single valueTransform overload runs off FX thread preserving backward compatibility" {
         val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
         val transformedOnFxThread = CopyOnWriteArrayList<Boolean>()
         val projection =
-            TransformedFxMultiKeyProjectionMap(
+            TransformedFxMultiKeyProjection(
                 { source },
                 { it.genres },
                 { pk, items ->
@@ -477,10 +477,10 @@ class FxMultiKeyProjectionMapTest : StringSpec({
         projection["Jazz"] shouldBe "[Jazz:1]"
     }
 
-    "FxMultiKeyProjectionMap iterates without ConcurrentModificationException under concurrent multi-key churn"
+    "FxMultiKeyProjection iterates without ConcurrentModificationException under concurrent multi-key churn"
         .config(tags = setOf(Stress)) {
             val source = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
-            val projection = FxMultiKeyProjectionMap({ source }, { it.genres }, false)
+            val projection = FxMultiKeyProjection({ source }, { it.genres }, false)
 
             val genres = listOf("Rock", "Jazz", "Indie", "Pop", "Blues", "Metal", "Funk", "Soul")
             val seedSize = 100

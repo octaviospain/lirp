@@ -27,8 +27,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * method is accessible from Java and that the resulting projection correctly groups entities
  * and fires {@link MapChangeListener} notifications for both list and set sources.
  */
-@DisplayName("FxProjectionMap Java interop")
-class FxProjectionMapJavaInteropTest {
+@DisplayName("FxProjection Java interop")
+class FxProjectionJavaInteropTest {
 
     @BeforeAll
     static void initToolkit() {
@@ -50,7 +50,7 @@ class FxProjectionMapJavaInteropTest {
     void projectionMapFromListSource() {
         FxAggregateList<Integer, AudioItem> source = FxProperties.fxAggregateList(List.of(), false);
 
-        FxProjectionMap<Integer, String, AudioItem> audioItemsByAlbum =
+        FxProjection<Integer, String, AudioItem> audioItemsByAlbum =
             FxProjections.fxProjection(() -> source, AudioItem::getAlbumName, false);
 
         assertTrue(audioItemsByAlbum.isEmpty(), "Map is empty before any items are added");
@@ -76,7 +76,7 @@ class FxProjectionMapJavaInteropTest {
     void projectionMapFiresMapChangeListener() {
         FxAggregateList<Integer, AudioItem> source = FxProperties.fxAggregateList(List.of(), false);
 
-        FxProjectionMap<Integer, String, AudioItem> projection =
+        FxProjection<Integer, String, AudioItem> projection =
             FxProjections.fxProjection(() -> source, AudioItem::getAlbumName, false);
 
         AtomicBoolean listenerFired = new AtomicBoolean(false);
@@ -101,7 +101,7 @@ class FxProjectionMapJavaInteropTest {
     void projectionMapFromSetSource() {
         FxAggregateSet<Integer, AudioItem> source = FxProperties.fxAggregateSet(Set.of(), false);
 
-        FxProjectionMap<Integer, String, AudioItem> projection =
+        FxProjection<Integer, String, AudioItem> projection =
             FxProjections.fxProjection(() -> source, AudioItem::getAlbumName, false);
 
         assertTrue(projection.isEmpty(), "Map is empty before any items are added");

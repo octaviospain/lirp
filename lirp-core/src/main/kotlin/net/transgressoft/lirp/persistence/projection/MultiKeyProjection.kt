@@ -30,7 +30,7 @@ import kotlin.reflect.KProperty
  * A read-only grouped view that derives a `Map<PK, List<E>>` from a source aggregate collection,
  * placing each entity under every bucket key that [keyExtractor] returns for it.
  *
- * Unlike [ProjectionMap] (one entity per bucket), a multi-key projection places the same entity
+ * Unlike [Projection] (one entity per bucket), a multi-key projection places the same entity
  * into multiple buckets simultaneously. A `MutableMultiKeyAudioItem` with genres `{Rock, Jazz}`
  * appears in both the `"Rock"` and `"Jazz"` buckets.
  *
@@ -51,11 +51,11 @@ import kotlin.reflect.KProperty
  * When the source is a [MutableAggregateList] or [MutableAggregateSet], mutations are serialized
  * through the source collection's internal lock, so concurrent writes are safe.
  *
- * **Aggregate-source limitation:** like [ProjectionMap], an in-place mutation of an entity's key set
+ * **Aggregate-source limitation:** like [Projection], an in-place mutation of an entity's key set
  * (a reactive `genres` change on an entity already present in the source, with no add/remove on the
  * aggregate) is NOT reflected — aggregate `CollectionChangeEvent`s carry only added/removed elements,
  * no update. The entity stays bucketed under its keys at insertion time. The registry-source
- * [MultiKeyRegistryProjectionMap] reflects in-place key changes via its Update path.
+ * [MultiKeyRegistryProjection] reflects in-place key changes via its Update path.
  *
  * The map is read-only. All mutations flow through the source collection.
  *
@@ -66,14 +66,14 @@ import kotlin.reflect.KProperty
  * @param keyExtractor function that extracts the set of projection keys from an entity;
  *   each returned key names one bucket the entity belongs to
  */
-class MultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
+class MultiKeyProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
     private val sourceRef: () -> AggregateCollectionRef<K, E>,
     private val keyExtractor: (E) -> Collection<PK>
 ) : AbstractMap<PK, List<E>>() {
 
     // Bucket engine — stores one List<E> per PK bucket key in a ConcurrentSkipListMap.
     // All per-key bucket ops are driven explicitly via addEntityToKey / per-key removal.
-    private val core = ProjectionCore<K, PK, E> { error("ProjectionCore keyExtractor must not be called in MultiKeyProjectionMap") }
+    private val core = ProjectionCore<K, PK, E> { error("ProjectionCore keyExtractor must not be called in MultiKeyProjection") }
 
     /**
      * Reverse index: entity id → the current set of bucket keys it occupies.
@@ -276,7 +276,7 @@ class MultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identifi
      *
      * Implements Kotlin `by`-delegation: `val grouped by multiKeyProjection(::audioItems) { it.genres }`.
      */
-    operator fun getValue(thisRef: Any?, property: KProperty<*>): MultiKeyProjectionMap<K, PK, E> {
+    operator fun getValue(thisRef: Any?, property: KProperty<*>): MultiKeyProjection<K, PK, E> {
         initialize()
         return this
     }

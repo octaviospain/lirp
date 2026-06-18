@@ -25,7 +25,7 @@ import net.transgressoft.lirp.persistence.AggregateCollectionRef
 import net.transgressoft.lirp.persistence.FxObservableCollection
 import net.transgressoft.lirp.persistence.fx.FxAggregateList
 import net.transgressoft.lirp.persistence.fx.FxAggregateSet
-import net.transgressoft.lirp.persistence.projection.MultiKeyProjectionMap
+import net.transgressoft.lirp.persistence.projection.MultiKeyProjection
 import javafx.application.Platform
 import javafx.beans.InvalidationListener
 import javafx.collections.FXCollections
@@ -44,11 +44,11 @@ import kotlinx.coroutines.launch
  * A read-only [ObservableMap] that derives a multi-key grouped view from an existing
  * [FxObservableCollection] source (either an [FxAggregateList] or [FxAggregateSet]).
  *
- * Unlike [FxProjectionMap] (one entity per bucket), this map places each entity under every bucket
+ * Unlike [FxProjection] (one entity per bucket), this map places each entity under every bucket
  * key that [keyExtractor] returns for it. A `MutableMultiKeyAudioItem` with genres `{Rock, Jazz}`
  * appears in both the `"Rock"` and `"Jazz"` buckets.
  *
- * Delegates all bucketing logic to a core [MultiKeyProjectionMap], wiring its `onBucketsChanged`
+ * Delegates all bucketing logic to a core [MultiKeyProjection], wiring its `onBucketsChanged`
  * hook to a pending-flush coalescer that batches all bucket changes from one source event into
  * a single [Platform.runLater] call (dispatch mode) or one [ReactiveScope.flowScope] channel
  * action (non-dispatch mode).
@@ -77,7 +77,7 @@ import kotlinx.coroutines.launch
  *   each returned key names one bucket the entity belongs to
  * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
  */
-class FxMultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E>(
+class FxMultiKeyProjection<K : Comparable<K>, PK : Comparable<PK>, E>(
     private val sourceRef: () -> FxObservableCollection<K, E>,
     private val keyExtractor: (E) -> Collection<PK>,
     val dispatchToFxThread: Boolean = true
@@ -114,13 +114,13 @@ class FxMultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E>(
     private val entityBuckets = ConcurrentHashMap<K, MutableSet<PK>>()
 
     // The source reference delegates through the FxAggregateList/FxAggregateSet wrapper to the
-    // underlying MutableAggregateList/MutableAggregateSet. MultiKeyProjectionMap.subscribeToSource
+    // underlying MutableAggregateList/MutableAggregateSet. MultiKeyProjection.subscribeToSource
     // checks for MutableAggregateList/MutableAggregateSet by type, not for AggregateCollectionRef in
     // general, so the inner proxy must be supplied rather than the FX wrapper for the projection
     // callback to be installed on the backing delegate.
     @Suppress("UNCHECKED_CAST")
-    private val core: MultiKeyProjectionMap<K, PK, E> =
-        MultiKeyProjectionMap(
+    private val core: MultiKeyProjection<K, PK, E> =
+        MultiKeyProjection(
             {
                 when (val source = sourceRef()) {
                     is FxAggregateList<*, *> -> source.innerProxy as AggregateCollectionRef<K, E>
@@ -174,7 +174,7 @@ class FxMultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E>(
     /**
      * Registers a per-entity mutation subscription. When the entity's key set changes (as
      * detected by comparing [keyExtractor] output before and after the mutation),
-     * [MultiKeyProjectionMap.reconcile] is called so the core recomputes bucket membership
+     * [MultiKeyProjection.reconcile] is called so the core recomputes bucket membership
      * in one atomic add-before-remove delta that fires a single [onBucketsChanged] signal.
      */
     private fun subscribeEntity(entity: E) {
@@ -340,7 +340,7 @@ class FxMultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E>(
     override fun clear() = throw UnsupportedOperationException(READ_ONLY_MESSAGE)
 
     companion object {
-        private const val READ_ONLY_MESSAGE = "FxMultiKeyProjectionMap is read-only"
+        private const val READ_ONLY_MESSAGE = "FxMultiKeyProjection is read-only"
     }
 
     // Listener methods delegate to innerObservableMap; addListener also triggers initialization
@@ -366,7 +366,7 @@ class FxMultiKeyProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E>(
      *
      * Implements Kotlin `by`-delegation: `val byGenre: ObservableMap<String, List<E>> by fxMultiKeyProjection(...)`.
      */
-    operator fun getValue(thisRef: Any?, property: KProperty<*>): FxMultiKeyProjectionMap<K, PK, E> {
+    operator fun getValue(thisRef: Any?, property: KProperty<*>): FxMultiKeyProjection<K, PK, E> {
         initialize()
         return this
     }

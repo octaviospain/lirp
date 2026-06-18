@@ -41,7 +41,7 @@ data class ProjectionEntryChange<PK, V>(val key: PK, val oldValue: V?, val newVa
 }
 
 /**
- * A [CloseableProjectionMap] that additionally emits per-entry value changes carrying both the old
+ * A [CloseableProjection] that additionally emits per-entry value changes carrying both the old
  * and new transformed values, mirroring the JavaFX `MapChangeListener` contract for the core layer.
  *
  * The value-transform projection factories return this type so a consumer can drive a CRUD-style
@@ -71,14 +71,14 @@ data class ProjectionEntryChange<PK, V>(val key: PK, val oldValue: V?, val newVa
  *
  * Subscribing to both is valid and produces no double-delivery: the repository subscription
  * sees all entity-level transitions, and the projection listener sees bucket-level derived-view
- * transitions. Closing the projection (via [CloseableProjectionMap.close]) releases the
+ * transitions. Closing the projection (via [CloseableProjection.close]) releases the
  * projection listener without affecting the repository subscription.
  *
  * ### Identity projection maps
  *
  * This interface is available only on the **value-transform** projection maps, not on the
- * identity projection maps (`ProjectionMap`, `RegistryProjectionMap`, `MultiKeyProjectionMap`,
- * `MultiKeyRegistryProjectionMap`). Identity maps do not hold a per-key cached value; emitting
+ * identity projection maps (`Projection`, `RegistryProjection`, `MultiKeyProjection`,
+ * `MultiKeyRegistryProjection`). Identity maps do not hold a per-key cached value; emitting
  * old/new bucket `List<E>` would require retaining the previous bucket contents per key inside
  * `ProjectionCore`, which fires its `onBucketsChanged` callback after the backing map has already
  * been mutated. That additional retention is not justified for this interface — see the identity-map
@@ -87,7 +87,7 @@ data class ProjectionEntryChange<PK, V>(val key: PK, val oldValue: V?, val newVa
  * @param PK the projection key type
  * @param V the transformed value type
  */
-interface ObservableProjectionMap<PK, V> : CloseableProjectionMap<PK, V> {
+interface ObservableProjection<PK, V> : CloseableProjection<PK, V> {
 
     /**
      * Registers [listener] to receive batched per-entry value changes after each projection delta.
