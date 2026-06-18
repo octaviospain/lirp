@@ -84,7 +84,7 @@ gradle :lirp-sql:test
 Some concurrency regression tests are tagged with `Stress` and run by default with the
 rest of the suite.
 They are aggressive multi-iteration tripwires that protect invariants like CME-free
-iteration of `ProjectionMap` / `FxProjectionMap`; they are too slow and noisy for the
+iteration of `Projection` / `FxProjection`; they are too slow and noisy for the
 short feedback loop, but valuable when modifying the affected code.
 
 Skip them with the `kotest.tags.exclude` Gradle property:

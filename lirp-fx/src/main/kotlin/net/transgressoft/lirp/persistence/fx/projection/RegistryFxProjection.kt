@@ -23,7 +23,7 @@ import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.event.StandardCrudEvent
 import net.transgressoft.lirp.persistence.Registry
-import net.transgressoft.lirp.persistence.projection.RegistryProjectionMap
+import net.transgressoft.lirp.persistence.projection.RegistryProjection
 import javafx.application.Platform
 import javafx.beans.InvalidationListener
 import javafx.collections.FXCollections
@@ -46,7 +46,7 @@ import kotlinx.coroutines.launch
  * so projection keys are always iterated in natural sorted order with CME-free iteration.
  *
  * Bucketing, soft-delete filtering, and reverse-index tracking are all delegated to a core
- * [RegistryProjectionMap] instance. Changes notified by the core engine's `onBucketsChanged`
+ * [RegistryProjection] instance. Changes notified by the core engine's `onBucketsChanged`
  * hook are collected in a pending set and flushed in exactly one [Platform.runLater] call
  * (dispatch mode) or one [ReactiveScope.flowScope] channel action (non-dispatch mode),
  * ensuring all bucket changes from a single registry event land in one FX pulse.
@@ -68,7 +68,7 @@ import kotlinx.coroutines.launch
  * @param keyExtractor grouping function that extracts the projection key from an entity
  * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
  */
-class RegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
+class RegistryFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
     private val registry: Registry<K, E>,
     private val keyExtractor: (E) -> PK,
     val dispatchToFxThread: Boolean = true
@@ -103,7 +103,7 @@ class RegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identi
     private val pendingUpdateKeys = LinkedHashSet<PK>()
     private val flushScheduled = AtomicBoolean(false)
 
-    private val core: RegistryProjectionMap<K, PK, E> = RegistryProjectionMap(registry, keyExtractor)
+    private val core: RegistryProjection<K, PK, E> = RegistryProjection(registry, keyExtractor)
 
     // Subscription that forces a flush for in-place mutations where the entity is mutated
     // on the same object reference already stored in the bucket. In those cases the core's
@@ -163,7 +163,7 @@ class RegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identi
 
     /**
      * Accumulates [changedKeys] into the bucket-change pending set and schedules a single flush
-     * if none is already pending. Called by the [RegistryProjectionMap] core via [onBucketsChanged]
+     * if none is already pending. Called by the [RegistryProjection] core via [onBucketsChanged]
      * for creates, deletes, and bucket key changes. Keys flushed from this set are written with
      * a standard put-or-remove, which is sufficient because the old value is either absent
      * (create) or structurally different (re-bucket).
@@ -319,7 +319,7 @@ class RegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identi
     override fun clear() = throw UnsupportedOperationException(READ_ONLY_MESSAGE)
 
     companion object {
-        private const val READ_ONLY_MESSAGE = "RegistryFxProjectionMap is read-only"
+        private const val READ_ONLY_MESSAGE = "RegistryFxProjection is read-only"
     }
 
     // Listener methods delegate to innerObservableMap; addListener also triggers initialization
@@ -345,7 +345,7 @@ class RegistryFxProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : Identi
      *
      * Implements Kotlin `by`-delegation: `val byAlbum: ObservableMap<String, List<AudioItem>> by registryFxProjection(...)`.
      */
-    operator fun getValue(thisRef: Any?, property: KProperty<*>): RegistryFxProjectionMap<K, PK, E> {
+    operator fun getValue(thisRef: Any?, property: KProperty<*>): RegistryFxProjection<K, PK, E> {
         initialize()
         return this
     }

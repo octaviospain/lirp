@@ -23,48 +23,42 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * A read-only value-transformed view of a [ProjectionMap] that derives a `Map<PK, V>` by applying
- * a [valueTransform] to each bucket in the backing projection. The transform is re-run only for
- * buckets whose contents actually changed in a given delta, not for the entire map.
+ * A read-only value-transformed view of a [MultiKeyProjection] that derives a `Map<PK, V>` by
+ * applying a [valueTransform] to each bucket in the backing multi-key projection. The transform
+ * is re-run only for buckets whose contents actually changed in a given delta, not for the entire map.
  *
- * This decorator wraps a [ProjectionMap] and registers on its `addOnBucketsChangedListener` signal to
+ * This decorator wraps a [MultiKeyProjection] and registers on its `addOnBucketsChangedListener` signal to
  * maintain an internal `ConcurrentHashMap<PK, V>` transform cache. When a bucket is emptied
  * and its key is removed from the backing map, the corresponding key is also removed from this
  * view — the transform is never called over an empty list.
  *
  * Because the cache holds the previous transformed value per key, this decorator can report both the
- * old and the new value for every changed key. It therefore implements [ObservableProjectionMap]:
+ * old and the new value for every changed key. It therefore implements [ObservableProjection]:
  * [addOnEntriesChangedListener] emits batched [ProjectionEntryChange] deltas (add / replace / remove),
  * letting a consumer drive a CRUD-style event stream directly without keeping its own diff cache.
- * [close] is a no-op for this variant — the backing [ProjectionMap] holds no closeable source subscription.
+ * [close] is a no-op for this variant — the backing [MultiKeyProjection] holds no closeable source subscription.
  *
  * **Weak cross-key consistency:** Two consecutive `get()` calls for different keys are NOT
- * a single snapshot — they may observe different states of an ongoing delta. Iteration via
- * [entries], [keys], or [values] is CME-free (backed by [ConcurrentHashMap]) but each call to
- * the underlying iterator represents a weakly consistent view. This inherits the same
- * weakly-consistent contract of the backing map's [java.util.concurrent.ConcurrentSkipListMap] iteration.
+ * a single snapshot. Iteration via [entries], [keys], or [values] is CME-free (backed by
+ * [ConcurrentHashMap]). This inherits the weakly-consistent contract of the underlying
+ * [java.util.concurrent.ConcurrentSkipListMap] iteration.
  *
  * **Multi-subscriber:** This decorator registers one listener via `addOnBucketsChangedListener` on
- * the backing [ProjectionMap]. Additional listeners registered on the same backing map are
+ * the backing [MultiKeyProjection]. Additional listeners registered on the same backing map are
  * independent and will each receive their own notifications — no registration clobbers another.
- *
- * The initial transform cache is built lazily on the first map access. The backing map fires
- * `addOnBucketsChangedListener` synchronously during its own initial seed on the seeding thread; that same-thread
- * re-entry is short-circuited (the seed loop captures those keys directly), while cross-thread events
- * recompute under the cache lock from a non-initializing bucket snapshot.
  *
  * @param K the entity ID type, must be [Comparable]
  * @param PK the projection key type, must be [Comparable]
  * @param E the entity type
  * @param V the value type produced by [valueTransform]
- * @param backing the underlying [ProjectionMap] whose buckets are transformed
+ * @param backing the underlying [MultiKeyProjection] whose buckets are transformed
  * @param valueTransform function applied to each `(PK, List<E>)` bucket to produce a `V` value;
  *   invoked only for buckets whose contents changed in a given delta
  */
-internal class TransformedProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V>(
-    private val backing: ProjectionMap<K, PK, E>,
+internal class TransformedMultiKeyProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V>(
+    private val backing: MultiKeyProjection<K, PK, E>,
     private val valueTransform: (PK, List<E>) -> V
-) : AbstractMap<PK, V>(), ObservableProjectionMap<PK, V> {
+) : AbstractMap<PK, V>(), ObservableProjection<PK, V> {
 
     private val log = KotlinLogging.logger {}
 

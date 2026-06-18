@@ -34,7 +34,7 @@ import java.util.UUID
  * The projection operates on the in-memory aggregate list — the SQL layer provides persistence
  * and round-trip fidelity, while the projection map groups entities by [FxSqlTestEntity.groupProperty].
  */
-internal class FxSqlProjectionMapTest : StringSpec({
+internal class FxSqlProjectionTest : StringSpec({
 
     fun freshJdbcUrl() = "jdbc:h2:mem:${UUID.randomUUID()};DB_CLOSE_DELAY=-1"
 

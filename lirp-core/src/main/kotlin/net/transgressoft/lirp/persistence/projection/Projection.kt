@@ -55,7 +55,7 @@ import kotlin.reflect.KProperty
  * @param sourceRef deferred reference to the source collection (resolved on first access)
  * @param keyExtractor grouping function that extracts the projection key from an entity
  */
-class ProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
+class Projection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
     private val sourceRef: () -> AggregateCollectionRef<K, E>,
     private val keyExtractor: (E) -> PK
 ) : AbstractMap<PK, List<E>>() {
@@ -173,7 +173,7 @@ class ProjectionMap<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEnti
      *
      * Implements Kotlin `by`-delegation: `val grouped by projection(::items) { it.key }`.
      */
-    operator fun getValue(thisRef: Any?, property: KProperty<*>): ProjectionMap<K, PK, E> {
+    operator fun getValue(thisRef: Any?, property: KProperty<*>): Projection<K, PK, E> {
         initialize()
         return this
     }

@@ -33,8 +33,8 @@ import io.kotest.matchers.shouldBe
  *
  * Covers initial grouping, add propagation, and remove propagation.
  */
-@DisplayName("FxProjectionMapIntegrationTest")
-class FxProjectionMapIntegrationTest : StringSpec({
+@DisplayName("FxProjectionIntegrationTest")
+class FxProjectionIntegrationTest : StringSpec({
 
     reactiveScope()
 

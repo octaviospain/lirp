@@ -209,8 +209,8 @@ public final class net/transgressoft/lirp/persistence/fx/LirpStringProperty : ja
 	public fun set (Ljava/lang/String;)V
 }
 
-public final class net/transgressoft/lirp/persistence/fx/projection/FxMultiKeyProjectionMap : java/lang/AutoCloseable, javafx/collections/ObservableMap {
-	public static final field Companion Lnet/transgressoft/lirp/persistence/fx/projection/FxMultiKeyProjectionMap$Companion;
+public final class net/transgressoft/lirp/persistence/fx/projection/FxMultiKeyProjection : java/lang/AutoCloseable, javafx/collections/ObservableMap {
+	public static final field Companion Lnet/transgressoft/lirp/persistence/fx/projection/FxMultiKeyProjection$Companion;
 	public fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Z)V
 	public synthetic fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun addListener (Ljavafx/beans/InvalidationListener;)V
@@ -230,7 +230,7 @@ public final class net/transgressoft/lirp/persistence/fx/projection/FxMultiKeyPr
 	public fun getEntries ()Ljava/util/Set;
 	public fun getKeys ()Ljava/util/Set;
 	public fun getSize ()I
-	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/fx/projection/FxMultiKeyProjectionMap;
+	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/fx/projection/FxMultiKeyProjection;
 	public fun getValues ()Ljava/util/Collection;
 	public fun isEmpty ()Z
 	public final fun keySet ()Ljava/util/Set;
@@ -248,38 +248,11 @@ public final class net/transgressoft/lirp/persistence/fx/projection/FxMultiKeyPr
 	public final fun values ()Ljava/util/Collection;
 }
 
-public final class net/transgressoft/lirp/persistence/fx/projection/FxMultiKeyProjectionMap$Companion {
+public final class net/transgressoft/lirp/persistence/fx/projection/FxMultiKeyProjection$Companion {
 }
 
-public final class net/transgressoft/lirp/persistence/fx/projection/FxProjectionFactoriesKt {
-	public static final fun fxMultiKeyProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static final fun fxMultiKeyProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static final fun fxMultiKeyProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Z)Lnet/transgressoft/lirp/persistence/fx/projection/FxMultiKeyProjectionMap;
-	public static synthetic fun fxMultiKeyProjection$default (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static synthetic fun fxMultiKeyProjection$default (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static synthetic fun fxMultiKeyProjection$default (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/FxMultiKeyProjectionMap;
-	public static final fun fxProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static final fun fxProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static final fun fxProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Z)Lnet/transgressoft/lirp/persistence/fx/projection/FxProjectionMap;
-	public static synthetic fun fxProjection$default (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static synthetic fun fxProjection$default (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static synthetic fun fxProjection$default (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/FxProjectionMap;
-	public static final fun registryFxMultiKeyProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static final fun registryFxMultiKeyProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static final fun registryFxMultiKeyProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Z)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxMultiKeyProjectionMap;
-	public static synthetic fun registryFxMultiKeyProjection$default (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static synthetic fun registryFxMultiKeyProjection$default (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static synthetic fun registryFxMultiKeyProjection$default (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxMultiKeyProjectionMap;
-	public static final fun registryFxProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static final fun registryFxProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static final fun registryFxProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Z)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxProjectionMap;
-	public static synthetic fun registryFxProjection$default (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static synthetic fun registryFxProjection$default (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjectionMap;
-	public static synthetic fun registryFxProjection$default (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxProjectionMap;
-}
-
-public final class net/transgressoft/lirp/persistence/fx/projection/FxProjectionMap : javafx/collections/ObservableMap {
-	public static final field Companion Lnet/transgressoft/lirp/persistence/fx/projection/FxProjectionMap$Companion;
+public final class net/transgressoft/lirp/persistence/fx/projection/FxProjection : javafx/collections/ObservableMap {
+	public static final field Companion Lnet/transgressoft/lirp/persistence/fx/projection/FxProjection$Companion;
 	public fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Z)V
 	public synthetic fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun addListener (Ljavafx/beans/InvalidationListener;)V
@@ -298,7 +271,7 @@ public final class net/transgressoft/lirp/persistence/fx/projection/FxProjection
 	public fun getEntries ()Ljava/util/Set;
 	public fun getKeys ()Ljava/util/Set;
 	public fun getSize ()I
-	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/fx/projection/FxProjectionMap;
+	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/fx/projection/FxProjection;
 	public fun getValues ()Ljava/util/Collection;
 	public fun isEmpty ()Z
 	public final fun keySet ()Ljava/util/Set;
@@ -316,35 +289,62 @@ public final class net/transgressoft/lirp/persistence/fx/projection/FxProjection
 	public final fun values ()Ljava/util/Collection;
 }
 
-public final class net/transgressoft/lirp/persistence/fx/projection/FxProjectionMap$Companion {
+public final class net/transgressoft/lirp/persistence/fx/projection/FxProjection$Companion {
+}
+
+public final class net/transgressoft/lirp/persistence/fx/projection/FxProjectionFactoriesKt {
+	public static final fun fxMultiKeyProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/projection/ObservableProjection;
+	public static final fun fxMultiKeyProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/projection/ObservableProjection;
+	public static final fun fxMultiKeyProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Z)Lnet/transgressoft/lirp/persistence/fx/projection/FxMultiKeyProjection;
+	public static synthetic fun fxMultiKeyProjection$default (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjection;
+	public static synthetic fun fxMultiKeyProjection$default (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjection;
+	public static synthetic fun fxMultiKeyProjection$default (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/FxMultiKeyProjection;
+	public static final fun fxProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/projection/ObservableProjection;
+	public static final fun fxProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/projection/ObservableProjection;
+	public static final fun fxProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Z)Lnet/transgressoft/lirp/persistence/fx/projection/FxProjection;
+	public static synthetic fun fxProjection$default (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjection;
+	public static synthetic fun fxProjection$default (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjection;
+	public static synthetic fun fxProjection$default (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/FxProjection;
+	public static final fun registryFxMultiKeyProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/projection/ObservableProjection;
+	public static final fun registryFxMultiKeyProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/projection/ObservableProjection;
+	public static final fun registryFxMultiKeyProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Z)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxMultiKeyProjection;
+	public static synthetic fun registryFxMultiKeyProjection$default (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjection;
+	public static synthetic fun registryFxMultiKeyProjection$default (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjection;
+	public static synthetic fun registryFxMultiKeyProjection$default (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxMultiKeyProjection;
+	public static final fun registryFxProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/projection/ObservableProjection;
+	public static final fun registryFxProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/projection/ObservableProjection;
+	public static final fun registryFxProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Z)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxProjection;
+	public static synthetic fun registryFxProjection$default (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjection;
+	public static synthetic fun registryFxProjection$default (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/projection/ObservableProjection;
+	public static synthetic fun registryFxProjection$default (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxProjection;
 }
 
 public final class net/transgressoft/lirp/persistence/fx/projection/FxProjections {
 	public static final field INSTANCE Lnet/transgressoft/lirp/persistence/fx/projection/FxProjections;
-	public static final fun fxMultiKeyProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/fx/projection/FxMultiKeyProjectionMap;
-	public static final fun fxMultiKeyProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedFxMultiKeyProjectionMap;
-	public static final fun fxMultiKeyProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Z)Lnet/transgressoft/lirp/persistence/fx/projection/FxMultiKeyProjectionMap;
-	public static synthetic fun fxMultiKeyProjection$default (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedFxMultiKeyProjectionMap;
-	public static synthetic fun fxMultiKeyProjection$default (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/FxMultiKeyProjectionMap;
-	public static final fun fxProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/fx/projection/FxProjectionMap;
-	public static final fun fxProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedFxProjectionMap;
-	public static final fun fxProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Z)Lnet/transgressoft/lirp/persistence/fx/projection/FxProjectionMap;
-	public static synthetic fun fxProjection$default (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedFxProjectionMap;
-	public static synthetic fun fxProjection$default (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/FxProjectionMap;
-	public static final fun registryFxMultiKeyProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxMultiKeyProjectionMap;
-	public static final fun registryFxMultiKeyProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxMultiKeyProjectionMap;
-	public static final fun registryFxMultiKeyProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Z)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxMultiKeyProjectionMap;
-	public static synthetic fun registryFxMultiKeyProjection$default (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxMultiKeyProjectionMap;
-	public static synthetic fun registryFxMultiKeyProjection$default (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxMultiKeyProjectionMap;
-	public static final fun registryFxProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxProjectionMap;
-	public static final fun registryFxProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxProjectionMap;
-	public static final fun registryFxProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Z)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxProjectionMap;
-	public static synthetic fun registryFxProjection$default (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxProjectionMap;
-	public static synthetic fun registryFxProjection$default (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxProjectionMap;
+	public static final fun fxMultiKeyProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/fx/projection/FxMultiKeyProjection;
+	public static final fun fxMultiKeyProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedFxMultiKeyProjection;
+	public static final fun fxMultiKeyProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Z)Lnet/transgressoft/lirp/persistence/fx/projection/FxMultiKeyProjection;
+	public static synthetic fun fxMultiKeyProjection$default (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedFxMultiKeyProjection;
+	public static synthetic fun fxMultiKeyProjection$default (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/FxMultiKeyProjection;
+	public static final fun fxProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/fx/projection/FxProjection;
+	public static final fun fxProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedFxProjection;
+	public static final fun fxProjection (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Z)Lnet/transgressoft/lirp/persistence/fx/projection/FxProjection;
+	public static synthetic fun fxProjection$default (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedFxProjection;
+	public static synthetic fun fxProjection$default (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/FxProjection;
+	public static final fun registryFxMultiKeyProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxMultiKeyProjection;
+	public static final fun registryFxMultiKeyProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxMultiKeyProjection;
+	public static final fun registryFxMultiKeyProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Z)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxMultiKeyProjection;
+	public static synthetic fun registryFxMultiKeyProjection$default (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxMultiKeyProjection;
+	public static synthetic fun registryFxMultiKeyProjection$default (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxMultiKeyProjection;
+	public static final fun registryFxProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxProjection;
+	public static final fun registryFxProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Z)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxProjection;
+	public static final fun registryFxProjection (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Z)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxProjection;
+	public static synthetic fun registryFxProjection$default (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxProjection;
+	public static synthetic fun registryFxProjection$default (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;ZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxProjection;
 }
 
-public final class net/transgressoft/lirp/persistence/fx/projection/RegistryFxMultiKeyProjectionMap : java/lang/AutoCloseable, javafx/collections/ObservableMap {
-	public static final field Companion Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxMultiKeyProjectionMap$Companion;
+public final class net/transgressoft/lirp/persistence/fx/projection/RegistryFxMultiKeyProjection : java/lang/AutoCloseable, javafx/collections/ObservableMap {
+	public static final field Companion Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxMultiKeyProjection$Companion;
 	public fun <init> (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Z)V
 	public synthetic fun <init> (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun addListener (Ljavafx/beans/InvalidationListener;)V
@@ -364,7 +364,7 @@ public final class net/transgressoft/lirp/persistence/fx/projection/RegistryFxMu
 	public fun getEntries ()Ljava/util/Set;
 	public fun getKeys ()Ljava/util/Set;
 	public fun getSize ()I
-	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxMultiKeyProjectionMap;
+	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxMultiKeyProjection;
 	public fun getValues ()Ljava/util/Collection;
 	public fun isEmpty ()Z
 	public final fun keySet ()Ljava/util/Set;
@@ -382,11 +382,11 @@ public final class net/transgressoft/lirp/persistence/fx/projection/RegistryFxMu
 	public final fun values ()Ljava/util/Collection;
 }
 
-public final class net/transgressoft/lirp/persistence/fx/projection/RegistryFxMultiKeyProjectionMap$Companion {
+public final class net/transgressoft/lirp/persistence/fx/projection/RegistryFxMultiKeyProjection$Companion {
 }
 
-public final class net/transgressoft/lirp/persistence/fx/projection/RegistryFxProjectionMap : java/lang/AutoCloseable, javafx/collections/ObservableMap {
-	public static final field Companion Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxProjectionMap$Companion;
+public final class net/transgressoft/lirp/persistence/fx/projection/RegistryFxProjection : java/lang/AutoCloseable, javafx/collections/ObservableMap {
+	public static final field Companion Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxProjection$Companion;
 	public fun <init> (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Z)V
 	public synthetic fun <init> (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun addListener (Ljavafx/beans/InvalidationListener;)V
@@ -406,7 +406,7 @@ public final class net/transgressoft/lirp/persistence/fx/projection/RegistryFxPr
 	public fun getEntries ()Ljava/util/Set;
 	public fun getKeys ()Ljava/util/Set;
 	public fun getSize ()I
-	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxProjectionMap;
+	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/fx/projection/RegistryFxProjection;
 	public fun getValues ()Ljava/util/Collection;
 	public fun isEmpty ()Z
 	public final fun keySet ()Ljava/util/Set;
@@ -424,11 +424,11 @@ public final class net/transgressoft/lirp/persistence/fx/projection/RegistryFxPr
 	public final fun values ()Ljava/util/Collection;
 }
 
-public final class net/transgressoft/lirp/persistence/fx/projection/RegistryFxProjectionMap$Companion {
+public final class net/transgressoft/lirp/persistence/fx/projection/RegistryFxProjection$Companion {
 }
 
-public final class net/transgressoft/lirp/persistence/fx/projection/TransformedFxMultiKeyProjectionMap : java/lang/AutoCloseable, javafx/collections/ObservableMap, net/transgressoft/lirp/persistence/projection/ObservableProjectionMap {
-	public static final field Companion Lnet/transgressoft/lirp/persistence/fx/projection/TransformedFxMultiKeyProjectionMap$Companion;
+public final class net/transgressoft/lirp/persistence/fx/projection/TransformedFxMultiKeyProjection : java/lang/AutoCloseable, javafx/collections/ObservableMap, net/transgressoft/lirp/persistence/projection/ObservableProjection {
+	public static final field Companion Lnet/transgressoft/lirp/persistence/fx/projection/TransformedFxMultiKeyProjection$Companion;
 	public fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;Z)V
 	public synthetic fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Z)V
@@ -449,7 +449,7 @@ public final class net/transgressoft/lirp/persistence/fx/projection/TransformedF
 	public fun getEntries ()Ljava/util/Set;
 	public fun getKeys ()Ljava/util/Set;
 	public fun getSize ()I
-	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedFxMultiKeyProjectionMap;
+	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedFxMultiKeyProjection;
 	public fun getValues ()Ljava/util/Collection;
 	public fun isEmpty ()Z
 	public final fun keySet ()Ljava/util/Set;
@@ -466,11 +466,11 @@ public final class net/transgressoft/lirp/persistence/fx/projection/TransformedF
 	public final fun values ()Ljava/util/Collection;
 }
 
-public final class net/transgressoft/lirp/persistence/fx/projection/TransformedFxMultiKeyProjectionMap$Companion {
+public final class net/transgressoft/lirp/persistence/fx/projection/TransformedFxMultiKeyProjection$Companion {
 }
 
-public final class net/transgressoft/lirp/persistence/fx/projection/TransformedFxProjectionMap : javafx/collections/ObservableMap, net/transgressoft/lirp/persistence/projection/ObservableProjectionMap {
-	public static final field Companion Lnet/transgressoft/lirp/persistence/fx/projection/TransformedFxProjectionMap$Companion;
+public final class net/transgressoft/lirp/persistence/fx/projection/TransformedFxProjection : javafx/collections/ObservableMap, net/transgressoft/lirp/persistence/projection/ObservableProjection {
+	public static final field Companion Lnet/transgressoft/lirp/persistence/fx/projection/TransformedFxProjection$Companion;
 	public fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;Z)V
 	public synthetic fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Z)V
@@ -491,7 +491,7 @@ public final class net/transgressoft/lirp/persistence/fx/projection/TransformedF
 	public fun getEntries ()Ljava/util/Set;
 	public fun getKeys ()Ljava/util/Set;
 	public fun getSize ()I
-	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedFxProjectionMap;
+	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedFxProjection;
 	public fun getValues ()Ljava/util/Collection;
 	public fun isEmpty ()Z
 	public final fun keySet ()Ljava/util/Set;
@@ -508,11 +508,11 @@ public final class net/transgressoft/lirp/persistence/fx/projection/TransformedF
 	public final fun values ()Ljava/util/Collection;
 }
 
-public final class net/transgressoft/lirp/persistence/fx/projection/TransformedFxProjectionMap$Companion {
+public final class net/transgressoft/lirp/persistence/fx/projection/TransformedFxProjection$Companion {
 }
 
-public final class net/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxMultiKeyProjectionMap : java/lang/AutoCloseable, javafx/collections/ObservableMap, net/transgressoft/lirp/persistence/projection/ObservableProjectionMap {
-	public static final field Companion Lnet/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxMultiKeyProjectionMap$Companion;
+public final class net/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxMultiKeyProjection : java/lang/AutoCloseable, javafx/collections/ObservableMap, net/transgressoft/lirp/persistence/projection/ObservableProjection {
+	public static final field Companion Lnet/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxMultiKeyProjection$Companion;
 	public fun <init> (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;Z)V
 	public synthetic fun <init> (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun <init> (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Z)V
@@ -533,7 +533,7 @@ public final class net/transgressoft/lirp/persistence/fx/projection/TransformedR
 	public fun getEntries ()Ljava/util/Set;
 	public fun getKeys ()Ljava/util/Set;
 	public fun getSize ()I
-	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxMultiKeyProjectionMap;
+	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxMultiKeyProjection;
 	public fun getValues ()Ljava/util/Collection;
 	public fun isEmpty ()Z
 	public final fun keySet ()Ljava/util/Set;
@@ -550,11 +550,11 @@ public final class net/transgressoft/lirp/persistence/fx/projection/TransformedR
 	public final fun values ()Ljava/util/Collection;
 }
 
-public final class net/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxMultiKeyProjectionMap$Companion {
+public final class net/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxMultiKeyProjection$Companion {
 }
 
-public final class net/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxProjectionMap : java/lang/AutoCloseable, javafx/collections/ObservableMap, net/transgressoft/lirp/persistence/projection/ObservableProjectionMap {
-	public static final field Companion Lnet/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxProjectionMap$Companion;
+public final class net/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxProjection : java/lang/AutoCloseable, javafx/collections/ObservableMap, net/transgressoft/lirp/persistence/projection/ObservableProjection {
+	public static final field Companion Lnet/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxProjection$Companion;
 	public fun <init> (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;Z)V
 	public synthetic fun <init> (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun <init> (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Z)V
@@ -575,7 +575,7 @@ public final class net/transgressoft/lirp/persistence/fx/projection/TransformedR
 	public fun getEntries ()Ljava/util/Set;
 	public fun getKeys ()Ljava/util/Set;
 	public fun getSize ()I
-	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxProjectionMap;
+	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxProjection;
 	public fun getValues ()Ljava/util/Collection;
 	public fun isEmpty ()Z
 	public final fun keySet ()Ljava/util/Set;
@@ -592,6 +592,6 @@ public final class net/transgressoft/lirp/persistence/fx/projection/TransformedR
 	public final fun values ()Ljava/util/Collection;
 }
 
-public final class net/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxProjectionMap$Companion {
+public final class net/transgressoft/lirp/persistence/fx/projection/TransformedRegistryFxProjection$Companion {
 }
 

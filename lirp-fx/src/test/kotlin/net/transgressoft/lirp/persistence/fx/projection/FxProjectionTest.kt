@@ -23,7 +23,7 @@ import net.transgressoft.lirp.persistence.fx.FxAudioItem
 import net.transgressoft.lirp.persistence.fx.FxToolkitInit
 import net.transgressoft.lirp.persistence.fx.fxAggregateList
 import net.transgressoft.lirp.persistence.fx.fxAggregateSet
-import net.transgressoft.lirp.persistence.projection.ObservableProjectionMap
+import net.transgressoft.lirp.persistence.projection.ObservableProjection
 import net.transgressoft.lirp.testing.Stress
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldNotThrowAny
@@ -52,10 +52,10 @@ import kotlinx.coroutines.launch
 data class FxAlbumBucket(val key: String, val titles: List<String>)
 
 /**
- * Tests for [FxProjectionMap] verifying grouped projection from list and set sources,
+ * Tests for [FxProjection] verifying grouped projection from list and set sources,
  * [MapChangeListener.Change] notifications, key ordering, and unmodifiability.
  */
-class FxProjectionMapTest : StringSpec({
+class FxProjectionTest : StringSpec({
 
     reactiveScope()
 
@@ -63,9 +63,9 @@ class FxProjectionMapTest : StringSpec({
         FxToolkitInit.ensureInitialized()
     }
 
-    "FxProjectionMap groups entities by key extractor on add" {
+    "FxProjection groups entities by key extractor on add" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         source.add(0, FxAudioItem(1, "Track A", "Jazz"))
 
@@ -74,9 +74,9 @@ class FxProjectionMapTest : StringSpec({
         projection["Jazz"]!![0].id shouldBe 1
     }
 
-    "FxProjectionMap fires MapChangeListener wasAdded when new group key appears" {
+    "FxProjection fires MapChangeListener wasAdded when new group key appears" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         val changes = mutableListOf<MapChangeListener.Change<out String, out List<AudioItem>>>()
         projection.addListener(MapChangeListener(changes::add))
@@ -88,9 +88,9 @@ class FxProjectionMapTest : StringSpec({
         changes[0].key shouldBe "Jazz"
     }
 
-    "FxProjectionMap fires MapChangeListener when entity added to existing group" {
+    "FxProjection fires MapChangeListener when entity added to existing group" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         source.add(0, FxAudioItem(1, "Track A", "Jazz"))
 
@@ -104,9 +104,9 @@ class FxProjectionMapTest : StringSpec({
         projection["Jazz"]!!.size shouldBe 2
     }
 
-    "FxProjectionMap removes bucket when last entity removed" {
+    "FxProjection removes bucket when last entity removed" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         val item = FxAudioItem(1, "Track A", "Jazz")
         source.add(0, item)
@@ -115,9 +115,9 @@ class FxProjectionMapTest : StringSpec({
         projection.containsKey("Jazz") shouldBe false
     }
 
-    "FxProjectionMap fires MapChangeListener wasRemoved when bucket removed" {
+    "FxProjection fires MapChangeListener wasRemoved when bucket removed" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         val item = FxAudioItem(1, "Track A", "Jazz")
         source.add(0, item)
@@ -130,9 +130,9 @@ class FxProjectionMapTest : StringSpec({
         changes.any { it.wasRemoved() } shouldBe true
     }
 
-    "FxProjectionMap updates bucket without removing on partial remove" {
+    "FxProjection updates bucket without removing on partial remove" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         val item1 = FxAudioItem(1, "Track A", "Jazz")
         val item2 = FxAudioItem(2, "Track B", "Jazz")
@@ -144,9 +144,9 @@ class FxProjectionMapTest : StringSpec({
         projection["Jazz"]!!.size shouldBe 1
     }
 
-    "FxProjectionMap keys are in natural sorted order" {
+    "FxProjection keys are in natural sorted order" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         source.addAll(
             listOf(
@@ -159,9 +159,9 @@ class FxProjectionMapTest : StringSpec({
         projection.keys.toList() shouldContainExactly listOf("Alpha", "Middle", "Zebra")
     }
 
-    "FxProjectionMap handles clear on source" {
+    "FxProjection handles clear on source" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         source.addAll(
             listOf(
@@ -174,7 +174,7 @@ class FxProjectionMapTest : StringSpec({
         projection.isEmpty() shouldBe true
     }
 
-    "FxProjectionMap builds initial state from source on first getValue" {
+    "FxProjection builds initial state from source on first getValue" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
         source.addAll(
             listOf(
@@ -184,15 +184,15 @@ class FxProjectionMapTest : StringSpec({
             )
         )
 
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         projection["Jazz"]!!.size shouldBe 2
         projection["Rock"]!!.size shouldBe 1
     }
 
-    "FxProjectionMap with set source groups entities correctly" {
+    "FxProjection with set source groups entities correctly" {
         val source = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         source.add(FxAudioItem(1, "Track A", "Jazz"))
         source.add(FxAudioItem(2, "Track B", "Rock"))
@@ -201,9 +201,9 @@ class FxProjectionMapTest : StringSpec({
         projection["Rock"]!!.size shouldBe 1
     }
 
-    "FxProjectionMap is unmodifiable" {
+    "FxProjection is unmodifiable" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         shouldThrow<UnsupportedOperationException> {
             projection.put("Jazz", listOf(FxAudioItem(1, "T1", "Jazz")))
@@ -213,9 +213,9 @@ class FxProjectionMapTest : StringSpec({
         }
     }
 
-    "FxProjectionMap with dispatchToFxThread=false fires on flowScope" {
+    "FxProjection with dispatchToFxThread=false fires on flowScope" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         var listenerFired = false
         projection.addListener(MapChangeListener { listenerFired = true })
@@ -225,9 +225,9 @@ class FxProjectionMapTest : StringSpec({
         listenerFired shouldBe true
     }
 
-    "FxProjectionMap entries contains all key-value pairs after population" {
+    "FxProjection entries contains all key-value pairs after population" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         source.addAll(listOf(FxAudioItem(1, "T1", "Jazz"), FxAudioItem(2, "T2", "Rock")))
 
@@ -236,9 +236,9 @@ class FxProjectionMapTest : StringSpec({
         entries.map { it.key }.toSet() shouldBe setOf("Jazz", "Rock")
     }
 
-    "FxProjectionMap values contains all bucket lists" {
+    "FxProjection values contains all bucket lists" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         source.addAll(
             listOf(
@@ -254,9 +254,9 @@ class FxProjectionMapTest : StringSpec({
         values.any { it.size == 1 } shouldBe true
     }
 
-    "FxProjectionMap containsValue returns true for a matching bucket" {
+    "FxProjection containsValue returns true for a matching bucket" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         val item1 = FxAudioItem(1, "T1", "Jazz")
         val item2 = FxAudioItem(2, "T2", "Rock")
@@ -267,27 +267,27 @@ class FxProjectionMapTest : StringSpec({
         projection.containsValue(listOf(item1, item2)) shouldBe false
     }
 
-    "FxProjectionMap putAll throws UnsupportedOperationException" {
+    "FxProjection putAll throws UnsupportedOperationException" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         shouldThrow<UnsupportedOperationException> {
             projection.putAll(mapOf("Jazz" to listOf(FxAudioItem(1, "T1", "Jazz"))))
         }
     }
 
-    "FxProjectionMap clear throws UnsupportedOperationException" {
+    "FxProjection clear throws UnsupportedOperationException" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         shouldThrow<UnsupportedOperationException> {
             projection.clear()
         }
     }
 
-    "FxProjectionMap removeListener stops MapChangeListener from receiving changes" {
+    "FxProjection removeListener stops MapChangeListener from receiving changes" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         var changeCount = 0
         val listener = MapChangeListener<String, List<AudioItem>> { changeCount++ }
@@ -301,9 +301,9 @@ class FxProjectionMapTest : StringSpec({
         changeCount shouldBe 1
     }
 
-    "FxProjectionMap addListener InvalidationListener fires on change" {
+    "FxProjection addListener InvalidationListener fires on change" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         var invalidationCount = 0
         val listener = InvalidationListener { invalidationCount++ }
@@ -314,9 +314,9 @@ class FxProjectionMapTest : StringSpec({
         invalidationCount shouldBe 1
     }
 
-    "FxProjectionMap removeListener InvalidationListener stops invalidation notifications" {
+    "FxProjection removeListener InvalidationListener stops invalidation notifications" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         var invalidationCount = 0
         val listener = InvalidationListener { invalidationCount++ }
@@ -330,7 +330,7 @@ class FxProjectionMapTest : StringSpec({
         invalidationCount shouldBe 1
     }
 
-    "FxProjectionMap does not lose source mutations occurring during initialization" {
+    "FxProjection does not lose source mutations occurring during initialization" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
 
         val preloaded = (1..5).map { FxAudioItem(it, "Pre-$it", "Jazz") }
@@ -349,7 +349,7 @@ class FxProjectionMapTest : StringSpec({
             }
         mutator.start()
 
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         initStarted.countDown()
         mutationDone.await(5, TimeUnit.SECONDS)
@@ -362,9 +362,9 @@ class FxProjectionMapTest : StringSpec({
         mutator.join(5000)
     }
 
-    "FxProjectionMap with dispatchToFxThread=false serializes rapid mutations without loss" {
+    "FxProjection with dispatchToFxThread=false serializes rapid mutations without loss" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
 
         // Trigger initialization
         projection.size
@@ -384,9 +384,9 @@ class FxProjectionMapTest : StringSpec({
         projection["Pop"]!!.size shouldBe 5
     }
 
-    "FxProjectionMap reflects writer state in reader iteration after writer completes" {
+    "FxProjection reflects writer state in reader iteration after writer completes" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-        val projection = FxProjectionMap({ source }, { it.albumName }, false)
+        val projection = FxProjection({ source }, { it.albumName }, false)
         // Trigger init before writer starts so the source-listener subscription is live.
         projection.size shouldBe 0
 
@@ -424,10 +424,10 @@ class FxProjectionMapTest : StringSpec({
         }
     }
 
-    "TransformedFxProjectionMap maps bucket to value via valueTransform" {
+    "TransformedFxProjection maps bucket to value via valueTransform" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
         val projection =
-            TransformedFxProjectionMap(
+            TransformedFxProjection(
                 { source },
                 { it.albumName },
                 { pk, items -> FxAlbumBucket(pk, items.map { it.title }) },
@@ -443,11 +443,11 @@ class FxProjectionMapTest : StringSpec({
         projection.size shouldBe 2
     }
 
-    "TransformedFxProjectionMap fires exactly one MapChangeListener pulse per source event" {
+    "TransformedFxProjection fires exactly one MapChangeListener pulse per source event" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
         val pulseCount = AtomicInteger(0)
         val projection =
-            TransformedFxProjectionMap(
+            TransformedFxProjection(
                 { source },
                 { it.albumName },
                 { pk, items -> FxAlbumBucket(pk, items.map { it.title }) },
@@ -467,10 +467,10 @@ class FxProjectionMapTest : StringSpec({
         pulseCount.get() shouldBe 1
     }
 
-    "TransformedFxProjectionMap removes key from map when last item in bucket is removed" {
+    "TransformedFxProjection removes key from map when last item in bucket is removed" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
         val projection =
-            TransformedFxProjectionMap(
+            TransformedFxProjection(
                 { source },
                 { it.albumName },
                 { pk, items -> FxAlbumBucket(pk, items.map { it.title }) },
@@ -486,10 +486,10 @@ class FxProjectionMapTest : StringSpec({
         projection.isEmpty() shouldBe true
     }
 
-    "TransformedFxProjectionMap with FxAggregateSet source groups entities by key extractor" {
+    "TransformedFxProjection with FxAggregateSet source groups entities by key extractor" {
         val source = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         val projection =
-            TransformedFxProjectionMap(
+            TransformedFxProjection(
                 { source },
                 { it.albumName },
                 { pk, items -> FxAlbumBucket(pk, items.map { it.title }) },
@@ -507,10 +507,10 @@ class FxProjectionMapTest : StringSpec({
         projection.containsKey("Jazz") shouldBe false
     }
 
-    "TransformedFxProjectionMap exposes read-only keys, values, entries, containsValue, and isEmpty" {
+    "TransformedFxProjection exposes read-only keys, values, entries, containsValue, and isEmpty" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
         val projection =
-            TransformedFxProjectionMap(
+            TransformedFxProjection(
                 { source },
                 { it.albumName },
                 { pk, items -> FxAlbumBucket(pk, items.map { it.title }) },
@@ -530,10 +530,10 @@ class FxProjectionMapTest : StringSpec({
         projection.isEmpty() shouldBe false
     }
 
-    "TransformedFxProjectionMap mutation methods throw UnsupportedOperationException" {
+    "TransformedFxProjection mutation methods throw UnsupportedOperationException" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
         val projection =
-            TransformedFxProjectionMap(
+            TransformedFxProjection(
                 { source },
                 { it.albumName },
                 { pk, items -> FxAlbumBucket(pk, items.map { it.title }) },
@@ -545,10 +545,10 @@ class FxProjectionMapTest : StringSpec({
         shouldThrow<UnsupportedOperationException> { projection.clear() }
     }
 
-    "TransformedFxProjectionMap removeListener stops receiving changes" {
+    "TransformedFxProjection removeListener stops receiving changes" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
         val projection =
-            TransformedFxProjectionMap(
+            TransformedFxProjection(
                 { source },
                 { it.albumName },
                 { pk, items -> FxAlbumBucket(pk, items.map { it.title }) },
@@ -566,11 +566,11 @@ class FxProjectionMapTest : StringSpec({
         count shouldBe 1
     }
 
-    "TransformedFxProjectionMap valueTransform runs off FX Application Thread" {
+    "TransformedFxProjection valueTransform runs off FX Application Thread" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
         val transformThreads = mutableListOf<Boolean>()
         val projection =
-            TransformedFxProjectionMap(
+            TransformedFxProjection(
                 { source },
                 { it.albumName },
                 { pk, items ->
@@ -587,12 +587,12 @@ class FxProjectionMapTest : StringSpec({
         transformThreads.all { !it } shouldBe true
     }
 
-    "TransformedFxProjectionMap runs valueTransform off FX thread while dispatching the pulse on the FX thread when dispatchToFxThread is true" {
+    "TransformedFxProjection runs valueTransform off FX thread while dispatching the pulse on the FX thread when dispatchToFxThread is true" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
         val transformOnFxThread = mutableListOf<Boolean>()
         val listenerOnFxThread = mutableListOf<Boolean>()
         val projection =
-            TransformedFxProjectionMap(
+            TransformedFxProjection(
                 { source },
                 { it.albumName },
                 { pk, items ->
@@ -620,7 +620,7 @@ class FxProjectionMapTest : StringSpec({
         listenerOnFxThread.all { it } shouldBe true
     }
 
-    "TransformedFxProjectionMap two-phase dataTransform runs off FX thread and fxFactory runs on FX thread building a real FX value" {
+    "TransformedFxProjection two-phase dataTransform runs off FX thread and fxFactory runs on FX thread building a real FX value" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
         val dataTransformThreadFlags = CopyOnWriteArrayList<Boolean>()
         val fxFactoryThreadFlags = CopyOnWriteArrayList<Boolean>()
@@ -657,7 +657,7 @@ class FxProjectionMapTest : StringSpec({
         view.hasTracks shouldBe true
     }
 
-    "TransformedFxProjectionMap fxFactory failure in one bucket does not prevent other buckets from flushing" {
+    "TransformedFxProjection fxFactory failure in one bucket does not prevent other buckets from flushing" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
         val projection =
             fxProjection(
@@ -681,7 +681,7 @@ class FxProjectionMapTest : StringSpec({
         view.hasTracks shouldBe true
     }
 
-    "TransformedFxProjectionMap fxFactory failure during initial seed skips only that bucket and leaves the projection usable" {
+    "TransformedFxProjection fxFactory failure during initial seed skips only that bucket and leaves the projection usable" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
         source.add(0, FxAudioItem(1, "Track A", "Jazz"))
         source.add(1, FxAudioItem(2, "Track B", "Rock"))
@@ -704,11 +704,11 @@ class FxProjectionMapTest : StringSpec({
         (projection["Rock"] as AlbumFxView).hasTracks shouldBe true
     }
 
-    "TransformedFxProjectionMap single valueTransform overload runs off FX thread preserving backward compatibility" {
+    "TransformedFxProjection single valueTransform overload runs off FX thread preserving backward compatibility" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
         val transformedOnFxThread = CopyOnWriteArrayList<Boolean>()
         val projection =
-            TransformedFxProjectionMap(
+            TransformedFxProjection(
                 { source },
                 { it.albumName },
                 { pk, items ->
@@ -727,10 +727,10 @@ class FxProjectionMapTest : StringSpec({
         projection["Jazz"] shouldBe FxAlbumBucket("Jazz", listOf("Track A", "Track B"))
     }
 
-    "FxProjectionMap iterates without ConcurrentModificationException under concurrent reader and writer stress"
+    "FxProjection iterates without ConcurrentModificationException under concurrent reader and writer stress"
         .config(tags = setOf(Stress)) {
             val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
-            val projection = FxProjectionMap({ source }, { it.albumName }, false)
+            val projection = FxProjection({ source }, { it.albumName }, false)
 
             val seedSize = 100
             val mutationCount = 5000
@@ -782,18 +782,18 @@ class FxProjectionMapTest : StringSpec({
         val mkSource = fxAggregateList<Int, MutableMultiKeyAudioItem>(dispatchToFxThread = false)
 
         // identity forms — return released concrete types (ABI check: 3-arg signature unchanged)
-        val identityMap: FxProjectionMap<Int, String, AudioItem> =
+        val identityMap: FxProjection<Int, String, AudioItem> =
             fxProjection(sourceRef = { source }, keyExtractor = { it.albumName }, dispatchToFxThread = false)
-        val transformMap: ObservableProjectionMap<String, FxAlbumBucket> =
+        val transformMap: ObservableProjection<String, FxAlbumBucket> =
             fxProjection(
                 sourceRef = { source },
                 keyExtractor = { it.albumName },
                 valueTransform = { pk, items -> FxAlbumBucket(pk, items.map { it.title }) },
                 dispatchToFxThread = false
             )
-        val mkIdentityMap: FxMultiKeyProjectionMap<Int, String, MutableMultiKeyAudioItem> =
+        val mkIdentityMap: FxMultiKeyProjection<Int, String, MutableMultiKeyAudioItem> =
             fxMultiKeyProjection(sourceRef = { mkSource }, keyExtractor = { it.genres }, dispatchToFxThread = false)
-        val mkTransformMap: ObservableProjectionMap<String, FxAlbumBucket> =
+        val mkTransformMap: ObservableProjection<String, FxAlbumBucket> =
             fxMultiKeyProjection(
                 sourceRef = { mkSource },
                 keyExtractor = { it.genres },
@@ -801,12 +801,12 @@ class FxProjectionMapTest : StringSpec({
                 dispatchToFxThread = false
             )
 
-        // the released 3-arg form returns FxProjectionMap (ABI check)
-        identityMap.shouldBeInstanceOf<FxProjectionMap<Int, String, AudioItem>>()
-        // transform forms are ObservableProjectionMap-typed (also ObservableMap at runtime)
-        transformMap.shouldBeInstanceOf<ObservableProjectionMap<*, *>>()
+        // the released 3-arg form returns FxProjection (ABI check)
+        identityMap.shouldBeInstanceOf<FxProjection<Int, String, AudioItem>>()
+        // transform forms are ObservableProjection-typed (also ObservableMap at runtime)
+        transformMap.shouldBeInstanceOf<ObservableProjection<*, *>>()
         mkIdentityMap.shouldBeInstanceOf<ObservableMap<*, *>>()
-        mkTransformMap.shouldBeInstanceOf<ObservableProjectionMap<*, *>>()
+        mkTransformMap.shouldBeInstanceOf<ObservableProjection<*, *>>()
 
         // Exercise the identity map: add an item to source, then access the projection — the
         // first access triggers initialize() which seeds from the source's current contents

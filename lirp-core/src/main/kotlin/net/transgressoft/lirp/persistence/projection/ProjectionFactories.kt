@@ -24,7 +24,7 @@ import net.transgressoft.lirp.persistence.Registry
 /**
  * Creates a read-only projection that groups entities from a source collection by a secondary key.
  *
- * The returned [ProjectionMap] lazily initializes on the first Kotlin `by`-delegation access,
+ * The returned [Projection] lazily initializes on the first Kotlin `by`-delegation access,
  * building its initial state from the source's current contents. When the source is a
  * [MutableAggregateList] or [MutableAggregateSet], subsequent mutations are reflected
  * automatically without any manual notification. For other [AggregateCollectionRef] implementations,
@@ -43,17 +43,17 @@ import net.transgressoft.lirp.persistence.Registry
  * @param E the entity type
  * @param sourceRef lambda returning the source collection (supports `::property` syntax)
  * @param keyExtractor trailing-lambda grouping function that extracts the projection key from an entity
- * @return a [ProjectionMap] delegate grouping entities by [keyExtractor]
+ * @return a [Projection] delegate grouping entities by [keyExtractor]
  */
 fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> projection(
     sourceRef: () -> AggregateCollectionRef<K, E>,
     keyExtractor: (E) -> PK
-): ProjectionMap<K, PK, E> = ProjectionMap(sourceRef, keyExtractor)
+): Projection<K, PK, E> = Projection(sourceRef, keyExtractor)
 
 /**
  * Creates a read-only projection that groups all entities from a [Registry] by a secondary key.
  *
- * The returned [RegistryProjectionMap] lazily initializes on the first map access,
+ * The returned [RegistryProjection] lazily initializes on the first map access,
  * building its initial state from the registry's current contents and subscribing to
  * incremental [net.transgressoft.lirp.event.CrudEvent] notifications for ongoing maintenance.
  * Soft-deleted entities (those implementing [net.transgressoft.lirp.entity.SoftDeletable] with a
@@ -71,12 +71,12 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> projecti
  * @param E the entity type
  * @param registry the source registry to project
  * @param keyExtractor trailing-lambda grouping function that extracts the projection key from an entity
- * @return a [RegistryProjectionMap] delegate grouping registry entities by [keyExtractor]
+ * @return a [RegistryProjection] delegate grouping registry entities by [keyExtractor]
  */
 fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> PK
-): RegistryProjectionMap<K, PK, E> = RegistryProjectionMap(registry, keyExtractor)
+): RegistryProjection<K, PK, E> = RegistryProjection(registry, keyExtractor)
 
 /**
  * Creates a read-only value-transformed projection that groups entities from a source collection
@@ -107,16 +107,16 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registry
  *   value; invoked only for buckets affected by the latest delta. `V` is constrained to be non-null so
  *   the add/replace/remove encoding of [ProjectionEntryChange] stays sound (a null value cannot be
  *   confused with an absent key)
- * @return an [ObservableProjectionMap] of type `Map<PK, V>` grouping transformed bucket values by [keyExtractor];
- *   its [addOnEntriesChangedListener][ObservableProjectionMap.addOnEntriesChangedListener]
- *   emits per-key old/new transformed values; [close][CloseableProjectionMap.close] is a no-op for this
+ * @return an [ObservableProjection] of type `Map<PK, V>` grouping transformed bucket values by [keyExtractor];
+ *   its [addOnEntriesChangedListener][ObservableProjection.addOnEntriesChangedListener]
+ *   emits per-key old/new transformed values; [close][CloseableProjection.close] is a no-op for this
  *   aggregate-source variant (no source subscription to release)
  */
 fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> projection(
     sourceRef: () -> AggregateCollectionRef<K, E>,
     keyExtractor: (E) -> PK,
     valueTransform: (PK, List<E>) -> V
-): ObservableProjectionMap<PK, V> = TransformedProjectionMap(ProjectionMap(sourceRef, keyExtractor), valueTransform)
+): ObservableProjection<PK, V> = TransformedProjection(Projection(sourceRef, keyExtractor), valueTransform)
 
 /**
  * Creates a read-only value-transformed projection that groups all entities from a [Registry] by
@@ -147,15 +147,15 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  *   value; invoked only for buckets affected by the latest delta. `V` is constrained to be non-null so
  *   the add/replace/remove encoding of [ProjectionEntryChange] stays sound (a null value cannot be
  *   confused with an absent key)
- * @return an [ObservableProjectionMap] of type `Map<PK, V>` grouping transformed bucket values by
- *   [keyExtractor]; its [addOnEntriesChangedListener][ObservableProjectionMap.addOnEntriesChangedListener]
- *   emits per-key old/new transformed values; [close][CloseableProjectionMap.close] releases the registry subscription
+ * @return an [ObservableProjection] of type `Map<PK, V>` grouping transformed bucket values by
+ *   [keyExtractor]; its [addOnEntriesChangedListener][ObservableProjection.addOnEntriesChangedListener]
+ *   emits per-key old/new transformed values; [close][CloseableProjection.close] releases the registry subscription
  */
 fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> registryProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> PK,
     valueTransform: (PK, List<E>) -> V
-): ObservableProjectionMap<PK, V> = TransformedRegistryProjectionMap(RegistryProjectionMap(registry, keyExtractor), valueTransform)
+): ObservableProjection<PK, V> = TransformedRegistryProjection(RegistryProjection(registry, keyExtractor), valueTransform)
 
 /**
  * Creates a read-only multi-key projection that groups entities from a source collection by every
@@ -177,12 +177,12 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  * @param E the entity type
  * @param sourceRef lambda returning the source collection (supports `::property` syntax)
  * @param keyExtractor trailing-lambda that extracts a collection of projection keys from an entity
- * @return a [MultiKeyProjectionMap] delegate grouping entities by every key in [keyExtractor]
+ * @return a [MultiKeyProjection] delegate grouping entities by every key in [keyExtractor]
  */
 fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> multiKeyProjection(
     sourceRef: () -> AggregateCollectionRef<K, E>,
     keyExtractor: (E) -> Collection<PK>
-): MultiKeyProjectionMap<K, PK, E> = MultiKeyProjectionMap(sourceRef, keyExtractor)
+): MultiKeyProjection<K, PK, E> = MultiKeyProjection(sourceRef, keyExtractor)
 
 /**
  * Creates a read-only value-transformed multi-key projection that groups entities from a source
@@ -205,16 +205,16 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> multiKey
  *   value; invoked only for buckets affected by the latest delta. `V` is constrained to be non-null so
  *   the add/replace/remove encoding of [ProjectionEntryChange] stays sound (a null value cannot be
  *   confused with an absent key)
- * @return an [ObservableProjectionMap] of type `Map<PK, V>` grouping transformed bucket values by every key in [keyExtractor];
- *   its [addOnEntriesChangedListener][ObservableProjectionMap.addOnEntriesChangedListener]
- *   emits per-key old/new transformed values; [close][CloseableProjectionMap.close] is a no-op for this
+ * @return an [ObservableProjection] of type `Map<PK, V>` grouping transformed bucket values by every key in [keyExtractor];
+ *   its [addOnEntriesChangedListener][ObservableProjection.addOnEntriesChangedListener]
+ *   emits per-key old/new transformed values; [close][CloseableProjection.close] is a no-op for this
  *   aggregate-source variant (no source subscription to release)
  */
 fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> multiKeyProjection(
     sourceRef: () -> AggregateCollectionRef<K, E>,
     keyExtractor: (E) -> Collection<PK>,
     valueTransform: (PK, List<E>) -> V
-): ObservableProjectionMap<PK, V> = TransformedMultiKeyProjectionMap(MultiKeyProjectionMap(sourceRef, keyExtractor), valueTransform)
+): ObservableProjection<PK, V> = TransformedMultiKeyProjection(MultiKeyProjection(sourceRef, keyExtractor), valueTransform)
 
 /**
  * Creates a read-only multi-key projection that groups all entities from a [Registry] by every key
@@ -238,12 +238,12 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  * @param E the entity type
  * @param registry the source registry to project
  * @param keyExtractor trailing-lambda that extracts a collection of projection keys from an entity
- * @return a [MultiKeyRegistryProjectionMap] delegate grouping registry entities by every key in [keyExtractor]
+ * @return a [MultiKeyRegistryProjection] delegate grouping registry entities by every key in [keyExtractor]
  */
 fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryMultiKeyProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> Collection<PK>
-): MultiKeyRegistryProjectionMap<K, PK, E> = MultiKeyRegistryProjectionMap(registry, keyExtractor)
+): MultiKeyRegistryProjection<K, PK, E> = MultiKeyRegistryProjection(registry, keyExtractor)
 
 /**
  * Creates a read-only value-transformed multi-key projection that groups all entities from a
@@ -267,13 +267,13 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registry
  *   value; invoked only for buckets affected by the latest delta. `V` is constrained to be non-null so
  *   the add/replace/remove encoding of [ProjectionEntryChange] stays sound (a null value cannot be
  *   confused with an absent key)
- * @return an [ObservableProjectionMap] of type `Map<PK, V>` grouping transformed bucket values by every
- *   key in [keyExtractor]; its [addOnEntriesChangedListener][ObservableProjectionMap.addOnEntriesChangedListener]
- *   emits per-key old/new transformed values, and [close][CloseableProjectionMap.close] releases the
+ * @return an [ObservableProjection] of type `Map<PK, V>` grouping transformed bucket values by every
+ *   key in [keyExtractor]; its [addOnEntriesChangedListener][ObservableProjection.addOnEntriesChangedListener]
+ *   emits per-key old/new transformed values, and [close][CloseableProjection.close] releases the
  *   registry subscription
  */
 fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> registryMultiKeyProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> Collection<PK>,
     valueTransform: (PK, List<E>) -> V
-): ObservableProjectionMap<PK, V> = TransformedMultiKeyRegistryProjectionMap(MultiKeyRegistryProjectionMap(registry, keyExtractor), valueTransform)
+): ObservableProjection<PK, V> = TransformedMultiKeyRegistryProjection(MultiKeyRegistryProjection(registry, keyExtractor), valueTransform)
