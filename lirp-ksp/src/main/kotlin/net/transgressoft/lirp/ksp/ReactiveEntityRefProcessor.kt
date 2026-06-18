@@ -701,17 +701,19 @@ class ReactiveEntityRefProcessor(
         val collectionEntriesCode = buildCollectionEntriesCode(collectionMetas)
 
         writeAccessorFile(
-            file = file,
-            packageName = packageName,
-            className = className,
-            kotlinClassName = kotlinClassName,
-            accessorName = accessorName,
-            visibility = visibility,
-            allReferencedFqns = allReferencedFqns,
-            entriesCode = entriesCode,
-            collectionEntriesCode = collectionEntriesCode,
-            collectionMetas = collectionMetas,
-            toOneEntries = toOneEntries
+            file,
+            AccessorFileSpec(
+                packageName = packageName,
+                className = className,
+                kotlinClassName = kotlinClassName,
+                accessorName = accessorName,
+                visibility = visibility,
+                allReferencedFqns = allReferencedFqns,
+                entriesCode = entriesCode,
+                collectionEntriesCode = collectionEntriesCode,
+                collectionMetas = collectionMetas,
+                toOneEntries = toOneEntries
+            )
         )
 
         logger.info("Generated $packageName.$accessorName for $className")
@@ -840,24 +842,40 @@ class ReactiveEntityRefProcessor(
         }
 
     /**
+     * Bundles the descriptive inputs for [writeAccessorFile]: the names of the accessor and its
+     * entity, the visibility, the imports to emit, and the pre-rendered entry code plus the metadata
+     * needed to generate `cancelAllBubbleUp`.
+     */
+    private data class AccessorFileSpec(
+        val packageName: String,
+        val className: String,
+        val kotlinClassName: String,
+        val accessorName: String,
+        val visibility: String,
+        val allReferencedFqns: List<String>,
+        val entriesCode: String,
+        val collectionEntriesCode: String,
+        val collectionMetas: List<CollectionRefPropertyMeta>,
+        val toOneEntries: List<ToOneRefPropertyMeta>
+    )
+
+    /**
      * Writes the `_LirpRefAccessor` source: package, imports, the generated KDoc header, the
      * `entries` and `collectionEntries` properties (each `emptyList()` when its section is blank),
-     * and the `cancelAllBubbleUp` override. The accessor-name set for [toOneEntries] scalar refs lets
-     * `cancelAllBubbleUp` avoid allocating a to-one delegate that was never created.
+     * and the `cancelAllBubbleUp` override. The accessor-name set for [AccessorFileSpec.toOneEntries]
+     * scalar refs lets `cancelAllBubbleUp` avoid allocating a to-one delegate that was never created.
      */
-    private fun writeAccessorFile(
-        file: OutputStream,
-        packageName: String,
-        className: String,
-        kotlinClassName: String,
-        accessorName: String,
-        visibility: String,
-        allReferencedFqns: List<String>,
-        entriesCode: String,
-        collectionEntriesCode: String,
-        collectionMetas: List<CollectionRefPropertyMeta>,
-        toOneEntries: List<ToOneRefPropertyMeta>
-    ) {
+    private fun writeAccessorFile(file: OutputStream, spec: AccessorFileSpec) {
+        val packageName = spec.packageName
+        val className = spec.className
+        val kotlinClassName = spec.kotlinClassName
+        val accessorName = spec.accessorName
+        val visibility = spec.visibility
+        val allReferencedFqns = spec.allReferencedFqns
+        val entriesCode = spec.entriesCode
+        val collectionEntriesCode = spec.collectionEntriesCode
+        val collectionMetas = spec.collectionMetas
+        val toOneEntries = spec.toOneEntries
         // Set of accessor names for scalar @ToOneAggregate entries — used in cancelAllBubbleUp to avoid
         // allocating a new delegate when none was created yet (e.g. entity closed before repo bind).
         // Delegate-val entries are excluded: their delegates are accessed directly without getOrComputeToOneRef.
