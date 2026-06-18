@@ -113,7 +113,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registry
  *   `V` is constrained to be non-null so the add/replace/remove encoding of [ProjectionEntryChange] stays sound
  * @param dispatchToFxThread when `true` (default), dispatches notifications to the FX Application Thread;
  *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
- * @return an [ObservableProjection] grouping transformed bucket values by secondary key;
+ * @return an [FxObservableProjection] grouping transformed bucket values by secondary key;
  *   its [addOnEntriesChangedListener][ObservableProjection.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
  */
@@ -122,7 +122,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
     keyExtractor: (E) -> PK,
     valueTransform: (PK, List<E>) -> V,
     dispatchToFxThread: Boolean = true
-): ObservableProjection<PK, V> =
+): FxObservableProjection<PK, V> =
     TransformedFxProjection(sourceRef, keyExtractor, valueTransform, dispatchToFxThread)
 
 /**
@@ -164,7 +164,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  *   constrained to be non-null so the add/replace/remove encoding of [ProjectionEntryChange] stays sound
  * @param dispatchToFxThread when `true` (default), dispatches notifications to the FX Application Thread;
  *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
- * @return an [ObservableProjection] grouping transformed bucket values by secondary key;
+ * @return an [FxObservableProjection] grouping transformed bucket values by secondary key;
  *   its [addOnEntriesChangedListener][ObservableProjection.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
  */
@@ -175,7 +175,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : A
     dataTransform: (PK, List<E>) -> D,
     fxFactory: (PK, D) -> V,
     dispatchToFxThread: Boolean = true
-): ObservableProjection<PK, V> =
+): FxObservableProjection<PK, V> =
     TransformedFxProjection(
         sourceRef,
         keyExtractor,
@@ -209,7 +209,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : A
  *   `V` is constrained to be non-null so the add/replace/remove encoding of [ProjectionEntryChange] stays sound
  * @param dispatchToFxThread when `true` (default), dispatches notifications to the FX Application Thread;
  *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
- * @return an [ObservableProjection] grouping transformed bucket values by secondary key;
+ * @return an [FxObservableProjection] grouping transformed bucket values by secondary key;
  *   its [addOnEntriesChangedListener][ObservableProjection.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
  */
@@ -218,7 +218,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
     keyExtractor: (E) -> PK,
     valueTransform: (PK, List<E>) -> V,
     dispatchToFxThread: Boolean = true
-): ObservableProjection<PK, V> =
+): FxObservableProjection<PK, V> =
     TransformedRegistryFxProjection(registry, keyExtractor, valueTransform, dispatchToFxThread)
 
 /**
@@ -260,7 +260,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  *   constrained to be non-null so the add/replace/remove encoding of [ProjectionEntryChange] stays sound
  * @param dispatchToFxThread when `true` (default), dispatches notifications to the FX Application Thread;
  *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
- * @return an [ObservableProjection] grouping transformed bucket values by secondary key;
+ * @return an [FxObservableProjection] grouping transformed bucket values by secondary key;
  *   its [addOnEntriesChangedListener][ObservableProjection.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
  */
@@ -271,7 +271,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : A
     dataTransform: (PK, List<E>) -> D,
     fxFactory: (PK, D) -> V,
     dispatchToFxThread: Boolean = true
-): ObservableProjection<PK, V> =
+): FxObservableProjection<PK, V> =
     TransformedRegistryFxProjection(
         registry,
         keyExtractor,
@@ -337,7 +337,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E> fxMultiKeyProjection(
  *   `V` is constrained to be non-null so the add/replace/remove encoding of [ProjectionEntryChange] stays sound
  * @param dispatchToFxThread when `true` (default), dispatches notifications to the FX Application Thread;
  *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
- * @return an [ObservableProjection] grouping transformed bucket values by multiple secondary keys;
+ * @return an [FxObservableProjection] grouping transformed bucket values by multiple secondary keys;
  *   its [addOnEntriesChangedListener][ObservableProjection.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
  */
@@ -346,7 +346,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E, V : Any> fxMultiKeyProjection(
     keyExtractor: (E) -> Collection<PK>,
     valueTransform: (PK, List<E>) -> V,
     dispatchToFxThread: Boolean = true
-): ObservableProjection<PK, V> where E : IdentifiableEntity<K>, E : ReactiveEntity<K, E> =
+): FxObservableProjection<PK, V> where E : IdentifiableEntity<K>, E : ReactiveEntity<K, E> =
     TransformedFxMultiKeyProjection(sourceRef, keyExtractor, valueTransform, dispatchToFxThread)
 
 /**
@@ -389,7 +389,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E, V : Any> fxMultiKeyProjection(
  *   constrained to be non-null so the add/replace/remove encoding of [ProjectionEntryChange] stays sound
  * @param dispatchToFxThread when `true` (default), dispatches notifications to the FX Application Thread;
  *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
- * @return an [ObservableProjection] grouping transformed bucket values by multiple secondary keys;
+ * @return an [FxObservableProjection] grouping transformed bucket values by multiple secondary keys;
  *   its [addOnEntriesChangedListener][ObservableProjection.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
  */
@@ -400,7 +400,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E, D, V : Any> fxMultiKeyProjection
     dataTransform: (PK, List<E>) -> D,
     fxFactory: (PK, D) -> V,
     dispatchToFxThread: Boolean = true
-): ObservableProjection<PK, V> where E : IdentifiableEntity<K>, E : ReactiveEntity<K, E> =
+): FxObservableProjection<PK, V> where E : IdentifiableEntity<K>, E : ReactiveEntity<K, E> =
     TransformedFxMultiKeyProjection(
         sourceRef,
         keyExtractor,
@@ -466,7 +466,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registry
  *   `V` is constrained to be non-null so the add/replace/remove encoding of [ProjectionEntryChange] stays sound
  * @param dispatchToFxThread when `true` (default), dispatches notifications to the FX Application Thread;
  *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
- * @return an [ObservableProjection] grouping transformed bucket values by multiple secondary keys;
+ * @return an [FxObservableProjection] grouping transformed bucket values by multiple secondary keys;
  *   its [addOnEntriesChangedListener][ObservableProjection.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
  */
@@ -475,7 +475,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
     keyExtractor: (E) -> Collection<PK>,
     valueTransform: (PK, List<E>) -> V,
     dispatchToFxThread: Boolean = true
-): ObservableProjection<PK, V> =
+): FxObservableProjection<PK, V> =
     TransformedRegistryFxMultiKeyProjection(registry, keyExtractor, valueTransform, dispatchToFxThread)
 
 /**
@@ -518,7 +518,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  *   constrained to be non-null so the add/replace/remove encoding of [ProjectionEntryChange] stays sound
  * @param dispatchToFxThread when `true` (default), dispatches notifications to the FX Application Thread;
  *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
- * @return an [ObservableProjection] grouping transformed bucket values by multiple secondary keys;
+ * @return an [FxObservableProjection] grouping transformed bucket values by multiple secondary keys;
  *   its [addOnEntriesChangedListener][ObservableProjection.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
  */
@@ -529,7 +529,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : A
     dataTransform: (PK, List<E>) -> D,
     fxFactory: (PK, D) -> V,
     dispatchToFxThread: Boolean = true
-): ObservableProjection<PK, V> =
+): FxObservableProjection<PK, V> =
     TransformedRegistryFxMultiKeyProjection(
         registry,
         keyExtractor,

@@ -49,9 +49,11 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
   receives a batched `List<ProjectionEntryChange<PK, V>>` carrying the old **and** new transformed
   value per key (add / replace / remove), so a consumer can drive a CRUD-style event stream directly
   from projection changes without maintaining its own diff cache. Registration replays the current
-  entries as adds so a late subscriber observes full state. FX value-transform maps expose
-  `addOnEntriesChangedListener` alongside their existing `ObservableMap`/`MapChangeListener` surface,
-  giving a single core-level listener API across both layers. Identity projection maps (the four
+  entries as adds so a late subscriber observes full state. The four FX value-transform factories
+  return `FxObservableProjection<PK, V>` — a single interface extending both JavaFX `ObservableMap`
+  and `ObservableProjection` — so a caller keeps `addListener(MapChangeListener)` **and**
+  `addOnEntriesChangedListener` without a cast, giving a single core-level listener API across both
+  layers. Identity projection maps (the four
   non-value-transform variants) deliberately do not implement this interface — see the wiki for the
   rationale. The transform output type `V` on every value-transform factory is now constrained to
   `V : Any`, so the add/replace/remove encoding of `ProjectionEntryChange` cannot be confused with an
