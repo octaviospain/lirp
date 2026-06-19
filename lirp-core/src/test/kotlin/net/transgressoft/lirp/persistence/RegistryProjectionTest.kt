@@ -239,6 +239,19 @@ internal class RegistryProjectionTest : StringSpec({
         projection.containsKey("Rock") shouldBe false
     }
 
+    "skips a redundant Create for an already-bucketed entity without duplicating it" {
+        trackRepo.create(1, "Track A", "Jazz")
+        val projection = registryProjection(trackRepo) { it.albumName }
+        projection["Jazz"]!!.size shouldBe 1
+
+        // A redundant Create for an id already held in a bucket (as happens when the seed iterator and
+        // a buffered seed-window create both reference the same entity) must not add it a second time.
+        trackRepo.emitAsync(StandardCrudEvent.Create(MutableAudioItem(1, "Track A", "Jazz")))
+        reactive.advance()
+
+        projection["Jazz"]!!.size shouldBe 1
+    }
+
     "fires onChange after Create" {
         val projection = registryProjection(trackRepo) { it.albumName }
         projection.size shouldBe 0
@@ -648,6 +661,21 @@ internal class RegistryProjectionTest : StringSpec({
         projection.containsKey("Jazz") shouldBe false
         projection["Rock"]!!.size shouldBe 2 // item and anotherItem still in Rock
         projection["Rock"]!!.any { it.id == item.id } shouldBe true
+    }
+
+    "MultiKeyRegistryProjection skips a redundant Create for an already-bucketed entity without duplicating it" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        multiKeyRepo.create(1, "Track A", setOf("Rock", "Jazz"))
+        val projection = registryMultiKeyProjection(multiKeyRepo) { it.genres }
+        projection["Rock"]!!.size shouldBe 1
+        projection["Jazz"]!!.size shouldBe 1
+
+        // A redundant Create for an id already held in its buckets must not add it a second time.
+        multiKeyRepo.emitAsync(StandardCrudEvent.Create(MutableMultiKeyAudioItem(1, "Track A", setOf("Rock", "Jazz"))))
+        reactive.advance()
+
+        projection["Rock"]!!.size shouldBe 1
+        projection["Jazz"]!!.size shouldBe 1
     }
 
     "MultiKeyRegistryProjection places entity in zero buckets when keyExtractor returns empty set" {

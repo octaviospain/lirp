@@ -110,19 +110,24 @@ class RegistryProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identifiabl
         if (initialized) return
         synchronized(initLock) {
             if (initialized) return
-            // Seed first so the initial snapshot is complete before any events are processed;
-            // soft-deleted entities are excluded from all buckets.
-            for (entity in registry) {
-                if (!isSoftDeleted(entity)) addToBucket(entity)
-            }
-            // Subscribe after the seed is complete to avoid double-applying events that arrive
-            // during iteration.
+            // Subscribe BEFORE seeding so events emitted concurrently during the seed iteration are
+            // not dropped (the publisher short-circuits emissions while there are no subscribers, and
+            // the registry iterator is only weakly consistent). Events arriving while seeding are
+            // buffered and replayed in arrival order after the seed completes, so the seed thread
+            // stays the sole writer during seeding. Entities captured by both the seed iterator and a
+            // buffered create are de-duplicated by the reverse-index guard in onCreated.
+            val seedBuffer = SeedEventBuffer<K, E>()
             subscription =
                 registry.subscribeAsync(
                     CrudEvent.Type.CREATE,
                     CrudEvent.Type.UPDATE,
                     CrudEvent.Type.DELETE
-                ) { event -> handleCrudEvent(event) }
+                ) { event -> if (!seedBuffer.deferIfSeeding(event)) handleCrudEvent(event) }
+            // Soft-deleted entities are excluded from all buckets.
+            for (entity in registry) {
+                if (!isSoftDeleted(entity)) addToBucket(entity)
+            }
+            seedBuffer.completeSeed { handleCrudEvent(it) }
             initialized = true
         }
     }
@@ -137,7 +142,11 @@ class RegistryProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identifiabl
     }
 
     private fun onCreated(entity: E) {
-        if (!isSoftDeleted(entity)) addToBucket(entity)
+        if (isSoftDeleted(entity)) return
+        // Skip entities already bucketed — e.g. one both captured by the seed iterator and replayed
+        // as a buffered create from the seed window — so it is not added to its bucket twice.
+        if (reverseIndex.containsKey(entity.id)) return
+        addToBucket(entity)
     }
 
     private fun onDeleted(entity: E) {
