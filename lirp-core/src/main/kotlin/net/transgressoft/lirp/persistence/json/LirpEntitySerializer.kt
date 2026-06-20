@@ -28,6 +28,7 @@ import net.transgressoft.lirp.persistence.MutableAggregateSet
 import net.transgressoft.lirp.persistence.ReactivePropertyDelegate
 import net.transgressoft.lirp.persistence.ReactivePropertyDelegateWithAccessors
 import net.transgressoft.lirp.persistence.ReactivePropertyEntry
+import net.transgressoft.lirp.persistence.writeReactivePropertyBackingField
 import kotlin.reflect.KClass
 import kotlin.reflect.KParameter
 import kotlin.reflect.KProperty1
@@ -53,10 +54,11 @@ import kotlinx.serialization.serializer
  * JSON field names match property names exactly.
  *
  * Reactive-property-backed fields are read and written through the KSP-generated
- * `{EntityName}_LirpReactivePropertyAccessor` (looked up via [Class.forName]). FxScalar-backed
- * fields use the analogous `{EntityName}_LirpFxScalarAccessor`. KSP is mandatory for any entity
- * with reactive-property or FxScalar delegates; a missing accessor at runtime surfaces a clear
- * `configure KSP` error rather than a swallowed `ClassNotFoundException`.
+ * `{EntityName}_LirpReactivePropertyAccessor` (looked up via [Class.forName]) when present.
+ * FxScalar-backed fields use the analogous `{EntityName}_LirpFxScalarAccessor`. When an entity's
+ * module does not apply lirp-ksp, both fall back to a reflection-based accessor so JSON
+ * round-tripping still works without code generation — at the cost of reflection on the property
+ * getters. Applying lirp-ksp restores the zero-reflection direct-call path.
  *
  * Usage: pass a sample entity instance to the [lirpSerializer] factory function to build
  * the serializer, then use it with [MapSerializer] when constructing a [JsonFileRepository]:
@@ -155,7 +157,8 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
         val hasFxScalarDelegate = registry.values.any { it is FxScalarPropertyDelegate }
 
         val reactivePropertyAccessor: LirpReactivePropertyAccessor<E>? =
-            tryLoadReactivePropertyAccessor(hasReactiveDelegate)
+            tryLoadReactivePropertyAccessor()
+                ?: if (hasReactiveDelegate) reflectionReactivePropertyAccessor(registry, memberProps) else null
         val fxScalarAccessor: LirpFxScalarAccessor<E>? = tryLoadFxScalarAccessor(hasFxScalarDelegate)
 
         val reactiveEntriesByName: Map<String, ReactivePropertyEntry<E>> =
@@ -479,12 +482,12 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
     /**
      * Attempts to load the KSP-generated reactive-property accessor for the entity class.
      *
-     * Returns `null` when the entity carries no reactive-property delegates and no accessor exists.
-     * Throws with a `configure KSP` remediation message when the entity has reactive-property
-     * delegates but no generated accessor was found — KSP is mandatory for persisted entities.
+     * Returns `null` when no generated accessor exists (the entity's module did not apply lirp-ksp,
+     * or the entity carries no reactive-property delegates). The caller substitutes a reflection
+     * fallback ([reflectionReactivePropertyAccessor]) when the entity does have reactive delegates.
      */
     @Suppress("UNCHECKED_CAST")
-    private fun tryLoadReactivePropertyAccessor(hasReactiveDelegate: Boolean): LirpReactivePropertyAccessor<E>? =
+    private fun tryLoadReactivePropertyAccessor(): LirpReactivePropertyAccessor<E>? =
         try {
             val accessorClass =
                 Class.forName(
@@ -494,15 +497,46 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
                 )
             accessorClass.getDeclaredConstructor().newInstance() as LirpReactivePropertyAccessor<E>
         } catch (_: ClassNotFoundException) {
-            if (hasReactiveDelegate) {
-                error(
-                    "Entity ${kClass.simpleName} has reactive-property delegates but no generated " +
-                        "LirpReactivePropertyAccessor — apply the net.transgressoft.lirp.sql Gradle plugin or add " +
-                        "lirp-ksp to your build.gradle dependencies block to configure KSP."
-                )
-            }
             null
         }
+
+    /**
+     * Builds a reflection-based [LirpReactivePropertyAccessor] for entities whose module does not
+     * apply lirp-ksp, so JSON round-tripping of reactive-property fields works without code
+     * generation. Each entry reads through the property's getter and writes via
+     * [writeReactivePropertyBackingField] — the same delegate-registry path the generated accessor
+     * uses, bypassing event emission and `lastDateModified` bumping — and resolves the value
+     * serializer from the property's declared type.
+     *
+     * This trades the generated direct-call accessor for reflection on the property getters; applying
+     * lirp-ksp restores the zero-reflection path. It needs no `--add-opens`, as values are written
+     * through the delegate registry rather than direct backing-field reflection.
+     */
+    private fun reflectionReactivePropertyAccessor(
+        registry: Map<String, *>,
+        memberProps: Map<String, KProperty1<E, *>>
+    ): LirpReactivePropertyAccessor<E> {
+        val reflectionEntries =
+            registry.entries
+                .filter { (_, delegate) ->
+                    delegate is ReactivePropertyDelegate<*> || delegate is ReactivePropertyDelegateWithAccessors<*>
+                }
+                .map { (name, _) ->
+                    val prop =
+                        memberProps[name]
+                            ?: error("Reactive property '$name' on ${kClass.simpleName} has no corresponding member property")
+                    prop.isAccessible = true
+                    ReactivePropertyEntry<E>(
+                        name = name,
+                        getter = { entity: E -> prop.get(entity) },
+                        silentSetter = { entity: E, value -> writeReactivePropertyBackingField<Any?>(entity, name, value) },
+                        serializer = serializer(prop.returnType)
+                    )
+                }
+        return object : LirpReactivePropertyAccessor<E> {
+            override val entries: List<ReactivePropertyEntry<E>> = reflectionEntries
+        }
+    }
 
     /**
      * Attempts to load the KSP-generated FxScalar accessor for the entity class.

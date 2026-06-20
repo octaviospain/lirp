@@ -28,6 +28,9 @@ import kotlinx.serialization.KSerializer
  *
  * The generated [entries] expose per-property silent setters and serializers that
  * `LirpEntitySerializer` uses to round-trip reactive-property-backed fields without reflection.
+ * When an entity's module does not apply lirp-ksp, `LirpEntitySerializer` synthesizes an equivalent
+ * accessor by reflection so JSON round-tripping still works — at the cost of reflective property
+ * access; applying lirp-ksp restores this zero-reflection path.
  * **This is API consumed by generated code — not intended for direct use by application code.**
  *
  * @param T the entity type this accessor was generated for

@@ -25,6 +25,12 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
   even when the entity is mutated again before the subscriber drains. `FieldChange<R, V>` is the
   per-field change carrier inside `BatchChanged`. The `MutationEvent.Type` enum gains
   `PROPERTY_CHANGED` (302) and `BATCH_CHANGED` (303).
+- **KSP-free JSON persistence** — `JsonFileRepository` now serializes and reloads reactive entities
+  whose module deliberately omits lirp-ksp. `LirpEntitySerializer` falls back to a reflection-based
+  reactive-property accessor (reusing the delegate-registry silent-setter path, so no `--add-opens`
+  is needed), and the redundant `_LirpRawInitializer` load-time guard is gone. Applying lirp-ksp
+  still yields the zero-reflection direct-call path; the fallback only trades that for reflection on
+  property getters.
 - **Registry-source projections** — `RegistryProjection` (core) and `RegistryFxProjection`
   (FX) project a `Registry`'s entities into buckets, complementing the existing aggregate-source
   projections. Registry-backed projections are `AutoCloseable` so their registry subscription can
