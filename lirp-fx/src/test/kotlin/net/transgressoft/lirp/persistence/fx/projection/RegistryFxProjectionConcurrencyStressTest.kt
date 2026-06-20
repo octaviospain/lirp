@@ -36,12 +36,17 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * Concurrency regression tests for the registry-backed FX projections under a large async batch
  * import, using the production reactive dispatchers (via [ReactiveScopeSerialization]) so the real
- * background event coroutine and the FX Application Thread are both active.
+ * background event coroutine and the flush pipeline are both active.
  *
  * Guards against a seed-window dropped-update race: registry events arriving in the interval between
  * the core subscribing and the projection finishing its direct seed must not be lost, even when the
  * projection is first initialized in the middle of the import. With unique-per-entity keys, a dropped
  * event is permanent (no later event re-flushes the key), so full materialization is a strict probe.
+ *
+ * The projections run with `dispatchToFxThread = false` so flushes are serialized through the
+ * reactive flow scope rather than `Platform.runLater`, matching the rest of the projection test
+ * suite and keeping the probe independent of FX-thread scheduling. The seed-window fix is dispatch
+ * mode independent, so this still exercises it faithfully.
  */
 @DisplayName("Registry FX projection concurrency")
 class RegistryFxProjectionConcurrencyStressTest : StringSpec({
@@ -62,12 +67,14 @@ class RegistryFxProjectionConcurrencyStressTest : StringSpec({
         try {
             for (i in 1..itemCount) {
                 pool.submit {
+                    // Count starts, not completions, so the mid-import gate opens the seed window
+                    // while the import is still in full flight — a stronger probe of the race.
+                    started.incrementAndGet()
                     try {
                         repo.create(i, "Track-$i", setOf("artist-$i"))
                     } catch (t: Throwable) {
                         errors.add(t)
                     } finally {
-                        started.incrementAndGet()
                         completed.countDown()
                     }
                 }
@@ -95,7 +102,7 @@ class RegistryFxProjectionConcurrencyStressTest : StringSpec({
     "RegistryFxMultiKeyProjection materializes every entry when first initialized during a large concurrent import"
         .config(tags = setOf(Stress)) {
             val repo = MultiKeyAudioItemVolatileRepository()
-            val projection = RegistryFxMultiKeyProjection(repo, { it.genres }, true)
+            val projection = RegistryFxMultiKeyProjection(repo, { it.genres }, false)
 
             runConcurrentImport(repo) { projection.addListener(MapChangeListener { }) }
 
@@ -106,7 +113,7 @@ class RegistryFxProjectionConcurrencyStressTest : StringSpec({
     "RegistryFxProjection materializes every entry when first initialized during a large concurrent import"
         .config(tags = setOf(Stress)) {
             val repo = MultiKeyAudioItemVolatileRepository()
-            val projection = RegistryFxProjection(repo, { it.title }, true)
+            val projection = RegistryFxProjection(repo, { it.title }, false)
 
             runConcurrentImport(repo) { projection.addListener(MapChangeListener { }) }
 
@@ -117,7 +124,7 @@ class RegistryFxProjectionConcurrencyStressTest : StringSpec({
     "RegistryFxMultiKeyProjection iterates entries, keys, and values without exception under a concurrent import"
         .config(tags = setOf(Stress)) {
             val repo = MultiKeyAudioItemVolatileRepository()
-            val projection = RegistryFxMultiKeyProjection(repo, { it.genres }, true)
+            val projection = RegistryFxMultiKeyProjection(repo, { it.genres }, false)
             projection.addListener(MapChangeListener { })
 
             shouldNotThrowAny {
@@ -137,11 +144,18 @@ class RegistryFxProjectionConcurrencyStressTest : StringSpec({
                             }
                         }
                     }
-                runConcurrentImport(repo) { /* already initialized above */ }
-                stop.set(1)
-                readerTask.get(30, TimeUnit.SECONDS)
-                reader.shutdownNow()
-                readerError.isEmpty() shouldBe true
+                try {
+                    runConcurrentImport(repo) { /* already initialized above */ }
+                    stop.set(1)
+                    readerTask.get(30, TimeUnit.SECONDS)
+                    readerError.isEmpty() shouldBe true
+                } finally {
+                    // Stop the reader loop (it polls `stop`, not interruption) and reap the thread on
+                    // every path, so an assertion failure above cannot leak a spinning reader into
+                    // later tests.
+                    stop.set(1)
+                    reader.shutdownNow()
+                }
             }
         }
 })
