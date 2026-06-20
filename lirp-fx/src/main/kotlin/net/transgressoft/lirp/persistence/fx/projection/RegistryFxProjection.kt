@@ -127,9 +127,15 @@ class RegistryFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identifia
         if (initialized) return
         synchronized(initLock) {
             if (initialized) return
+            // Wire the buckets-changed listener BEFORE triggering core initialization so a registry
+            // mutation landing in the seed window — the interval between the core subscribing and
+            // this projection finishing its direct seed — is buffered rather than lost. The core's
+            // own synchronous seed callbacks (fired on this thread) are ignored by the buffer; the
+            // seed is applied directly below.
+            val seedWindow = FxSeedWindowBuffer<PK>(::scheduleFlush)
+            core.addOnBucketsChangedListener(seedWindow::onBucketsChanged)
+
             // Trigger core initialization (seeds from registry, subscribes to CrudEvents).
-            // onBucketsChanged is left unset during this phase so the initial seed does not
-            // schedule a flush — the seed is applied directly to innerObservableMap below.
             core.size
 
             // Synchronously populate innerObservableMap from the core's freshly built buckets.
@@ -137,10 +143,6 @@ class RegistryFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identifia
                 val bucket = core.bucketSnapshot(key)
                 if (bucket != null) innerObservableMap[key] = freezeBucket(bucket)
             }
-
-            // Wire the coalescer after the initial seed so that only incremental (post-init) changes
-            // go through scheduleFlush.
-            core.addOnBucketsChangedListener(::scheduleFlush)
 
             // Subscribe to Update events to guarantee MapChangeListener fires for in-place mutations.
             // When an entity is mutated via a field assignment on the same object reference already
@@ -155,6 +157,10 @@ class RegistryFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identifia
                         if (keysToFlush.isNotEmpty()) scheduleUpdateFlush(keysToFlush)
                     }
                 }
+
+            // End the window and reconcile any keys mutated during it in a single batch, so no
+            // delta is lost between the seed snapshot and the listener becoming live.
+            seedWindow.drainAndReconcile()
 
             initBarrier?.complete(Unit)
             initialized = true
@@ -263,14 +269,16 @@ class RegistryFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identifia
         return innerObservableMap.size
     }
 
-    // Safe: ObservableMap declares MutableSet<MutableEntry> but the returned set is unmodifiable via Collections.unmodifiableSet.
-    // Callers cannot mutate through this view; the cast satisfies the interface contract without exposing true mutability.
-    // Returns the live entry set backed by innerObservableMap — consistent with keys and values,
-    // which also return live views. ConcurrentSkipListMap entries are CME-safe for iteration.
+    // Safe: ObservableMap declares MutableSet<MutableEntry> but the returned set is an unmodifiable
+    // point-in-time snapshot. Callers cannot mutate through this view; the cast satisfies the
+    // interface contract without exposing true mutability. The snapshot (rather than a live view of
+    // innerObservableMap.entries) gives every projection in the family the same read-only,
+    // stable-iteration entries semantics.
     @Suppress("UNCHECKED_CAST")
     override val entries: MutableSet<MutableMap.MutableEntry<PK, List<E>>> get() {
         initialize()
-        return Collections.unmodifiableSet(innerObservableMap.entries) as MutableSet<MutableMap.MutableEntry<PK, List<E>>>
+        val snapshot = innerObservableMap.entries.map { java.util.AbstractMap.SimpleImmutableEntry(it.key, it.value) }.toSet()
+        return Collections.unmodifiableSet(snapshot) as MutableSet<MutableMap.MutableEntry<PK, List<E>>>
     }
 
     // Safe: same as entries — Collections.unmodifiableSet wraps the keys. The MutableSet return type is required by

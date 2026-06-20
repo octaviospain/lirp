@@ -123,15 +123,23 @@ class MultiKeyRegistryProjection<K : Comparable<K>, PK : Comparable<PK>, E : Ide
         if (initialized) return
         synchronized(initLock) {
             if (initialized) return
-            for (entity in registry) {
-                if (!isSoftDeleted(entity)) addToBucket(entity)
-            }
+            // Subscribe BEFORE seeding so events emitted concurrently during the seed iteration are
+            // not dropped (the publisher short-circuits emissions while there are no subscribers, and
+            // the registry iterator is only weakly consistent). Events arriving while seeding are
+            // buffered and replayed in arrival order after the seed completes, so the seed thread
+            // stays the sole writer during seeding. Entities captured by both the seed iterator and a
+            // buffered create are de-duplicated by the reverse-index guard in onCreated.
+            val seedBuffer = SeedEventBuffer<K, E>()
             subscription =
                 registry.subscribeAsync(
                     CrudEvent.Type.CREATE,
                     CrudEvent.Type.UPDATE,
                     CrudEvent.Type.DELETE
-                ) { event -> handleCrudEvent(event) }
+                ) { event -> if (!seedBuffer.deferIfSeeding(event)) handleCrudEvent(event) }
+            for (entity in registry) {
+                if (!isSoftDeleted(entity)) addToBucket(entity)
+            }
+            seedBuffer.completeSeed { handleCrudEvent(it) }
             initialized = true
         }
     }
@@ -146,7 +154,11 @@ class MultiKeyRegistryProjection<K : Comparable<K>, PK : Comparable<PK>, E : Ide
     }
 
     private fun onCreated(entity: E) {
-        if (!isSoftDeleted(entity)) addToBucket(entity)
+        if (isSoftDeleted(entity)) return
+        // Skip entities already bucketed — e.g. one both captured by the seed iterator and replayed
+        // as a buffered create from the seed window — so it is not added to its buckets twice.
+        if (reverseIndex.containsKey(entity.id)) return
+        addToBucket(entity)
     }
 
     private fun onDeleted(entity: E) {
