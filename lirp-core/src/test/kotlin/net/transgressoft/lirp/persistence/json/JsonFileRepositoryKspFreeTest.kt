@@ -24,6 +24,8 @@ import io.kotest.matchers.shouldBe
 import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 
@@ -115,13 +117,17 @@ class JsonFileRepositoryKspFreeTest : StringSpec({
 
         val repo = JsonFileRepository(file, kspFreeSerializer())
         val events = CopyOnWriteArrayList<String>()
+        val firstEvent = CountDownLatch(1)
         for (entity in repo) {
-            entity.subscribeAsync { event -> events += event.toString() }
+            entity.subscribeAsync { event ->
+                events += event.toString()
+                firstEvent.countDown()
+            }
         }
         // The silent fallback setter bypasses event emission during load; the first real mutation
         // afterwards confirms the subscription is live and the load itself stayed quiet.
         repo.findById(0).orElseThrow().label = "mutated"
-        Thread.sleep(50)
+        firstEvent.await(2, TimeUnit.SECONDS) shouldBe true
         events.size shouldBe 1
         repo.close()
         file.parentFile?.deleteRecursively()
