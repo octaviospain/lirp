@@ -18,10 +18,14 @@
 package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.entity.ReactiveEntity
+import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.StandardCrudEvent
+import net.transgressoft.lirp.persistence.LirpRawConstructor
+import net.transgressoft.lirp.persistence.LirpRawInitializer
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.jetbrains.exposed.v1.core.Column
+import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
@@ -50,6 +54,8 @@ import kotlin.uuid.toKotlinUuid
  */
 internal class OptimisticLockRecovery<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     private val tableDef: SqlTableDef<R>,
+    private val publicRawInitializerFor: (Class<*>) -> LirpRawInitializer<Any>,
+    private val publicRawConstructorFor: (Class<*>) -> LirpRawConstructor<Any>?,
     private val table: Table,
     private val pkCol: Column<*>,
     private val versionCol: Column<Long>,
@@ -65,6 +71,53 @@ internal class OptimisticLockRecovery<K : Comparable<K>, R : ReactiveEntity<K, R
     private val emitRecoveryFailed: (K, Long, Exception) -> Unit
 ) {
     private val log = KotlinLogging.logger(javaClass.name)
+
+    // Mirrors SqlEntityLoader: when the table definition opts into construction delegation, the
+    // canonical row is rebuilt through the entity's co-located LirpRawConstructor rather than fromRow.
+    @Suppress("UNCHECKED_CAST")
+    private val rawConstructibleTableDef: RawConstructibleTableDef<R>? = tableDef as? RawConstructibleTableDef<R>
+
+    @Suppress("UNCHECKED_CAST")
+    private val rawConstructor: LirpRawConstructor<R>? by lazy {
+        rawConstructibleTableDef?.let { rc ->
+            val entityClass = Class.forName(rc.entityClassName)
+            (
+                publicRawConstructorFor(entityClass)
+                    ?: error(
+                        "RawConstructibleTableDef '${tableDef::class.qualifiedName}' declares " +
+                            "entityClassName='${rc.entityClassName}' but no " +
+                            "${rc.entityClassName}_LirpRawConstructor was found on the classpath"
+                    )
+            ) as LirpRawConstructor<R>
+        }
+    }
+
+    // Mirrors SqlEntityLoader's load flow: the raw constructor only sets constructor-supplied fields,
+    // so any remaining persisted scalar/reactive state must still be restored through the entity's
+    // LirpRawInitializer before the reconstructed instance is re-inserted. Otherwise Case 2b would
+    // resurrect a partially hydrated entity carrying default values for non-constructor columns.
+    private fun reconstruct(row: ResultRow): R {
+        val rc = rawConstructibleTableDef ?: return tableDef.fromRow(row, table)
+        val entity = rawConstructor!!.construct(rc.constructorParams(row, table))
+        resolveRawInitializer(entity)?.let { rawInit ->
+            if (entity is ReactiveEntityBase<*, *>) {
+                entity.withEventsDisabled { tableDef.applyScalarRow(entity, row, table, rawInit) }
+            } else {
+                tableDef.applyScalarRow(entity, row, table, rawInit)
+            }
+        }
+        return entity
+    }
+
+    // Null when the entity has no generated/hand-authored LirpRawInitializer — every persisted field
+    // is then a constructor parameter and the construct() result is already complete.
+    private fun resolveRawInitializer(entity: R): LirpRawInitializer<R>? =
+        try {
+            @Suppress("UNCHECKED_CAST")
+            publicRawInitializerFor(entity::class.java) as LirpRawInitializer<R>
+        } catch (_: IllegalStateException) {
+            null
+        }
 
     /**
      * Shared recovery path for a single conflict accumulated during a flush. Re-SELECTs the
@@ -143,7 +196,7 @@ internal class OptimisticLockRecovery<K : Comparable<K>, R : ReactiveEntity<K, R
             // Case 2b: our DELETE was defeated. The entity is no longer in in-memory state
             // but the canonical row exists — reconstruct and re-insert without enqueueing an
             // insert PendingOp (the row is already persisted).
-            val reconstructed = tableDef.fromRow(canonicalRow, table)
+            val reconstructed = reconstruct(canonicalRow)
             hydrateJunctions(reconstructed)
             // Suppress the Create event that would otherwise fire from addToMemoryOnly →
             // VolatileRepository.add. Recovery should look like a single Conflict to

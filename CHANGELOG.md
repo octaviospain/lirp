@@ -31,6 +31,17 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
   is needed), and the redundant `_LirpRawInitializer` load-time guard is gone. Applying lirp-ksp
   still yields the zero-reflection direct-call path; the fallback only trades that for reflection on
   property getters.
+- **Construction-free SQL persistence of non-public entities** — `SqlRepository.loadFromStore` can
+  now rebuild an entity whose primary constructor is `internal` or `private` — and therefore
+  unreachable from a separate persistence module — without a public factory. A table definition opts
+  in by implementing the new `RawConstructibleTableDef`: it supplies the constructor argument values
+  via `constructorParams` and the entity's binary name via `entityClassName`, and leaves `fromRow`
+  unused. Construction is delegated to a `LirpRawConstructor` co-located with the entity (resolved by
+  the `_LirpRawConstructor` `Class.forName` convention, mirroring `_LirpRawInitializer`), which alone
+  reaches the non-public constructor; remaining fields are still populated through
+  `LirpRawInitializer`. This makes the SQL bulk-load path symmetric with the reflective JSON
+  construction path for entities a persistence module cannot construct directly. KSP generation of
+  `_LirpRawConstructor` is not yet provided — hand-author the class for now.
 - **Registry-source projections** — `RegistryProjection` (core) and `RegistryFxProjection`
   (FX) project a `Registry`'s entities into buckets, complementing the existing aggregate-source
   projections. Registry-backed projections are `AutoCloseable` so their registry subscription can

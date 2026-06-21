@@ -19,6 +19,7 @@ package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.entity.ReactiveEntity
 import net.transgressoft.lirp.entity.ReactiveEntityBase
+import net.transgressoft.lirp.persistence.LirpRawConstructor
 import net.transgressoft.lirp.persistence.LirpRawInitializer
 import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.ResultRow
@@ -48,7 +49,8 @@ internal class SqlEntityLoader<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     private val exposedTable: ExposedTable,
     private val junctionTables: Map<JunctionTableDef, ExposedJunctionTable>,
     private val db: Database,
-    private val publicRawInitializerFor: (Class<*>) -> LirpRawInitializer<Any>
+    private val publicRawInitializerFor: (Class<*>) -> LirpRawInitializer<Any>,
+    private val publicRawConstructorFor: (Class<*>) -> LirpRawConstructor<Any>?
 ) {
     private val table: Table = exposedTable.table
 
@@ -56,6 +58,29 @@ internal class SqlEntityLoader<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     // safe — JunctionAware members are typed on the same self-type R as this loader's tableDef.
     @Suppress("UNCHECKED_CAST")
     private val junctionAware: JunctionAware<R>? = tableDef as? JunctionAware<R>
+
+    // Non-null when the table definition opts into construction delegation: the entity is built by
+    // its co-located LirpRawConstructor instead of tableDef.fromRow, so a persistence-module table
+    // definition can map an entity whose primary constructor is not reachable across the module wall.
+    @Suppress("UNCHECKED_CAST")
+    private val rawConstructibleTableDef: RawConstructibleTableDef<R>? = tableDef as? RawConstructibleTableDef<R>
+
+    // Resolved once (a RawConstructibleTableDef maps a single concrete entity type via
+    // entityClassName); polymorphic per-row construction stays on the fromRow path.
+    @Suppress("UNCHECKED_CAST")
+    private val rawConstructor: LirpRawConstructor<R>? by lazy {
+        rawConstructibleTableDef?.let { rc ->
+            val entityClass = Class.forName(rc.entityClassName)
+            (
+                publicRawConstructorFor(entityClass)
+                    ?: error(
+                        "RawConstructibleTableDef '${tableDef::class.qualifiedName}' declares " +
+                            "entityClassName='${rc.entityClassName}' but no " +
+                            "${rc.entityClassName}_LirpRawConstructor was found on the classpath"
+                    )
+            ) as LirpRawConstructor<R>
+        }
+    }
 
     /**
      * Loads all rows from the entity table (and its junction tables when present) into a
@@ -91,12 +116,22 @@ internal class SqlEntityLoader<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         val rawInitByClass = mutableMapOf<Class<*>, LirpRawInitializer<R>?>()
         val entities =
             table.selectAll().map { row ->
-                val entity = tableDef.fromRow(row, table)
+                val entity = constructEntity(row)
                 val rawInit = rawInitByClass.getOrPut(entity::class.java) { resolveRawInitializer(entity) }
                 rawInit?.let { applyScalarRow(entity, row, it) }
                 entity
             }
         return entities.associateBy { it.id }
+    }
+
+    /**
+     * Builds a single entity from [row]. Delegates to the entity's [LirpRawConstructor] when the
+     * table definition is a [RawConstructibleTableDef] (construction lives in the entity's module),
+     * otherwise calls [SqlTableDef.fromRow] as usual.
+     */
+    private fun constructEntity(row: ResultRow): R {
+        val rc = rawConstructibleTableDef ?: return tableDef.fromRow(row, table)
+        return rawConstructor!!.construct(rc.constructorParams(row, table))
     }
 
     private fun resolveRawInitializer(entity: R): LirpRawInitializer<R>? =

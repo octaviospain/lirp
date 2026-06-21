@@ -223,12 +223,14 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         // can react.
         activateEvents(CrudEvent.Type.RECOVERY_FAILED)
         schemaInstaller = SqlSchemaInstaller(dataSource, tableDef, exposedTable, junctionTables, db)
-        entityLoader = SqlEntityLoader(tableDef, exposedTable, junctionTables, db, ::publicRawInitializerFor)
+        entityLoader = SqlEntityLoader(tableDef, exposedTable, junctionTables, db, ::publicRawInitializerFor, ::publicRawConstructorFor)
         writePipeline = SqlWritePipeline(tableDef, exposedTable, junctionTables, pkCol, versionCol)
         recovery =
             versionCol?.let { vc ->
                 OptimisticLockRecovery(
                     tableDef = tableDef,
+                    publicRawInitializerFor = ::publicRawInitializerFor,
+                    publicRawConstructorFor = ::publicRawConstructorFor,
                     table = exposedTable.table,
                     pkCol = pkCol,
                     versionCol = vc,

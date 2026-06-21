@@ -39,6 +39,7 @@ internal object KspAccessorLoader {
     internal const val REF_ACCESSOR_SUFFIX = "_LirpRefAccessor"
     internal const val VIA_ACCESSOR_SUFFIX = "_LirpViaAccessor"
     internal const val RAW_INITIALIZER_SUFFIX = "_LirpRawInitializer"
+    internal const val RAW_CONSTRUCTOR_SUFFIX = "_LirpRawConstructor"
     internal const val REGISTRY_INFO_SUFFIX = "_LirpRegistryInfo"
 
     // Uses Optional as the map value to cache both "found" and "not found" states —
