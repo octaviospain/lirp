@@ -857,5 +857,33 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
         @JvmStatic
         fun publicRawInitializerFor(entityClass: Class<*>): LirpRawInitializer<Any> =
             rawInitializerFor(entityClass)
+
+        /**
+         * Returns the [LirpRawConstructor] for [entityClass], loading it via [KspAccessorLoader] on
+         * first call and caching the result, or `null` when none exists.
+         *
+         * Unlike [rawInitializerFor], absence is not an error: most entities are constructed through
+         * `SqlTableDef.fromRow` and have no constructor SPI. A `_LirpRawConstructor` exists only for
+         * entities whose table descriptor opts into construction delegation (a
+         * `RawConstructibleTableDef`); the SQL load path enforces presence at its own call site when
+         * that opt-in is declared.
+         */
+        @JvmStatic
+        internal fun rawConstructorFor(entityClass: Class<*>): LirpRawConstructor<Any>? =
+            KspAccessorLoader.load(entityClass, KspAccessorLoader.RAW_CONSTRUCTOR_SUFFIX)
+
+        /**
+         * Public cross-module entry point for [rawConstructorFor].
+         *
+         * `lirp-sql` (a separate Gradle / Kotlin module) needs to resolve raw constructors from
+         * `SqlRepository.loadFromStore`. Kotlin `internal` visibility is module-scoped, so the
+         * cross-module call site goes through this thin public wrapper. The actual cache and accessor
+         * lookup live in [rawConstructorFor] via [KspAccessorLoader].
+         *
+         * @return the resolved constructor, or `null` when the entity has no `_LirpRawConstructor`.
+         */
+        @JvmStatic
+        fun publicRawConstructorFor(entityClass: Class<*>): LirpRawConstructor<Any>? =
+            rawConstructorFor(entityClass)
     }
 }

@@ -862,7 +862,9 @@ public abstract class net/transgressoft/lirp/persistence/RegistryBase : net/tran
 	public synthetic fun isEventActive (Lnet/transgressoft/lirp/event/EventType;)Z
 	public fun iterator ()Ljava/util/Iterator;
 	public fun lazySearch (Ljava/util/function/Predicate;)Lkotlin/sequences/Sequence;
+	public static final fun publicRawConstructorFor (Ljava/lang/Class;)Lnet/transgressoft/lirp/persistence/LirpRawConstructor;
 	public static final fun publicRawInitializerFor (Ljava/lang/Class;)Lnet/transgressoft/lirp/persistence/LirpRawInitializer;
+	public static final fun rawConstructorFor$net_transgressoft_lirp_core (Ljava/lang/Class;)Lnet/transgressoft/lirp/persistence/LirpRawConstructor;
 	public static final fun rawInitializerFor$net_transgressoft_lirp_core (Ljava/lang/Class;)Lnet/transgressoft/lirp/persistence/LirpRawInitializer;
 	public static final fun refAccessorFor$net_transgressoft_lirp_core (Ljava/lang/Class;)Lnet/transgressoft/lirp/persistence/LirpRefAccessor;
 	public static final fun registerRepository (Ljava/lang/Class;Lnet/transgressoft/lirp/persistence/Repository;)V
@@ -887,6 +889,7 @@ public abstract class net/transgressoft/lirp/persistence/RegistryBase : net/tran
 
 public final class net/transgressoft/lirp/persistence/RegistryBase$Companion {
 	public final fun deregisterRepository (Ljava/lang/Class;)V
+	public final fun publicRawConstructorFor (Ljava/lang/Class;)Lnet/transgressoft/lirp/persistence/LirpRawConstructor;
 	public final fun publicRawInitializerFor (Ljava/lang/Class;)Lnet/transgressoft/lirp/persistence/LirpRawInitializer;
 	public final fun registerRepository (Ljava/lang/Class;Lnet/transgressoft/lirp/persistence/Repository;)V
 }

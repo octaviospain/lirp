@@ -58,6 +58,16 @@ public abstract interface class net/transgressoft/lirp/persistence/sql/JunctionT
 	public abstract fun isOrdered ()Z
 }
 
+public abstract interface class net/transgressoft/lirp/persistence/sql/RawConstructibleTableDef : net/transgressoft/lirp/persistence/sql/SqlTableDef {
+	public abstract fun constructorParams (Lorg/jetbrains/exposed/v1/core/ResultRow;Lorg/jetbrains/exposed/v1/core/Table;)Ljava/util/Map;
+	public fun fromRow (Lorg/jetbrains/exposed/v1/core/ResultRow;Lorg/jetbrains/exposed/v1/core/Table;)Ljava/lang/Object;
+	public abstract fun getEntityClassName ()Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/persistence/sql/RawConstructibleTableDef$DefaultImpls {
+	public static fun fromRow (Lnet/transgressoft/lirp/persistence/sql/RawConstructibleTableDef;Lorg/jetbrains/exposed/v1/core/ResultRow;Lorg/jetbrains/exposed/v1/core/Table;)Ljava/lang/Object;
+}
+
 public abstract interface class net/transgressoft/lirp/persistence/sql/SqlTableDef : net/transgressoft/lirp/persistence/LirpTableDef {
 	public abstract fun applyRow (Ljava/lang/Object;Lorg/jetbrains/exposed/v1/core/ResultRow;Lorg/jetbrains/exposed/v1/core/Table;)V
 	public abstract fun applyScalarRow (Ljava/lang/Object;Lorg/jetbrains/exposed/v1/core/ResultRow;Lorg/jetbrains/exposed/v1/core/Table;Lnet/transgressoft/lirp/persistence/LirpRawInitializer;)V

@@ -347,6 +347,10 @@ public final class net/transgressoft/lirp/persistence/LirpDeserializationExcepti
 	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 }
 
+public abstract interface class net/transgressoft/lirp/persistence/LirpRawConstructor {
+	public abstract fun construct (Ljava/util/Map;)Ljava/lang/Object;
+}
+
 public abstract interface class net/transgressoft/lirp/persistence/LirpRawInitializer {
 	public abstract fun getEntries ()Ljava/util/List;
 }
