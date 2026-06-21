@@ -1000,7 +1000,8 @@ public final class net/transgressoft/lirp/persistence/json/LirpEntityPolymorphic
 }
 
 public final class net/transgressoft/lirp/persistence/json/LirpEntitySerializer : kotlinx/serialization/KSerializer {
-	public fun <init> (Lkotlin/reflect/KClass;Lnet/transgressoft/lirp/entity/ReactiveEntityBase;)V
+	public fun <init> (Lkotlin/reflect/KClass;Lnet/transgressoft/lirp/entity/ReactiveEntityBase;Lkotlinx/serialization/modules/SerializersModule;)V
+	public synthetic fun <init> (Lkotlin/reflect/KClass;Lnet/transgressoft/lirp/entity/ReactiveEntityBase;Lkotlinx/serialization/modules/SerializersModule;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
 	public fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lnet/transgressoft/lirp/entity/ReactiveEntityBase;
 	public fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;

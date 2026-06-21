@@ -31,9 +31,20 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.descriptors.buildClassSerialDescriptor
+import kotlinx.serialization.descriptors.element
+import kotlinx.serialization.encoding.CompositeDecoder
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.encoding.decodeStructure
+import kotlinx.serialization.encoding.encodeStructure
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.modules.SerializersModule
+import kotlinx.serialization.modules.contextual
 
 // --- Fixture entities for LirpEntitySerializer tests ---
 
@@ -120,6 +131,84 @@ class CombinedDelegate(override val id: Int) : ReactiveEntityBase<Int, CombinedD
     }
 
     override fun hashCode(): Int = 31 * (31 * id + name.hashCode()) + tracks.referenceIds.hashCode()
+}
+
+/**
+ * A plain value type that is deliberately NOT `@Serializable`, modeling a domain type a consumer owns
+ * but chooses not to annotate (or cannot, e.g. a third-party type).
+ */
+class Coordinate(val latitude: Double, val longitude: Double) {
+    override fun equals(other: Any?): Boolean =
+        this === other || (other is Coordinate && latitude == other.latitude && longitude == other.longitude)
+
+    override fun hashCode(): Int = 31 * latitude.hashCode() + longitude.hashCode()
+}
+
+/**
+ * Hand-written contextual serializer for the non-`@Serializable` [Coordinate], registered in a
+ * [SerializersModule] and resolved by [LirpEntitySerializer] without annotating the domain type.
+ */
+object CoordinateSerializer : KSerializer<Coordinate> {
+    override val descriptor =
+        buildClassSerialDescriptor("Coordinate") {
+            element<Double>("latitude")
+            element<Double>("longitude")
+        }
+
+    override fun serialize(encoder: Encoder, value: Coordinate) {
+        encoder.encodeStructure(descriptor) {
+            encodeDoubleElement(descriptor, 0, value.latitude)
+            encodeDoubleElement(descriptor, 1, value.longitude)
+        }
+    }
+
+    override fun deserialize(decoder: Decoder): Coordinate =
+        decoder.decodeStructure(descriptor) {
+            var latitude = 0.0
+            var longitude = 0.0
+            while (true) {
+                when (val index = decodeElementIndex(descriptor)) {
+                    0 -> latitude = decodeDoubleElement(descriptor, 0)
+                    1 -> longitude = decodeDoubleElement(descriptor, 1)
+                    CompositeDecoder.DECODE_DONE -> break
+                    else -> error("Unexpected element index $index")
+                }
+            }
+            Coordinate(latitude, longitude)
+        }
+}
+
+/** Entity with a constructor parameter whose type is the non-`@Serializable` [Coordinate]. */
+class OriginEntity(override val id: Int, val origin: Coordinate) : ReactiveEntityBase<Int, OriginEntity>() {
+    override val uniqueId: String get() = id.toString()
+
+    override fun clone(): OriginEntity = OriginEntity(id, origin)
+
+    override fun equals(other: Any?): Boolean =
+        this === other || (other is OriginEntity && id == other.id && origin == other.origin)
+
+    override fun hashCode(): Int = 31 * id + origin.hashCode()
+}
+
+/**
+ * A `private` entity whose reactive property holds the non-`@Serializable` [Coordinate]. The KSP
+ * structural processors skip private classes, so no `_LirpReactivePropertyAccessor` is generated and
+ * the reflection-based reactive-property fallback resolves the field serializer through the supplied
+ * module — exercising the contextual path on a site distinct from [OriginEntity]'s constructor
+ * parameter. (Were KSP to process this class, its codegen could not resolve a serializer for the
+ * non-`@Serializable` field, so its absence is what keeps the fallback under test.)
+ */
+private class WaypointEntity(override val id: Int) : ReactiveEntityBase<Int, WaypointEntity>() {
+    var waypoint: Coordinate by reactiveProperty(Coordinate(0.0, 0.0))
+    override val uniqueId: String get() = id.toString()
+
+    override fun clone(): WaypointEntity =
+        WaypointEntity(id).also { copy -> copy.withEventsDisabled { copy.waypoint = waypoint } }
+
+    override fun equals(other: Any?): Boolean =
+        this === other || (other is WaypointEntity && id == other.id && waypoint == other.waypoint)
+
+    override fun hashCode(): Int = 31 * id + waypoint.hashCode()
 }
 
 /**
@@ -250,6 +339,60 @@ class LirpEntitySerializerTest : StringSpec({
         shouldThrow<IllegalStateException> {
             lirpSerializer(entity)
         }.message shouldContain "configure KSP"
+    }
+
+    "entity with a non-serializable field type fails to build a serializer without a contextual module" {
+        shouldThrow<SerializationException> {
+            lirpSerializer(OriginEntity(1, Coordinate(40.0, -3.0)))
+        }
+    }
+
+    "entity with a non-serializable field type round-trips when its serializer is registered contextually" {
+        val module = SerializersModule { contextual(Coordinate::class, CoordinateSerializer) }
+        val original = OriginEntity(7, Coordinate(40.4168, -3.7038))
+        val serializer = lirpSerializer(original, module)
+
+        val jsonStr = json.encodeToString(serializer, original)
+        jsonStr shouldContain "\"origin\""
+        jsonStr shouldContain "40.4168"
+
+        val decoded = json.decodeFromString(serializer, jsonStr)
+        decoded.id shouldBe 7
+        decoded.origin shouldBe Coordinate(40.4168, -3.7038)
+    }
+
+    "MapSerializer round-trips entities whose field is resolved by a contextual serializer" {
+        val module = SerializersModule { contextual(Coordinate::class, CoordinateSerializer) }
+        val mapSerializer = MapSerializer(Int.serializer(), lirpSerializer(OriginEntity(0, Coordinate(0.0, 0.0)), module))
+        val entities =
+            mapOf(
+                1 to OriginEntity(1, Coordinate(1.0, 2.0)),
+                2 to OriginEntity(2, Coordinate(3.0, 4.0))
+            )
+        val jsonStr = json.encodeToString(mapSerializer, entities)
+        val decoded = json.decodeFromString(mapSerializer, jsonStr)
+        decoded[1]?.origin shouldBe Coordinate(1.0, 2.0)
+        decoded[2]?.origin shouldBe Coordinate(3.0, 4.0)
+    }
+
+    "reactive property of a non-serializable type round-trips via the reflection fallback when registered contextually" {
+        val module = SerializersModule { contextual(Coordinate::class, CoordinateSerializer) }
+        val original = WaypointEntity(3).apply { waypoint = Coordinate(51.5074, -0.1278) }
+        val serializer = lirpSerializer(original, module)
+
+        val jsonStr = json.encodeToString(serializer, original)
+        jsonStr shouldContain "\"waypoint\""
+        jsonStr shouldContain "51.5074"
+
+        val decoded = json.decodeFromString(serializer, jsonStr)
+        decoded.id shouldBe 3
+        decoded.waypoint shouldBe Coordinate(51.5074, -0.1278)
+    }
+
+    "reactive property of a non-serializable type fails to build a serializer without a contextual module" {
+        shouldThrow<SerializationException> {
+            lirpSerializer(WaypointEntity(1))
+        }
     }
 })
 

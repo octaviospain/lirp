@@ -31,6 +31,14 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
   is needed), and the redundant `_LirpRawInitializer` load-time guard is gone. Applying lirp-ksp
   still yields the zero-reflection direct-call path; the fallback only trades that for reflection on
   property getters.
+- **Contextual serializers for non-`@Serializable` field types** — `LirpEntitySerializer` and the
+  `lirpSerializer(sample, serializersModule)` factory now accept a `SerializersModule` and resolve the
+  serializers for nested constructor-parameter and reactive-property field types through it. An entity
+  whose field types are not `@Serializable` — including third-party or polymorphic types the consumer
+  cannot annotate — can now be persisted by registering a contextual serializer for each such type
+  instead of annotating the domain model. This gives the JSON path the same bring-your-own-mapping
+  flexibility the SQL path already offers through `ColumnConverter`. The parameter defaults to an empty
+  module, so existing callers are unaffected.
 - **Construction-free SQL persistence of non-public entities** — `SqlRepository.loadFromStore` can
   now rebuild an entity whose primary constructor is `internal` or `private` — and therefore
   unreachable from a separate persistence module — without a public factory. A table definition opts

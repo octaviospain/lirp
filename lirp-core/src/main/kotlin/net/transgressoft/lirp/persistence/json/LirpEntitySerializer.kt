@@ -43,6 +43,8 @@ import kotlinx.serialization.descriptors.buildClassSerialDescriptor
 import kotlinx.serialization.encoding.CompositeDecoder
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.modules.EmptySerializersModule
+import kotlinx.serialization.modules.SerializersModule
 import kotlinx.serialization.serializer
 
 /**
@@ -60,20 +62,31 @@ import kotlinx.serialization.serializer
  * round-tripping still works without code generation — at the cost of reflection on the property
  * getters. Applying lirp-ksp restores the zero-reflection direct-call path.
  *
+ * Serializers for nested constructor-parameter and reactive-property field types are resolved
+ * through the supplied [serializersModule], so an entity whose field types are not `@Serializable`
+ * can still be persisted by registering a contextual serializer for each such type. With the default
+ * empty module, resolution falls back to the reflective built-in/`@Serializable` lookup — identical
+ * to the behavior of consumers that register no contextual serializers. This mirrors the
+ * `ColumnConverter` escape hatch the SQL persistence layer already offers.
+ *
  * Usage: pass a sample entity instance to the [lirpSerializer] factory function to build
  * the serializer, then use it with [MapSerializer] when constructing a [JsonFileRepository]:
  * ```kotlin
- * val serializer = lirpSerializer(MyEntity(defaultId))
+ * val module = SerializersModule { contextual(Artist::class, ArtistSerializer) }
+ * val serializer = lirpSerializer(MyEntity(defaultId), module)
  * val repo = JsonFileRepository(file, MapSerializer(Int.serializer(), serializer))
  * ```
  *
  * @param E the entity type
  * @param kClass the entity's [KClass]
  * @param sampleInstance a sample entity used to discover delegate properties at construction time
+ * @param serializersModule module consulted to resolve serializers for nested field types, enabling
+ *   contextual serializers for types that are not `@Serializable`; defaults to an empty module
  */
 class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
     private val kClass: KClass<E>,
-    sampleInstance: E
+    sampleInstance: E,
+    private val serializersModule: SerializersModule = EmptySerializersModule()
 ) : KSerializer<E> {
 
     /**
@@ -142,7 +155,7 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
                     val prop =
                         memberProps[param.name!!]
                             ?: error("Constructor param '${param.name}' has no corresponding member property on ${kClass.simpleName}")
-                    ConstructorParamInfo(param, serializer(param.type), prop)
+                    ConstructorParamInfo(param, serializersModule.serializer(param.type), prop)
                 }
 
         // Track constructor params that are also reactive delegates — they are serialized as
@@ -286,11 +299,11 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
             qualifiedName.endsWith("BooleanProperty") -> serializer<Boolean>()
             qualifiedName.endsWith("ObjectProperty") -> {
                 val typeArg = prop?.returnType?.arguments?.firstOrNull()?.type
-                if (typeArg != null) serializer(typeArg) else serializer<String?>()
+                if (typeArg != null) serializersModule.serializer(typeArg) else serializer<String?>()
             }
             else -> {
                 val value = delegate.javaClass.getMethod("get").invoke(delegate)
-                if (value != null) serializer(value::class.createType()) else serializer<String?>()
+                if (value != null) serializersModule.serializer(value::class.createType()) else serializer<String?>()
             }
         }
     }
@@ -530,7 +543,7 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
                         name = name,
                         getter = { entity: E -> prop.get(entity) },
                         silentSetter = { entity: E, value -> writeReactivePropertyBackingField<Any?>(entity, name, value) },
-                        serializer = serializer(prop.returnType)
+                        serializer = serializersModule.serializer(prop.returnType)
                     )
                 }
         return object : LirpReactivePropertyAccessor<E> {
@@ -571,7 +584,11 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
  * Creates a [LirpEntitySerializer] for the given entity type by introspecting a [sample] instance.
  *
  * @param sample any instance of the entity class — used to discover delegate properties
+ * @param serializersModule module consulted to resolve serializers for nested field types, enabling
+ *   contextual serializers for field types that are not `@Serializable`; defaults to an empty module
  * @return a [KSerializer] that serializes/deserializes entities via delegate introspection
  */
-inline fun <reified E : ReactiveEntityBase<*, *>> lirpSerializer(sample: E): LirpEntitySerializer<E> =
-    LirpEntitySerializer(E::class, sample)
+inline fun <reified E : ReactiveEntityBase<*, *>> lirpSerializer(
+    sample: E,
+    serializersModule: SerializersModule = EmptySerializersModule()
+): LirpEntitySerializer<E> = LirpEntitySerializer(E::class, sample, serializersModule)
