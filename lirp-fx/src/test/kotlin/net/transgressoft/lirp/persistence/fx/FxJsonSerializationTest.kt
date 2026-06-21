@@ -17,6 +17,7 @@
 
 package net.transgressoft.lirp.persistence.fx
 
+import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.persistence.json.lirpSerializer
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.annotation.DisplayName
@@ -25,9 +26,17 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.types.shouldBeInstanceOf
+import javafx.beans.property.ObjectProperty
 import javafx.collections.ObservableList
 import javafx.collections.ObservableSet
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.modules.SerializersModule
+import kotlinx.serialization.modules.contextual
 
 /**
  * Tests verifying JSON serialization round-trips for entities using [fxAggregateList],
@@ -191,4 +200,57 @@ class FxJsonSerializationTest : StringSpec({
 
         decoded.descriptionProperty.get() shouldBe null
     }
+
+    "fx object property holding a non-serializable type round-trips when registered contextually" {
+        val module = SerializersModule { contextual(Tempo::class, TempoSerializer) }
+        val tempoSerializer = lirpSerializer(TempoEntity(0), module)
+        val original = TempoEntity(7).apply { tempoProperty.set(Tempo(128.5)) }
+
+        val encoded = json.encodeToString(tempoSerializer, original)
+        encoded shouldContain "\"tempoProperty\""
+        encoded shouldContain "128.5"
+
+        val decoded = json.decodeFromString(tempoSerializer, encoded)
+        decoded.id shouldBe 7
+        decoded.tempoProperty.get() shouldBe Tempo(128.5)
+    }
 })
+
+/**
+ * A non-`@Serializable` value type carried in a JavaFX [ObjectProperty], modeling a third-party or
+ * domain type the consumer does not annotate. Resolved through a contextual [TempoSerializer].
+ */
+class Tempo(val beatsPerMinute: Double) {
+    override fun equals(other: Any?): Boolean =
+        this === other || (other is Tempo && beatsPerMinute == other.beatsPerMinute)
+
+    override fun hashCode(): Int = beatsPerMinute.hashCode()
+}
+
+/** Hand-written contextual serializer for the non-`@Serializable` [Tempo]. */
+object TempoSerializer : KSerializer<Tempo> {
+    override val descriptor = PrimitiveSerialDescriptor("Tempo", PrimitiveKind.DOUBLE)
+
+    override fun serialize(encoder: Encoder, value: Tempo) = encoder.encodeDouble(value.beatsPerMinute)
+
+    override fun deserialize(decoder: Decoder): Tempo = Tempo(decoder.decodeDouble())
+}
+
+/**
+ * A `private` entity whose `fxObject` scalar holds the non-`@Serializable` [Tempo]. The declared
+ * `ObjectProperty<Tempo>` type keeps it off the KSP FxScalar accessor, so [LirpEntitySerializer]
+ * resolves the value serializer through the reflection fallback's `ObjectProperty` branch — the
+ * third nested-field site threaded through the supplied module.
+ */
+private class TempoEntity(override val id: Int, initialTempo: Tempo? = null) : ReactiveEntityBase<Int, TempoEntity>() {
+    override val uniqueId: String get() = "tempo-$id"
+
+    val tempoProperty: ObjectProperty<Tempo?> by fxObject<Tempo>(initialTempo, dispatchToFxThread = false)
+
+    override fun clone(): TempoEntity = TempoEntity(id, tempoProperty.get())
+
+    override fun equals(other: Any?): Boolean =
+        this === other || (other is TempoEntity && id == other.id && tempoProperty.get() == other.tempoProperty.get())
+
+    override fun hashCode(): Int = 31 * id + (tempoProperty.get()?.hashCode() ?: 0)
+}
