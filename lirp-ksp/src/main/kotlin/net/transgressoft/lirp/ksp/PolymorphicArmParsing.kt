@@ -43,9 +43,22 @@ internal const val POLYMORPHIC_AGGREGATE_CALL = "polymorphicAggregate("
  */
 internal fun buildArmRegex(): Regex =
     Regex(
-        """\barm\s*<\s*([A-Za-z_][A-Za-z_0-9.]*)\s*,\s*([A-Za-z_][A-Za-z_0-9.]*)\s*>""" +
-            """\s*\(\s*"([^"]+)"\s*(?:,\s*(?:onDelete\s*=\s*)?CascadeAction\.([A-Za-z_][A-Za-z_0-9]*))?\s*\)""" +
-            """\s*\{\s*((?:this\.)?[A-Za-z_][A-Za-z_0-9]*(?:\.[A-Za-z_][A-Za-z_0-9]*)*)"""
+        """
+        \barm\s*<\s*                  # arm<
+        ([\w.]+)\s*,\s*               # type K
+        ([\w.]+)\s*>\s*               # type E
+        \(\s*                         # (
+        "([^"]*)"\s*                  # label
+        (?:
+            ,\s*
+            (?:onDelete\s*=\s*)?      # optional 'onDelete ='
+            CascadeAction\.(\w+)      # cascade action
+        )?
+        \s*\)                         # )
+        \s*\{\s*                      # {
+        ([\w.]+)                      # scalar path
+        """.trimIndent(),
+        RegexOption.COMMENTS
     )
 
 /**
