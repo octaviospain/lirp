@@ -118,7 +118,7 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
         // BEFORE invoking resolveConverter (which carries /). This preserves the
         // one-diagnostic-per-site invariant: a misplaced converter on a rejected target emits
         // the target rejection, not the kind/S diagnostics.
-        val converterInfo =
+        val explicitConverterInfo =
             if (hasNonSentinelConverterArgument(persistenceAnnotation)) {
                 when {
                     isPrimaryKey -> {
@@ -147,6 +147,11 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
             } else {
                 null
             }
+
+        // Fall back to a built-in default converter when the consumer declared none and the column's
+        // declared type has a generic JDK mapping. Default converters never apply to PK / @Version /
+        // FK columns (those reject converters outright). An explicit converter always wins.
+        val converterInfo = explicitConverterInfo ?: defaultConverterFor(typeFqn, isPrimaryKey, isVersion, isAggregateBackingScalar)
 
         // When a converter is bound, derive the column type from the converter's declared sqlType
         // (and refine it via compatible @PersistenceProperty hints). Otherwise fall back to the
@@ -218,12 +223,14 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
         // Reuse the converter resolution + hint-refinement pipeline so an
         // `@PersistenceProperty(converter = X::class)` at a scalar leaf inside an `@Embeddable`
         // produces the same column-type expression and fromRow/toParams casts it would at the
-        // top level.
+        // top level. A built-in default converter applies to a leaf of a covered JDK type when the
+        // consumer declared none; an explicit converter always wins. Embedded leaves are never
+        // PK / @Version / aggregate-FK columns, so no role-based suppression is needed here.
         val converterInfo =
             if (hasNonSentinelConverterArgument(persistenceAnnotation)) {
                 resolveConverter(persistenceAnnotation, propertyFqn)
             } else {
-                null
+                DEFAULT_CONVERTERS[childTypeFqn]
             }
 
         val hasExplicitConverter = hasNonSentinelConverterArgument(persistenceAnnotation)
@@ -743,6 +750,22 @@ internal class ColumnMetaBuilder(private val logger: KSPLogger) {
         }
 
         return ConverterInfo(converterFqn = converterFqn, sqlTypeFqn = sFqn)
+    }
+
+    /**
+     * Returns the built-in [ConverterInfo] for [typeFqn] when a default converter covers that domain
+     * type, or null when none applies. Default converters are suppressed on primary-key, `@Version`,
+     * and aggregate-FK columns, whose scalar type is dictated by their role rather than a value
+     * mapping — mirroring the explicit-converter rejection on those same positions.
+     */
+    private fun defaultConverterFor(
+        typeFqn: String,
+        isPrimaryKey: Boolean,
+        isVersion: Boolean,
+        isAggregateBackingScalar: Boolean
+    ): ConverterInfo? {
+        if (isPrimaryKey || isVersion || isAggregateBackingScalar) return null
+        return DEFAULT_CONVERTERS[typeFqn]
     }
 
     // Mutable for SqlTableDef fromRow purposes means: var property with a public setter.
