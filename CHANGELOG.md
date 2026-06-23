@@ -18,6 +18,17 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
 
 ### Added
 
+- **Built-in default `ColumnConverter`s for common JDK value types** — `PathColumnConverter`,
+  `DurationColumnConverter`, `InstantColumnConverter`, `OffsetDateTimeColumnConverter`,
+  `UriColumnConverter`, `UrlColumnConverter`, and `BigIntegerColumnConverter` ship in `lirp-api` and
+  are bound automatically when an entity property's declared type matches — no
+  `@PersistenceProperty(converter = …)` annotation and no registration required. `Path`, `URI`,
+  `URL`, `Instant`, `OffsetDateTime`, and `BigInteger` map to a `TEXT` column; `Duration` maps to a
+  `BIGINT` of nanoseconds. A consumer-supplied converter for the same type always wins, and
+  `length` / `precision` / `scale` hints refine a default-converter column exactly as they do an
+  explicit one. Types lirp already maps natively (`LocalDate`, `LocalDateTime`, `UUID`,
+  `BigDecimal`) are intentionally excluded. The change is additive and backward compatible: existing
+  hand-written converters keep working unchanged.
 - **Typed mutation events** — `PropertyChanged<K, R, V>` and `BatchChanged<K, R>` are now the
   primary event types emitted when reactive properties change. Both carry immutable value scalars
   (`oldValue`, `newValue`, `property`, `versionAtMutation`, `oldIndexKey`, `newIndexKey`) captured

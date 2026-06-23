@@ -27,6 +27,13 @@ internal const val SQL_TABLE_DEF_FQN = "net.transgressoft.lirp.persistence.sql.S
 internal const val UUID_FQN = "java.util.UUID"
 internal const val LOCAL_DATE_FQN = "java.time.LocalDate"
 internal const val LOCAL_DATE_TIME_FQN = "java.time.LocalDateTime"
+internal const val DURATION_FQN = "java.time.Duration"
+internal const val INSTANT_FQN = "java.time.Instant"
+internal const val OFFSET_DATE_TIME_FQN = "java.time.OffsetDateTime"
+internal const val PATH_FQN = "java.nio.file.Path"
+internal const val URI_FQN = "java.net.URI"
+internal const val URL_FQN = "java.net.URL"
+internal const val BIG_INTEGER_FQN = "java.math.BigInteger"
 internal const val KOTLIN_STRING_FQN = "kotlin.String"
 internal const val KOTLIN_INT_FQN = "kotlin.Int"
 internal const val KOTLIN_LONG_FQN = "kotlin.Long"
@@ -125,4 +132,26 @@ internal val ELEMENT_COLLECTION_S_TYPES: Set<String> =
     setOf(
         KOTLIN_STRING_FQN, KOTLIN_INT_FQN, KOTLIN_LONG_FQN, KOTLIN_SHORT_FQN,
         KOTLIN_BYTE_FQN, KOTLIN_BOOLEAN_FQN, KOTLIN_DOUBLE_FQN, KOTLIN_FLOAT_FQN
+    )
+
+private const val DEFAULT_CONVERTER_PACKAGE = "net.transgressoft.lirp.persistence"
+
+// Built-in default converters keyed by the domain type FQN they map. A column whose declared type
+// matches one of these keys — and which carries no explicit @PersistenceProperty(converter = …) —
+// is bound to the named converter exactly as if the consumer had annotated it, so the existing
+// converter codegen path (sqlType refinement, fromSql on read, toSql on write) drives the column.
+//
+// Resolution is a fallback: explicit converter resolution runs first in the column builders, so a
+// consumer-supplied converter for the same type always wins. Types lirp already maps natively
+// (LocalDate, LocalDateTime, UUID, BigDecimal) are intentionally absent — adding them here would
+// duplicate the FQN-driven inference path.
+internal val DEFAULT_CONVERTERS: Map<String, ConverterInfo> =
+    mapOf(
+        PATH_FQN to ConverterInfo("$DEFAULT_CONVERTER_PACKAGE.PathColumnConverter", KOTLIN_STRING_FQN),
+        DURATION_FQN to ConverterInfo("$DEFAULT_CONVERTER_PACKAGE.DurationColumnConverter", KOTLIN_LONG_FQN),
+        INSTANT_FQN to ConverterInfo("$DEFAULT_CONVERTER_PACKAGE.InstantColumnConverter", KOTLIN_STRING_FQN),
+        OFFSET_DATE_TIME_FQN to ConverterInfo("$DEFAULT_CONVERTER_PACKAGE.OffsetDateTimeColumnConverter", KOTLIN_STRING_FQN),
+        URI_FQN to ConverterInfo("$DEFAULT_CONVERTER_PACKAGE.UriColumnConverter", KOTLIN_STRING_FQN),
+        URL_FQN to ConverterInfo("$DEFAULT_CONVERTER_PACKAGE.UrlColumnConverter", KOTLIN_STRING_FQN),
+        BIG_INTEGER_FQN to ConverterInfo("$DEFAULT_CONVERTER_PACKAGE.BigIntegerColumnConverter", KOTLIN_STRING_FQN)
     )
