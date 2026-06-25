@@ -67,11 +67,15 @@ import kotlinx.coroutines.launch
  * @param registry the source registry to project
  * @param keyExtractor grouping function that extracts the projection key from an entity
  * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
+ * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
+ *   ordering is applied on the background thread before the FX-thread dispatch. When `null` (default),
+ *   buckets retain insertion order and existing behaviour is preserved.
  */
 class RegistryFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
     private val registry: Registry<K, E>,
     private val keyExtractor: (E) -> PK,
-    val dispatchToFxThread: Boolean = true
+    val dispatchToFxThread: Boolean = true,
+    val entryOrdering: Comparator<E>? = null
 ) : ObservableMap<PK, List<E>>, AutoCloseable {
     private val innerObservableMap: ObservableMap<PK, List<E>> =
         FXCollections.observableMap(ConcurrentSkipListMap<PK, List<E>>())
@@ -103,7 +107,7 @@ class RegistryFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identifia
     private val pendingUpdateKeys = LinkedHashSet<PK>()
     private val flushScheduled = AtomicBoolean(false)
 
-    private val core: RegistryProjection<K, PK, E> = RegistryProjection(registry, keyExtractor)
+    private val core: RegistryProjection<K, PK, E> = RegistryProjection(registry, keyExtractor, entryOrdering)
 
     // Subscription that forces a flush for in-place mutations where the entity is mutated
     // on the same object reference already stored in the bucket. In those cases the core's

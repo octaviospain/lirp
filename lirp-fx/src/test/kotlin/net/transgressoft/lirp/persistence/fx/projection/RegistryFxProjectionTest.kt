@@ -84,7 +84,7 @@ class RegistryFxProjectionTest : StringSpec({
         trackRepo.create(2, "Track B", "Jazz")
         trackRepo.create(3, "Track C", "Rock")
 
-        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, false)
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = false)
         val changes = mutableListOf<MapChangeListener.Change<out String, out List<AudioItem>>>()
         projection.addListener(MapChangeListener(changes::add))
 
@@ -98,7 +98,7 @@ class RegistryFxProjectionTest : StringSpec({
         trackRepo.create(2, "Track B", "Jazz")
         trackRepo.create(3, "Track C", "Rock")
 
-        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, false)
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = false)
 
         // Initial state is not populated until first access
         val map by projection
@@ -107,7 +107,7 @@ class RegistryFxProjectionTest : StringSpec({
     }
 
     "dispatches MapChangeListener on FX thread on Create" {
-        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, true)
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = true)
         val changes = mutableListOf<MapChangeListener.Change<out String, out List<AudioItem>>>()
         val onFxThread = mutableListOf<Boolean>()
 
@@ -136,7 +136,7 @@ class RegistryFxProjectionTest : StringSpec({
     }
 
     "dispatches MapChangeListener on Create" {
-        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, false)
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = false)
         val changes = mutableListOf<MapChangeListener.Change<out String, out List<AudioItem>>>()
         projection.addListener(MapChangeListener(changes::add))
 
@@ -151,7 +151,7 @@ class RegistryFxProjectionTest : StringSpec({
 
     "dispatches MapChangeListener on Delete" {
         val item = trackRepo.create(1, "Track A", "Jazz")
-        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, false)
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = false)
         val changes = mutableListOf<MapChangeListener.Change<out String, out List<AudioItem>>>()
         projection.addListener(MapChangeListener(changes::add))
 
@@ -166,7 +166,7 @@ class RegistryFxProjectionTest : StringSpec({
 
     "dispatches MapChangeListener on Update with same key" {
         val item = trackRepo.create(1, "Track A", "Jazz") as MutableAudioItem
-        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, false)
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = false)
         val changes = mutableListOf<MapChangeListener.Change<out String, out List<AudioItem>>>()
         projection.addListener(MapChangeListener(changes::add))
 
@@ -190,7 +190,7 @@ class RegistryFxProjectionTest : StringSpec({
 
     "re-buckets entity on FX thread when key changes on Update" {
         val item = trackRepo.create(1, "Track A", "Jazz") as MutableAudioItem
-        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, false)
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = false)
         val changes = mutableListOf<MapChangeListener.Change<out String, out List<AudioItem>>>()
         projection.addListener(MapChangeListener(changes::add))
 
@@ -210,7 +210,7 @@ class RegistryFxProjectionTest : StringSpec({
 
     "removes empty bucket when last entity deleted" {
         val item = trackRepo.create(1, "Track A", "Jazz")
-        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, false)
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = false)
         projection.addListener(MapChangeListener { })
 
         projection["Jazz"]!!.size shouldBe 1
@@ -222,7 +222,7 @@ class RegistryFxProjectionTest : StringSpec({
     }
 
     "fires single MapChangeListener pulse per event" {
-        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, false)
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = false)
         val pulseCount = AtomicInteger(0)
 
         projection.addListener(MapChangeListener { pulseCount.incrementAndGet() })
@@ -263,7 +263,7 @@ class RegistryFxProjectionTest : StringSpec({
         trackRepo.create(2, "Active Track", "Jazz")
         reactive.advance()
 
-        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, false)
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = false)
         projection.addListener(MapChangeListener { })
 
         projection["Jazz"]!!.size shouldBe 1
@@ -279,7 +279,7 @@ class RegistryFxProjectionTest : StringSpec({
         trackRepo.create(2, "Track B", "Jazz")
         reactive.advance()
 
-        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, false)
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = false)
         projection.addListener(MapChangeListener { })
         projection["Jazz"]!!.size shouldBe 2
 
@@ -299,7 +299,7 @@ class RegistryFxProjectionTest : StringSpec({
             }
         reactive.advance()
 
-        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, false)
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = false)
         projection.addListener(MapChangeListener { })
         projection["Jazz"]!!.size shouldBe 1
 
@@ -325,7 +325,7 @@ class RegistryFxProjectionTest : StringSpec({
         trackRepo.create(2, "T2", "Alpha")
         trackRepo.create(3, "T3", "Middle")
 
-        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, false)
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = false)
 
         projection.keys.toList() shouldBe listOf("Alpha", "Middle", "Zebra")
     }
@@ -333,7 +333,7 @@ class RegistryFxProjectionTest : StringSpec({
     "exposes read-only accessors consistent with bucket state" {
         trackRepo.create(1, "Track A", "Jazz")
         trackRepo.create(2, "Track B", "Rock")
-        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, false)
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = false)
         projection.addListener(MapChangeListener { })
 
         projection.isEmpty() shouldBe false
@@ -347,7 +347,7 @@ class RegistryFxProjectionTest : StringSpec({
     }
 
     "mutation methods throw because the projection is read-only" {
-        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, false)
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = false)
         projection.addListener(MapChangeListener { })
 
         shouldThrow<UnsupportedOperationException> { projection.put("X", emptyList()) }
@@ -357,7 +357,7 @@ class RegistryFxProjectionTest : StringSpec({
     }
 
     "registers and removes map and invalidation listeners" {
-        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, false)
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = false)
         var invalidations = 0
         val invalidationListener = InvalidationListener { invalidations++ }
         val mapListener = MapChangeListener<String, List<AudioItem>> { }
@@ -377,7 +377,7 @@ class RegistryFxProjectionTest : StringSpec({
 
     "ignores Delete for an entity that was never bucketed" {
         trackRepo.create(1, "Track A", "Jazz")
-        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, false)
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = false)
         projection.addListener(MapChangeListener { })
         projection["Jazz"]!!.size shouldBe 1
 
@@ -400,7 +400,7 @@ class RegistryFxProjectionTest : StringSpec({
                 trackRepo,
                 AudioItem::albumName,
                 { pk, items -> RegistryAlbumBucket(pk, items.map { it.title }.sorted()) },
-                false
+                dispatchToFxThread = false
             )
         projection.addListener(MapChangeListener { })
 
@@ -416,7 +416,7 @@ class RegistryFxProjectionTest : StringSpec({
                 trackRepo,
                 AudioItem::albumName,
                 { pk, items -> RegistryAlbumBucket(pk, items.map { it.title }) },
-                false
+                dispatchToFxThread = false
             )
         projection.addListener(MapChangeListener { pulseCount.incrementAndGet() })
 
@@ -440,7 +440,7 @@ class RegistryFxProjectionTest : StringSpec({
                     transformedOnFxThread.add(Platform.isFxApplicationThread())
                     RegistryAlbumBucket(pk, items.map { it.title })
                 },
-                false
+                dispatchToFxThread = false
             )
         projection.addListener(MapChangeListener { })
 
@@ -458,7 +458,7 @@ class RegistryFxProjectionTest : StringSpec({
                 trackRepo,
                 AudioItem::albumName,
                 { pk, items -> RegistryAlbumBucket(pk, items.map { it.title }) },
-                false
+                dispatchToFxThread = false
             )
         projection.addListener(MapChangeListener { })
 
@@ -478,7 +478,7 @@ class RegistryFxProjectionTest : StringSpec({
                 trackRepo,
                 AudioItem::albumName,
                 { pk, items -> RegistryAlbumBucket(pk, items.map { it.title }.sorted()) },
-                false
+                dispatchToFxThread = false
             )
         projection.addListener(MapChangeListener { })
         projection["Jazz"] shouldBe RegistryAlbumBucket("Jazz", listOf("Track A"))
@@ -498,7 +498,7 @@ class RegistryFxProjectionTest : StringSpec({
                 trackRepo,
                 AudioItem::albumName,
                 { pk, items -> RegistryAlbumBucket(pk, items.map { it.title }) },
-                false
+                dispatchToFxThread = false
             )
         projection.addListener(MapChangeListener { })
         projection.containsKey("Jazz") shouldBe true
@@ -522,7 +522,7 @@ class RegistryFxProjectionTest : StringSpec({
                 trackRepo,
                 AudioItem::albumName,
                 { pk, items -> RegistryAlbumBucket(pk, items.map { it.title }) },
-                false
+                dispatchToFxThread = false
             )
         projection.addListener(MapChangeListener { })
 
@@ -538,7 +538,7 @@ class RegistryFxProjectionTest : StringSpec({
                 trackRepo,
                 AudioItem::albumName,
                 { pk, items -> RegistryAlbumBucket(pk, items.map { it.title }) },
-                false
+                dispatchToFxThread = false
             )
         shouldThrow<UnsupportedOperationException> { projection.put("Jazz", RegistryAlbumBucket("Jazz", emptyList())) }
         shouldThrow<UnsupportedOperationException> { projection.remove("Jazz") }
@@ -548,7 +548,7 @@ class RegistryFxProjectionTest : StringSpec({
 
     "RegistryFxProjection close releases core subscription and update subscription" {
         trackRepo.create(1, "Track A", "Jazz")
-        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, false)
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = false)
         projection.addListener(MapChangeListener { })
 
         projection["Jazz"]!!.size shouldBe 1
@@ -569,7 +569,7 @@ class RegistryFxProjectionTest : StringSpec({
                 trackRepo,
                 AudioItem::albumName,
                 { pk, items -> RegistryAlbumBucket(pk, items.map { it.title }) },
-                false
+                dispatchToFxThread = false
             )
         projection.addListener(MapChangeListener { })
         projection.containsKey("Jazz") shouldBe true
@@ -683,7 +683,7 @@ class RegistryFxProjectionTest : StringSpec({
                     transformedOnFxThread.add(Platform.isFxApplicationThread())
                     RegistryAlbumBucket(pk, items.map { it.title }.sorted())
                 },
-                false
+                dispatchToFxThread = false
             )
         projection.addListener(MapChangeListener { })
 
@@ -702,7 +702,7 @@ class RegistryFxProjectionTest : StringSpec({
         trackRepo.create(3, "Track C", "Rock")
 
         val projection =
-            registryFxProjection(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, false)
+            registryFxProjection(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, dispatchToFxThread = false)
 
         val replayed = mutableMapOf<String, Pair<String?, String?>>()
         projection.addOnEntriesChangedListener { changes ->
@@ -719,7 +719,7 @@ class RegistryFxProjectionTest : StringSpec({
         reactive.advance()
 
         val projection =
-            registryFxProjection(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, false)
+            registryFxProjection(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, dispatchToFxThread = false)
 
         val changesLog = mutableListOf<Triple<String, String?, String?>>()
         projection.addOnEntriesChangedListener { changes ->
@@ -744,7 +744,7 @@ class RegistryFxProjectionTest : StringSpec({
         reactive.advance()
 
         val projection =
-            registryFxProjection(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, false)
+            registryFxProjection(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, dispatchToFxThread = false)
 
         val invocationCount = AtomicInteger(0)
         val lastBatchKeys = mutableListOf<String>()
@@ -772,7 +772,7 @@ class RegistryFxProjectionTest : StringSpec({
         reactive.advance()
 
         val projection =
-            registryFxProjection(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, false)
+            registryFxProjection(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, dispatchToFxThread = false)
 
         val changesLog = mutableListOf<ProjectionEntryChange<String, String>>()
         val handle = projection.addOnEntriesChangedListener { changes -> changesLog.addAll(changes) }
@@ -790,7 +790,7 @@ class RegistryFxProjectionTest : StringSpec({
         reactive.advance()
 
         val projection =
-            registryFxProjection(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, false)
+            registryFxProjection(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, dispatchToFxThread = false)
 
         val changesLog = mutableListOf<ProjectionEntryChange<String, String>>()
         projection.addOnEntriesChangedListener { changes -> changesLog.addAll(changes) }
@@ -808,7 +808,7 @@ class RegistryFxProjectionTest : StringSpec({
         reactive.advance()
 
         val projection =
-            registryFxProjection(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, false)
+            registryFxProjection(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, dispatchToFxThread = false)
 
         val deltas = mutableListOf<Triple<String, String?, String?>>()
         projection.addOnEntriesChangedListener { changes ->
@@ -839,7 +839,7 @@ class RegistryFxProjectionTest : StringSpec({
 
         // The transform ignores the title, so a title-only update recomputes the same value.
         val projection =
-            registryFxProjection(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, false)
+            registryFxProjection(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, dispatchToFxThread = false)
 
         val changesLog = mutableListOf<ProjectionEntryChange<String, String>>()
         projection.addOnEntriesChangedListener { changes -> changesLog.addAll(changes) }
@@ -858,7 +858,7 @@ class RegistryFxProjectionTest : StringSpec({
         reactive.advance()
 
         val projection =
-            registryFxProjection(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, false)
+            registryFxProjection(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, dispatchToFxThread = false)
 
         val secondListenerKeys = mutableListOf<String>()
         projection.addOnEntriesChangedListener { error("listener boom") }
@@ -906,11 +906,95 @@ class RegistryFxProjectionTest : StringSpec({
         fxFactoryOnFx.all { it } shouldBe true
     }
 
+    "RegistryFxProjection with entryOrdering delivers title-sorted bucket" {
+        trackRepo.create(1, "Zebra Track", "Jazz")
+        trackRepo.create(2, "Alpha Track", "Jazz")
+        trackRepo.create(3, "Middle Track", "Jazz")
+
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = false, entryOrdering = compareBy { it.title })
+        projection.addListener(MapChangeListener { })
+
+        val bucket = projection["Jazz"]!!
+        bucket.map { it.title } shouldBe listOf("Alpha Track", "Middle Track", "Zebra Track")
+    }
+
+    "RegistryFxProjection with null entryOrdering preserves insertion order" {
+        trackRepo.create(1, "Zebra Track", "Jazz")
+        trackRepo.create(2, "Alpha Track", "Jazz")
+        trackRepo.create(3, "Middle Track", "Jazz")
+
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = false)
+        projection.addListener(MapChangeListener { })
+
+        // Null ordering: titles appear in insertion order
+        projection["Jazz"]!!.map { it.title } shouldBe listOf("Zebra Track", "Alpha Track", "Middle Track")
+    }
+
+    "RegistryFxProjection repositions entity in bucket when sort-key title changes on Update" {
+        val item1 = trackRepo.create(1, "Zebra", "Jazz") as MutableAudioItem
+        trackRepo.create(2, "Alpha", "Jazz")
+        val projection = RegistryFxProjection(trackRepo, AudioItem::albumName, dispatchToFxThread = false, entryOrdering = compareBy { it.title })
+        projection.addListener(MapChangeListener { })
+
+        projection["Jazz"]!!.map { it.title } shouldBe listOf("Alpha", "Zebra")
+
+        // Rename "Zebra" to "Aardvark" — must move to front of sorted bucket
+        val oldSnapshot = item1.clone()
+        item1.title = "Aardvark"
+        trackRepo.emitAsync(StandardCrudEvent.Update(item1, oldSnapshot))
+        reactive.advance()
+
+        projection["Jazz"]!!.map { it.title } shouldBe listOf("Aardvark", "Alpha")
+    }
+
+    "TransformedRegistryFxProjection single-phase valueTransform receives title-sorted bucket" {
+        trackRepo.create(1, "Zebra Track", "Jazz")
+        trackRepo.create(2, "Alpha Track", "Jazz")
+
+        var receivedOrder = listOf<String>()
+        val projection =
+            TransformedRegistryFxProjection(
+                trackRepo,
+                AudioItem::albumName,
+                { _, items ->
+                    receivedOrder = items.map { it.title }
+                    RegistryAlbumBucket("Jazz", receivedOrder)
+                },
+                entryOrdering = compareBy { it.title },
+                dispatchToFxThread = false
+            )
+        projection.addListener(MapChangeListener { })
+
+        receivedOrder shouldBe listOf("Alpha Track", "Zebra Track")
+    }
+
+    "TransformedRegistryFxProjection two-phase dataTransform receives title-sorted bucket" {
+        trackRepo.create(1, "Zebra Track", "Jazz")
+        trackRepo.create(2, "Alpha Track", "Jazz")
+
+        var dataOrderCapture = listOf<String>()
+        val projection =
+            registryFxProjection(
+                trackRepo,
+                AudioItem::albumName,
+                dataTransform = { _, items ->
+                    dataOrderCapture = items.map { it.title }
+                    items.toList()
+                },
+                fxFactory = { albumName, items -> AlbumFxView(albumName, items) },
+                entryOrdering = compareBy { it.title },
+                dispatchToFxThread = false
+            )
+        projection.addListener(MapChangeListener { })
+
+        dataOrderCapture shouldBe listOf("Alpha Track", "Zebra Track")
+    }
+
     "TransformedRegistryFxProjection close refuses new entries-changed registration and delivers nothing after" {
         trackRepo.create(1, "Track A", "Rock")
         reactive.advance()
         val projection =
-            registryFxProjection(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, false)
+            registryFxProjection(trackRepo, AudioItem::albumName, { pk, items -> "$pk:${items.size}" }, dispatchToFxThread = false)
         projection.containsKey("Rock") shouldBe true
 
         projection.close()

@@ -91,6 +91,9 @@ import kotlinx.coroutines.launch
  * @param fxFactory FX-thread function that constructs the final `V` from the bucket key and the
  *   intermediate value produced by [dataTransform]; safe to build JavaFX property bindings here
  * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
+ * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
+ *   ordering is applied on the background thread (inside [dataTransform]'s input) before the
+ *   FX-thread dispatch. When `null` (default), buckets retain insertion order.
  */
 class TransformedRegistryFxMultiKeyProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>(
     private val registry: Registry<K, E>,
@@ -98,7 +101,8 @@ class TransformedRegistryFxMultiKeyProjection<K : Comparable<K>, PK : Comparable
     private val dataTransform: (PK, List<E>) -> Any?,
     @Suppress("UNCHECKED_CAST")
     private val fxFactory: (PK, Any?) -> V,
-    val dispatchToFxThread: Boolean = true
+    val dispatchToFxThread: Boolean = true,
+    val entryOrdering: Comparator<E>? = null
 ) : FxObservableProjection<PK, V> {
 
     private val log = KotlinLogging.logger {}
@@ -134,7 +138,7 @@ class TransformedRegistryFxMultiKeyProjection<K : Comparable<K>, PK : Comparable
     private val flushScheduled = AtomicBoolean(false)
 
     private val core: MultiKeyRegistryProjection<K, PK, E> =
-        MultiKeyRegistryProjection(registry, keyExtractor)
+        MultiKeyRegistryProjection(registry, keyExtractor, entryOrdering)
 
     /**
      * Constructs a single-transform projection. [valueTransform] runs entirely off-thread; an
@@ -145,19 +149,23 @@ class TransformedRegistryFxMultiKeyProjection<K : Comparable<K>, PK : Comparable
      * @param valueTransform pure off-thread function that maps a non-empty bucket to its display
      *   value; must not touch JavaFX observables
      * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
+     * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted
+     *   order before [valueTransform] receives it. When `null` (default), insertion order is kept.
      */
     @Suppress("UNCHECKED_CAST")
     constructor(
         registry: Registry<K, E>,
         keyExtractor: (E) -> Collection<PK>,
         valueTransform: (PK, List<E>) -> V,
-        dispatchToFxThread: Boolean = true
+        dispatchToFxThread: Boolean = true,
+        entryOrdering: Comparator<E>? = null
     ) : this(
         registry = registry,
         keyExtractor = keyExtractor,
         dataTransform = valueTransform,
         fxFactory = { _, staged -> staged as V },
-        dispatchToFxThread = dispatchToFxThread
+        dispatchToFxThread = dispatchToFxThread,
+        entryOrdering = entryOrdering
     )
 
     init {

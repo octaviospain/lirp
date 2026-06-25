@@ -102,7 +102,7 @@ class RegistryFxProjectionConcurrencyStressTest : StringSpec({
     "RegistryFxMultiKeyProjection materializes every entry when first initialized during a large concurrent import"
         .config(tags = setOf(Stress)) {
             val repo = MultiKeyAudioItemVolatileRepository()
-            val projection = RegistryFxMultiKeyProjection(repo, { it.genres }, false)
+            val projection = RegistryFxMultiKeyProjection(repo, { it.genres }, dispatchToFxThread = false)
 
             runConcurrentImport(repo) { projection.addListener(MapChangeListener { }) }
 
@@ -113,7 +113,7 @@ class RegistryFxProjectionConcurrencyStressTest : StringSpec({
     "RegistryFxProjection materializes every entry when first initialized during a large concurrent import"
         .config(tags = setOf(Stress)) {
             val repo = MultiKeyAudioItemVolatileRepository()
-            val projection = RegistryFxProjection(repo, { it.title }, false)
+            val projection = RegistryFxProjection(repo, { it.title }, dispatchToFxThread = false)
 
             runConcurrentImport(repo) { projection.addListener(MapChangeListener { }) }
 
@@ -124,7 +124,7 @@ class RegistryFxProjectionConcurrencyStressTest : StringSpec({
     "RegistryFxMultiKeyProjection iterates entries, keys, and values without exception under a concurrent import"
         .config(tags = setOf(Stress)) {
             val repo = MultiKeyAudioItemVolatileRepository()
-            val projection = RegistryFxMultiKeyProjection(repo, { it.genres }, false)
+            val projection = RegistryFxMultiKeyProjection(repo, { it.genres }, dispatchToFxThread = false)
             projection.addListener(MapChangeListener { })
 
             shouldNotThrowAny {

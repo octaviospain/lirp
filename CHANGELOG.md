@@ -138,6 +138,21 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
   the scalar form above is the recommended default. See
   [GitHub #255](https://github.com/octaviospain/lirp/issues/255).
 
+- **Per-bucket ordering for registry projections** — all four registry projection factories
+  (`registryProjection`, `registryMultiKeyProjection`, `registryFxProjection`,
+  `registryFxMultiKeyProjection`) and their `valueTransform` / two-phase `dataTransform`+`fxFactory`
+  overloads now accept an optional `entryOrdering: Comparator<E>? = null` parameter placed
+  immediately after `keyExtractor`. When a comparator is supplied, each per-key bucket `List<E>` is
+  kept sorted incrementally — new entities are inserted at their comparator position using a
+  stable upper-bound binary search, so equal elements retain arrival order (a newly arriving equal
+  element is placed after the existing run of equal elements). An in-place mutation to a sort-key
+  property re-positions the element within its bucket so the list remains ordered without a
+  full re-sort. A `valueTransform` or `dataTransform` callback always receives the already-ordered
+  `List<E>`; for FX variants, ordering is applied on the background thread before the FX-thread
+  dispatch, consistent with the existing off-thread transform contract. Omitting the parameter
+  (`null`) preserves the prior insertion order and is binary compatible.
+  See [#278](https://github.com/octaviospain/lirp/issues/278).
+
 ### Changed
 
 - **`@Aggregate` renamed to `@ToManyAggregates`** — the existing annotation for collection-typed

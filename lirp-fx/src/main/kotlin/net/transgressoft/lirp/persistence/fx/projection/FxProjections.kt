@@ -84,15 +84,18 @@ object FxProjections {
      * @param registry the source registry to project
      * @param keyExtractor function extracting the projection key from an entity
      * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
+     * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
+     *   when `null` (default), buckets retain insertion order
      */
     @JvmStatic
     @JvmOverloads
     fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryFxProjection(
         registry: Registry<K, E>,
         keyExtractor: (E) -> PK,
-        dispatchToFxThread: Boolean = true
+        dispatchToFxThread: Boolean = true,
+        entryOrdering: Comparator<E>? = null
     ): RegistryFxProjection<K, PK, E> =
-        RegistryFxProjection(registry, keyExtractor, dispatchToFxThread)
+        RegistryFxProjection(registry, keyExtractor, dispatchToFxThread, entryOrdering)
 
     /**
      * Creates a value-transformed [TransformedRegistryFxProjection] that groups all entities from a
@@ -106,15 +109,19 @@ object FxProjections {
      * @param keyExtractor function extracting the projection key from an entity
      * @param valueTransform pure function mapping a non-empty bucket to its display value
      * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
+     * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
+     *   when `null` (default), buckets retain insertion order
      */
     @JvmStatic
+    @JvmOverloads
     fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> registryFxProjection(
         registry: Registry<K, E>,
         keyExtractor: (E) -> PK,
         valueTransform: (PK, List<E>) -> V,
-        dispatchToFxThread: Boolean = true
+        dispatchToFxThread: Boolean = true,
+        entryOrdering: Comparator<E>? = null
     ): TransformedRegistryFxProjection<K, PK, E, V> =
-        TransformedRegistryFxProjection(registry, keyExtractor, valueTransform, dispatchToFxThread)
+        TransformedRegistryFxProjection(registry, keyExtractor, valueTransform, dispatchToFxThread, entryOrdering)
 
     /**
      * Creates a [FxMultiKeyProjection] that groups entities from an [FxObservableCollection] source
@@ -168,15 +175,18 @@ object FxProjections {
      * @param registry the source registry whose entities are projected
      * @param keyExtractor function that extracts the set of projection keys from an entity
      * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
+     * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
+     *   when `null` (default), buckets retain insertion order
      */
     @JvmStatic
     @JvmOverloads
     fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryFxMultiKeyProjection(
         registry: Registry<K, E>,
         keyExtractor: (E) -> Collection<PK>,
-        dispatchToFxThread: Boolean = true
+        dispatchToFxThread: Boolean = true,
+        entryOrdering: Comparator<E>? = null
     ): RegistryFxMultiKeyProjection<K, PK, E> =
-        RegistryFxMultiKeyProjection(registry, keyExtractor, dispatchToFxThread)
+        RegistryFxMultiKeyProjection(registry, keyExtractor, dispatchToFxThread, entryOrdering)
 
     /**
      * Creates a value-transformed [TransformedRegistryFxMultiKeyProjection] that groups all entities
@@ -190,13 +200,17 @@ object FxProjections {
      * @param keyExtractor function that extracts the set of projection keys from an entity
      * @param valueTransform pure function mapping a non-empty bucket to its display value
      * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
+     * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
+     *   when `null` (default), buckets retain insertion order
      */
     @JvmStatic
+    @JvmOverloads
     fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> registryFxMultiKeyProjection(
         registry: Registry<K, E>,
         keyExtractor: (E) -> Collection<PK>,
         valueTransform: (PK, List<E>) -> V,
-        dispatchToFxThread: Boolean = true
+        dispatchToFxThread: Boolean = true,
+        entryOrdering: Comparator<E>? = null
     ): TransformedRegistryFxMultiKeyProjection<K, PK, E, V> =
-        TransformedRegistryFxMultiKeyProjection(registry, keyExtractor, valueTransform, dispatchToFxThread)
+        TransformedRegistryFxMultiKeyProjection(registry, keyExtractor, valueTransform, dispatchToFxThread, entryOrdering)
 }

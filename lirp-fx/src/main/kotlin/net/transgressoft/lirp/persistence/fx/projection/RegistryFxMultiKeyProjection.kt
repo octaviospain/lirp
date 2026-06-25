@@ -67,11 +67,15 @@ import kotlinx.coroutines.launch
  * @param keyExtractor function that extracts the set of projection keys from an entity;
  *   each returned key names one bucket the entity belongs to
  * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
+ * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
+ *   ordering is applied on the background thread before the FX-thread dispatch. When `null` (default),
+ *   buckets retain insertion order and existing behaviour is preserved.
  */
 class RegistryFxMultiKeyProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
     private val registry: Registry<K, E>,
     private val keyExtractor: (E) -> Collection<PK>,
-    val dispatchToFxThread: Boolean = true
+    val dispatchToFxThread: Boolean = true,
+    val entryOrdering: Comparator<E>? = null
 ) : ObservableMap<PK, List<E>>, AutoCloseable {
 
     private val innerObservableMap: ObservableMap<PK, List<E>> =
@@ -94,7 +98,7 @@ class RegistryFxMultiKeyProjection<K : Comparable<K>, PK : Comparable<PK>, E : I
     private val flushScheduled = AtomicBoolean(false)
 
     private val core: MultiKeyRegistryProjection<K, PK, E> =
-        MultiKeyRegistryProjection(registry, keyExtractor)
+        MultiKeyRegistryProjection(registry, keyExtractor, entryOrdering)
 
     init {
         mutationChannel?.let { channel ->

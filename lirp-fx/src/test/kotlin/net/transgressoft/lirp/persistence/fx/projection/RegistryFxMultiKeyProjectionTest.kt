@@ -73,7 +73,7 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
     "RegistryFxMultiKeyProjection places an FX audio item with two genres into both buckets" {
         trackRepo.create(1, "Track A", setOf("Rock", "Jazz"))
 
-        val projection = RegistryFxMultiKeyProjection(trackRepo, { it.genres }, false)
+        val projection = RegistryFxMultiKeyProjection(trackRepo, { it.genres }, dispatchToFxThread = false)
         projection.addListener(MapChangeListener { })
 
         projection.containsKey("Rock") shouldBe true
@@ -86,7 +86,7 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
 
     "RegistryFxMultiKeyProjection mutating the genre set in place fires a single pulse adding the new bucket and removing the old" {
         val item = trackRepo.create(1, "Track A", setOf("Rock", "Jazz"))
-        val projection = RegistryFxMultiKeyProjection(trackRepo, { it.genres }, false)
+        val projection = RegistryFxMultiKeyProjection(trackRepo, { it.genres }, dispatchToFxThread = false)
         val pulseCount = AtomicInteger(0)
         projection.addListener(MapChangeListener { pulseCount.incrementAndGet() })
 
@@ -112,7 +112,7 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
 
     "RegistryFxMultiKeyProjection the item is never absent from all genre buckets during a re-bucket" {
         val item = trackRepo.create(1, "Track A", setOf("Rock", "Jazz"))
-        val projection = RegistryFxMultiKeyProjection(trackRepo, { it.genres }, false)
+        val projection = RegistryFxMultiKeyProjection(trackRepo, { it.genres }, dispatchToFxThread = false)
 
         val bucketsAtFlushTime = mutableListOf<Set<String>>()
         projection.addListener(
@@ -142,7 +142,7 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
 
     "RegistryFxMultiKeyProjection registry update that changes the genre set re-buckets" {
         val item = trackRepo.create(1, "Track A", setOf("Rock", "Jazz"))
-        val projection = RegistryFxMultiKeyProjection(trackRepo, { it.genres }, false)
+        val projection = RegistryFxMultiKeyProjection(trackRepo, { it.genres }, dispatchToFxThread = false)
         val changes = mutableListOf<MapChangeListener.Change<out String, out List<MutableMultiKeyAudioItem>>>()
         projection.addListener(MapChangeListener(changes::add))
 
@@ -165,7 +165,7 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
     "RegistryFxMultiKeyProjection excludes soft-deleted entities" {
         val softRepo = SoftDeletableMultiKeyAudioItemRepo()
         val item = softRepo.create(1, "Track A", setOf("Rock", "Jazz"))
-        val projection = RegistryFxMultiKeyProjection(softRepo, { it.genres }, false)
+        val projection = RegistryFxMultiKeyProjection(softRepo, { it.genres }, dispatchToFxThread = false)
         projection.addListener(MapChangeListener { })
 
         projection.containsKey("Rock") shouldBe true
@@ -182,7 +182,7 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
 
     "RegistryFxMultiKeyProjection empty key set — entity placed in zero buckets, no error" {
         trackRepo.create(1, "Track A", emptySet())
-        val projection = RegistryFxMultiKeyProjection(trackRepo, { it.genres }, false)
+        val projection = RegistryFxMultiKeyProjection(trackRepo, { it.genres }, dispatchToFxThread = false)
         projection.addListener(MapChangeListener { })
 
         projection.isEmpty() shouldBe true
@@ -190,7 +190,7 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
 
     "RegistryFxMultiKeyProjection containsValue, values, and mutation methods" {
         val item = trackRepo.create(1, "Track A", setOf("Rock", "Jazz"))
-        val projection = RegistryFxMultiKeyProjection(trackRepo, { it.genres }, false)
+        val projection = RegistryFxMultiKeyProjection(trackRepo, { it.genres }, dispatchToFxThread = false)
         projection.addListener(MapChangeListener { })
 
         projection.values.any { it.contains(item) } shouldBe true
@@ -205,7 +205,7 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
 
     "RegistryFxMultiKeyProjection close cancels registry subscription" {
         val item = trackRepo.create(1, "Track A", setOf("Rock"))
-        val projection = RegistryFxMultiKeyProjection(trackRepo, { it.genres }, false)
+        val projection = RegistryFxMultiKeyProjection(trackRepo, { it.genres }, dispatchToFxThread = false)
         projection.addListener(MapChangeListener { })
         projection.containsKey("Rock") shouldBe true
 
@@ -223,7 +223,7 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
     }
 
     "RegistryFxMultiKeyProjection dispatches MapChangeListener on FX Application Thread" {
-        val projection = RegistryFxMultiKeyProjection(trackRepo, { it.genres }, true)
+        val projection = RegistryFxMultiKeyProjection(trackRepo, { it.genres }, dispatchToFxThread = true)
         val onFxThread = mutableListOf<Boolean>()
         val latch = CountDownLatch(1)
 
@@ -255,7 +255,7 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
                 trackRepo,
                 { it.genres },
                 { pk, items -> "[$pk:${items.size}]" },
-                false
+                dispatchToFxThread = false
             )
         projection.addListener(MapChangeListener { })
 
@@ -271,7 +271,7 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
                 trackRepo,
                 { it.genres },
                 { pk, items -> "[$pk:${items.size}]" },
-                false
+                dispatchToFxThread = false
             )
         projection.addListener(MapChangeListener { })
 
@@ -298,7 +298,7 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
                 trackRepo,
                 { it.genres },
                 { pk, items -> "[$pk:${items.size}]" },
-                false
+                dispatchToFxThread = false
             )
         projection.addListener(MapChangeListener { })
 
@@ -315,7 +315,7 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
                 trackRepo,
                 { it.genres },
                 { pk, items -> "[$pk:${items.size}]" },
-                false
+                dispatchToFxThread = false
             )
         shouldThrow<UnsupportedOperationException> { projection.put("Rock", "[Rock:0]") }
         shouldThrow<UnsupportedOperationException> { projection.remove("Rock") }
@@ -330,7 +330,7 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
                 trackRepo,
                 { it.genres },
                 { pk, items -> "[$pk:${items.size}]" },
-                false
+                dispatchToFxThread = false
             )
         projection.addListener(MapChangeListener { })
         projection.containsKey("Rock") shouldBe true
@@ -442,7 +442,7 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
                     transformedOnFxThread.add(Platform.isFxApplicationThread())
                     "[$pk:${items.size}]"
                 },
-                false
+                dispatchToFxThread = false
             )
         projection.addListener(MapChangeListener { })
 
@@ -457,7 +457,7 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
         trackRepo.create(2, "Track B", setOf("Jazz"))
 
         val projection =
-            registryFxMultiKeyProjection(trackRepo, { it.genres }, { pk, items -> "$pk:${items.size}" }, false)
+            registryFxMultiKeyProjection(trackRepo, { it.genres }, { pk, items -> "$pk:${items.size}" }, dispatchToFxThread = false)
 
         val replayed = mutableMapOf<String, Pair<String?, String?>>()
         projection.addOnEntriesChangedListener { changes ->
@@ -471,7 +471,7 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
 
     "TransformedRegistryFxMultiKeyProjection addOnEntriesChangedListener emits multi-key fan-out in a single batch" {
         val projection =
-            registryFxMultiKeyProjection(trackRepo, { it.genres }, { pk, items -> "$pk:${items.size}" }, false)
+            registryFxMultiKeyProjection(trackRepo, { it.genres }, { pk, items -> "$pk:${items.size}" }, dispatchToFxThread = false)
 
         val invocationCount = AtomicInteger(0)
         val lastBatchKeys = mutableListOf<String>()
@@ -493,7 +493,7 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
         reactive.advance()
 
         val projection =
-            registryFxMultiKeyProjection(trackRepo, { it.genres }, { pk, items -> "$pk:${items.size}" }, false)
+            registryFxMultiKeyProjection(trackRepo, { it.genres }, { pk, items -> "$pk:${items.size}" }, dispatchToFxThread = false)
 
         val changesLog = mutableListOf<ProjectionEntryChange<String, String>>()
         val handle = projection.addOnEntriesChangedListener { changes -> changesLog.addAll(changes) }
@@ -540,11 +540,92 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
         fxFactoryOnFx.all { it } shouldBe true
     }
 
+    "RegistryFxMultiKeyProjection with entryOrdering delivers title-sorted genre buckets" {
+        trackRepo.create(1, "Zebra Track", setOf("Rock", "Jazz"))
+        trackRepo.create(2, "Alpha Track", setOf("Rock"))
+        trackRepo.create(3, "Middle Track", setOf("Jazz"))
+
+        val projection = RegistryFxMultiKeyProjection(trackRepo, { it.genres }, dispatchToFxThread = false, entryOrdering = compareBy { it.title })
+        projection.addListener(MapChangeListener { })
+
+        projection["Rock"]!!.map { it.title } shouldBe listOf("Alpha Track", "Zebra Track")
+        projection["Jazz"]!!.map { it.title } shouldBe listOf("Middle Track", "Zebra Track")
+    }
+
+    "RegistryFxMultiKeyProjection with null entryOrdering preserves insertion order" {
+        trackRepo.create(1, "Zebra Track", setOf("Rock"))
+        trackRepo.create(2, "Alpha Track", setOf("Rock"))
+
+        val projection = RegistryFxMultiKeyProjection(trackRepo, { it.genres }, dispatchToFxThread = false)
+        projection.addListener(MapChangeListener { })
+
+        projection["Rock"]!!.map { it.title } shouldBe listOf("Zebra Track", "Alpha Track")
+    }
+
+    "RegistryFxMultiKeyProjection with entryOrdering repositions entity in genre bucket on title mutation" {
+        val item = trackRepo.create(1, "Zebra Track", setOf("Rock"))
+        trackRepo.create(2, "Alpha Track", setOf("Rock"))
+
+        val projection = RegistryFxMultiKeyProjection(trackRepo, { it.genres }, dispatchToFxThread = false, entryOrdering = compareBy { it.title })
+        projection.addListener(MapChangeListener { })
+
+        projection["Rock"]!!.map { it.title } shouldBe listOf("Alpha Track", "Zebra Track")
+
+        val oldSnapshot = item.clone()
+        item.title = "Aardvark Track"
+        trackRepo.emitAsync(StandardCrudEvent.Update(item, oldSnapshot))
+        reactive.advance()
+
+        projection["Rock"]!!.map { it.title } shouldBe listOf("Aardvark Track", "Alpha Track")
+    }
+
+    "RegistryFxMultiKeyProjection with entryOrdering re-buckets and sorts when an Update changes both genres and title" {
+        val item = trackRepo.create(1, "Mid Track", setOf("Rock"))
+        trackRepo.create(2, "Alpha Track", setOf("Jazz"))
+        trackRepo.create(3, "Zebra Track", setOf("Jazz"))
+
+        val projection = RegistryFxMultiKeyProjection(trackRepo, { it.genres }, dispatchToFxThread = false, entryOrdering = compareBy { it.title })
+        projection.addListener(MapChangeListener { })
+
+        projection["Rock"]!!.map { it.title } shouldBe listOf("Mid Track")
+        projection["Jazz"]!!.map { it.title } shouldBe listOf("Alpha Track", "Zebra Track")
+
+        val oldSnapshot = item.clone()
+        item.title = "Beta Track"
+        item.genres = setOf("Jazz")
+        trackRepo.emitAsync(StandardCrudEvent.Update(item, oldSnapshot))
+        reactive.advance()
+
+        projection.containsKey("Rock") shouldBe false
+        projection["Jazz"]!!.map { it.title } shouldBe listOf("Alpha Track", "Beta Track", "Zebra Track")
+    }
+
+    "TransformedRegistryFxMultiKeyProjection valueTransform receives title-sorted genre bucket" {
+        trackRepo.create(1, "Zebra Track", setOf("Rock"))
+        trackRepo.create(2, "Alpha Track", setOf("Rock"))
+
+        var capturedOrder = listOf<String>()
+        val projection =
+            registryFxMultiKeyProjection(
+                trackRepo,
+                { it.genres },
+                { _, items ->
+                    capturedOrder = items.map { it.title }
+                    "${ items.map { it.title }.sorted() }"
+                },
+                entryOrdering = compareBy { it.title },
+                dispatchToFxThread = false
+            )
+        projection.addListener(MapChangeListener { })
+
+        capturedOrder shouldBe listOf("Alpha Track", "Zebra Track")
+    }
+
     "TransformedRegistryFxMultiKeyProjection close refuses new entries-changed registration and delivers nothing after" {
         trackRepo.create(1, "Track A", setOf("Rock"))
         reactive.advance()
         val projection =
-            registryFxMultiKeyProjection(trackRepo, { it.genres }, { pk, items -> "$pk:${items.size}" }, false)
+            registryFxMultiKeyProjection(trackRepo, { it.genres }, { pk, items -> "$pk:${items.size}" }, dispatchToFxThread = false)
         projection.containsKey("Rock") shouldBe true
 
         projection.close()
