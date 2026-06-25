@@ -5,7 +5,63 @@ All notable changes to **LIRP (Lightweight Reactive Persistence)** are documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — 3.0.0
+## [Unreleased] — 3.1.0
+
+Small, additive improvements on top of the 3.0.0 release: per-bucket ordering for registry
+projections, and a read-only query-diagnostics (`EXPLAIN`) surface over the in-memory query
+planner. One internal type relocation (`ViaStrategy`) is the only breaking change.
+
+### Added
+
+- **Per-bucket ordering for registry projections** — all four registry projection factories
+  (`registryProjection`, `registryMultiKeyProjection`, `registryFxProjection`,
+  `registryFxMultiKeyProjection`) and their `valueTransform` / two-phase `dataTransform`+`fxFactory`
+  overloads now accept an optional `entryOrdering: Comparator<E>? = null` parameter placed
+  immediately after `keyExtractor`. When a comparator is supplied, each per-key bucket `List<E>` is
+  kept sorted incrementally — new entities are inserted at their comparator position using a
+  stable upper-bound binary search, so equal elements retain arrival order (a newly arriving equal
+  element is placed after the existing run of equal elements). An in-place mutation to a sort-key
+  property re-positions the element within its bucket so the list remains ordered without a
+  full re-sort. A `valueTransform` or `dataTransform` callback always receives the already-ordered
+  `List<E>`; for FX variants, ordering is applied on the background thread before the FX-thread
+  dispatch, consistent with the existing off-thread transform contract. Omitting the parameter
+  (`null`) preserves the prior insertion order and is binary compatible.
+  See [#278](https://github.com/octaviospain/lirp/issues/278).
+
+- **Query diagnostics API** — two new extension functions on `Registry<K, E>` expose the query
+  planner's internal decisions without altering query semantics.
+  `explainQuery { }` mirrors the `query { }` DSL but returns a `QueryDiagnostic` snapshot
+  instead of a result sequence; the result sequence is **never consumed**, making it safe to call
+  without side-effects (equivalent to SQL `EXPLAIN`).
+  `queryWithDiagnostics { }` executes the query eagerly and returns a `DiagnosedQuery<E>` pairing
+  the result sequence with a `QueryDiagnostic`.
+  Both functions are in `lirp-core` and visible via Kotlin extension syntax on any `Registry`.
+  The following public types in `net.transgressoft.lirp.persistence.query` (module `lirp-api`) support them:
+  - `QueryDiagnostic` — the full diagnostic snapshot: chosen `Strategy`, list of `IndexHit`s,
+    post-filter predicate count, optional `ViaStrategy` for cross-aggregate queries, planning time
+    in nanoseconds, and (for `queryWithDiagnostics` only) execution time in nanoseconds.
+  - `DiagnosedQuery<T>` — pairs a result `Sequence<T>` with a `QueryDiagnostic`.
+  - `IndexHit` — per-predicate breakdown: property name, index name, `IndexHitType`, and an optional
+    selectivity whose meaning depends on the hit type — candidate count for `RANGE`, number of
+    distinct probed values for `MULTI`, and `null` for `EXACT` (not computed at plan time).
+  - `IndexHitType` — `EXACT` (equality lookup), `MULTI` (`isIn` set lookup), or `RANGE` (comparison).
+  - `Strategy` — the planner's chosen retrieval mode: `INDEX_ONLY`, `INDEX_THEN_FILTER`, or
+    `SCAN_ONLY`.
+  See [#151](https://github.com/octaviospain/lirp/issues/151).
+
+### Changed
+
+- **`ViaStrategy` moved from `lirp-core` to `lirp-api`** — the enum class
+  `net.transgressoft.lirp.persistence.query.ViaStrategy` is now declared in the `lirp-api`
+  artifact. The **package name is unchanged**, so any source import of the fully-qualified name
+  (`import net.transgressoft.lirp.persistence.query.ViaStrategy`) recompiles without modification.
+  Consumers that depend on `lirp-core` at the binary level and reference `ViaStrategy` must
+  ensure they also declare a `lirp-api` dependency; because `lirp-core` already pulls in
+  `lirp-api` transitively, a standard Gradle or Maven dependency on `lirp-core` is sufficient
+  with no extra `implementation("net.transgressoft:lirp-api:…")` line needed.
+  See [#151](https://github.com/octaviospain/lirp/issues/151).
+
+## [3.0.0] - 2026-06-23
 
 The 3.0.0 line expands the projection API from a single aggregate-source, single-key,
 identity-only map into a full matrix: aggregate **and** registry sources, single-key **and**
@@ -116,8 +172,6 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
   independent error handler so individual subscribers can observe failures without routing them
   to the publisher-level handler.
 
-### Added
-
 - **Two-phase FX-safe value transform** — new `dataTransform` / `fxFactory` overloads on
   `fxProjection`, `registryFxProjection`, `fxMultiKeyProjection`, and
   `registryFxMultiKeyProjection` split bucket projection into an off-thread data-extraction
@@ -137,21 +191,6 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
   navigation member) for the case where the reference key is computed rather than a stored scalar;
   the scalar form above is the recommended default. See
   [GitHub #255](https://github.com/octaviospain/lirp/issues/255).
-
-- **Per-bucket ordering for registry projections** — all four registry projection factories
-  (`registryProjection`, `registryMultiKeyProjection`, `registryFxProjection`,
-  `registryFxMultiKeyProjection`) and their `valueTransform` / two-phase `dataTransform`+`fxFactory`
-  overloads now accept an optional `entryOrdering: Comparator<E>? = null` parameter placed
-  immediately after `keyExtractor`. When a comparator is supplied, each per-key bucket `List<E>` is
-  kept sorted incrementally — new entities are inserted at their comparator position using a
-  stable upper-bound binary search, so equal elements retain arrival order (a newly arriving equal
-  element is placed after the existing run of equal elements). An in-place mutation to a sort-key
-  property re-positions the element within its bucket so the list remains ordered without a
-  full re-sort. A `valueTransform` or `dataTransform` callback always receives the already-ordered
-  `List<E>`; for FX variants, ordering is applied on the background thread before the FX-thread
-  dispatch, consistent with the existing off-thread transform contract. Omitting the parameter
-  (`null`) preserves the prior insertion order and is binary compatible.
-  See [#278](https://github.com/octaviospain/lirp/issues/278).
 
 ### Changed
 
@@ -183,8 +222,6 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
   `FxProjectionMap` → `FxProjection`, the `MultiKey*` / `Transformed*` variants, and the matching
   `projectionMap(…)` → `projection(…)` factory functions). See
   [Migration](#projection-types-and-factories-drop-the-map-suffix) below.
-
-### Removed
 
 - **Entity-clone fields on mutation events** — `ReactiveMutationEvent.oldEntity` /
   `ReactiveMutationEvent.newEntity` have been removed. The two-arg constructor

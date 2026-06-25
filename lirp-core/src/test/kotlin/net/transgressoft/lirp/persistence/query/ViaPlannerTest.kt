@@ -21,6 +21,7 @@ import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 
 /**
@@ -264,13 +265,38 @@ internal class ViaPlannerTest : FunSpec({
         // Strategy is HASH_JOIN on the Via arm (never silent fallback)
         planner.strategyFor(hybrid, playlists) shouldBe ViaStrategy.HASH_JOIN
 
-        val results =
+        val context =
             planner.execute(
                 Query(predicate = hybrid, orderBy = emptyList(), limit = null, offset = 0),
                 playlists
-            ).results.toList().map { it.id }
+            )
+        // The non-via arm (name eq "X") is applied as a post-filter, so it counts as one residual leaf.
+        context.postFilterCount shouldBe 1
+        val results = context.results.toList().map { it.id }
         // Intersection of name="X" and via match = {0, 2, 4}
         results shouldContainExactlyInAnyOrder listOf(0, 2, 4)
+    }
+
+    test("PlanContext viaStrategy is non-null for cross-aggregate via predicate") {
+        val tracks =
+            TrackRepo().apply {
+                repeat(100) { add(Track(it, "t$it", if (it == 0) 999.0 else 1.0)) }
+            }
+        val playlists =
+            PlaylistRepo().apply {
+                repeat(50) { p -> add(Playlist(p, "p$p", (0 until 20).toList(), null)) }
+            }
+        val via = Playlist::trackIds via tracks anyMatch { Track::price gt 500.0 }
+        val planner = nonIndexedPlanner()
+        val context =
+            planner.execute(
+                Query(predicate = via, orderBy = emptyList(), limit = null, offset = 0),
+                playlists
+            )
+        context.viaStrategy.shouldNotBeNull()
+        context.viaStrategy shouldBe planner.strategyFor(via, playlists)
+        // A bare via predicate has no non-via post-filter arm.
+        context.postFilterCount shouldBe 0
     }
 
     test("hybrid predicate result preserves Sequence laziness - taking only first N elements does not iterate beyond N parents") {

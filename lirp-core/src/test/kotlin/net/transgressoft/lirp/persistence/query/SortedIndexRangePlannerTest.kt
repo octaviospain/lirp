@@ -102,7 +102,7 @@ internal class SortedIndexRangePlannerTest : StringSpec({
         withFreshRepo { repo ->
             val plan = planner(repo).execute(query { where { RangeFixture::age gt 30 } }, repo)
 
-            plan.strategy shouldBe QueryPlanner.Strategy.INDEX_ONLY
+            plan.strategy shouldBe Strategy.INDEX_ONLY
             plan.results.toSet() shouldBe fixtures.filter { it.age > 30 }.toSet()
         }
     }
@@ -111,7 +111,7 @@ internal class SortedIndexRangePlannerTest : StringSpec({
         withFreshRepo { repo ->
             val plan = planner(repo).execute(query { where { RangeFixture::age gte 32 } }, repo)
 
-            plan.strategy shouldBe QueryPlanner.Strategy.INDEX_ONLY
+            plan.strategy shouldBe Strategy.INDEX_ONLY
             plan.results.toSet() shouldBe fixtures.filter { it.age >= 32 }.toSet()
         }
     }
@@ -120,7 +120,7 @@ internal class SortedIndexRangePlannerTest : StringSpec({
         withFreshRepo { repo ->
             val plan = planner(repo).execute(query { where { RangeFixture::age lt 36 } }, repo)
 
-            plan.strategy shouldBe QueryPlanner.Strategy.INDEX_ONLY
+            plan.strategy shouldBe Strategy.INDEX_ONLY
             plan.results.toSet() shouldBe fixtures.filter { it.age < 36 }.toSet()
         }
     }
@@ -129,7 +129,7 @@ internal class SortedIndexRangePlannerTest : StringSpec({
         withFreshRepo { repo ->
             val plan = planner(repo).execute(query { where { RangeFixture::age lte 36 } }, repo)
 
-            plan.strategy shouldBe QueryPlanner.Strategy.INDEX_ONLY
+            plan.strategy shouldBe Strategy.INDEX_ONLY
             plan.results.toSet() shouldBe fixtures.filter { it.age <= 36 }.toSet()
         }
     }
@@ -138,7 +138,7 @@ internal class SortedIndexRangePlannerTest : StringSpec({
         withFreshRepo { repo ->
             val plan = planner(repo).execute(query { where { RangeFixture::age eq 32 } }, repo)
 
-            plan.strategy shouldBe QueryPlanner.Strategy.INDEX_ONLY
+            plan.strategy shouldBe Strategy.INDEX_ONLY
             plan.results.toSet() shouldBe fixtures.filter { it.age == 32 }.toSet()
         }
     }
@@ -148,7 +148,7 @@ internal class SortedIndexRangePlannerTest : StringSpec({
             // category is hash-indexed (not sorted), so range queries must scan
             val plan = planner(repo).execute(query { where { RangeFixture::category gt "books" } }, repo)
 
-            plan.strategy shouldBe QueryPlanner.Strategy.SCAN_ONLY
+            plan.strategy shouldBe Strategy.SCAN_ONLY
             plan.results.toSet() shouldBe fixtures.filter { it.category > "books" }.toSet()
         }
     }
@@ -158,7 +158,7 @@ internal class SortedIndexRangePlannerTest : StringSpec({
             // id is not in the accessor — not indexed at all
             val plan = planner(repo).execute(query { where { RangeFixture::id gt 5 } }, repo)
 
-            plan.strategy shouldBe QueryPlanner.Strategy.SCAN_ONLY
+            plan.strategy shouldBe Strategy.SCAN_ONLY
             plan.results.toSet() shouldBe fixtures.filter { it.id > 5 }.toSet()
         }
     }
@@ -168,7 +168,7 @@ internal class SortedIndexRangePlannerTest : StringSpec({
             // age ∈ (25, 40) exclusive-exclusive
             val plan = planner(repo).execute(query { where { (RangeFixture::age gt 25) and (RangeFixture::age lt 40) } }, repo)
 
-            plan.strategy shouldBe QueryPlanner.Strategy.INDEX_ONLY
+            plan.strategy shouldBe Strategy.INDEX_ONLY
             plan.results.toSet() shouldBe fixtures.filter { it.age in 26..<40 }.toSet()
         }
     }
@@ -181,7 +181,7 @@ internal class SortedIndexRangePlannerTest : StringSpec({
                     query { where { (RangeFixture::category eq "X") and (RangeFixture::age gte 30) } }, repo
                 )
 
-            plan.strategy shouldBe QueryPlanner.Strategy.INDEX_ONLY
+            plan.strategy shouldBe Strategy.INDEX_ONLY
             plan.results.toSet() shouldBe fixtures.filter { it.category == "X" && it.age >= 30 }.toSet()
         }
     }
@@ -190,7 +190,7 @@ internal class SortedIndexRangePlannerTest : StringSpec({
         withFreshRepo { repo ->
             val plan = planner(repo).execute(query { where { RangeFixture::age gt 99999 } }, repo)
 
-            plan.strategy shouldBe QueryPlanner.Strategy.INDEX_ONLY
+            plan.strategy shouldBe Strategy.INDEX_ONLY
             plan.results.toList().shouldBeEmpty()
         }
     }
@@ -202,7 +202,7 @@ internal class SortedIndexRangePlannerTest : StringSpec({
                     query { where { (RangeFixture::age gt 48) or (RangeFixture::age lt 24) } }, repo
                 )
 
-            plan.strategy shouldBe QueryPlanner.Strategy.SCAN_ONLY
+            plan.strategy shouldBe Strategy.SCAN_ONLY
             plan.results.toSet() shouldBe fixtures.filter { it.age !in 24..48 }.toSet()
         }
     }
@@ -214,7 +214,7 @@ internal class SortedIndexRangePlannerTest : StringSpec({
 
             val plan = planner(repo).execute(query { where { RangeFixture::nick gt "a" } }, repo)
 
-            plan.strategy shouldBe QueryPlanner.Strategy.INDEX_ONLY
+            plan.strategy shouldBe Strategy.INDEX_ONLY
             // Only entities with non-null nick > "a" are returned; null-nick entities are excluded
             val expected = fixtures.filter { it.nick != null && it.nick > "a" }.toSet()
             plan.results.toSet() shouldBe expected

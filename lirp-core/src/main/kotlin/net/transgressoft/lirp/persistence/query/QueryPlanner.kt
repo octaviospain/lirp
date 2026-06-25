@@ -27,29 +27,6 @@ import kotlin.reflect.KProperty1
 private val log = KotlinLogging.logger {}
 
 /**
- * Execution strategy for cross-aggregate `via … anyMatch/allMatch/noneMatch/where` predicates.
- *
- * Selected per-query by [QueryPlanner.chooseStrategy] based on the cardinality estimate
- * `|children matching predicate| < |parents| × avg-refs-per-parent`. Never cached
- * across queries; re-estimated on every execution.
- */
-enum class ViaStrategy {
-    /**
-     * Iterates parents lazily; for each parent, reads the live `parentProp` collection and
-     * applies the Via* node's `matches` directly (delegates child resolution via
-     * [Registry.findById]).
-     */
-    PER_PARENT_LOOP,
-
-    /**
-     * Pre-filters the child registry by the child predicate, materialises matching ids into
-     * a [HashSet], then per-parent tests `parentProp` reads (live) against that set with the
-     * quantifier appropriate to the Via* operator.
-     */
-    HASH_JOIN
-}
-
-/**
  * Plans and executes [Query] instances against a [Registry], selecting the optimal
  * retrieval strategy based on indexed property metadata.
  *
@@ -87,29 +64,6 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
     private val viaJoinExecutor = ViaJoinExecutor<T>()
 
     /**
-     * Execution strategy selected by the planner.
-     */
-    enum class Strategy {
-        /** All predicate leaves are indexed equality checks; results come directly from the index. */
-        INDEX_ONLY,
-
-        /** Some leaves are indexed equality checks, but others require post-filtering. */
-        INDEX_THEN_FILTER,
-
-        /** No indexed equality leaves are present; a full in-memory scan is required. */
-        SCAN_ONLY
-    }
-
-    /**
-     * Result of query planning, containing the chosen strategy and a lazy [Sequence]
-     * of matching entities.
-     *
-     * @param strategy the chosen execution strategy
-     * @param results a lazy sequence of matching entities
-     */
-    data class Plan<T>(val strategy: Strategy, val results: Sequence<T>)
-
-    /**
      * Internal discriminated leaf representation used during index candidate extraction.
      *
      * [Single] carries a single exact value (from [Predicate.Eq]); [Multi] carries a value-set
@@ -120,16 +74,49 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
      * The [RangeSlice.candidates] set holds `T` instances erased to `Any`; callers must
      * suppress the unchecked-cast warning when retrieving them as `Set<T>`.
      */
-    private sealed interface IndexableLeaf {
+    internal sealed interface IndexableLeaf {
+        val propertyName: String
         val indexName: String
 
-        data class Single(override val indexName: String, val value: Any) : IndexableLeaf
+        data class Single(override val propertyName: String, override val indexName: String, val value: Any) : IndexableLeaf
 
-        data class Multi(override val indexName: String, val values: Set<Any>) : IndexableLeaf
+        data class Multi(override val propertyName: String, override val indexName: String, val values: Set<Any>) : IndexableLeaf
 
         /** [candidates] erased to `Set<Any>` — type-safely `Set<T>` at construction. */
-        data class RangeSlice(override val indexName: String, val candidates: Set<Any>) : IndexableLeaf
+        data class RangeSlice(override val propertyName: String, override val indexName: String, val candidates: Set<Any>) : IndexableLeaf
     }
+
+    /**
+     * Planning result carrying the chosen strategy, index leaves, post-filter count, via-strategy,
+     * and a lazy result sequence.
+     *
+     * `strategy` is the retrieval mode selected by the planner. `indexLeaves` lists every predicate
+     * leaf that was pushed to an index. `postFilterCount` is the number of predicate leaves not
+     * resolved by any index, requiring a post-filter pass over the candidate set. `viaStrategy` is
+     * non-null when the query contained a cross-aggregate `via` arm. `results` is the lazy entity
+     * sequence, which may include ordering and pagination applied on top of the candidate set.
+     *
+     * @param strategy the chosen execution strategy
+     * @param indexLeaves the index-resolved leaves, in extraction order
+     * @param postFilterCount the number of predicate leaves that require post-filtering
+     * @param viaStrategy the via-join strategy when a cross-aggregate arm is present, or `null`
+     * @param results a lazy sequence of matching entities
+     */
+    internal data class PlanContext<T>(
+        val strategy: Strategy,
+        val indexLeaves: List<IndexableLeaf>,
+        val postFilterCount: Int,
+        val viaStrategy: ViaStrategy?,
+        val results: Sequence<T>
+    )
+
+    private data class SelectResult<T>(
+        val strategy: Strategy,
+        val indexLeaves: List<IndexableLeaf>,
+        val postFilterCount: Int,
+        val viaStrategy: ViaStrategy?,
+        val candidates: Sequence<T>
+    )
 
     /**
      * Executes [query] against [registry], selecting the optimal strategy.
@@ -160,90 +147,133 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
      *
      * @param query the query to execute
      * @param registry the registry to search
-     * @return a [Plan] containing the strategy and result sequence
+     * @return a [PlanContext] containing the strategy, index leaves, post-filter count, via-strategy, and result sequence
      */
-    fun execute(query: Query<T>, registry: Registry<*, T>): Plan<T> {
+    fun execute(query: Query<T>, registry: Registry<*, T>): PlanContext<T> {
         // Normalise Via* fold rules before any strategy selection.
         // ViaNormalizer is a no-op for predicates without Via* nodes, so this stays cheap
         // for queries that do not use cross-aggregate traversal.
         val pred = query.predicate?.let { normalize(it) }
-        val (strategy, candidates) = selectStrategyAndCandidates(pred, registry)
+        val (strategy, indexLeaves, postFilterCount, viaStrat, candidates) = selectStrategyAndCandidates(pred, registry)
         val ordered = applyOrdering(candidates, query.orderBy)
         val sliced = applyPagination(ordered, query.offset, query.limit)
-        return Plan(strategy, sliced)
+        return PlanContext(strategy, indexLeaves, postFilterCount, viaStrat, sliced)
     }
 
     private fun selectStrategyAndCandidates(
         pred: Predicate<T>?,
         registry: Registry<*, T>
-    ): Pair<Strategy, Sequence<T>> {
-        if (pred == null) return Strategy.SCAN_ONLY to registry.asSequence()
+    ): SelectResult<T> {
+        if (pred == null) return SelectResult(Strategy.SCAN_ONLY, emptyList(), 0, null, registry.asSequence())
         // Empty-In short-circuit: x ∈ ∅ is always false — no entities can match.
         if (pred is Predicate.In<*, *> && (pred as Predicate.In<T, *>).values.isEmpty()) {
-            return Strategy.INDEX_ONLY to emptySequence()
+            return SelectResult(Strategy.INDEX_ONLY, emptyList(), 0, null, emptySequence())
         }
         if (containsVia(pred)) {
             // Cross-aggregate path: split hybrid predicate, choose Via strategy, apply
             // any NonVia arm as a lazy post-filter. Strategy reported to callers is
             // still SCAN_ONLY at the parent level (no index acceleration on Via* nodes).
-            return Strategy.SCAN_ONLY to executeViaPlan(pred, registry)
+            // The NonVia arm of a hybrid And(NonVia, Via*) is post-filtered, so its leaves
+            // count toward postFilterCount; a bare or multi-Via* predicate has none.
+            val viaStrat = strategyFor(pred, registry)
+            val (nonViaArm, _) = splitHybridAnd(pred)
+            val viaPostFilterCount = nonViaArm?.let { countLeaves(it) } ?: 0
+            return SelectResult(Strategy.SCAN_ONLY, emptyList(), viaPostFilterCount, viaStrat, executeViaPlan(pred, registry))
         }
         val indexable = extractIndexableLeaves(pred)
         if (indexable.isEmpty()) {
             log.trace { "QueryPlanner: no indexable leaves — full scan on ${registry.size()} entities" }
-            return Strategy.SCAN_ONLY to registry.asSequence().filter { pred.matches(it) }
+            return SelectResult(Strategy.SCAN_ONLY, emptyList(), countLeaves(pred), null, registry.asSequence().filter { pred.matches(it) })
         }
         return indexAcceleratedCandidates(pred, indexable, registry)
     }
+
+    /**
+     * Counts the non-Via predicate leaves in [pred]. Used to compute the post-filter count
+     * for scan paths where no index acceleration is available.
+     *
+     * Composite nodes (And, Or) recurse into both arms. Not-wrapped leaves count as one leaf
+     * (the inner leaf). Via* nodes are not counted — they are reported via [PlanContext.viaStrategy].
+     */
+    private fun countLeaves(pred: Predicate<T>): Int =
+        when (pred) {
+            is Predicate.Eq<*, *>, is Predicate.In<*, *>,
+            is Predicate.Gt<*, *>, is Predicate.Gte<*, *>,
+            is Predicate.Lt<*, *>, is Predicate.Lte<*, *> -> 1
+            is Predicate.Not<*> -> {
+                @Suppress("UNCHECKED_CAST")
+                countLeaves((pred as Predicate.Not<T>).inner)
+            }
+            is Predicate.And<*> -> {
+                @Suppress("UNCHECKED_CAST")
+                val a = pred as Predicate.And<T>
+                countLeaves(a.left) + countLeaves(a.right)
+            }
+            is Predicate.Or<*> -> {
+                @Suppress("UNCHECKED_CAST")
+                val o = pred as Predicate.Or<T>
+                countLeaves(o.left) + countLeaves(o.right)
+            }
+            else -> 0
+        }
 
     private fun indexAcceleratedCandidates(
         pred: Predicate<T>,
         indexable: List<IndexableLeaf>,
         registry: Registry<*, T>
-    ): Pair<Strategy, Sequence<T>> {
+    ): SelectResult<T> {
         // Use the internal non-copying index read when available (RegistryBase), falling back to the
         // public defensive-copy findByIndex for any other Registry implementation.
         val noCopyRegistry = registry as? RegistryBase<*, T>
-        var working: Set<T>? = null
-        for (leaf in indexable) {
-            val hit: Collection<T> =
-                when (leaf) {
-                    is IndexableLeaf.Single ->
-                        noCopyRegistry?.findByIndexNoCopy(leaf.indexName, leaf.value)
-                            ?: registry.findByIndex(leaf.indexName, leaf.value)
-                    is IndexableLeaf.Multi ->
-                        leaf.values.flatMapTo(HashSet()) { v ->
-                            noCopyRegistry?.findByIndexNoCopy(leaf.indexName, v)
-                                ?: registry.findByIndex(leaf.indexName, v)
-                        }
-                    // RangeSlice candidates are pre-materialised from NavigableMap bucket sets —
-                    // no further findByIndex dispatch needed. The cast is safe: RangeSlice is
-                    // constructed only via rangeLeaf(), which receives Set<T> from rangeSlice().
-                    is IndexableLeaf.RangeSlice -> {
-                        @Suppress("UNCHECKED_CAST")
-                        leaf.candidates as Set<T>
-                    }
-                }
-            working = working?.let { it intersect hit } ?: hit.toHashSet()
-            if (working.isEmpty()) break
-        }
-        val candidateSet = working ?: emptySet()
         val strategy = if (allLeavesAreIndexedEq(pred)) Strategy.INDEX_ONLY else Strategy.INDEX_THEN_FILTER
-        val candidates =
-            when (strategy) {
-                Strategy.INDEX_ONLY -> candidateSet.asSequence()
-                // When any In leaf contains null, null-valued entities are not reachable via the index
-                // (null keys are not stored). A full registry scan with pred.matches is required so
-                // null-matching entities are included alongside the index-resolved candidates.
-                Strategy.INDEX_THEN_FILTER ->
-                    if (containsInWithNull(pred)) {
-                        registry.asSequence().filter { pred.matches(it) }
-                    } else {
-                        candidateSet.asSequence().filter { pred.matches(it) }
-                    }
-                else -> candidateSet.asSequence().filter { pred.matches(it) }
+        // When any In leaf contains null, the index cannot resolve null-valued entities (null keys
+        // are not stored), so execution falls back to a full scan re-evaluating every leaf — none
+        // are effectively index-resolved, so the whole predicate is post-filtered.
+        val nullInScan = containsInWithNull(pred)
+        val postFilterCount =
+            when {
+                strategy == Strategy.INDEX_ONLY -> 0
+                nullInScan -> countLeaves(pred)
+                else -> countLeaves(pred) - indexable.size
             }
-        return strategy to candidates
+        // Candidate resolution (index reads, intersection, post-filter scan) is deferred into the
+        // returned sequence so the planner stays plan-only until a terminal operation consumes the
+        // results — honoring the lazy contract in execute()'s KDoc and keeping explainQuery cheap.
+        val candidates =
+            sequence {
+                var working: Set<T>? = null
+                for (leaf in indexable) {
+                    val hit: Collection<T> =
+                        when (leaf) {
+                            is IndexableLeaf.Single ->
+                                noCopyRegistry?.findByIndexNoCopy(leaf.indexName, leaf.value)
+                                    ?: registry.findByIndex(leaf.indexName, leaf.value)
+                            is IndexableLeaf.Multi ->
+                                leaf.values.flatMapTo(HashSet()) { v ->
+                                    noCopyRegistry?.findByIndexNoCopy(leaf.indexName, v)
+                                        ?: registry.findByIndex(leaf.indexName, v)
+                                }
+                            // RangeSlice candidates are pre-materialised from NavigableMap bucket sets —
+                            // no further findByIndex dispatch needed. The cast is safe: RangeSlice is
+                            // constructed only via rangeLeaf(), which receives Set<T> from rangeSlice().
+                            is IndexableLeaf.RangeSlice -> {
+                                @Suppress("UNCHECKED_CAST")
+                                leaf.candidates as Set<T>
+                            }
+                        }
+                    working = working?.let { it intersect hit } ?: hit.toHashSet()
+                    if (working.isEmpty()) break
+                }
+                val candidateSet = working ?: emptySet()
+                val resolved =
+                    when {
+                        strategy == Strategy.INDEX_ONLY -> candidateSet.asSequence()
+                        nullInScan -> registry.asSequence().filter { pred.matches(it) }
+                        else -> candidateSet.asSequence().filter { pred.matches(it) }
+                    }
+                yieldAll(resolved)
+            }
+        return SelectResult(strategy, indexable, postFilterCount, null, candidates)
     }
 
     /**
@@ -333,7 +363,9 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
     private fun applyOrdering(candidates: Sequence<T>, orderBy: List<OrderClause<T>>): Sequence<T> {
         if (orderBy.isEmpty()) return candidates
         val cmp = composeComparator(orderBy)
-        return candidates.toList().sortedWith(cmp).asSequence()
+        // Defer the materialise-and-sort to the first terminal operation so planning stays
+        // execution-free; the sort runs when the consumer iterates, not at plan() / execute() time.
+        return sequence { yieldAll(candidates.toList().sortedWith(cmp)) }
     }
 
     private fun applyPagination(seq: Sequence<T>, offset: Int, limit: Int?): Sequence<T> {
@@ -357,7 +389,7 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
             is Predicate.Eq<*, *> -> {
                 val eq = pred as Predicate.Eq<T, Any?>
                 if (isIndexed(eq.prop) && eq.value != null) {
-                    listOf(IndexableLeaf.Single(indexNameFor(eq.prop), eq.value))
+                    listOf(IndexableLeaf.Single(eq.prop.name, indexNameFor(eq.prop), eq.value))
                 } else {
                     emptyList()
                 }
@@ -370,11 +402,11 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
                 // allLeavesAreIndexedEq classifies the leaf as resolved (null !in []) while it
                 // contributes no candidates, and a sibling Eq's candidates leak through INDEX_ONLY.
                 if (inPred.values.isEmpty()) {
-                    return listOf(IndexableLeaf.Multi(indexNameFor(inPred.prop), emptySet()))
+                    return listOf(IndexableLeaf.Multi(inPred.prop.name, indexNameFor(inPred.prop), emptySet()))
                 }
                 val nonNullValues = inPred.values.filterNotNull().toSet()
                 if (nonNullValues.isEmpty()) emptyList()
-                else listOf(IndexableLeaf.Multi(indexNameFor(inPred.prop), nonNullValues))
+                else listOf(IndexableLeaf.Multi(inPred.prop.name, indexNameFor(inPred.prop), nonNullValues))
             }
             is Predicate.Gt<*, *> -> rangeLeaf(pred as Predicate.Gt<T, *>)
             is Predicate.Gte<*, *> -> rangeLeaf(pred as Predicate.Gte<T, *>)
@@ -415,7 +447,7 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
         if (!isSortedIndexed(prop)) return emptyList()
         val candidates = rangeSlice(pred) ?: return emptyList()
         @Suppress("UNCHECKED_CAST")
-        return listOf(IndexableLeaf.RangeSlice(indexNameFor(prop), candidates as Set<Any>))
+        return listOf(IndexableLeaf.RangeSlice(prop.name, indexNameFor(prop), candidates as Set<Any>))
     }
 
     /**
@@ -599,8 +631,6 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
      * bypassing the [Registry.query] entry point. The returned sequence yields parents
      * at the per-parent boundary so a test may mutate a parent's `parentProp` between
      * two `.next()` calls and observe the live read on the very next yield.
-     *
-     * Not part of the public API; consumed by Plan 05 Task 1 case 3.
      *
      * @param predicate the query predicate (must already be a Via* node or contain one)
      * @param parentRegistry the registry holding the parent entities
