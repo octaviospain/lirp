@@ -102,7 +102,7 @@ class HighConcurrencyStressTest : DescribeSpec({
                     "high-concurrency-stress",
                     closeOnEmpty = false
                 )
-            publisher.activateEvents(MutationEvent.Type.MUTATE)
+            publisher.activateEvents(MutationEvent.Type.PROPERTY_CHANGED)
 
             // Each of the 250 subscribers gets its own queue and latch
             val subscribers =
@@ -129,7 +129,14 @@ class HighConcurrencyStressTest : DescribeSpec({
                         repeat(EVENTS_PER_WRITER) { eventIndex ->
                             val newEntity = TestEntity("entity-$writerIndex-$eventIndex")
                             newEntity.name = "Name-$writerIndex-$eventIndex"
-                            publisher.emitAsync(ReactiveMutationEvent(newEntity))
+                            publisher.emitAsync(
+                                PropertyChanged(
+                                    entity = newEntity,
+                                    property = TestEntity::name,
+                                    oldValue = "Initial Name",
+                                    newValue = newEntity.name
+                                )
+                            )
                         }
                     }
                 }

@@ -53,6 +53,13 @@ import net.transgressoft.lirp.entity.ReactiveEntity
 data class StandardAggregateMutationEvent<K, R>(
     override val entity: R,
     override val refName: String,
-    override val childEvent: LirpEvent<*>,
-    override val type: MutationEvent.Type = MutationEvent.Type.MUTATE
-) : AggregateMutationEvent<K, R> where K : Comparable<K>, R : ReactiveEntity<K, R>
+    override val childEvent: LirpEvent<*>
+) : AggregateMutationEvent<K, R> where K : Comparable<K>, R : ReactiveEntity<K, R> {
+
+    override val type: MutationEvent.Type
+        get() =
+            when (childEvent) {
+                is PropertyChanged<*, *, *> -> MutationEvent.Type.PROPERTY_CHANGED
+                else -> MutationEvent.Type.BATCH_CHANGED
+            }
+}

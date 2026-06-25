@@ -184,7 +184,6 @@ public abstract interface class net/transgressoft/lirp/event/MutationEvent : net
 
 public final class net/transgressoft/lirp/event/MutationEvent$Type : java/lang/Enum, net/transgressoft/lirp/event/EventType {
 	public static final field BATCH_CHANGED Lnet/transgressoft/lirp/event/MutationEvent$Type;
-	public static final field MUTATE Lnet/transgressoft/lirp/event/MutationEvent$Type;
 	public static final field PROPERTY_CHANGED Lnet/transgressoft/lirp/event/MutationEvent$Type;
 	public fun getCode ()I
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;

@@ -190,19 +190,6 @@ public final class net/transgressoft/lirp/event/PublisherConfig$Companion {
 	public static synthetic fun withReplay$default (Lnet/transgressoft/lirp/event/PublisherConfig$Companion;IILjava/lang/Object;)Lnet/transgressoft/lirp/event/PublisherConfig;
 }
 
-public final class net/transgressoft/lirp/event/ReactiveMutationEvent : net/transgressoft/lirp/event/MutationEvent {
-	public fun <init> (Lnet/transgressoft/lirp/entity/ReactiveEntity;)V
-	public final fun component1 ()Lnet/transgressoft/lirp/entity/ReactiveEntity;
-	public final fun copy (Lnet/transgressoft/lirp/entity/ReactiveEntity;)Lnet/transgressoft/lirp/event/ReactiveMutationEvent;
-	public static synthetic fun copy$default (Lnet/transgressoft/lirp/event/ReactiveMutationEvent;Lnet/transgressoft/lirp/entity/ReactiveEntity;ILjava/lang/Object;)Lnet/transgressoft/lirp/event/ReactiveMutationEvent;
-	public fun equals (Ljava/lang/Object;)Z
-	public fun getEntity ()Lnet/transgressoft/lirp/entity/ReactiveEntity;
-	public synthetic fun getType ()Lnet/transgressoft/lirp/event/EventType;
-	public fun getType ()Lnet/transgressoft/lirp/event/MutationEvent$Type;
-	public fun hashCode ()I
-	public fun toString ()Ljava/lang/String;
-}
-
 public final class net/transgressoft/lirp/event/ReactiveScope {
 	public static final field INSTANCE Lnet/transgressoft/lirp/event/ReactiveScope;
 	public final fun getFlowScope ()Lkotlinx/coroutines/CoroutineScope;
@@ -214,14 +201,12 @@ public final class net/transgressoft/lirp/event/ReactiveScope {
 }
 
 public final class net/transgressoft/lirp/event/StandardAggregateMutationEvent : net/transgressoft/lirp/event/AggregateMutationEvent {
-	public fun <init> (Lnet/transgressoft/lirp/entity/ReactiveEntity;Ljava/lang/String;Lnet/transgressoft/lirp/event/LirpEvent;Lnet/transgressoft/lirp/event/MutationEvent$Type;)V
-	public synthetic fun <init> (Lnet/transgressoft/lirp/entity/ReactiveEntity;Ljava/lang/String;Lnet/transgressoft/lirp/event/LirpEvent;Lnet/transgressoft/lirp/event/MutationEvent$Type;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lnet/transgressoft/lirp/entity/ReactiveEntity;Ljava/lang/String;Lnet/transgressoft/lirp/event/LirpEvent;)V
 	public final fun component1 ()Lnet/transgressoft/lirp/entity/ReactiveEntity;
 	public final fun component2 ()Ljava/lang/String;
 	public final fun component3 ()Lnet/transgressoft/lirp/event/LirpEvent;
-	public final fun component4 ()Lnet/transgressoft/lirp/event/MutationEvent$Type;
-	public final fun copy (Lnet/transgressoft/lirp/entity/ReactiveEntity;Ljava/lang/String;Lnet/transgressoft/lirp/event/LirpEvent;Lnet/transgressoft/lirp/event/MutationEvent$Type;)Lnet/transgressoft/lirp/event/StandardAggregateMutationEvent;
-	public static synthetic fun copy$default (Lnet/transgressoft/lirp/event/StandardAggregateMutationEvent;Lnet/transgressoft/lirp/entity/ReactiveEntity;Ljava/lang/String;Lnet/transgressoft/lirp/event/LirpEvent;Lnet/transgressoft/lirp/event/MutationEvent$Type;ILjava/lang/Object;)Lnet/transgressoft/lirp/event/StandardAggregateMutationEvent;
+	public final fun copy (Lnet/transgressoft/lirp/entity/ReactiveEntity;Ljava/lang/String;Lnet/transgressoft/lirp/event/LirpEvent;)Lnet/transgressoft/lirp/event/StandardAggregateMutationEvent;
+	public static synthetic fun copy$default (Lnet/transgressoft/lirp/event/StandardAggregateMutationEvent;Lnet/transgressoft/lirp/entity/ReactiveEntity;Ljava/lang/String;Lnet/transgressoft/lirp/event/LirpEvent;ILjava/lang/Object;)Lnet/transgressoft/lirp/event/StandardAggregateMutationEvent;
 	public fun equals (Ljava/lang/Object;)Z
 	public fun getChildEvent ()Lnet/transgressoft/lirp/event/LirpEvent;
 	public fun getEntity ()Lnet/transgressoft/lirp/entity/ReactiveEntity;

@@ -9,7 +9,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Small, additive improvements on top of the 3.0.0 release: per-bucket ordering for registry
 projections, and a read-only query-diagnostics (`EXPLAIN`) surface over the in-memory query
-planner. One internal type relocation (`ViaStrategy`) is the only breaking change.
+planner. This release also completes the event-API cleanup started in 3.0.0 by removing the
+deprecated `MutationEvent.Type.MUTATE(301)` enum value and the `ReactiveMutationEvent` class.
+See [Migration from 3.0.0 to 3.1.0](#migration-from-300-to-310) for upgrade steps.
 
 ### Added
 
@@ -60,6 +62,83 @@ planner. One internal type relocation (`ViaStrategy`) is the only breaking chang
   `lirp-api` transitively, a standard Gradle or Maven dependency on `lirp-core` is sufficient
   with no extra `implementation("net.transgressoft:lirp-api:…")` line needed.
   See [#151](https://github.com/octaviospain/lirp/issues/151).
+
+### Removed
+
+- **`MutationEvent.Type.MUTATE(301)` enum value** — the `MUTATE` constant (code 301) is removed
+  from the `MutationEvent.Type` enum. Code that switches or filters on this value must be updated.
+  Use `PROPERTY_CHANGED(302)` for single-property mutations and `BATCH_CHANGED(303)` for
+  multi-property batch mutations. The two-value enum is now `{ PROPERTY_CHANGED(302), BATCH_CHANGED(303) }`.
+
+- **`ReactiveMutationEvent` class** — the `net.transgressoft.lirp.event.ReactiveMutationEvent`
+  data class is removed entirely. It had no production emitter in 3.0.0 — its only purpose was to
+  carry the now-deleted `MUTATE(301)` type. Replace any construction sites with `PropertyChanged`
+  (for a single property) or `BatchChanged` (for a coordinated batch of property changes). Both
+  types carry the same `entity` reference and are subtypes of `MutationEvent`.
+
+- **Aggregate bubble-up events no longer report type 301** — `StandardAggregateMutationEvent`
+  previously defaulted its `type` to `MUTATE(301)`. It now derives `type` from the wrapped child
+  event: a `PropertyChanged` child yields `PROPERTY_CHANGED(302)`; a `BatchChanged` or collection
+  child yields `BATCH_CHANGED(303)`. The event continues to be delivered; only its `type` value
+  changes. Consumers that filter aggregate events on `event.type == MUTATE` must update the
+  condition to match `PROPERTY_CHANGED` or `BATCH_CHANGED` as appropriate, or switch to inspecting
+  `event.childEvent` directly (which carries the full per-property detail and is unaffected by
+  this change).
+
+## Migration from 3.0.0 to 3.1.0
+
+### Replace `MutationEvent.Type.MUTATE` references
+
+Remove any `when`/`if` branches, filter calls, or constants that reference `MutationEvent.Type.MUTATE`.
+Depending on whether the mutation is a single-property or batch change:
+
+```kotlin
+// Before
+entity.subscribe { event ->
+    if (event.type == MutationEvent.Type.MUTATE) { handle(event) }
+}
+
+// After — filter on the concrete subtype instead
+entity.subscribe { event ->
+    when (event) {
+        is PropertyChanged<*, *, *> -> handleProperty(event)
+        is BatchChanged<*, *>       -> handleBatch(event)
+        else                        -> { /* aggregate or other */ }
+    }
+}
+```
+
+### Replace `ReactiveMutationEvent` construction
+
+`ReactiveMutationEvent` is removed. Construct a `PropertyChanged` or `BatchChanged` event instead.
+In tests, `PropertyChanged` is the direct replacement for single-property changes:
+
+```kotlin
+// Before
+val event = ReactiveMutationEvent(entity)
+
+// After — use PropertyChanged for a specific property change
+val event = PropertyChanged(entity, property = MyEntity::title, oldValue = "A", newValue = "B")
+// or BatchChanged for a coordinated multi-property mutation
+val event = BatchChanged(entity, changes = listOf(FieldChange(MyEntity::title, "A", "B")))
+```
+
+### Update aggregate bubble-up event handling
+
+If your code filters aggregate events by `event.type == MutationEvent.Type.MUTATE`, update it to
+accept `PROPERTY_CHANGED` and `BATCH_CHANGED`:
+
+```kotlin
+// Before
+aggregateEvents.filter { it.type == MutationEvent.Type.MUTATE }
+
+// After
+aggregateEvents.filter { it.type == MutationEvent.Type.PROPERTY_CHANGED
+                      || it.type == MutationEvent.Type.BATCH_CHANGED }
+// Or more idiomatically — inspect the child event directly:
+aggregateEvents.filterIsInstance<AggregateMutationEvent<*, *>>()
+    .filter { it.childEvent is PropertyChanged<*, *, *> || it.childEvent is BatchChanged<*, *> }
+```
 
 ## [3.0.0] - 2026-06-23
 

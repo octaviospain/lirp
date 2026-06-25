@@ -180,7 +180,7 @@ class SubscriptionExtensionsTest : StringSpec({
         playlist.audioItems.add(t1)
         playlist.audioItems.remove(t1)
 
-        // Drain pending coroutines — any ReactiveMutationEvent that would fire has already fired
+        // Drain pending coroutines — any direct MutationEvent that would fire has already fired
         reactive.advance()
         mutationEventCount shouldBe 0
     }

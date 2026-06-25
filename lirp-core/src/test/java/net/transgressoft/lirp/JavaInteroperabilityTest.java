@@ -14,7 +14,6 @@ import net.transgressoft.lirp.event.CrudEvent;
 import net.transgressoft.lirp.event.MutationEvent;
 import net.transgressoft.lirp.event.PropertyChanged;
 import net.transgressoft.lirp.event.ReactiveScope;
-import net.transgressoft.lirp.event.ReactiveMutationEvent;
 import net.transgressoft.lirp.persistence.AudioItem;
 import net.transgressoft.lirp.persistence.AudioItemVolatileRepository;
 import net.transgressoft.lirp.persistence.AudioPlaylistVolatileRepository;

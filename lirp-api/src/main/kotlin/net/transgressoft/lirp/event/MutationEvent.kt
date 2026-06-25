@@ -45,7 +45,6 @@ import net.transgressoft.lirp.entity.ReactiveEntity
 interface MutationEvent<K, R : ReactiveEntity<K, R>> : LirpEvent<MutationEvent.Type> where K: Comparable<K> {
 
     enum class Type(override val code: Int): EventType {
-        MUTATE(301),
         PROPERTY_CHANGED(302),
         BATCH_CHANGED(303)
     }

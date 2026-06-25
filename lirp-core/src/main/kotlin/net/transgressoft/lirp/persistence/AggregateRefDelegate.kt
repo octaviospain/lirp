@@ -381,7 +381,7 @@ class AggregateRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
             // here because it is defined on the entity class itself (which has the correctly-typed R),
             // allowing StandardAggregateMutationEvent to be constructed with the right bound at that site.
             //
-            // Only forward direct mutations (ReactiveMutationEvent), NOT AggregateMutationEvents.
+            // Only forward direct mutations (`PropertyChanged`/`BatchChanged`), NOT AggregateMutationEvents.
             // This enforces single-level bubble-up: A->B->C mutates A, B notifies its subscribers,
             // but C should NOT receive A's event — only direct mutations to B would trigger C's bubble-up.
             if (!parentEntity.isClosed &&

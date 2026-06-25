@@ -26,7 +26,7 @@ import kotlin.reflect.KClass
 
 // Extension functions providing a 3-tier subscription API for ReactiveEntity:
 // - subscribe — all events (property mutations, collection changes, bubble-up)
-// - subscribeToMutations — direct property mutation events only (PropertyChanged, BatchChanged, ReactiveMutationEvent)
+// - subscribeToMutations — direct property mutation events only (PropertyChanged, BatchChanged)
 // - subscribeToCollectionChanges — collection diff events only (CollectionChangeEvent), optionally filtered by property name
 // Java consumers can use the Consumer-based overloads, callable as static methods on CollectionChangeEventExtensionsKt.
 
@@ -99,8 +99,8 @@ fun <K : Comparable<K>, R : ReactiveEntity<K, R>, E : Any> ReactiveEntity<K, R>.
  * Subscribes to direct property mutation events on this entity, excluding aggregate/collection events.
  *
  * Filters the entity's event stream to any [MutationEvent] that is not an [AggregateMutationEvent],
- * delivering [net.transgressoft.lirp.event.PropertyChanged], [net.transgressoft.lirp.event.BatchChanged],
- * and [net.transgressoft.lirp.event.ReactiveMutationEvent] instances to the action.
+ * delivering [net.transgressoft.lirp.event.PropertyChanged] and [net.transgressoft.lirp.event.BatchChanged]
+ * instances to the action.
  * [AggregateMutationEvent] (which wraps bubble-up or collection change events) is excluded.
  *
  * @param action the suspend function invoked for each property mutation event

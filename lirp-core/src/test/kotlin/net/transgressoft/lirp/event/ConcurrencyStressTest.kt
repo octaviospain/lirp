@@ -128,7 +128,7 @@ class ConcurrencyStressTest : DescribeSpec({
                     "mutation-stress-publisher",
                     closeOnEmpty = false
                 )
-            publisher.activateEvents(MutationEvent.Type.MUTATE)
+            publisher.activateEvents(MutationEvent.Type.PROPERTY_CHANGED)
 
             val queue1 = ConcurrentLinkedQueue<MutationEvent<String, TestEntity>>()
             val queue2 = ConcurrentLinkedQueue<MutationEvent<String, TestEntity>>()
@@ -162,7 +162,14 @@ class ConcurrencyStressTest : DescribeSpec({
                         repeat(EVENTS_PER_WRITER) { eventIndex ->
                             val newEntity = TestEntity("entity-$writerIndex-$eventIndex")
                             newEntity.name = "Name-$writerIndex-$eventIndex"
-                            publisher.emitAsync(ReactiveMutationEvent(newEntity))
+                            publisher.emitAsync(
+                                PropertyChanged(
+                                    entity = newEntity,
+                                    property = TestEntity::name,
+                                    oldValue = "Initial Name",
+                                    newValue = newEntity.name
+                                )
+                            )
                         }
                     }
                 }
@@ -194,7 +201,7 @@ class ConcurrencyStressTest : DescribeSpec({
                     "interleaved-mutation-publisher",
                     closeOnEmpty = false
                 )
-            mutationPublisher.activateEvents(MutationEvent.Type.MUTATE)
+            mutationPublisher.activateEvents(MutationEvent.Type.PROPERTY_CHANGED)
 
             val crudWriterCount = WRITER_COUNT / 2
             val mutationWriterCount = WRITER_COUNT - crudWriterCount
@@ -250,7 +257,14 @@ class ConcurrencyStressTest : DescribeSpec({
                         repeat(EVENTS_PER_WRITER) { eventIndex ->
                             val newEntity = TestEntity("interleaved-$writerIndex-$eventIndex")
                             newEntity.name = "Interleaved-$writerIndex-$eventIndex"
-                            mutationPublisher.emitAsync(ReactiveMutationEvent(newEntity))
+                            mutationPublisher.emitAsync(
+                                PropertyChanged(
+                                    entity = newEntity,
+                                    property = TestEntity::name,
+                                    oldValue = "Initial Name",
+                                    newValue = newEntity.name
+                                )
+                            )
                         }
                     }
                 }
