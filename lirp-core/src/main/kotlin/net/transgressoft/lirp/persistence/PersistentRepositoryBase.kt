@@ -677,7 +677,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
          * several `@Indexed` properties of different runtime types, and applying one property's key to a
          * differently-typed sorted index would throw [ClassCastException] in the comparator. [PropertyChanged]
          * carries one (property, key) pair; [BatchChanged] is fanned out per indexed field change.
-         * [ReactiveMutationEvent]/[AggregateMutationEvent] carry no index keys and are skipped.
+         * [AggregateMutationEvent] carries no index keys and is skipped.
          */
         private fun reindexMutation(mutationEvent: MutationEvent<K, R>) {
             when (mutationEvent) {
@@ -700,7 +700,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
                         }
                     }
                 }
-                else -> { /* ReactiveMutationEvent / AggregateMutationEvent — no index keys to apply */ }
+                else -> { /* AggregateMutationEvent — no index keys to apply */ }
             }
         }
 

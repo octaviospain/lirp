@@ -26,7 +26,6 @@ import net.transgressoft.lirp.event.LirpEventPublisher
 import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.MutationEvent.Type.BATCH_CHANGED
-import net.transgressoft.lirp.event.MutationEvent.Type.MUTATE
 import net.transgressoft.lirp.event.MutationEvent.Type.PROPERTY_CHANGED
 import net.transgressoft.lirp.event.PropertyChanged
 import net.transgressoft.lirp.event.StandardAggregateMutationEvent
@@ -158,7 +157,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
                 check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
 
                 val newPublisher = publisherFactory(this::class.java.simpleName)
-                newPublisher.activateEvents(MUTATE, PROPERTY_CHANGED, BATCH_CHANGED)
+                newPublisher.activateEvents(PROPERTY_CHANGED, BATCH_CHANGED)
                 if (publisherRef.compareAndSet(current, newPublisher)) {
                     return newPublisher
                 }

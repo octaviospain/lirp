@@ -19,7 +19,6 @@ package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.event.AggregateMutationEvent
 import net.transgressoft.lirp.event.CollectionChangeEvent
-import net.transgressoft.lirp.event.ReactiveMutationEvent
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.nondeterministic.continually
 import io.kotest.core.annotation.DisplayName
@@ -34,7 +33,7 @@ import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Tests that mutable aggregate collection operations emit [AggregateMutationEvent] wrapping
- * [CollectionChangeEvent] diffs, and never emit [ReactiveMutationEvent] for collection mutations.
+ * [CollectionChangeEvent] diffs with type [net.transgressoft.lirp.event.MutationEvent.Type.BATCH_CHANGED].
  */
 @DisplayName("CollectionChangeEvent emission")
 internal class CollectionChangeEventTest : StringSpec({
@@ -238,23 +237,26 @@ internal class CollectionChangeEventTest : StringSpec({
         }
     }
 
-    "collection mutation does not emit ReactiveMutationEvent" {
+    "collection mutation emits AggregateMutationEvent carrying BATCH_CHANGED" {
         val t1 = trackRepo.create(1, "Track 1")
         val playlist = DefaultAudioPlaylist(1, "Test").also(playlistRepo::add)
 
-        var reactiveMutationCount = 0
+        val receivedEvents = java.util.concurrent.CopyOnWriteArrayList<AggregateMutationEvent<*, *>>()
+        val latch = CountDownLatch(2)
         playlist.subscribeAsync { event ->
-            if (event is ReactiveMutationEvent<*, *>) {
-                reactiveMutationCount++
+            if (event is AggregateMutationEvent<*, *>) {
+                receivedEvents.add(event)
+                latch.countDown()
             }
         }
 
         playlist.audioItems.add(t1)
         playlist.audioItems.remove(t1)
 
-        continually(200.milliseconds) {
-            reactiveMutationCount shouldBe 0
-        }
+        latch.await(2, TimeUnit.SECONDS) shouldBe true
+        receivedEvents.size shouldBe 2
+        receivedEvents.all { it.type == net.transgressoft.lirp.event.MutationEvent.Type.BATCH_CHANGED } shouldBe true
+        receivedEvents.all { it.childEvent is CollectionChangeEvent<*> } shouldBe true
     }
 
     "add(element) on mutableAggregateSet emits ADD CollectionChangeEvent" {

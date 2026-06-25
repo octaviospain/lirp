@@ -390,6 +390,15 @@ val repo = SqlRepository<Int, Album>(
 Individual subscriptions can also carry an independent error handler via
 `subscribeAsync(action, onError)`, independent of the repository-level handler.
 
+## Upgrading to v3.1.0
+
+Version 3.1.0 removes two public API elements deprecated since 3.0.0. See **[CHANGELOG.md](CHANGELOG.md)**
+for the full migration guide, including:
+
+- `MutationEvent.Type.MUTATE(301)` removed — use `PROPERTY_CHANGED(302)` or `BATCH_CHANGED(303)`
+- `ReactiveMutationEvent` class removed — use `PropertyChanged` or `BatchChanged` instead
+- Aggregate bubble-up events now report type 302 or 303 (derived from the child event) instead of 301
+
 ## Upgrading to v3.0.0
 
 Version 3.0.0 contains breaking changes to the aggregate annotation vocabulary, the subscription

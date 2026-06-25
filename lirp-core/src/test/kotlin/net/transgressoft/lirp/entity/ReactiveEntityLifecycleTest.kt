@@ -21,7 +21,6 @@ import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.MutationEvent.Type.BATCH_CHANGED
 import net.transgressoft.lirp.event.MutationEvent.Type.PROPERTY_CHANGED
 import net.transgressoft.lirp.event.PropertyChanged
-import net.transgressoft.lirp.event.ReactiveMutationEvent
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.testing.reactiveScope
@@ -124,7 +123,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
         entity.close()
 
         shouldThrow<IllegalStateException> {
-            entity.emitAsync(ReactiveMutationEvent(entity))
+            entity.emitAsync(PropertyChanged(entity = entity, property = LazyTestEntity::value, oldValue = "initial", newValue = entity.value))
         }
 
         subscription.cancel()
@@ -252,7 +251,7 @@ class ReactiveEntityLifecycleTest : StringSpec({
         audioItem.close()
 
         shouldThrow<IllegalStateException> {
-            audioItem.emitAsync(ReactiveMutationEvent(audioItem))
+            audioItem.emitAsync(PropertyChanged(entity = audioItem, property = AudioItem::title, oldValue = audioItem.title, newValue = audioItem.title))
         }.message shouldContain "MutableAudioItem"
 
         sub.cancel()
