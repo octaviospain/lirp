@@ -97,7 +97,7 @@ internal class IsInOperatorTest : StringSpec({
             )
         val plan = planner.execute(query { where { IsInFixture::category isIn emptyList() } }, repo)
 
-        plan.strategy shouldBe QueryPlanner.Strategy.INDEX_ONLY
+        plan.strategy shouldBe Strategy.INDEX_ONLY
         plan.results.toList().shouldBeEmpty()
     }
 
@@ -128,7 +128,7 @@ internal class IsInOperatorTest : StringSpec({
                 query { where { IsInFixture::sku isIn listOf("sku-a", "sku-b") } },
                 repo
             )
-        plan.strategy shouldBe QueryPlanner.Strategy.SCAN_ONLY
+        plan.strategy shouldBe Strategy.SCAN_ONLY
         plan.results.toList().map { it.sku } shouldContainExactlyInAnyOrder listOf("sku-a", "sku-b")
     }
 
@@ -148,7 +148,7 @@ internal class IsInOperatorTest : StringSpec({
                 query { where { IsInFixture::category isIn listOf("electronics", "books") } },
                 repo
             )
-        plan.strategy shouldBe QueryPlanner.Strategy.INDEX_ONLY
+        plan.strategy shouldBe Strategy.INDEX_ONLY
         plan.results.toList().map { it.id } shouldContainExactlyInAnyOrder listOf(1, 2, 3)
     }
 
@@ -167,7 +167,7 @@ internal class IsInOperatorTest : StringSpec({
                 query { where { IsInFixture::category isIn listOf("electronics", null) } },
                 repo
             )
-        plan.strategy shouldBe QueryPlanner.Strategy.INDEX_THEN_FILTER
+        plan.strategy shouldBe Strategy.INDEX_THEN_FILTER
         plan.results.toList().map { it.id } shouldContainExactlyInAnyOrder listOf(1, 2)
     }
 
@@ -187,7 +187,7 @@ internal class IsInOperatorTest : StringSpec({
                 query { where { (IsInFixture::category eq "electronics") and (IsInFixture::sku isIn listOf("sku-a", "sku-b")) } },
                 repo
             )
-        plan.strategy shouldBe QueryPlanner.Strategy.INDEX_ONLY
+        plan.strategy shouldBe Strategy.INDEX_ONLY
         plan.results.toList().map { it.id } shouldContainExactlyInAnyOrder listOf(1, 2)
     }
 
@@ -216,7 +216,7 @@ internal class IsInOperatorTest : StringSpec({
         val plan = planner.execute(query { where { pred } }, repo)
 
         // The Or arm contains In(null,...) nested inside the And — planner must detect null and use INDEX_THEN_FILTER.
-        plan.strategy shouldBe QueryPlanner.Strategy.INDEX_THEN_FILTER
+        plan.strategy shouldBe Strategy.INDEX_THEN_FILTER
         plan.results.toList().map { it.id } shouldContainExactlyInAnyOrder listOf(3)
     }
 
@@ -238,7 +238,7 @@ internal class IsInOperatorTest : StringSpec({
                 query { where { (IsInFixture::category eq "electronics") and (IsInFixture::sku isIn emptyList()) } },
                 repo
             )
-        plan.strategy shouldBe QueryPlanner.Strategy.INDEX_ONLY
+        plan.strategy shouldBe Strategy.INDEX_ONLY
         plan.results.toList().shouldBeEmpty()
     }
 
@@ -262,7 +262,7 @@ internal class IsInOperatorTest : StringSpec({
                 },
                 repo
             )
-        plan.strategy shouldBe QueryPlanner.Strategy.SCAN_ONLY
+        plan.strategy shouldBe Strategy.SCAN_ONLY
         plan.results.toList().map { it.id } shouldContainExactlyInAnyOrder listOf(1, 2)
     }
 })

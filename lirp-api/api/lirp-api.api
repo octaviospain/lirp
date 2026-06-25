@@ -567,3 +567,80 @@ public final class net/transgressoft/lirp/persistence/json/JsonRepository$Defaul
 	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/json/JsonRepository;Lkotlin/jvm/functions/Function2;Lnet/transgressoft/lirp/event/LirpErrorHandler;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 }
 
+public final class net/transgressoft/lirp/persistence/query/DiagnosedQuery {
+	public fun <init> (Lkotlin/sequences/Sequence;Lnet/transgressoft/lirp/persistence/query/QueryDiagnostic;)V
+	public final fun component1 ()Lkotlin/sequences/Sequence;
+	public final fun component2 ()Lnet/transgressoft/lirp/persistence/query/QueryDiagnostic;
+	public final fun copy (Lkotlin/sequences/Sequence;Lnet/transgressoft/lirp/persistence/query/QueryDiagnostic;)Lnet/transgressoft/lirp/persistence/query/DiagnosedQuery;
+	public static synthetic fun copy$default (Lnet/transgressoft/lirp/persistence/query/DiagnosedQuery;Lkotlin/sequences/Sequence;Lnet/transgressoft/lirp/persistence/query/QueryDiagnostic;ILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/query/DiagnosedQuery;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDiagnostic ()Lnet/transgressoft/lirp/persistence/query/QueryDiagnostic;
+	public final fun getResults ()Lkotlin/sequences/Sequence;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/persistence/query/IndexHit {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Lnet/transgressoft/lirp/persistence/query/IndexHitType;Ljava/lang/Integer;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Lnet/transgressoft/lirp/persistence/query/IndexHitType;
+	public final fun component4 ()Ljava/lang/Integer;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Lnet/transgressoft/lirp/persistence/query/IndexHitType;Ljava/lang/Integer;)Lnet/transgressoft/lirp/persistence/query/IndexHit;
+	public static synthetic fun copy$default (Lnet/transgressoft/lirp/persistence/query/IndexHit;Ljava/lang/String;Ljava/lang/String;Lnet/transgressoft/lirp/persistence/query/IndexHitType;Ljava/lang/Integer;ILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/query/IndexHit;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getIndexName ()Ljava/lang/String;
+	public final fun getPropertyName ()Ljava/lang/String;
+	public final fun getSelectivity ()Ljava/lang/Integer;
+	public final fun getType ()Lnet/transgressoft/lirp/persistence/query/IndexHitType;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/persistence/query/IndexHitType : java/lang/Enum {
+	public static final field EXACT Lnet/transgressoft/lirp/persistence/query/IndexHitType;
+	public static final field MULTI Lnet/transgressoft/lirp/persistence/query/IndexHitType;
+	public static final field RANGE Lnet/transgressoft/lirp/persistence/query/IndexHitType;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lnet/transgressoft/lirp/persistence/query/IndexHitType;
+	public static fun values ()[Lnet/transgressoft/lirp/persistence/query/IndexHitType;
+}
+
+public final class net/transgressoft/lirp/persistence/query/QueryDiagnostic {
+	public fun <init> (Lnet/transgressoft/lirp/persistence/query/Strategy;Ljava/util/List;ILnet/transgressoft/lirp/persistence/query/ViaStrategy;JLjava/lang/Long;)V
+	public final fun component1 ()Lnet/transgressoft/lirp/persistence/query/Strategy;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()I
+	public final fun component4 ()Lnet/transgressoft/lirp/persistence/query/ViaStrategy;
+	public final fun component5 ()J
+	public final fun component6 ()Ljava/lang/Long;
+	public final fun copy (Lnet/transgressoft/lirp/persistence/query/Strategy;Ljava/util/List;ILnet/transgressoft/lirp/persistence/query/ViaStrategy;JLjava/lang/Long;)Lnet/transgressoft/lirp/persistence/query/QueryDiagnostic;
+	public static synthetic fun copy$default (Lnet/transgressoft/lirp/persistence/query/QueryDiagnostic;Lnet/transgressoft/lirp/persistence/query/Strategy;Ljava/util/List;ILnet/transgressoft/lirp/persistence/query/ViaStrategy;JLjava/lang/Long;ILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/query/QueryDiagnostic;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getExecutionTimeNs ()Ljava/lang/Long;
+	public final fun getIndexHits ()Ljava/util/List;
+	public final fun getPlanningTimeNs ()J
+	public final fun getPostFilterPredicateCount ()I
+	public final fun getStrategy ()Lnet/transgressoft/lirp/persistence/query/Strategy;
+	public final fun getViaStrategy ()Lnet/transgressoft/lirp/persistence/query/ViaStrategy;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/persistence/query/Strategy : java/lang/Enum {
+	public static final field INDEX_ONLY Lnet/transgressoft/lirp/persistence/query/Strategy;
+	public static final field INDEX_THEN_FILTER Lnet/transgressoft/lirp/persistence/query/Strategy;
+	public static final field SCAN_ONLY Lnet/transgressoft/lirp/persistence/query/Strategy;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lnet/transgressoft/lirp/persistence/query/Strategy;
+	public static fun values ()[Lnet/transgressoft/lirp/persistence/query/Strategy;
+}
+
+public final class net/transgressoft/lirp/persistence/query/ViaStrategy : java/lang/Enum {
+	public static final field HASH_JOIN Lnet/transgressoft/lirp/persistence/query/ViaStrategy;
+	public static final field PER_PARENT_LOOP Lnet/transgressoft/lirp/persistence/query/ViaStrategy;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lnet/transgressoft/lirp/persistence/query/ViaStrategy;
+	public static fun values ()[Lnet/transgressoft/lirp/persistence/query/ViaStrategy;
+}
+

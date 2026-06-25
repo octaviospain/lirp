@@ -1345,7 +1345,9 @@ public final class net/transgressoft/lirp/persistence/query/QueryBuilder {
 }
 
 public final class net/transgressoft/lirp/persistence/query/RegistryQueryExtensionsKt {
+	public static final fun explainQueryRegistry (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/query/QueryDiagnostic;
 	public static final fun queryRegistry (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;)Lkotlin/sequences/Sequence;
+	public static final fun queryWithDiagnosticsRegistry (Lnet/transgressoft/lirp/persistence/Registry;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/persistence/query/DiagnosedQuery;
 }
 
 public final class net/transgressoft/lirp/persistence/query/ViaAllMatch : net/transgressoft/lirp/persistence/query/Predicate {
@@ -1391,14 +1393,6 @@ public final class net/transgressoft/lirp/persistence/query/ViaSingleStep {
 	public fun <init> (Lkotlin/reflect/KProperty1;Lnet/transgressoft/lirp/persistence/Registry;)V
 	public final fun getChildRegistry ()Lnet/transgressoft/lirp/persistence/Registry;
 	public final fun getParentProp ()Lkotlin/reflect/KProperty1;
-}
-
-public final class net/transgressoft/lirp/persistence/query/ViaStrategy : java/lang/Enum {
-	public static final field HASH_JOIN Lnet/transgressoft/lirp/persistence/query/ViaStrategy;
-	public static final field PER_PARENT_LOOP Lnet/transgressoft/lirp/persistence/query/ViaStrategy;
-	public static fun getEntries ()Lkotlin/enums/EnumEntries;
-	public static fun valueOf (Ljava/lang/String;)Lnet/transgressoft/lirp/persistence/query/ViaStrategy;
-	public static fun values ()[Lnet/transgressoft/lirp/persistence/query/ViaStrategy;
 }
 
 public final class net/transgressoft/lirp/persistence/query/ViaWhere : net/transgressoft/lirp/persistence/query/Predicate {

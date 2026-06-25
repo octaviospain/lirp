@@ -22,6 +22,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 
 /**
@@ -65,7 +66,7 @@ internal class QueryPlannerTest : FunSpec({
                 query { where { Product::category eq "books" } },
                 productRepo
             )
-        plan.strategy shouldBe QueryPlanner.Strategy.INDEX_ONLY
+        plan.strategy shouldBe Strategy.INDEX_ONLY
         plan.results.toList().map { it.name } shouldContainExactlyInAnyOrder listOf("Book A", "Book B")
     }
 
@@ -75,7 +76,7 @@ internal class QueryPlannerTest : FunSpec({
                 query { where { (Product::category eq "electronics") and (Product::price gt 60.0) } },
                 productRepo
             )
-        plan.strategy shouldBe QueryPlanner.Strategy.INDEX_THEN_FILTER
+        plan.strategy shouldBe Strategy.INDEX_THEN_FILTER
         plan.results.toList().map { it.name } shouldContainExactlyInAnyOrder listOf("Gadget")
     }
 
@@ -85,7 +86,7 @@ internal class QueryPlannerTest : FunSpec({
                 query { where { Product::price gt 20.0 } },
                 productRepo
             )
-        plan.strategy shouldBe QueryPlanner.Strategy.SCAN_ONLY
+        plan.strategy shouldBe Strategy.SCAN_ONLY
         plan.results.toList().map { it.name } shouldContainExactlyInAnyOrder listOf("Gadget", "Tablet")
     }
 
@@ -95,7 +96,7 @@ internal class QueryPlannerTest : FunSpec({
                 query { where { (Employee::department eq "eng") and (Employee::level eq 5) } },
                 employeeRepo
             )
-        plan.strategy shouldBe QueryPlanner.Strategy.INDEX_ONLY
+        plan.strategy shouldBe Strategy.INDEX_ONLY
         plan.results.toList().map { it.name } shouldContainExactlyInAnyOrder listOf("Alice", "Bob")
     }
 
@@ -105,7 +106,7 @@ internal class QueryPlannerTest : FunSpec({
                 query { where { (Product::category eq "books") or (Product::category eq "electronics") } },
                 productRepo
             )
-        plan.strategy shouldBe QueryPlanner.Strategy.SCAN_ONLY
+        plan.strategy shouldBe Strategy.SCAN_ONLY
         plan.results.toList() shouldHaveSize 4
     }
 
@@ -115,7 +116,7 @@ internal class QueryPlannerTest : FunSpec({
                 query { where { !(Product::category eq "books") } },
                 productRepo
             )
-        plan.strategy shouldBe QueryPlanner.Strategy.SCAN_ONLY
+        plan.strategy shouldBe Strategy.SCAN_ONLY
         plan.results.toList().map { it.name } shouldContainExactlyInAnyOrder listOf("Gadget", "Tablet")
     }
 
@@ -125,7 +126,7 @@ internal class QueryPlannerTest : FunSpec({
                 query { where { (Product::category eq "books") and (Product::category eq "sports") } },
                 productRepo
             )
-        plan.strategy shouldBe QueryPlanner.Strategy.INDEX_ONLY
+        plan.strategy shouldBe Strategy.INDEX_ONLY
         plan.results.toList().shouldBeEmpty()
     }
 
@@ -135,7 +136,7 @@ internal class QueryPlannerTest : FunSpec({
                 query { where { Product::category eq null } },
                 productRepo
             )
-        plan.strategy shouldBe QueryPlanner.Strategy.SCAN_ONLY
+        plan.strategy shouldBe Strategy.SCAN_ONLY
         plan.results.toList().shouldBeEmpty()
     }
 
@@ -145,7 +146,7 @@ internal class QueryPlannerTest : FunSpec({
                 query<Product> { },
                 productRepo
             )
-        plan.strategy shouldBe QueryPlanner.Strategy.SCAN_ONLY
+        plan.strategy shouldBe Strategy.SCAN_ONLY
         plan.results.toList() shouldHaveSize 4
     }
 
@@ -215,5 +216,34 @@ internal class QueryPlannerTest : FunSpec({
                 productRepo
             )
         plan.results.toList().map { it.name } shouldBe listOf("Book B", "Tablet")
+    }
+
+    test("PlanContext indexLeaves non-empty for INDEX_ONLY query") {
+        val context = productPlanner.execute(query { where { Product::category eq "books" } }, productRepo)
+        context.indexLeaves shouldHaveSize 1
+        context.indexLeaves[0].propertyName shouldBe "category"
+        context.postFilterCount shouldBe 0
+        context.viaStrategy.shouldBeNull()
+    }
+
+    test("PlanContext postFilterCount is 1 for INDEX_THEN_FILTER query") {
+        val context =
+            productPlanner.execute(
+                query { where { (Product::category eq "electronics") and (Product::price gt 60.0) } },
+                productRepo
+            )
+        context.strategy shouldBe Strategy.INDEX_THEN_FILTER
+        context.postFilterCount shouldBe 1
+    }
+
+    test("PlanContext indexLeaves empty for SCAN_ONLY query") {
+        val context = productPlanner.execute(query { where { Product::price gt 20.0 } }, productRepo)
+        context.strategy shouldBe Strategy.SCAN_ONLY
+        context.indexLeaves.shouldBeEmpty()
+    }
+
+    test("PlanContext viaStrategy is null for non-Via query") {
+        val context = productPlanner.execute(query { where { Product::category eq "books" } }, productRepo)
+        context.viaStrategy.shouldBeNull()
     }
 })
