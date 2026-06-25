@@ -78,14 +78,18 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> fxProjec
  * @param keyExtractor grouping function that extracts the projection key from an entity
  * @param dispatchToFxThread when `true` (default), dispatches notifications to the FX Application Thread;
  *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
+ * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
+ *   applied on the background thread before the FX-thread dispatch. Equal elements retain arrival
+ *   order (stable-after-equals). When `null` (default), buckets retain insertion order.
  * @return a read-only observable projection map delegate incrementally updated from the registry
  */
 fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryFxProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> PK,
-    dispatchToFxThread: Boolean = true
+    dispatchToFxThread: Boolean = true,
+    entryOrdering: Comparator<E>? = null
 ): RegistryFxProjection<K, PK, E> =
-    RegistryFxProjection(registry, keyExtractor, dispatchToFxThread)
+    RegistryFxProjection(registry, keyExtractor, dispatchToFxThread, entryOrdering)
 
 /**
  * Creates a value-transformed read-only [ObservableMap] projection that groups entities from an
@@ -209,6 +213,9 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : A
  *   `V` is constrained to be non-null so the add/replace/remove encoding of [ProjectionEntryChange] stays sound
  * @param dispatchToFxThread when `true` (default), dispatches notifications to the FX Application Thread;
  *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
+ * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
+ *   applied on the background thread so [valueTransform] receives an already-ordered list. Equal
+ *   elements retain arrival order (stable-after-equals). When `null` (default), insertion order is kept.
  * @return an [FxObservableProjection] grouping transformed bucket values by secondary key;
  *   its [addOnEntriesChangedListener][ObservableProjection.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
@@ -217,9 +224,10 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
     registry: Registry<K, E>,
     keyExtractor: (E) -> PK,
     valueTransform: (PK, List<E>) -> V,
-    dispatchToFxThread: Boolean = true
+    dispatchToFxThread: Boolean = true,
+    entryOrdering: Comparator<E>? = null
 ): FxObservableProjection<PK, V> =
-    TransformedRegistryFxProjection(registry, keyExtractor, valueTransform, dispatchToFxThread)
+    TransformedRegistryFxProjection(registry, keyExtractor, valueTransform, dispatchToFxThread, entryOrdering)
 
 /**
  * Creates a two-phase value-transformed read-only [ObservableMap] projection that groups all entities
@@ -260,6 +268,9 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  *   constrained to be non-null so the add/replace/remove encoding of [ProjectionEntryChange] stays sound
  * @param dispatchToFxThread when `true` (default), dispatches notifications to the FX Application Thread;
  *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
+ * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
+ *   applied on the background thread so [dataTransform] receives an already-ordered list. Equal
+ *   elements retain arrival order (stable-after-equals). When `null` (default), insertion order is kept.
  * @return an [FxObservableProjection] grouping transformed bucket values by secondary key;
  *   its [addOnEntriesChangedListener][ObservableProjection.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
@@ -270,14 +281,16 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : A
     keyExtractor: (E) -> PK,
     dataTransform: (PK, List<E>) -> D,
     fxFactory: (PK, D) -> V,
-    dispatchToFxThread: Boolean = true
+    dispatchToFxThread: Boolean = true,
+    entryOrdering: Comparator<E>? = null
 ): FxObservableProjection<PK, V> =
     TransformedRegistryFxProjection(
         registry,
         keyExtractor,
         dataTransform as (PK, List<E>) -> Any?,
         fxFactory as (PK, Any?) -> V,
-        dispatchToFxThread
+        dispatchToFxThread,
+        entryOrdering
     )
 
 /**
@@ -432,14 +445,18 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E, D, V : Any> fxMultiKeyProjection
  * @param keyExtractor function that extracts the set of projection keys from an entity
  * @param dispatchToFxThread when `true` (default), dispatches notifications to the FX Application Thread;
  *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
+ * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
+ *   applied on the background thread before the FX-thread dispatch. Equal elements retain arrival
+ *   order (stable-after-equals). When `null` (default), buckets retain insertion order.
  * @return a read-only multi-key projection map delegate incrementally updated from the registry
  */
 fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryFxMultiKeyProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> Collection<PK>,
-    dispatchToFxThread: Boolean = true
+    dispatchToFxThread: Boolean = true,
+    entryOrdering: Comparator<E>? = null
 ): RegistryFxMultiKeyProjection<K, PK, E> =
-    RegistryFxMultiKeyProjection(registry, keyExtractor, dispatchToFxThread)
+    RegistryFxMultiKeyProjection(registry, keyExtractor, dispatchToFxThread, entryOrdering)
 
 /**
  * Creates a value-transformed read-only [ObservableMap] multi-key projection delegate that groups
@@ -466,6 +483,9 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registry
  *   `V` is constrained to be non-null so the add/replace/remove encoding of [ProjectionEntryChange] stays sound
  * @param dispatchToFxThread when `true` (default), dispatches notifications to the FX Application Thread;
  *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
+ * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
+ *   applied on the background thread so [valueTransform] receives an already-ordered list. Equal
+ *   elements retain arrival order (stable-after-equals). When `null` (default), insertion order is kept.
  * @return an [FxObservableProjection] grouping transformed bucket values by multiple secondary keys;
  *   its [addOnEntriesChangedListener][ObservableProjection.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
@@ -474,9 +494,10 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
     registry: Registry<K, E>,
     keyExtractor: (E) -> Collection<PK>,
     valueTransform: (PK, List<E>) -> V,
-    dispatchToFxThread: Boolean = true
+    dispatchToFxThread: Boolean = true,
+    entryOrdering: Comparator<E>? = null
 ): FxObservableProjection<PK, V> =
-    TransformedRegistryFxMultiKeyProjection(registry, keyExtractor, valueTransform, dispatchToFxThread)
+    TransformedRegistryFxMultiKeyProjection(registry, keyExtractor, valueTransform, dispatchToFxThread, entryOrdering)
 
 /**
  * Creates a two-phase value-transformed read-only [ObservableMap] multi-key projection delegate that
@@ -518,6 +539,9 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  *   constrained to be non-null so the add/replace/remove encoding of [ProjectionEntryChange] stays sound
  * @param dispatchToFxThread when `true` (default), dispatches notifications to the FX Application Thread;
  *   when `false`, dispatches on [net.transgressoft.lirp.event.ReactiveScope.flowScope]
+ * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
+ *   applied on the background thread so [dataTransform] receives an already-ordered list. Equal
+ *   elements retain arrival order (stable-after-equals). When `null` (default), insertion order is kept.
  * @return an [FxObservableProjection] grouping transformed bucket values by multiple secondary keys;
  *   its [addOnEntriesChangedListener][ObservableProjection.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
@@ -528,12 +552,14 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : A
     keyExtractor: (E) -> Collection<PK>,
     dataTransform: (PK, List<E>) -> D,
     fxFactory: (PK, D) -> V,
-    dispatchToFxThread: Boolean = true
+    dispatchToFxThread: Boolean = true,
+    entryOrdering: Comparator<E>? = null
 ): FxObservableProjection<PK, V> =
     TransformedRegistryFxMultiKeyProjection(
         registry,
         keyExtractor,
         dataTransform as (PK, List<E>) -> Any?,
         fxFactory as (PK, Any?) -> V,
-        dispatchToFxThread
+        dispatchToFxThread,
+        entryOrdering
     )

@@ -73,7 +73,7 @@ class MultiKeyProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identifiabl
 
     // Bucket engine — stores one List<E> per PK bucket key in a ConcurrentSkipListMap.
     // All per-key bucket ops are driven explicitly via addEntityToKey / per-key removal.
-    private val core = ProjectionCore<K, PK, E> { error("ProjectionCore keyExtractor must not be called in MultiKeyProjection") }
+    private val core = ProjectionCore<K, PK, E>(keyExtractor = { error("ProjectionCore keyExtractor must not be called in MultiKeyProjection") })
 
     /**
      * Reverse index: entity id → the current set of bucket keys it occupies.

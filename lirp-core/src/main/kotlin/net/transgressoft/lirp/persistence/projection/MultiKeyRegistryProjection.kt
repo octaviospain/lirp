@@ -70,16 +70,23 @@ import kotlin.reflect.KProperty
  * @param registry the source registry whose entities are projected
  * @param keyExtractor function that extracts the set of projection keys from an entity;
  *   each returned key names one bucket the entity belongs to
+ * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
+ *   `null` (the default) preserves insertion order. Equal elements retain arrival order.
  */
 class MultiKeyRegistryProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
     private val registry: Registry<K, E>,
-    private val keyExtractor: (E) -> Collection<PK>
+    private val keyExtractor: (E) -> Collection<PK>,
+    private val entryOrdering: Comparator<E>? = null
 ) : AbstractMap<PK, List<E>>(), AutoCloseable {
 
     // Bucket engine — stores one List<E> per PK bucket key in a ConcurrentSkipListMap.
     // All per-key bucket ops are driven explicitly through the silent batch primitives; the
     // ProjectionCore keyExtractor is never invoked.
-    private val core = ProjectionCore<K, PK, E> { error("ProjectionCore keyExtractor must not be called in MultiKeyRegistryProjection") }
+    private val core =
+        ProjectionCore<K, PK, E>(
+            keyExtractor = { error("ProjectionCore keyExtractor must not be called in MultiKeyRegistryProjection") },
+            entryOrdering = entryOrdering
+        )
 
     /**
      * Reverse index: entity id → the current set of bucket keys it occupies.
@@ -183,7 +190,12 @@ class MultiKeyRegistryProjection<K : Comparable<K>, PK : Comparable<PK>, E : Ide
         for (key in toAdd) changed += core.addToBucketSilent(entity, key)
         if (newKeys.isEmpty()) reverseIndex.remove(id) else reverseIndex[id] = newKeys
         for (key in toRemove) core.removeByIdFromBucketSilent(id, key)?.let { changed += it }
-        for (key in unchanged) core.replaceInBucketSilent(entity, key)?.let { changed += it }
+        for (key in unchanged) {
+            val changedKey =
+                if (entryOrdering == null) core.replaceInBucketSilent(entity, key)
+                else core.repositionInBucketSilent(entity, key)
+            changedKey?.let { changed += it }
+        }
         core.fireBucketsChanged(changed) // one batched delta for the whole key-set update
     }
 

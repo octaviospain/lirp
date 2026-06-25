@@ -68,7 +68,7 @@ internal class RegistryProjectionTest : StringSpec({
         trackRepo.create(2, "Jazz Outro", "Jazz")
         trackRepo.create(3, "Rock Anthem", "Rock")
 
-        val projection = registryProjection(trackRepo) { it.albumName }
+        val projection = registryProjection(trackRepo, { it.albumName })
 
         projection.size shouldBe 2
         projection["Jazz"]!!.size shouldBe 2
@@ -85,14 +85,14 @@ internal class RegistryProjectionTest : StringSpec({
         trackRepo.create(2, "Active Track", "Jazz")
         reactive.advance()
 
-        val projection = registryProjection(trackRepo) { it.albumName }
+        val projection = registryProjection(trackRepo, { it.albumName })
 
         projection["Jazz"]!!.size shouldBe 1
         projection["Jazz"]!!.none { it.id == t1.id } shouldBe true
     }
 
     "adds entity to correct bucket on Create" {
-        val projection = registryProjection(trackRepo) { it.albumName }
+        val projection = registryProjection(trackRepo, { it.albumName })
         projection.size shouldBe 0
 
         trackRepo.create(1, "New Track", "Classical")
@@ -106,7 +106,7 @@ internal class RegistryProjectionTest : StringSpec({
         trackRepo.create(2, "Track B", "Pop")
         val trackC = trackRepo.create(3, "Track C", "Rock")
 
-        val projection = registryProjection(trackRepo) { it.albumName }
+        val projection = registryProjection(trackRepo, { it.albumName })
         projection["Pop"]!!.size shouldBe 2
 
         trackRepo.remove(trackC)
@@ -120,7 +120,7 @@ internal class RegistryProjectionTest : StringSpec({
         val t1 = trackRepo.create(1, "Track A", "Blues")
         trackRepo.create(2, "Track B", "Jazz")
 
-        val projection = registryProjection(trackRepo) { it.albumName }
+        val projection = registryProjection(trackRepo, { it.albumName })
         projection.containsKey("Blues") shouldBe true
 
         trackRepo.remove(t1)
@@ -133,7 +133,7 @@ internal class RegistryProjectionTest : StringSpec({
     "replaces entity in bucket on Update when key is unchanged" {
         trackRepo.create(1, "Old Title", "Rock")
 
-        val projection = registryProjection(trackRepo) { it.albumName }
+        val projection = registryProjection(trackRepo, { it.albumName })
         projection["Rock"]!!.first().title shouldBe "Old Title"
 
         // Use distinct entity objects so handleReplaceInBucket detects the change
@@ -150,7 +150,7 @@ internal class RegistryProjectionTest : StringSpec({
         trackRepo.create(1, "Track A", "Jazz")
         trackRepo.create(2, "Track B", "Rock")
 
-        val projection = registryProjection(trackRepo) { it.albumName }
+        val projection = registryProjection(trackRepo, { it.albumName })
         projection["Jazz"]!!.size shouldBe 1
         projection["Rock"]!!.size shouldBe 1
 
@@ -173,7 +173,7 @@ internal class RegistryProjectionTest : StringSpec({
         trackRepo.create(2, "Track B", "Jazz")
         reactive.advance()
 
-        val projection = registryProjection(trackRepo) { it.albumName }
+        val projection = registryProjection(trackRepo, { it.albumName })
         projection["Jazz"]!!.size shouldBe 2
 
         // Soft-delete: set deletedAt and emit Update event
@@ -193,7 +193,7 @@ internal class RegistryProjectionTest : StringSpec({
             }
         reactive.advance()
 
-        val projection = registryProjection(trackRepo) { it.albumName }
+        val projection = registryProjection(trackRepo, { it.albumName })
         projection["Jazz"]!!.size shouldBe 1
 
         // Soft-delete removes it from its bucket and drops it from the reverse index
@@ -216,7 +216,7 @@ internal class RegistryProjectionTest : StringSpec({
     "exposes read-only accessors consistent with bucket state" {
         trackRepo.create(1, "Track A", "Jazz")
         trackRepo.create(2, "Track B", "Rock")
-        val projection = registryProjection(trackRepo) { it.albumName }
+        val projection = registryProjection(trackRepo, { it.albumName })
 
         projection.isEmpty() shouldBe false
         projection.containsKey("Jazz") shouldBe true
@@ -228,7 +228,7 @@ internal class RegistryProjectionTest : StringSpec({
 
     "ignores Delete for an entity that was never bucketed" {
         trackRepo.create(1, "Track A", "Jazz")
-        val projection = registryProjection(trackRepo) { it.albumName }
+        val projection = registryProjection(trackRepo, { it.albumName })
         projection["Jazz"]!!.size shouldBe 1
 
         // Entity absent from the reverse index falls back to a full-scan removal that finds nothing.
@@ -241,7 +241,7 @@ internal class RegistryProjectionTest : StringSpec({
 
     "skips a redundant Create for an already-bucketed entity without duplicating it" {
         trackRepo.create(1, "Track A", "Jazz")
-        val projection = registryProjection(trackRepo) { it.albumName }
+        val projection = registryProjection(trackRepo, { it.albumName })
         projection["Jazz"]!!.size shouldBe 1
 
         // A redundant Create for an id already held in a bucket (as happens when the seed iterator and
@@ -253,7 +253,7 @@ internal class RegistryProjectionTest : StringSpec({
     }
 
     "fires onChange after Create" {
-        val projection = registryProjection(trackRepo) { it.albumName }
+        val projection = registryProjection(trackRepo, { it.albumName })
         projection.size shouldBe 0
 
         var callbackSnapshot: Map<String, List<AudioItem>>? = null
@@ -272,7 +272,7 @@ internal class RegistryProjectionTest : StringSpec({
         val t2 = trackRepo.create(2, "Track B", "Blues")
         reactive.advance()
 
-        val projection = registryProjection(trackRepo) { it.albumName }
+        val projection = registryProjection(trackRepo, { it.albumName })
         projection.size shouldBe 1
 
         var callbackCount = 0
@@ -288,7 +288,7 @@ internal class RegistryProjectionTest : StringSpec({
         trackRepo.create(1, "Track A", "Jazz")
         reactive.advance()
 
-        val projection = registryProjection(trackRepo) { it.albumName }
+        val projection = registryProjection(trackRepo, { it.albumName })
         projection.size shouldBe 1
 
         var callbackCount = 0
@@ -311,7 +311,7 @@ internal class RegistryProjectionTest : StringSpec({
         trackRepo.create(3, "C", "Blues")
         trackRepo.create(4, "D", "Jazz")
 
-        val projection = registryProjection(trackRepo) { it.albumName }
+        val projection = registryProjection(trackRepo, { it.albumName })
 
         projection.keys.toList() shouldContainExactly listOf("Blues", "Classical", "Jazz", "Rock")
     }
@@ -325,7 +325,7 @@ internal class RegistryProjectionTest : StringSpec({
                 MutableAudioItem(i, "Track-$i", albumNames[i % albumNames.size])
             }
 
-        val projection = registryProjection(trackRepo) { it.albumName }
+        val projection = registryProjection(trackRepo, { it.albumName })
         projection.size shouldBe 0
 
         val executor = Executors.newSingleThreadExecutor()
@@ -420,7 +420,7 @@ internal class RegistryProjectionTest : StringSpec({
 
     "close stops the projection from reflecting subsequent registry mutations" {
         trackRepo.create(1, "Track A", "Jazz")
-        val projection = registryProjection(trackRepo) { it.albumName }
+        val projection = registryProjection(trackRepo, { it.albumName })
         // Force lazy init so the subscription is live before closing.
         projection["Jazz"]!!.size shouldBe 1
 
@@ -439,7 +439,7 @@ internal class RegistryProjectionTest : StringSpec({
     }
 
     "close before first access is a no-op and does not throw" {
-        val projection = registryProjection(trackRepo) { it.albumName }
+        val projection = registryProjection(trackRepo, { it.albumName })
 
         shouldNotThrowAny { projection.close() }
     }
@@ -483,7 +483,7 @@ internal class RegistryProjectionTest : StringSpec({
     "MultiKeyRegistryProjection close stops the projection from reflecting subsequent mutations" {
         val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
         multiKeyRepo.create(1, "Track A", setOf("Rock", "Jazz"))
-        val projection = registryMultiKeyProjection(multiKeyRepo) { it.genres }
+        val projection = registryMultiKeyProjection(multiKeyRepo, { it.genres })
         // Force lazy init so the subscription is live before closing.
         projection["Rock"]!!.size shouldBe 1
 
@@ -498,7 +498,7 @@ internal class RegistryProjectionTest : StringSpec({
 
     "MultiKeyRegistryProjection close before first access is a no-op and does not throw" {
         val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
-        val projection = registryMultiKeyProjection(multiKeyRepo) { it.genres }
+        val projection = registryMultiKeyProjection(multiKeyRepo, { it.genres })
 
         shouldNotThrowAny { projection.close() }
     }
@@ -508,7 +508,7 @@ internal class RegistryProjectionTest : StringSpec({
         val item = multiKeyRepo.create(1, "Track A", setOf("Rock", "Jazz", "Indie"))
         reactive.advance()
 
-        val projection = registryMultiKeyProjection(multiKeyRepo) { it.genres }
+        val projection = registryMultiKeyProjection(multiKeyRepo, { it.genres })
         projection["Rock"]!!.size shouldBe 1
         projection["Jazz"]!!.size shouldBe 1
         projection["Indie"]!!.size shouldBe 1
@@ -532,7 +532,7 @@ internal class RegistryProjectionTest : StringSpec({
         val item = multiKeyRepo.create(1, "Old Title", setOf("Rock", "Jazz"))
         reactive.advance()
 
-        val projection = registryMultiKeyProjection(multiKeyRepo) { it.genres }
+        val projection = registryMultiKeyProjection(multiKeyRepo, { it.genres })
         projection["Rock"]!!.first().title shouldBe "Old Title"
 
         // Change a non-key field AND shrink the key set: Rock is unchanged (replace fires), Jazz removed.
@@ -595,7 +595,7 @@ internal class RegistryProjectionTest : StringSpec({
                 }
             seedItems.forEach { trackRepo.add(it) }
 
-            val projection = registryProjection(trackRepo) { it.albumName }
+            val projection = registryProjection(trackRepo, { it.albumName })
             // Trigger init before writers start
             projection.size shouldBe 5
 
@@ -623,14 +623,14 @@ internal class RegistryProjectionTest : StringSpec({
         }
 
     // -------------------------------------------------------------------------
-    // Multi-key projection (PROJ-04) — registry source
+    // Multi-key projection — registry source
     // -------------------------------------------------------------------------
 
     "MultiKeyRegistryProjection places entity in every genre bucket on Create" {
         val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
         multiKeyRepo.create(1, "Double-Genre Track", setOf("Rock", "Jazz"))
 
-        val projection = registryMultiKeyProjection(multiKeyRepo) { it.genres }
+        val projection = registryMultiKeyProjection(multiKeyRepo, { it.genres })
 
         projection.size shouldBe 2
         projection["Rock"]!!.size shouldBe 1
@@ -645,7 +645,7 @@ internal class RegistryProjectionTest : StringSpec({
         val anotherItem = multiKeyRepo.create(2, "Track B", setOf("Rock"))
         reactive.advance()
 
-        val projection = registryMultiKeyProjection(multiKeyRepo) { it.genres }
+        val projection = registryMultiKeyProjection(multiKeyRepo, { it.genres })
         // Initial state: Rock=[item, anotherItem], Jazz=[item]
         projection["Rock"]!!.size shouldBe 2
         projection["Jazz"]!!.size shouldBe 1
@@ -666,7 +666,7 @@ internal class RegistryProjectionTest : StringSpec({
     "MultiKeyRegistryProjection skips a redundant Create for an already-bucketed entity without duplicating it" {
         val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
         multiKeyRepo.create(1, "Track A", setOf("Rock", "Jazz"))
-        val projection = registryMultiKeyProjection(multiKeyRepo) { it.genres }
+        val projection = registryMultiKeyProjection(multiKeyRepo, { it.genres })
         projection["Rock"]!!.size shouldBe 1
         projection["Jazz"]!!.size shouldBe 1
 
@@ -683,7 +683,7 @@ internal class RegistryProjectionTest : StringSpec({
         multiKeyRepo.create(1, "No-Genre Track", emptySet())
         reactive.advance()
 
-        val projection = registryMultiKeyProjection(multiKeyRepo) { it.genres }
+        val projection = registryMultiKeyProjection(multiKeyRepo, { it.genres })
 
         projection.isEmpty() shouldBe true
     }
@@ -693,7 +693,7 @@ internal class RegistryProjectionTest : StringSpec({
         val item = multiKeyRepo.create(1, "Track", setOf("Rock", "Jazz"))
         reactive.advance()
 
-        val projection = registryMultiKeyProjection(multiKeyRepo) { it.genres }
+        val projection = registryMultiKeyProjection(multiKeyRepo, { it.genres })
         projection["Rock"]!!.size shouldBe 1
         projection["Jazz"]!!.size shouldBe 1
 
@@ -709,7 +709,7 @@ internal class RegistryProjectionTest : StringSpec({
     "MultiKeyRegistryProjection deduplicates repeated genres before bucketing" {
         val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
 
-        val projection = registryMultiKeyProjection<Int, String, MutableMultiKeyAudioItem>(multiKeyRepo) { it.genres }
+        val projection = registryMultiKeyProjection<Int, String, MutableMultiKeyAudioItem>(multiKeyRepo, { it.genres })
         projection.size shouldBe 0
 
         val item = multiKeyRepo.create(1, "Track", setOf("Rock", "Jazz"))
@@ -720,9 +720,9 @@ internal class RegistryProjectionTest : StringSpec({
         // Simulate keyExtractor receiving a list with duplicates by creating a custom projection
         // We test duplicate-key dedup via the factory directly: the factory's keyExtractor returns a list with dupes
         val dupeProjection =
-            registryMultiKeyProjection<Int, String, MutableMultiKeyAudioItem>(multiKeyRepo) { _ ->
+            registryMultiKeyProjection<Int, String, MutableMultiKeyAudioItem>(multiKeyRepo, { _ ->
                 listOf("Rock", "Rock", "Jazz", "Jazz") // duplicates
-            }
+            })
 
         dupeProjection["Rock"]!!.size shouldBe 1 // entity appears once in Rock bucket
         dupeProjection["Jazz"]!!.size shouldBe 1 // entity appears once in Jazz bucket
@@ -734,7 +734,7 @@ internal class RegistryProjectionTest : StringSpec({
         val item = softRepo.create(1, "Multi-Genre Track", setOf("Rock", "Jazz", "Indie"))
         reactive.advance()
 
-        val projection = registryMultiKeyProjection(softRepo) { it.genres }
+        val projection = registryMultiKeyProjection(softRepo, { it.genres })
         projection["Rock"]!!.size shouldBe 1
         projection["Jazz"]!!.size shouldBe 1
         projection["Indie"]!!.size shouldBe 1
@@ -1103,6 +1103,147 @@ internal class RegistryProjectionTest : StringSpec({
         ordered.drop(replaySize) shouldContainExactly listOf(Triple("Rock", "Rock:1", "Rock:2"))
     }
 
+    // -------------------------------------------------------------------------
+    // Ordered projection (entryOrdering) — single-key and multi-key
+    // -------------------------------------------------------------------------
+
+    "RegistryProjection with entryOrdering produces title-sorted buckets on seed" {
+        trackRepo.create(1, "Zeppelin", "Rock")
+        trackRepo.create(2, "Aerosmith", "Rock")
+        trackRepo.create(3, "Beatles", "Rock")
+
+        val projection = registryProjection(trackRepo, { it.albumName }, entryOrdering = compareBy { it.title })
+
+        projection["Rock"]!!.map { it.title } shouldContainExactly listOf("Aerosmith", "Beatles", "Zeppelin")
+    }
+
+    "RegistryProjection with entryOrdering inserts incremental item at its sorted position" {
+        trackRepo.create(1, "Zeppelin", "Rock")
+        trackRepo.create(2, "Aerosmith", "Rock")
+
+        val projection = registryProjection(trackRepo, { it.albumName }, entryOrdering = compareBy { it.title })
+        projection["Rock"]!!.map { it.title } shouldContainExactly listOf("Aerosmith", "Zeppelin")
+
+        trackRepo.create(3, "Beatles", "Rock")
+        reactive.advance()
+
+        projection["Rock"]!!.map { it.title } shouldContainExactly listOf("Aerosmith", "Beatles", "Zeppelin")
+    }
+
+    "RegistryProjection with entryOrdering keeps arrival order for equal-title elements" {
+        val item1 = trackRepo.create(1, "Aria", "Classical")
+        val item2 = trackRepo.create(2, "Aria", "Classical")
+        val item3 = trackRepo.create(3, "Aria", "Classical")
+
+        val projection = registryProjection(trackRepo, { it.albumName }, entryOrdering = compareBy { it.title })
+
+        // All three have the same title — arrival order must be preserved (upper-bound stable)
+        projection["Classical"]!!.map { it.id } shouldContainExactly listOf(item1.id, item2.id, item3.id)
+    }
+
+    "RegistryProjection with entryOrdering preserves order after incremental remove" {
+        trackRepo.create(1, "Zeppelin", "Rock")
+        val beatles = trackRepo.create(2, "Beatles", "Rock")
+        trackRepo.create(3, "Aerosmith", "Rock")
+
+        val projection = registryProjection(trackRepo, { it.albumName }, entryOrdering = compareBy { it.title })
+        projection["Rock"]!!.map { it.title } shouldContainExactly listOf("Aerosmith", "Beatles", "Zeppelin")
+
+        trackRepo.remove(beatles)
+        reactive.advance()
+
+        projection["Rock"]!!.map { it.title } shouldContainExactly listOf("Aerosmith", "Zeppelin")
+    }
+
+    "RegistryProjection with entryOrdering repositions entity when sort-key title changes on same-PK Update" {
+        val item = trackRepo.create(1, "Zeppelin", "Rock")
+        trackRepo.create(2, "Aerosmith", "Rock")
+
+        val projection = registryProjection(trackRepo, { it.albumName }, entryOrdering = compareBy { it.title })
+        projection["Rock"]!!.map { it.title } shouldContainExactly listOf("Aerosmith", "Zeppelin")
+
+        // Mutate title so position changes — use distinct entity objects (album key unchanged)
+        val oldSnapshot = MutableAudioItem(item.id, "Zeppelin", "Rock")
+        val updated = MutableAudioItem(item.id, "AC/DC", "Rock")
+        trackRepo.emitAsync(StandardCrudEvent.Update(updated, oldSnapshot))
+        reactive.advance()
+
+        // "AC/DC" sorts before "Aerosmith" alphabetically
+        projection["Rock"]!!.map { it.title } shouldContainExactly listOf("AC/DC", "Aerosmith")
+    }
+
+    "RegistryProjection with entryOrdering: valueTransform receives already-ordered List<E>" {
+        trackRepo.create(1, "Zeppelin", "Rock")
+        trackRepo.create(2, "Aerosmith", "Rock")
+        trackRepo.create(3, "Beatles", "Rock")
+
+        val receivedOrder = mutableListOf<String>()
+        val transformed =
+            registryProjection<Int, String, AudioItem, String>(
+                trackRepo, { it.albumName }, entryOrdering = compareBy { it.title }
+            ) { _, items ->
+                receivedOrder.addAll(items.map { it.title })
+                "${items.size}"
+            }
+
+        // Trigger initialization and first transform call
+        transformed["Rock"] shouldBe "3"
+        receivedOrder shouldContainExactly listOf("Aerosmith", "Beatles", "Zeppelin")
+    }
+
+    "RegistryProjection without entryOrdering preserves insertion order" {
+        trackRepo.create(1, "Zeppelin", "Rock")
+        trackRepo.create(2, "Aerosmith", "Rock")
+        trackRepo.create(3, "Beatles", "Rock")
+
+        val projection = registryProjection(trackRepo, { it.albumName })
+
+        // No ordering — bucket keeps seeding/insertion order
+        projection["Rock"]!!.map { it.title } shouldContainExactly listOf("Zeppelin", "Aerosmith", "Beatles")
+    }
+
+    "MultiKeyRegistryProjection with entryOrdering produces title-sorted buckets per genre" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        multiKeyRepo.create(1, "Zeppelin", setOf("Rock"))
+        multiKeyRepo.create(2, "Aerosmith", setOf("Rock", "Jazz"))
+        multiKeyRepo.create(3, "Beatles", setOf("Rock"))
+
+        val projection = registryMultiKeyProjection(multiKeyRepo, { it.genres }, entryOrdering = compareBy { it.title })
+
+        projection["Rock"]!!.map { it.title } shouldContainExactly listOf("Aerosmith", "Beatles", "Zeppelin")
+        projection["Jazz"]!!.map { it.title } shouldContainExactly listOf("Aerosmith")
+    }
+
+    "MultiKeyRegistryProjection with entryOrdering repositions entity in unchanged buckets on sort-key Update" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        val item = multiKeyRepo.create(1, "Zeppelin", setOf("Rock", "Jazz"))
+        multiKeyRepo.create(2, "Aerosmith", setOf("Rock", "Jazz"))
+        reactive.advance()
+
+        val projection = registryMultiKeyProjection(multiKeyRepo, { it.genres }, entryOrdering = compareBy { it.title })
+        projection["Rock"]!!.map { it.title } shouldContainExactly listOf("Aerosmith", "Zeppelin")
+
+        // Title update with unchanged genres — both Rock and Jazz buckets must reposition item
+        val oldSnapshot = item.clone()
+        item.title = "AC/DC"
+        multiKeyRepo.emitAsync(StandardCrudEvent.Update(item, oldSnapshot))
+        reactive.advance()
+
+        projection["Rock"]!!.map { it.title } shouldContainExactly listOf("AC/DC", "Aerosmith")
+        projection["Jazz"]!!.map { it.title } shouldContainExactly listOf("AC/DC", "Aerosmith")
+    }
+
+    "MultiKeyRegistryProjection without entryOrdering preserves insertion order" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        multiKeyRepo.create(1, "Zeppelin", setOf("Rock"))
+        multiKeyRepo.create(2, "Aerosmith", setOf("Rock"))
+        multiKeyRepo.create(3, "Beatles", setOf("Rock"))
+
+        val projection = registryMultiKeyProjection(multiKeyRepo, { it.genres })
+
+        projection["Rock"]!!.map { it.title } shouldContainExactly listOf("Zeppelin", "Aerosmith", "Beatles")
+    }
+
     "MultiKeyRegistryProjection iterates without ConcurrentModificationException under concurrent key-set churn stress"
         .config(tags = setOf(Stress)) {
             extension(ReactiveScopeSerialization)
@@ -1117,7 +1258,7 @@ internal class RegistryProjectionTest : StringSpec({
                     multiKeyRepo.create(i, "Track-$i", setOf("Genre-${i % 3}"))
                 }
 
-            val projection = registryMultiKeyProjection(multiKeyRepo) { it.genres }
+            val projection = registryMultiKeyProjection(multiKeyRepo, { it.genres })
             // Trigger init before writers start
             projection.size shouldBe 3
 

@@ -61,22 +61,31 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> projecti
  *
  * Keys are maintained in natural sorted order via a [java.util.concurrent.ConcurrentSkipListMap].
  *
+ * When [entryOrdering] is non-null, each per-key bucket's `List<E>` is maintained sorted by that
+ * comparator. Elements with equal sort keys retain their arrival order. An in-place property mutation
+ * that changes the comparator's sort key will re-position the entity within its bucket on the next
+ * Update event. When null (the default), buckets keep insertion order.
+ *
  * Usage:
  * ```kotlin
  * val itemsByAlbum by registryProjection(trackRepo) { it.albumName }
+ * val itemsByAlbumOrderedByTitle by registryProjection(trackRepo, { it.albumName }, entryOrdering = compareBy { it.title })
  * ```
  *
  * @param K the entity ID type, must be [Comparable]
  * @param PK the projection key type, must be [Comparable]
  * @param E the entity type
  * @param registry the source registry to project
- * @param keyExtractor trailing-lambda grouping function that extracts the projection key from an entity
+ * @param keyExtractor grouping function that extracts the projection key from an entity
+ * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
+ *   `null` (the default) preserves insertion order. Equal elements retain arrival order.
  * @return a [RegistryProjection] delegate grouping registry entities by [keyExtractor]
  */
 fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryProjection(
     registry: Registry<K, E>,
-    keyExtractor: (E) -> PK
-): RegistryProjection<K, PK, E> = RegistryProjection(registry, keyExtractor)
+    keyExtractor: (E) -> PK,
+    entryOrdering: Comparator<E>? = null
+): RegistryProjection<K, PK, E> = RegistryProjection(registry, keyExtractor, entryOrdering)
 
 /**
  * Creates a read-only value-transformed projection that groups entities from a source collection
@@ -129,9 +138,13 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  * When a bucket becomes empty and its key is removed from the backing projection, the corresponding
  * key is also removed from the returned map — [valueTransform] is never called over an empty list.
  *
+ * When [entryOrdering] is non-null, each per-key bucket's `List<E>` is maintained sorted and
+ * [valueTransform] receives an already-ordered list. Equal elements retain arrival order.
+ *
  * Usage:
  * ```kotlin
  * val summaryByAlbum = registryProjection(trackRepo) { it.albumName } { pk, items -> AlbumSummary(pk, items.size) }
+ * val orderedSummary = registryProjection(trackRepo, { it.albumName }, entryOrdering = compareBy { it.title }) { pk, items -> AlbumSummary(pk, items) }
  * ```
  *
  * **Weak cross-key consistency:** Two consecutive reads on different keys are NOT a single
@@ -143,6 +156,9 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  * @param V the value type produced by [valueTransform]
  * @param registry the source registry to project
  * @param keyExtractor grouping function that extracts the projection key from an entity
+ * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order
+ *   before [valueTransform] is invoked; `null` (the default) preserves insertion order.
+ *   Equal elements retain arrival order.
  * @param valueTransform trailing-lambda applied to each `(PK, List<E>)` bucket to produce a non-null `V`
  *   value; invoked only for buckets affected by the latest delta. `V` is constrained to be non-null so
  *   the add/replace/remove encoding of [ProjectionEntryChange] stays sound (a null value cannot be
@@ -154,8 +170,9 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
 fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> registryProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> PK,
+    entryOrdering: Comparator<E>? = null,
     valueTransform: (PK, List<E>) -> V
-): ObservableProjection<PK, V> = TransformedRegistryProjection(RegistryProjection(registry, keyExtractor), valueTransform)
+): ObservableProjection<PK, V> = TransformedRegistryProjection(RegistryProjection(registry, keyExtractor, entryOrdering), valueTransform)
 
 /**
  * Creates a read-only multi-key projection that groups entities from a source collection by every
@@ -230,6 +247,10 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  * An empty key collection places the entity in zero buckets with no error. Duplicate keys are
  * deduplicated before bucketing.
  *
+ * When [entryOrdering] is non-null, each per-key bucket's `List<E>` is maintained sorted by that
+ * comparator. Elements with equal sort keys retain their arrival order. An in-place property mutation
+ * that changes the comparator's sort key will re-position the entity within its unchanged buckets.
+ *
  * **Weak cross-key consistency:** Two consecutive reads on different keys are NOT a single
  * snapshot. Iteration is CME-free via [java.util.concurrent.ConcurrentSkipListMap].
  *
@@ -237,13 +258,16 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  * @param PK the projection key type, must be [Comparable]
  * @param E the entity type
  * @param registry the source registry to project
- * @param keyExtractor trailing-lambda that extracts a collection of projection keys from an entity
+ * @param keyExtractor grouping function that extracts a collection of projection keys from an entity
+ * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
+ *   `null` (the default) preserves insertion order. Equal elements retain arrival order.
  * @return a [MultiKeyRegistryProjection] delegate grouping registry entities by every key in [keyExtractor]
  */
 fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryMultiKeyProjection(
     registry: Registry<K, E>,
-    keyExtractor: (E) -> Collection<PK>
-): MultiKeyRegistryProjection<K, PK, E> = MultiKeyRegistryProjection(registry, keyExtractor)
+    keyExtractor: (E) -> Collection<PK>,
+    entryOrdering: Comparator<E>? = null
+): MultiKeyRegistryProjection<K, PK, E> = MultiKeyRegistryProjection(registry, keyExtractor, entryOrdering)
 
 /**
  * Creates a read-only value-transformed multi-key projection that groups all entities from a
@@ -254,6 +278,9 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registry
  * are populated before stale buckets are removed (add-before-remove ordering). Duplicate keys are
  * deduplicated before bucketing.
  *
+ * When [entryOrdering] is non-null, each per-key bucket's `List<E>` is maintained sorted and
+ * [valueTransform] receives an already-ordered list. Equal elements retain arrival order.
+ *
  * **Weak cross-key consistency:** Two consecutive reads on different keys are NOT a single
  * snapshot. Iteration is CME-free via [java.util.concurrent.ConcurrentHashMap].
  *
@@ -263,6 +290,9 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registry
  * @param V the value type produced by [valueTransform]
  * @param registry the source registry to project
  * @param keyExtractor grouping function that extracts a collection of projection keys from an entity
+ * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order
+ *   before [valueTransform] is invoked; `null` (the default) preserves insertion order.
+ *   Equal elements retain arrival order.
  * @param valueTransform trailing-lambda applied to each `(PK, List<E>)` bucket to produce a non-null `V`
  *   value; invoked only for buckets affected by the latest delta. `V` is constrained to be non-null so
  *   the add/replace/remove encoding of [ProjectionEntryChange] stays sound (a null value cannot be
@@ -275,5 +305,6 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registry
 fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any> registryMultiKeyProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> Collection<PK>,
+    entryOrdering: Comparator<E>? = null,
     valueTransform: (PK, List<E>) -> V
-): ObservableProjection<PK, V> = TransformedMultiKeyRegistryProjection(MultiKeyRegistryProjection(registry, keyExtractor), valueTransform)
+): ObservableProjection<PK, V> = TransformedMultiKeyRegistryProjection(MultiKeyRegistryProjection(registry, keyExtractor, entryOrdering), valueTransform)

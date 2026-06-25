@@ -64,13 +64,16 @@ import kotlin.reflect.KProperty
  * @param E the entity type
  * @param registry the source registry whose entities are projected
  * @param keyExtractor grouping function that extracts the projection key from an entity
+ * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
+ *   `null` (the default) preserves insertion order. Equal elements retain arrival order.
  */
 class RegistryProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
     private val registry: Registry<K, E>,
-    private val keyExtractor: (E) -> PK
+    private val keyExtractor: (E) -> PK,
+    private val entryOrdering: Comparator<E>? = null
 ) : AbstractMap<PK, List<E>>(), AutoCloseable {
 
-    private val core = ProjectionCore<K, PK, E>(keyExtractor)
+    private val core = ProjectionCore<K, PK, E>(keyExtractor, entryOrdering)
 
     /** Reverse index: entity id → current bucket key. Enables O(1) old-key lookup on Update. */
     private val reverseIndex = ConcurrentHashMap<K, PK>()
@@ -169,7 +172,8 @@ class RegistryProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identifiabl
             // Bucket key changed: move the entity from its old bucket to the new one.
             oldKey != newKey -> reBucket(id, entity, oldKey)
             // Same bucket key, only non-key content changed.
-            else -> core.handleReplaceInBucket(entity, newKey)
+            // When ordered, re-position the entity within its bucket so sort-key mutations are reflected.
+            else -> if (entryOrdering == null) core.handleReplaceInBucket(entity, newKey) else core.repositionInBucket(entity, newKey)
         }
     }
 
