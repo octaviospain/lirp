@@ -22,18 +22,18 @@ import net.transgressoft.lirp.entity.ReactiveEntity
 /**
  * Describes a single `@Version` conflict detected during a transaction block commit.
  *
- * [entity] is the pre-block snapshot of the in-memory entity — captured before rollback so
- * the caller can read the values that were attempted. [canonical] is the authoritative database
- * state at conflict time; `null` when the row was concurrently deleted. [version] is the
- * actual database version at conflict time; `-1` when the row was deleted, `null` for
+ * [entity] carries the values that were **attempted inside the block** (captured before rollback)
+ * so the caller can inspect what the block tried to write. [canonical] is the authoritative
+ * on-disk state at conflict time; `null` when the row was concurrently deleted. [version] is
+ * the actual database version at conflict time; `-1` when the row was deleted, `null` for
  * non-`@Version` entities.
  *
  * Naming follows the vocabulary established by [net.transgressoft.lirp.event.StandardCrudEvent.Conflict].
  *
  * @param K the entity key type.
  * @param R the entity type.
- * @param entity the pre-block snapshot of the in-memory entity with the values that were attempted.
- * @param canonical the authoritative database state at conflict time; `null` when the row was concurrently deleted.
+ * @param entity the entity with the values attempted inside the transaction block, captured before in-memory rollback.
+ * @param canonical the authoritative on-disk state at conflict time; `null` when the row was concurrently deleted.
  * @param version the actual database version at conflict time; `-1` when the row was deleted, `null` for non-`@Version` entities.
  */
 data class ConflictInfo<K : Comparable<K>, R : ReactiveEntity<K, R>>(

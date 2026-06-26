@@ -24,6 +24,7 @@ import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.LirpRegistryInfo
 import net.transgressoft.lirp.persistence.LirpTransactionException
 import net.transgressoft.lirp.persistence.MutableAudioItem
+import net.transgressoft.lirp.persistence.PendingDelete
 import net.transgressoft.lirp.persistence.PendingUpdate
 import net.transgressoft.lirp.persistence.RegistryBase
 import net.transgressoft.lirp.persistence.TransactionBuffer
@@ -42,9 +43,16 @@ import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
+import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.jetbrains.exposed.v1.jdbc.update
 import javax.sql.DataSource
+
+@Suppress("UNCHECKED_CAST")
+private fun Table.audioItemIdColumn(): Column<Int> = columns.first { it.name == "id" } as Column<Int>
+
+@Suppress("UNCHECKED_CAST")
+private fun Table.audioItemTitleColumn(): Column<String> = columns.first { it.name == "title" } as Column<String>
 
 /**
  * H2 unit tests for [SqlRepository.commitTransactionBuffer]: covers the all-or-nothing commit
@@ -98,9 +106,143 @@ internal class SqlTransactionTest : StringSpec() {
                     (r.findById(1).get() as MutableAudioItem).title = "Killer Queen"
                 }
 
+                // In-memory assertion.
                 repo.findById(1).shouldBePresent { it.title shouldBe "Killer Queen" }
+
+                // DB-level assertion via rawTransaction (bypasses the in-memory cache).
+                val titleInDb =
+                    rawTransaction(dataSource, AudioItemSqlTableDef) {
+                        selectAll()
+                            .where { audioItemIdColumn() eq 1 }
+                            .singleOrNull()
+                            ?.let { it[audioItemTitleColumn()] }
+                    }
+                titleInDb shouldBe "Killer Queen"
             } finally {
                 repo.close()
+                dataSource.close()
+            }
+        }
+
+        "transaction insert inside block is persisted to DB and visible via raw query" {
+            val dataSource = H2ContainerSupport.buildH2DataSource()
+            val repo = AudioItemSqlRepository(dataSource)
+            try {
+                transaction(repo) { r ->
+                    r.add(MutableAudioItem(50, "Somebody to Love", "A Day at the Races") as AudioItem)
+                }
+
+                // In-memory: inserted entity is present.
+                repo.findById(50).shouldBePresent { it.title shouldBe "Somebody to Love" }
+
+                // DB-level: raw query confirms the row was committed.
+                val titleInDb =
+                    rawTransaction(dataSource, AudioItemSqlTableDef) {
+                        selectAll()
+                            .where { audioItemIdColumn() eq 50 }
+                            .singleOrNull()
+                            ?.let { it[audioItemTitleColumn()] }
+                    }
+                titleInDb shouldBe "Somebody to Love"
+            } finally {
+                repo.close()
+                dataSource.close()
+            }
+        }
+
+        "transaction delete inside block is persisted to DB and row absent from raw query" {
+            val dataSource = H2ContainerSupport.buildH2DataSource()
+            val seedRepo = AudioItemSqlRepository(dataSource)
+            seedRepo.add(MutableAudioItem(51, "We Are the Champions", "News of the World") as AudioItem)
+            seedRepo.close()
+
+            val repo = AudioItemSqlRepository(dataSource)
+            try {
+                transaction(repo) { r ->
+                    r.remove(r.findById(51).get())
+                }
+
+                // In-memory: entity removed.
+                repo.findById(51).isPresent shouldBe false
+
+                // DB-level: raw query confirms the row is gone.
+                val rowInDb =
+                    rawTransaction(dataSource, AudioItemSqlTableDef) {
+                        selectAll()
+                            .where { audioItemIdColumn() eq 51 }
+                            .singleOrNull()
+                    }
+                rowInDb shouldBe null
+            } finally {
+                repo.close()
+                dataSource.close()
+            }
+        }
+
+        "commitTransactionBuffer @Version conflict rolls back ALL DB ops atomically — sibling write absent from DB" {
+            val dataSource = H2ContainerSupport.buildH2DataSource()
+            // Seed two versioned persons: one will conflict, one is a sibling write in the same buffer.
+            val seedRepo = SqlRepository<Int, TestVersionedPerson>(dataSource, TestVersionedPersonTableDef)
+            val alice = TestVersionedPerson(10).apply { firstName = "Alice" }
+            val bob = TestVersionedPerson(11).apply { firstName = "Bob" }
+            seedRepo.add(alice)
+            seedRepo.add(bob)
+            // Flush both to DB synchronously.
+            transaction(seedRepo) { _ -> }
+            seedRepo.close()
+
+            val repo = SqlRepository<Int, TestVersionedPerson>(dataSource, TestVersionedPersonTableDef)
+            try {
+                // Third-party writer bumps Alice's DB version to 1. The in-memory entity keeps version=0.
+                rawTransaction(dataSource, TestVersionedPersonTableDef) {
+                    @Suppress("UNCHECKED_CAST")
+                    update({ (columns.first { it.name == "id" } as Column<Int>) eq 10 }) { row ->
+                        @Suppress("UNCHECKED_CAST")
+                        row[columns.first { it.name == "version" } as Column<Long>] = 1L
+                    }
+                }
+
+                val liveAlice = repo.findById(10).get()
+                val liveBob = repo.findById(11).get()
+
+                // Assemble a buffer: Alice (will conflict at version=0) and Bob (clean sibling write).
+                @Suppress("UNCHECKED_CAST")
+                (liveAlice as ReactiveEntityBase<Int, TestVersionedPerson>).withEventsDisabled {
+                    liveAlice.firstName = "AliceAttempted"
+                }
+                @Suppress("UNCHECKED_CAST")
+                (liveBob as ReactiveEntityBase<Int, TestVersionedPerson>).withEventsDisabled {
+                    liveBob.firstName = "BobAttempted"
+                }
+                val buffer = TransactionBuffer(repo)
+                buffer.updates.add(PendingUpdate(liveAlice, expectedVersion = 0L))
+                buffer.updates.add(PendingUpdate(liveBob, expectedVersion = 0L))
+
+                shouldThrow<TransactionConflictException> {
+                    repo.commitTransactionBuffer(buffer)
+                }
+
+                // DB-level: the sibling Bob write must NOT be in the DB (full rollback required).
+                val exposedTable = ExposedTableInterpreter().interpret(TestVersionedPersonTableDef)
+                val db = Database.connect(dataSource)
+                val bobFirstNameInDb =
+                    transaction(db) {
+                        exposedTable.table
+                            .selectAll()
+                            .where { (exposedTable.table.columns.first { it.name == "id" } as Column<Int>) eq 11 }
+                            .singleOrNull()
+                            ?.let { row ->
+                                @Suppress("UNCHECKED_CAST")
+                                row[exposedTable.table.columns.first { it.name == "first_name" } as Column<String>]
+                            }
+                    }
+                // Bob's DB row must remain "Bob" — the entire DB transaction was rolled back.
+                bobFirstNameInDb shouldBe "Bob"
+            } finally {
+                try {
+                    repo.close()
+                } catch (_: Exception) {
+                }
                 dataSource.close()
             }
         }
@@ -275,10 +417,12 @@ internal class SqlTransactionTest : StringSpec() {
             }
         }
 
-        "commitTransactionBuffer with cascade child on a different DataSource throws LirpTransactionException before any commit" {
+        "commitTransactionBuffer with cascade child on a different DataSource but CascadeAction.NONE completes without LirpTransactionException" {
             val dataSourceA = H2ContainerSupport.buildH2DataSource()
             val dataSourceB = H2ContainerSupport.buildH2DataSource()
-            // Playlist on dataSourceA; track repo registered on dataSourceB → cross-DataSource cascade.
+            // Playlist on dataSourceA; track repo registered on dataSourceB.
+            // MutablePlaylistSql.tracks has CascadeAction.NONE, so the different DataSource is ignored
+            // and the transaction proceeds normally.
             val trackRepo = TxSqlTestTrackRepo(dataSourceB)
             val playlistRepo = TxMutablePlaylistRepo(dataSourceA)
             try {
@@ -289,15 +433,15 @@ internal class SqlTransactionTest : StringSpec() {
 
                 @Suppress("UNCHECKED_CAST")
                 (playlist as ReactiveEntityBase<Long, MutablePlaylistSql>).withEventsDisabled {
-                    playlist.name = "should-not-commit"
+                    playlist.name = "should-commit"
                 }
                 val buffer = TransactionBuffer(playlistRepo)
                 buffer.updates.add(PendingUpdate(playlist, expectedVersion = null))
 
-                // LirpTransactionException because trackRepo uses a different DataSource than playlistRepo.
-                shouldThrow<LirpTransactionException> {
-                    playlistRepo.commitTransactionBuffer(buffer)
-                }
+                // No LirpTransactionException: CascadeAction.NONE means validation skips the cross-DS target.
+                playlistRepo.commitTransactionBuffer(buffer)
+
+                playlistRepo.findById(2L).shouldBePresent { it.name shouldBe "should-commit" }
             } finally {
                 try {
                     playlistRepo.close()
@@ -332,6 +476,104 @@ internal class SqlTransactionTest : StringSpec() {
 
                 events.shouldBeEmpty()
                 repo.findById(4).shouldBePresent { it.title shouldBe "Radio Ga Ga" }
+            } finally {
+                repo.close()
+                dataSource.close()
+            }
+        }
+
+        "delete-only @Version conflict surfaces as TransactionConflictException, not IllegalStateException" {
+            // Verifies that preRollbackSnapshots covers buffer.deletes so a delete-only
+            // version conflict can build ConflictInfo without a findById() fallback that
+            // would throw IllegalStateException on a row that no longer exists in DB.
+            val dataSource = H2ContainerSupport.buildH2DataSource()
+            val repo = SqlRepository<Int, TestVersionedPerson>(dataSource, TestVersionedPersonTableDef)
+            try {
+                val entity = TestVersionedPerson(99).apply { firstName = "George" }
+                repo.add(entity)
+                // Flush INSERT to DB via a no-op transaction (pre-flush writes the row).
+                transaction(repo) { _ -> }
+
+                // Bump the DB row's version externally. In-memory entity keeps version=0.
+                rawTransaction(dataSource, TestVersionedPersonTableDef) {
+                    @Suppress("UNCHECKED_CAST")
+                    update({ (columns.first { it.name == "id" } as Column<Int>) eq 99 }) { row ->
+                        @Suppress("UNCHECKED_CAST")
+                        row[columns.first { it.name == "version" } as Column<Long>] = 1L
+                    }
+                }
+
+                // Assemble a buffer with only a delete — no updates, no inserts. The conflict snapshot
+                // is built from buffer.deletes (which carries the entity), so no entitySnapshots seed
+                // is needed for the delete-only path.
+                val buffer = TransactionBuffer(repo)
+                buffer.deletes.add(
+                    net.transgressoft.lirp.persistence.PendingDelete(entity.id, entity, expectedVersion = 0L)
+                )
+
+                // Must throw TransactionConflictException, not IllegalStateException.
+                val ex =
+                    shouldThrow<TransactionConflictException> {
+                        repo.commitTransactionBuffer(buffer)
+                    }
+                ex.conflicts shouldHaveSize 1
+            } finally {
+                try {
+                    repo.close()
+                } catch (_: Exception) {
+                }
+                dataSource.close()
+            }
+        }
+
+        "transaction remove-then-add same pre-existing versioned id updates the row without duplicate-key failure" {
+            val dataSource = H2ContainerSupport.buildH2DataSource()
+            val seedRepo = AudioItemSqlRepository(dataSource)
+            seedRepo.add(MutableAudioItem(60, "Killer Queen", "Sheer Heart Attack") as AudioItem)
+            seedRepo.close()
+
+            val repo = AudioItemSqlRepository(dataSource)
+            try {
+                transaction(repo) { r ->
+                    val existing = r.findById(60).get()
+                    r.remove(existing)
+                    r.add(MutableAudioItem(60, "Bohemian Rhapsody", "A Night at the Opera") as AudioItem)
+                }
+
+                // In-memory: re-added value present.
+                repo.findById(60).shouldBePresent { it.title shouldBe "Bohemian Rhapsody" }
+
+                // DB-level: exactly one row with the updated title.
+                val titleInDb =
+                    rawTransaction(dataSource, AudioItemSqlTableDef) {
+                        selectAll().where { audioItemIdColumn() eq 60 }.singleOrNull()
+                            ?.let { it[audioItemTitleColumn()] }
+                    }
+                titleInDb shouldBe "Bohemian Rhapsody"
+            } finally {
+                repo.close()
+                dataSource.close()
+            }
+        }
+
+        "transaction add-then-remove same new id is a no-op — row absent from DB after commit" {
+            val dataSource = H2ContainerSupport.buildH2DataSource()
+            val repo = AudioItemSqlRepository(dataSource)
+            try {
+                transaction(repo) { r ->
+                    r.add(MutableAudioItem(61, "We Will Rock You", "News of the World") as AudioItem)
+                    r.remove(r.findById(61).get())
+                }
+
+                // In-memory: no entity.
+                repo.findById(61).isPresent shouldBe false
+
+                // DB-level: no row written.
+                val rowInDb =
+                    rawTransaction(dataSource, AudioItemSqlTableDef) {
+                        selectAll().where { audioItemIdColumn() eq 61 }.singleOrNull()
+                    }
+                rowInDb shouldBe null
             } finally {
                 repo.close()
                 dataSource.close()

@@ -219,11 +219,41 @@ internal class SqlTransactionIntegrationTest : FunSpec({
                         } catch (_: Exception) {
                         }
                     }
-                } catch (_: Exception) {
+                } finally {
+                    // Use finally so assertion failures from the inner block are not swallowed.
                     try {
                         repo.close()
                     } catch (_: Exception) {
                     }
+                }
+            }
+        }
+    }
+
+    context("transaction scalar mutation visible from concurrent connection after commit") {
+        withTests(databases) { db ->
+            withDatabaseTest(db, AudioItemSqlTableDef) { dataSource ->
+                val seedRepo = AudioItemSqlRepository(dataSource)
+                seedRepo.add(MutableAudioItem(40, "Don't Stop Me Now", "Jazz"))
+                seedRepo.close()
+
+                val repo = AudioItemSqlRepository(dataSource)
+                try {
+                    transaction(repo) { r ->
+                        (r.findById(40).get() as MutableAudioItem).title = "Committed Title"
+                    }
+
+                    // Read from a concurrent connection (rawTransaction) to prove DB persistence.
+                    val titleFromDb =
+                        rawTransaction(dataSource, AudioItemSqlTableDef) {
+                            selectAll()
+                                .where { audioItemIdColumn() eq 40 }
+                                .singleOrNull()
+                                ?.let { it[audioItemTitleColumn()] }
+                        }
+                    titleFromDb shouldBe "Committed Title"
+                } finally {
+                    repo.close()
                 }
             }
         }

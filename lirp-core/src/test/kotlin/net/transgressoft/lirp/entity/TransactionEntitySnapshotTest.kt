@@ -44,10 +44,15 @@ internal class TransactionEntitySnapshotTest : StringSpec({
         snapshot["albumName"] shouldBe "album-initial"
     }
 
-    "captureSnapshot captures exactly the two scalar reactive properties (excludes aggregate delegates)" {
+    "captureSnapshot captures the two scalar reactive properties and the lastDateModified sentinel" {
         val item = MutableAudioItem(2, "title", "album")
         val snapshot = item.captureSnapshot()
-        snapshot.keys shouldBe setOf("title", "albumName")
+        // Two reactive-property delegate keys plus the internal lastDateModified sentinel.
+        snapshot["title"] shouldBe "title"
+        snapshot["albumName"] shouldBe "album"
+        // Non-sentinel keys are exactly the two reactive-property names (order-agnostic).
+        snapshot.keys.filter { !it.startsWith(" ") }.toSet() shouldBe setOf("title", "albumName")
+        snapshot.values.filterIsInstance<java.time.LocalDateTime>() shouldBe listOf(item.lastDateModified)
     }
 
     "restoreSnapshot reverts reactive scalar properties to captured values" {

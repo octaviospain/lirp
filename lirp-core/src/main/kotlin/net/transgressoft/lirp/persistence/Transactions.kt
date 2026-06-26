@@ -20,6 +20,7 @@ package net.transgressoft.lirp.persistence
 import net.transgressoft.lirp.entity.ReactiveEntity
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.event.ReactiveScope
+import kotlinx.coroutines.asContextElement
 import kotlinx.coroutines.withContext
 
 /**
@@ -77,21 +78,23 @@ suspend fun <K : Comparable<K>, R : ReactiveEntity<K, R>> transaction(
     onError: (TransactionErrorContext<K, R>.() -> Unit)? = null,
     block: suspend (PersistentRepositoryBase<K, R>) -> Unit
 ) {
-    // NESTING (same repo): join the outer transaction without starting a new commit cycle.
-    if (repo.transactionDepth > 0) {
-        repo.transactionDepth++
-        try {
-            block(repo)
-        } finally {
-            repo.transactionDepth--
+    // Only treat this call as nesting when THIS execution already owns a transaction
+    // (activeTransactionCount is propagated across suspension via asContextElement). Checking
+    // repo.transactionDepth first would let a separate concurrent transaction(repo) call observe
+    // depth > 0, skip the flush lock, and corrupt the active buffer — so ownership is proven first.
+    if (activeTransactionCount.get() > 0) {
+        // NESTING (same repo): join the outer transaction without starting a new commit cycle.
+        if (repo.transactionDepth > 0) {
+            repo.transactionDepth++
+            try {
+                block(repo)
+            } finally {
+                repo.transactionDepth--
+            }
+            return
         }
-        return
-    }
 
-    // NESTING (different repo): another transaction is already active on this thread.
-    // Single-participant transactions do not support cross-repo nesting.
-    val threadCount = activeTransactionCount.get()
-    if (threadCount > 0) {
+        // NESTING (different repo): single-participant transactions do not support cross-repo nesting.
         throw LirpTransactionException(
             "Nested transactions on different repositories are not supported. " +
                 "Only single-participant transactions or nested calls on the same repository are allowed."
@@ -107,8 +110,8 @@ suspend fun <K : Comparable<K>, R : ReactiveEntity<K, R>> transaction(
     // flush lock is managed with explicit lock/unlock under a try/finally.
     // The IO scope's single-thread constraint (limitedParallelism = 1) ensures the
     // thread-local activeTransactionCount and per-entity _txEventBuffer checks are reliable.
-    withContext(ReactiveScope.ioScope.coroutineContext) {
-        repo.flushLock.lock()
+    withContext(ReactiveScope.ioScope.coroutineContext + activeTransactionCount.asContextElement(activeTransactionCount.get())) {
+        repo.lockFlush()
         // The lock is acquired outside the try only on the line above; everything that can throw —
         // including snapshot capture and event-buffer installation — runs inside so the finally
         // always releases the lock and restores per-repo transaction state.
@@ -131,11 +134,28 @@ suspend fun <K : Comparable<K>, R : ReactiveEntity<K, R>> transaction(
                 // from a consistent baseline. A failure here aborts before the block executes.
                 repo.drainPendingNoLock()
 
-                block(repo)
+                // Propagate each entity's _txEventBuffer across coroutine suspension points.
+                // This inner withContext also re-pins activeTransactionCount so nested transaction
+                // checks remain accurate even when the block suspends onto a different thread.
+                val entityBufferContext =
+                    loadedEntities.fold(
+                        activeTransactionCount.asContextElement(activeTransactionCount.get())
+                            as kotlin.coroutines.CoroutineContext
+                    ) { ctx, entity ->
+                        ctx + entity._txEventBuffer.asContextElement(buffer.deferredEvents)
+                    }
+                withContext(entityBufferContext) { block(repo) }
 
                 // COMMIT: write the buffer contents atomically to the backing store.
                 // This hook is a no-op for VolatileRepository; JSON and SQL override it.
                 try {
+                    // Coalesce contradictory insert+delete intents for the same id before committing.
+                    // Must run before captureDeferredUpdates so derived updates don't double-count.
+                    repo.normalizeTransactionBuffer(buffer)
+                    // Derive buffer.updates from deferred events: scalar mutations that were buffered
+                    // (instead of published via the reactive subscription) need to be captured here
+                    // so durable stores (SQL, JSON) know which rows to UPDATE.
+                    repo.captureDeferredUpdates(buffer)
                     repo.commitTransactionBuffer(buffer)
                 } catch (commitFailure: Throwable) {
                     handleTransactionFailure(repo, buffer, loadedEntities, commitFailure, onError)
@@ -157,7 +177,7 @@ suspend fun <K : Comparable<K>, R : ReactiveEntity<K, R>> transaction(
             repo.transactionDepth = 0
             repo.activeTransactionBuffer = null
             activeTransactionCount.set(activeTransactionCount.get() - 1)
-            repo.flushLock.unlock()
+            repo.unlockFlush()
             repo.rescheduleFlushIfPending()
         }
     }
@@ -180,11 +200,23 @@ private fun <K : Comparable<K>, R : ReactiveEntity<K, R>> handleTransactionFailu
     failure: Throwable,
     onError: (TransactionErrorContext<K, R>.() -> Unit)?
 ) {
+    if (failure is kotlinx.coroutines.CancellationException) throw failure
+
     // Rollback first: restore every snapshotted entity to its pre-block values.
     // Events are suppressed during restore so subscribers do not observe intermediate states.
     loadedEntities.forEach { entity ->
         val snapshot = buffer.entitySnapshots[entity.id] ?: return@forEach
         entity.restoreSnapshot(snapshot)
+    }
+
+    // Undo inserts: entities added inside the block must be removed from in-memory state.
+    buffer.inserts.forEach { entity ->
+        entity.withEventsDisabled { repo.removeFromMemoryOnlyInternal(entity) }
+    }
+
+    // Undo deletes: entities removed inside the block must be re-added to in-memory state.
+    buffer.deletes.forEach { pendingDelete ->
+        pendingDelete.entity.withEventsDisabled { repo.addToMemoryOnlyInternal(pendingDelete.entity) }
     }
 
     // Notify the repository's observability handler with identity-only context (never field values).

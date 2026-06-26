@@ -17,6 +17,7 @@
 
 package net.transgressoft.lirp.persistence.sql
 
+import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.entity.ReactiveEntity
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.LirpErrorHandler
@@ -42,6 +43,8 @@ import org.jetbrains.exposed.v1.jdbc.deleteAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.util.concurrent.ConcurrentHashMap
 import javax.sql.DataSource
+
+private class ConflictRollbackSignal : Exception()
 
 /**
  * SQL-backed reactive repository using JetBrains Exposed and HikariCP connection pooling.
@@ -451,49 +454,57 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         val preRollbackSnapshots: Map<K, R> =
             if (recovery != null) {
                 @Suppress("UNCHECKED_CAST")
-                (buffer.updates.map { it.entity } + buffer.inserts)
+                (buffer.updates.map { it.entity } + buffer.inserts + buffer.deletes.map { it.entity })
                     .distinctBy { it.id }
                     .associateBy { it.id }
             } else {
                 emptyMap()
             }
 
-        transaction(db = db) {
-            when {
-                buffer.inserts.size > 1 -> writePipeline.executeBatchInsertList(buffer.inserts)
-                buffer.inserts.size == 1 -> writePipeline.executeInsertSingle(buffer.inserts.first())
-            }
-            buffer.updates.forEach { writePipeline.executeUpdate(it, conflicts) }
-            when {
-                buffer.deletes.size > 1 -> writePipeline.executeBatchDeleteList(buffer.deletes, conflicts)
-                buffer.deletes.size == 1 -> writePipeline.executeDeleteSingle(buffer.deletes.first(), conflicts)
-            }
-        }
+        val bufferDeletePairs: List<Pair<K, Long?>> = buffer.deletes.map { it.id to it.expectedVersion }
 
-        // After the transaction commits, convert each conflict to a ConflictInfo via a canonical
-        // re-SELECT. Do NOT call recoverConflicts() — that auto-reloads in-memory state and emits
-        // StandardCrudEvent.Conflict, which is the debounce-flush recovery path, not the transaction path.
-        if (conflicts.isNotEmpty()) {
-            val rec = recovery
-            if (rec != null) {
-                val conflictInfos =
-                    conflicts.map { conflict ->
-                        // Capture the attempted entity before in-memory rollback. Fall back to findById
-                        // if the entity was not in the insert/update snapshot (edge case: delete-only buffer).
-                        val preRollback =
-                            preRollbackSnapshots[conflict.id]
-                                ?: findById(conflict.id).orElseThrow {
-                                    IllegalStateException(
-                                        "Cannot build ConflictInfo: entity ${conflict.id} not found after commit"
-                                    )
-                                }
-                        rec.buildConflictInfo(conflict.id, conflict.expectedVersion, preRollback)
-                    }
-                throw TransactionConflictException(
-                    "Transaction conflict on '${tableDef.tableName}': ${conflictInfos.size} version mismatch(es)",
-                    conflictInfos
-                )
+        try {
+            transaction(db = db) {
+                when {
+                    buffer.inserts.size > 1 -> writePipeline.executeBatchInsertList(buffer.inserts)
+                    buffer.inserts.size == 1 -> writePipeline.executeInsertSingle(buffer.inserts.first())
+                }
+                buffer.updates.forEach { writePipeline.executeUpdate(it, conflicts) }
+                when {
+                    bufferDeletePairs.size > 1 -> writePipeline.executeBatchDeleteList(bufferDeletePairs, conflicts)
+                    bufferDeletePairs.size == 1 -> writePipeline.executeDeleteSingle(bufferDeletePairs.first(), conflicts)
+                }
+                if (conflicts.isNotEmpty()) throw ConflictRollbackSignal()
             }
+        } catch (signal: ConflictRollbackSignal) {
+            // The Exposed transaction rolled back. Convert each conflict to a ConflictInfo via a
+            // canonical re-SELECT and throw TransactionConflictException so the orchestration layer
+            // triggers in-memory rollback. The signal MUST always result in a thrown exception: if it
+            // were swallowed, the rolled-back DB would be mistaken for a successful commit and memory
+            // would keep the attempted mutations — a silent divergence.
+            val rec =
+                checkNotNull(recovery) {
+                    "Version conflict raised on '${tableDef.tableName}' but optimistic-lock recovery is " +
+                        "disabled — the DB rolled back with no conflict-reporting path. Conflicts are only " +
+                        "accumulated for @Version tables, so reaching here signals a write-pipeline bug."
+                }
+            val conflictInfos =
+                conflicts.map { conflict ->
+                    val preRollback =
+                        preRollbackSnapshots[conflict.id]
+                            ?: findById(conflict.id).orElseThrow {
+                                IllegalStateException(
+                                    "Cannot build ConflictInfo: entity ${conflict.id} not found after rollback"
+                                )
+                            }
+                    @Suppress("UNCHECKED_CAST")
+                    rec.buildConflictInfo(conflict.id, conflict.expectedVersion, preRollback.clone() as R)
+                }
+            throw TransactionConflictException(
+                "Transaction conflict on '${tableDef.tableName}': ${conflictInfos.size} version mismatch(es)",
+                conflictInfos,
+                signal
+            )
         }
 
         dirty.set(false)
@@ -516,7 +527,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
      */
     private fun validateCascadeTargets(buffer: TransactionBuffer<K, R>) {
         val entityClasses: Set<Class<*>> =
-            (buffer.inserts + buffer.updates.map { it.entity } + findDeletedEntitiesById(buffer.deletes))
+            (buffer.inserts + buffer.updates.map { it.entity } + buffer.deletes.map { it.entity })
                 .map { it::class.java }
                 .toSet()
 
@@ -524,8 +535,12 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
             @Suppress("UNCHECKED_CAST")
             val refAccessor = RegistryBase.publicRefAccessorFor(entityClass) ?: continue
             val allEntries =
-                refAccessor.entries.map { it.referencedClass } +
-                    refAccessor.collectionEntries.map { it.referencedClass }
+                refAccessor.entries
+                    .filter { it.cascadeAction != CascadeAction.NONE }
+                    .map { it.referencedClass } +
+                    refAccessor.collectionEntries
+                        .filter { it.cascadeAction != CascadeAction.NONE }
+                        .map { it.referencedClass }
             for (referencedClass in allEntries) {
                 val targetRegistry = LirpContext.default.registryFor(referencedClass) ?: continue
                 when {
@@ -551,14 +566,6 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
             }
         }
     }
-
-    /**
-     * Returns the entities for delete operations in [deletes] by looking them up in memory.
-     * Used to resolve entity classes for cascade target validation when only (id, version) pairs
-     * are available in the buffer.
-     */
-    private fun findDeletedEntitiesById(deletes: List<Pair<K, Long?>>): List<R> =
-        deletes.mapNotNull { (id, _) -> findById(id).orElse(null) }
 
     /**
      * Recovers every accumulated optimistic-lock conflict after the main transaction has committed.
