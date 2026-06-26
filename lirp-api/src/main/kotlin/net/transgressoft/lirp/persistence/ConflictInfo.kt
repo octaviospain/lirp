@@ -15,30 +15,29 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>. *
  ******************************************************************************/
 
-package net.transgressoft.lirp.event
+package net.transgressoft.lirp.persistence
+
+import net.transgressoft.lirp.entity.ReactiveEntity
 
 /**
- * Discriminator for the async operation type at the point where a failure occurred.
+ * Describes a single `@Version` conflict detected during a transaction block commit.
  *
- * Mirrors the `lirp.operation` MDC key so that a log line and an [LirpErrorHandler]
- * callback describe the same failure with the same vocabulary.
+ * [entity] is the pre-block snapshot of the in-memory entity — captured before rollback so
+ * the caller can read the values that were attempted. [canonical] is the authoritative database
+ * state at conflict time; `null` when the row was concurrently deleted. [version] is the
+ * actual database version at conflict time; `-1` when the row was deleted, `null` for
+ * non-`@Version` entities.
  *
- * Members map to the distinct async failure sites in the framework:
- * - Entity-mutation operations: [CREATE], [UPDATE], [DELETE], [CLEAR]
- * - Persistence pipeline: [FLUSH]
- * - Event emission: [EMIT]
- * - Optimistic-lock recovery: [RECOVER]
- * - Explicit transaction boundary: [TRANSACTION]
+ * Naming follows the vocabulary established by [net.transgressoft.lirp.event.StandardCrudEvent.Conflict].
  *
- * Adding new members is binary-compatible; existing values are stable.
+ * @param K the entity key type.
+ * @param R the entity type.
+ * @param entity the pre-block snapshot of the in-memory entity with the values that were attempted.
+ * @param canonical the authoritative database state at conflict time; `null` when the row was concurrently deleted.
+ * @param version the actual database version at conflict time; `-1` when the row was deleted, `null` for non-`@Version` entities.
  */
-enum class LirpOperation {
-    CREATE,
-    UPDATE,
-    DELETE,
-    CLEAR,
-    FLUSH,
-    EMIT,
-    RECOVER,
-    TRANSACTION
-}
+data class ConflictInfo<K : Comparable<K>, R : ReactiveEntity<K, R>>(
+    val entity: R,
+    val canonical: R?,
+    val version: Long?
+)

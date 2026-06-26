@@ -62,6 +62,19 @@ internal class ReactivePropertyDelegate<T>(
     internal fun writeBackingDirectly(value: T) {
         storedValue = value
     }
+
+    /**
+     * Writes [value] directly into the backing field without invoking [entity.emitPropertyChanged][net.transgressoft.lirp.entity.ReactiveEntityBase.emitPropertyChanged].
+     *
+     * Used by the transaction rollback path to restore field values without emitting mutation events.
+     * Unlike [writeBackingDirectly], this method is explicitly named to signal non-emitting intent
+     * at the call site — the rollback path always wraps calls in
+     * [withEventsDisabled][net.transgressoft.lirp.entity.ReactiveEntityBase.withEventsDisabled]
+     * as an additional guard.
+     */
+    internal fun setDirectly(value: T) {
+        storedValue = value
+    }
 }
 
 /**
@@ -82,6 +95,9 @@ internal class ReactivePropertyDelegateWithAccessors<T>(
 
     override fun getValue(thisRef: Any?, property: KProperty<*>): T = getter()
 
+    /** Reads the current value via the supplied getter. Used by snapshot capture. */
+    internal fun readValue(): T = getter()
+
     override fun setValue(thisRef: Any?, property: KProperty<*>, value: T) {
         check(!entity.isClosed) { "Entity '${entity::class.java.simpleName}' is closed" }
         if (value != getter()) {
@@ -96,6 +112,18 @@ internal class ReactivePropertyDelegateWithAccessors<T>(
      * `@Transient`-backed reactive properties, the setter lambda is the backing-write path.
      */
     internal fun writeBackingDirectly(value: T) {
+        setter(value)
+    }
+
+    /**
+     * Writes [value] through the supplied [setter] without triggering event emission, the
+     * lastDateModified bump, or any other reactive side effect.
+     *
+     * Used by the transaction rollback path to restore field values without emitting mutation events.
+     * Unlike [writeBackingDirectly], this method is explicitly named to signal non-emitting intent
+     * at the call site.
+     */
+    internal fun setDirectly(value: T) {
         setter(value)
     }
 }
