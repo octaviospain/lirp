@@ -36,6 +36,7 @@ import net.transgressoft.lirp.persistence.KspAccessorLoader
 import net.transgressoft.lirp.persistence.LirpDelegate
 import net.transgressoft.lirp.persistence.LirpIndexAccessor
 import net.transgressoft.lirp.persistence.LirpRefAccessor
+import net.transgressoft.lirp.persistence.PersistenceIgnore
 import net.transgressoft.lirp.persistence.PolymorphicAggregateDelegate
 import net.transgressoft.lirp.persistence.ReactivePropertyDelegate
 import net.transgressoft.lirp.persistence.ReactivePropertyDelegateWithAccessors
@@ -135,6 +136,19 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
      * [BatchChanged] can be emitted when each block exits.
      */
     private val _batchAccumulator = ThreadLocal<MutableList<FieldChange<R, *>>?>()
+
+    /**
+     * Thread-local list that, when non-null, causes [emitPropertyChanged] to route [PropertyChanged]
+     * events into this buffer instead of publishing them to subscribers.
+     *
+     * Installed and removed by the transaction commit path via [withEventsDeferred].
+     * Mirrors the [_batchAccumulator] pattern — same thread-local lifecycle, different purpose:
+     * batch accumulation collapses multiple field changes into one [BatchChanged]; deferred buffering
+     * withholds all property events until commit (where they are collapsed and released) or discards
+     * them on rollback.
+     */
+    @PersistenceIgnore
+    internal val _txEventBuffer = ThreadLocal<MutableList<MutationEvent<K, R>>?>()
 
     /**
      * The lazily initialized publisher. Only created when the first subscriber registers.
@@ -398,6 +412,30 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
             return
         }
 
+        // When a transaction buffer is active, route the event into the buffer rather than
+        // publishing it — events are held until commit (collapsed and released) or discarded on
+        // rollback. This preserves event-isolation without data-isolation.
+        val txBuffer = _txEventBuffer.get()
+        if (txBuffer != null) {
+            val kprop1 = property as? KProperty1<R, V>
+            if (kprop1 != null) {
+                val indexEntries = loadIndexEntries()
+                val matchingIndex = indexEntries.firstOrNull { it.propertyName == property.name }
+                val event =
+                    PropertyChanged<K, R, V>(
+                        entity = this as R,
+                        property = kprop1,
+                        oldValue = oldValue,
+                        newValue = newValue,
+                        versionAtMutation = null,
+                        oldIndexKey = if (matchingIndex != null) oldValue else null,
+                        newIndexKey = if (matchingIndex != null) newValue else null
+                    )
+                txBuffer.add(event)
+            }
+            return
+        }
+
         if (!shouldEmit) return
 
         val kprop1 = property as? KProperty1<R, V> ?: return
@@ -641,6 +679,98 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
      * @return the result of [action]
      */
     fun <T> withEventsDisabledForClone(action: () -> T): T = withEventsDisabled(action)
+
+    /**
+     * Installs [buffer] as the active transaction event buffer for this thread, executes [action],
+     * then restores the previous buffer state. Property change events emitted inside [action] are
+     * routed into [buffer] rather than published to subscribers.
+     *
+     * The save/restore pattern mirrors [withEventsDisabled] — both are re-entrant and thread-local.
+     *
+     * @param buffer the mutable list that collects deferred [MutationEvent]s during [action]
+     * @param action the block to execute with event buffering active
+     * @return the result of [action]
+     */
+    internal fun <T> withEventsDeferred(buffer: MutableList<MutationEvent<K, R>>, action: () -> T): T {
+        val previous = _txEventBuffer.get()
+        _txEventBuffer.set(buffer)
+        try {
+            return action()
+        } finally {
+            if (previous != null) _txEventBuffer.set(previous) else _txEventBuffer.remove()
+        }
+    }
+
+    /**
+     * Captures a shallow snapshot of all reactive-property values registered in [delegateRegistry],
+     * keyed by property name.
+     *
+     * The snapshot is taken synchronously on the calling thread. Only [net.transgressoft.lirp.persistence.ReactivePropertyDelegate]
+     * and [net.transgressoft.lirp.persistence.ReactivePropertyDelegateWithAccessors] entries are
+     * captured — aggregate collection delegates manage their own identity collections and are not
+     * snapshotted here (Assumption A2: collection rollback is out of scope for the scalar rollback path).
+     *
+     * @return a map from property name to the current value for each reactive-property delegate
+     */
+    internal fun captureSnapshot(): Map<String, Any?> {
+        val snapshot = mutableMapOf<String, Any?>()
+        delegateRegistry.forEach { (name, delegate) ->
+            when (delegate) {
+                is net.transgressoft.lirp.persistence.ReactivePropertyDelegate<*> -> snapshot[name] = delegate.storedValue
+                is net.transgressoft.lirp.persistence.ReactivePropertyDelegateWithAccessors<*> -> snapshot[name] = delegate.readValue()
+                else -> { /* aggregate collection delegates — not snapshotted on the scalar rollback path */ }
+            }
+        }
+        return snapshot
+    }
+
+    /**
+     * Restores reactive properties to the values in [snapshot], suppressing all mutation events
+     * during the restore to prevent observers from seeing intermediate reverted state.
+     *
+     * Runs inside [withEventsDisabled] and writes each property via the non-emitting
+     * [setDirectly][net.transgressoft.lirp.persistence.ReactivePropertyDelegate.setDirectly]
+     * path so that neither [emitPropertyChanged] nor [lastDateModified] is updated during rollback.
+     * Only reactive-property delegates are processed; aggregate collection delegates are skipped
+     * because they manage their own backing-write paths.
+     *
+     * @param snapshot a property-name-to-value map previously returned by [captureSnapshot]
+     */
+    internal fun restoreSnapshot(snapshot: Map<String, Any?>) {
+        withEventsDisabled {
+            snapshot.forEach { (name, value) ->
+                when (val delegate = delegateRegistry[name]) {
+                    is net.transgressoft.lirp.persistence.ReactivePropertyDelegate<*> -> {
+                        @Suppress("UNCHECKED_CAST")
+                        (delegate as net.transgressoft.lirp.persistence.ReactivePropertyDelegate<Any?>).setDirectly(value)
+                    }
+                    is net.transgressoft.lirp.persistence.ReactivePropertyDelegateWithAccessors<*> -> {
+                        @Suppress("UNCHECKED_CAST")
+                        (delegate as net.transgressoft.lirp.persistence.ReactivePropertyDelegateWithAccessors<Any?>).setDirectly(value)
+                    }
+                    else -> { /* aggregate collection delegates — not restored on the scalar rollback path */ }
+                }
+            }
+        }
+    }
+
+    /**
+     * Publishes a pre-built [MutationEvent] directly to subscribers, bypassing the normal
+     * property-assignment and event-construction path.
+     *
+     * Used by the transaction commit path to release collapsed deferred events after a successful
+     * commit. The event was already constructed and buffered during the transaction block; this
+     * method emits it as-is once the commit is confirmed.
+     *
+     * Does nothing when the entity is closed or events are currently disabled.
+     *
+     * @param event the pre-built event to publish
+     */
+    internal fun emitCollapsedEvent(event: MutationEvent<K, R>) {
+        if (isClosed || eventsDisabled) return
+        if (!shouldEmit) return
+        publisher.emitAsync(event)
+    }
 
     @Volatile
     private var _toOneRefDelegates: MutableMap<String, AggregateRefDelegate<*, *>>? = null

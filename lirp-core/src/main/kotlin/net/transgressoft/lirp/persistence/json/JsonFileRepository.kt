@@ -28,8 +28,12 @@ import net.transgressoft.lirp.persistence.PendingUpdate
 import net.transgressoft.lirp.persistence.PersistentRepositoryBase
 import net.transgressoft.lirp.persistence.Registry
 import net.transgressoft.lirp.persistence.RegistryBase
+import net.transgressoft.lirp.persistence.TransactionBuffer
 import io.github.oshai.kotlinlogging.KotlinLogging
 import java.io.File
+import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.Objects
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.withLock
@@ -413,6 +417,41 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
                 json.decodeFromString(mapSerializer, content)
             } catch (exception: Exception) {
                 throw LirpDeserializationException("Failed to deserialize entities from file: ${jsonFile.absolutePath}", exception)
+            }
+        }
+
+        /**
+         * Commits the transaction buffer to [jsonFile] using an atomic write sequence.
+         *
+         * The current in-memory state is serialized to a sibling temporary file
+         * (`<jsonFile>.tmp`), then promoted over [jsonFile] via `Files.move` with
+         * [StandardCopyOption.ATOMIC_MOVE]. This guarantees that a crash or I/O error during
+         * the write leaves the original file intact — the in-progress write either completes
+         * and replaces the file atomically, or fails and the temp file is cleaned up while
+         * the original remains untouched.
+         *
+         * `Files.move(ATOMIC_MOVE)` is preferred over `File.renameTo` because the JDK NIO
+         * contract guarantees atomic replacement on POSIX filesystems even when the source
+         * and target are on different inodes, while `renameTo` behaviour is platform-dependent.
+         *
+         * **Threading contract:** invoked while [flushLock] is held. Must not call [flush] or
+         * otherwise re-acquire [flushLock].
+         *
+         * @param buffer the transaction buffer (its op lists are not used directly; the current
+         *   in-memory state is the source of truth for JSON serialization)
+         * @throws IOException if the atomic rename/move fails, leaving the original file intact
+         */
+        override fun commitTransactionBuffer(buffer: TransactionBuffer<K, R>) {
+            val jsonString = json.encodeToString(mapSerializer, entitiesById)
+            val tmp = File(jsonFile.parent, "${jsonFile.name}.tmp")
+            try {
+                tmp.writeText(jsonString)
+                Files.move(tmp.toPath(), jsonFile.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                dirty.set(false)
+                log.debug { "Transaction committed atomically to $jsonFile" }
+            } catch (e: IOException) {
+                tmp.delete()
+                throw IOException("Atomic write failed: $tmp -> $jsonFile", e)
             }
         }
 

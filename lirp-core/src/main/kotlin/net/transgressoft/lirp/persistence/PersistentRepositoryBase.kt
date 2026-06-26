@@ -113,8 +113,11 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         private val onError: LirpErrorHandler? = null
     ) : VolatileRepository<K, R>(context, name, initialEntities, onError), PersistentRepository<K, R> {
 
-        // Stored to populate MDC keys at flush launch time
+        // Stored to populate MDC keys at flush launch time and for transaction error context.
         private val repositoryName: String = name
+
+        /** The name of this repository, used in logging and error-context payloads. */
+        internal val repoName: String get() = repositoryName
 
         companion object {
             private const val CLOSED_MESSAGE = "PersistentRepositoryBase is closed"
@@ -263,10 +266,31 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         private val clearEpoch = AtomicLong(0L)
 
         // Serializes flush() calls: prevents concurrent drains from the pending map and ensures
-        // close() waits for any in-flight flush to complete before draining itself. Protected so
-        // subclasses can serialize direct writes against the same lock (e.g. JsonFileRepository's
-        // jsonFile setter).
-        protected val flushLock = ReentrantLock()
+        // close() waits for any in-flight flush to complete before draining itself. Internal so
+        // both subclasses and the transaction orchestration free function in the same module can
+        // serialize writes against the same lock (e.g. JsonFileRepository's jsonFile setter,
+        // Transactions.kt's pre-flush + block + commit sequence).
+        internal val flushLock = ReentrantLock()
+
+        /**
+         * Nesting depth of the active transaction on this repository.
+         *
+         * Zero means no transaction is active. Values greater than zero indicate nested transaction
+         * calls on the same repo, which are flattened — the outermost block owns commit/rollback
+         * and inner calls simply increment the counter without starting a new buffer.
+         */
+        @Volatile
+        internal var transactionDepth: Int = 0
+
+        /**
+         * The [TransactionBuffer] currently enrolled for this repository, non-null only while
+         * [transactionDepth] is greater than zero.
+         *
+         * Non-null signals [subscribeEntity]'s enqueue hook to route ops into this buffer instead
+         * of the normal debounce pipeline, filtering to only the mutations that belong to this repo.
+         */
+        @Volatile
+        internal var activeTransactionBuffer: TransactionBuffer<K, R>? = null
 
         @Volatile
         private var debounceJob: Job? = null
@@ -308,6 +332,54 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         )
 
         /**
+         * Drains the per-key pending cell map and dispatches the grouped payload to [writePending].
+         * On failure, restores the snapshot via [mergeOlder] so the next flush retries with a
+         * reconciled view of writes that arrived during the failed I/O.
+         *
+         * **Caller must hold [flushLock].** This method does not acquire [flushLock] itself — it is
+         * extracted from [flush] so that the transaction commit path can call it while already holding
+         * the lock, avoiding re-entrant lock acquisition which would deadlock on a non-reentrant lock.
+         *
+         * Subclasses are responsible for resetting [dirty] to `false` within [writePending] once the
+         * write is confirmed (or asynchronously, if the write is fire-and-forget).
+         */
+        internal fun drainPendingNoLock() {
+            // Capture the snapshot, hadClear flag, AND the clearEpoch under the write lock.
+            // The captured epoch is later compared in reenqueueAfterFailure() to determine
+            // whether a clear() ran during the I/O and so the snapshot must be dropped rather
+            // than restored.
+            val snapshot: Map<K, PendingCell<K, R>>
+            val clearFlag: Boolean
+            val capturedEpoch: Long
+            pendingLock.write {
+                snapshot = pendingCells.toMap()
+                pendingCells.clear()
+                clearFlag = hadClear.getAndSet(false)
+                capturedEpoch = clearEpoch.get()
+            }
+            // Reset the window origin so the next enqueue after this flush starts a fresh
+            // max-delay deadline rather than inheriting the stale timestamp.
+            startNanos.set(0L)
+            if (snapshot.isEmpty() && !clearFlag) return
+            val inserts = snapshot.values.filterIsInstance<PendingCell.Insert<K, R>>().map { it.entity }
+            val updates =
+                snapshot.values.filterIsInstance<PendingCell.Update<K, R>>()
+                    .map { PendingUpdate(it.entity, it.expectedVersion) }
+            val deletes =
+                snapshot.entries.mapNotNull { (id, cell) ->
+                    (cell as? PendingCell.Delete<K, R>)?.let { id to it.expectedVersion }
+                }
+            try {
+                writePending(inserts, updates, deletes, clearFlag)
+            } catch (e: OptimisticLockException) {
+                routeOptimisticLockConflict(e)
+            } catch (e: Exception) {
+                reenqueueAfterFailure(snapshot, clearFlag, capturedEpoch)
+                throw e
+            }
+        }
+
+        /**
          * Drains the per-key pending cell map under the write lock, then dispatches the grouped
          * payload to [writePending]. On failure, restores the snapshot via [mergeOlder] so the
          * next flush retries with a reconciled view of writes that arrived during the failed I/O.
@@ -320,40 +392,65 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
          */
         protected fun flush() {
             flushLock.withLock {
-                // Capture the snapshot, hadClear flag, AND the clearEpoch under the write lock.
-                // The captured epoch is later compared in reenqueueAfterFailure() to determine
-                // whether a clear() ran during the I/O and so the snapshot must be dropped rather
-                // than restored.
-                val snapshot: Map<K, PendingCell<K, R>>
-                val clearFlag: Boolean
-                val capturedEpoch: Long
-                pendingLock.write {
-                    snapshot = pendingCells.toMap()
-                    pendingCells.clear()
-                    clearFlag = hadClear.getAndSet(false)
-                    capturedEpoch = clearEpoch.get()
-                }
-                // Reset the window origin so the next enqueue after this flush starts a fresh
-                // max-delay deadline rather than inheriting the stale timestamp.
-                startNanos.set(0L)
-                if (snapshot.isEmpty() && !clearFlag) return
-                val inserts = snapshot.values.filterIsInstance<PendingCell.Insert<K, R>>().map { it.entity }
-                val updates =
-                    snapshot.values.filterIsInstance<PendingCell.Update<K, R>>()
-                        .map { PendingUpdate(it.entity, it.expectedVersion) }
-                val deletes =
-                    snapshot.entries.mapNotNull { (id, cell) ->
-                        (cell as? PendingCell.Delete<K, R>)?.let { id to it.expectedVersion }
-                    }
-                try {
-                    writePending(inserts, updates, deletes, clearFlag)
-                } catch (e: OptimisticLockException) {
-                    routeOptimisticLockConflict(e)
-                } catch (e: Exception) {
-                    reenqueueAfterFailure(snapshot, clearFlag, capturedEpoch)
-                    throw e
-                }
+                drainPendingNoLock()
             }
+        }
+
+        /**
+         * Cancels the sliding-window debounce job and the max-delay cap job.
+         *
+         * The transaction commit path calls this before acquiring [flushLock] to ensure the debounce
+         * coroutine does not attempt to acquire [flushLock] concurrently, which would otherwise
+         * stall the transaction behind an in-flight flush.
+         */
+        internal fun cancelDebounce() {
+            debounceJob?.cancel()
+            maxDelayJob?.cancel()
+        }
+
+        /**
+         * Fires the repository's [LirpErrorHandler] with [LirpOperation.TRANSACTION] and the given
+         * entity identifiers. This is a notify-only call — the handler cannot alter control flow.
+         *
+         * Only entity identity is included in the error context; field values are never exposed here.
+         */
+        internal fun notifyTransactionError(throwable: Throwable, entityIds: List<Any>) {
+            try {
+                onError?.invoke(throwable, LirpErrorContext(LirpOperation.TRANSACTION, entityIds, repositoryName))
+            } catch (handlerEx: Throwable) {
+                log.error(handlerEx) { "LirpErrorHandler threw inside transaction error notify; exception swallowed" }
+            }
+        }
+
+        /**
+         * Re-arms the debounce flush if there are pending cells after a transaction completes.
+         *
+         * Called at the end of a transaction (commit or rollback) so that any ops enqueued during
+         * the block that were not part of the buffer are flushed through the normal debounce pipeline.
+         */
+        internal fun rescheduleFlushIfPending() {
+            if (!closed && pendingCells.isNotEmpty()) {
+                scheduleFlush()
+            }
+        }
+
+        /**
+         * Called by the transaction commit path after [drainPendingNoLock] succeeds, with the ops
+         * captured during the block in place of the normal debounce payload.
+         *
+         * The default implementation is intentionally a no-op — [VolatileRepository] mutates memory
+         * in place during the block, so there is nothing durable to commit; rollback and event-deferral
+         * are handled by the shared base machinery regardless of store type. Durable stores (SQL,
+         * JSON) override this hook to write the buffer contents in a single atomic operation.
+         *
+         * **Threading contract:** invoked while [flushLock] is held. Must not call [flush] or
+         * otherwise re-acquire [flushLock].
+         *
+         * @param buffer the [TransactionBuffer] carrying the captured inserts, updates, deletes, and
+         *   entity snapshots for the completed block
+         */
+        open fun commitTransactionBuffer(buffer: TransactionBuffer<K, R>) {
+            // No-op: memory is already updated in place; Volatile relies on this default.
         }
 
         // optimistic-lock failures follow the Conflict + auto-reload path and DO NOT
@@ -641,6 +738,19 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
                 entity.subscribeAsync { mutationEvent ->
                     pendingLock.read {
                         if (closed) return@read
+
+                        // When a transaction is active for this repo, route the mutation op into the
+                        // buffer rather than the normal debounce pipeline. The buffer is filtered to
+                        // this repo only — mutations to entities from a different repo fall through
+                        // to enqueueUpdate on their own repo's subscribeEntity handler.
+                        val txBuffer = activeTransactionBuffer
+                        if (txBuffer != null) {
+                            txBuffer.updates.add(PendingUpdate(mutationEvent.entity, versionAtMutation(mutationEvent)))
+                            reindexMutation(mutationEvent)
+                            onEntityMutated(mutationEvent)
+                            return@read
+                        }
+
                         enqueueUpdate(mutationEvent.entity, versionAtMutation(mutationEvent))
                         // Reindex before the subclass hook so a throwing onEntityMutated override
                         // cannot leave findByIndex / range queries returning stale results.

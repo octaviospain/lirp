@@ -22,8 +22,14 @@ import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.LirpErrorHandler
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.StandardCrudEvent
+import net.transgressoft.lirp.persistence.ConflictInfo
+import net.transgressoft.lirp.persistence.LirpContext
+import net.transgressoft.lirp.persistence.LirpTransactionException
 import net.transgressoft.lirp.persistence.PendingUpdate
 import net.transgressoft.lirp.persistence.PersistentRepositoryBase
+import net.transgressoft.lirp.persistence.RegistryBase
+import net.transgressoft.lirp.persistence.TransactionBuffer
+import net.transgressoft.lirp.persistence.TransactionConflictException
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -89,7 +95,7 @@ import javax.sql.DataSource
  *   operations.
  */
 open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
-    private val dataSource: DataSource,
+    internal val dataSource: DataSource,
     private val tableDef: SqlTableDef<R>,
     private val ownsDataSource: Boolean,
     loadOnInit: Boolean = true,
@@ -412,6 +418,147 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         // dirty forever after the first successful flush even when pendingCells is empty.
         dirty.set(false)
     }
+
+    /**
+     * Commits the captured [buffer] from a `transaction { }` block as a single Exposed DB transaction.
+     *
+     * All inserts, updates, and deletes from the buffer execute in one `transaction(db) { }` call —
+     * a single JDBC connection commit — so either all buffer ops commit or none do. The DB
+     * transaction rolling back on failure is handled by Exposed automatically; the in-memory rollback
+     * is handled by the orchestration layer in `Transactions.kt`.
+     *
+     * `@Version` conflicts accumulated during the transaction are NOT auto-recovered here (that is the
+     * role of [recoverConflicts] for the debounce flush). Instead, the pre-rollback entity state is
+     * captured before the orchestration rolls back in-memory, then a [ConflictInfo] is built for each
+     * conflict using a canonical re-SELECT, and a [TransactionConflictException] is thrown so the
+     * orchestration's failure path catches it and triggers in-memory rollback.
+     *
+     * Before committing, all cascade target repositories reachable from the buffer's entities are
+     * validated: a child [SqlRepository] sharing the same [DataSource] may join the parent transaction;
+     * any other store type (JSON, Volatile) or a different DataSource cannot be made atomic
+     * and causes an immediate [LirpTransactionException] before any commit attempt. Atomicity
+     * of the same-DataSource cascade join is guaranteed because Exposed binds all table operations
+     * within a single `transaction(db = db) { }` to the same underlying JDBC connection.
+     */
+    override fun commitTransactionBuffer(buffer: TransactionBuffer<K, R>) {
+        validateCascadeTargets(buffer)
+
+        val conflicts = mutableListOf<PendingConflict<K>>()
+
+        // Capture entity states now, before the transaction (and any Exposed rollback) touches them.
+        // These are the "attempted" values passed to ConflictInfo.entity — the orchestration's
+        // restoreSnapshot will revert to pre-block state afterward, so we must snapshot here first.
+        val preRollbackSnapshots: Map<K, R> =
+            if (recovery != null) {
+                @Suppress("UNCHECKED_CAST")
+                (buffer.updates.map { it.entity } + buffer.inserts)
+                    .distinctBy { it.id }
+                    .associateBy { it.id }
+            } else {
+                emptyMap()
+            }
+
+        transaction(db = db) {
+            when {
+                buffer.inserts.size > 1 -> writePipeline.executeBatchInsertList(buffer.inserts)
+                buffer.inserts.size == 1 -> writePipeline.executeInsertSingle(buffer.inserts.first())
+            }
+            buffer.updates.forEach { writePipeline.executeUpdate(it, conflicts) }
+            when {
+                buffer.deletes.size > 1 -> writePipeline.executeBatchDeleteList(buffer.deletes, conflicts)
+                buffer.deletes.size == 1 -> writePipeline.executeDeleteSingle(buffer.deletes.first(), conflicts)
+            }
+        }
+
+        // After the transaction commits, convert each conflict to a ConflictInfo via a canonical
+        // re-SELECT. Do NOT call recoverConflicts() — that auto-reloads in-memory state and emits
+        // StandardCrudEvent.Conflict, which is the debounce-flush recovery path, not the transaction path.
+        if (conflicts.isNotEmpty()) {
+            val rec = recovery
+            if (rec != null) {
+                val conflictInfos =
+                    conflicts.map { conflict ->
+                        // Capture the attempted entity before in-memory rollback. Fall back to findById
+                        // if the entity was not in the insert/update snapshot (edge case: delete-only buffer).
+                        val preRollback =
+                            preRollbackSnapshots[conflict.id]
+                                ?: findById(conflict.id).orElseThrow {
+                                    IllegalStateException(
+                                        "Cannot build ConflictInfo: entity ${conflict.id} not found after commit"
+                                    )
+                                }
+                        rec.buildConflictInfo(conflict.id, conflict.expectedVersion, preRollback)
+                    }
+                throw TransactionConflictException(
+                    "Transaction conflict on '${tableDef.tableName}': ${conflictInfos.size} version mismatch(es)",
+                    conflictInfos
+                )
+            }
+        }
+
+        dirty.set(false)
+    }
+
+    /**
+     * Validates that all cascade target repositories reachable from the entities in [buffer] are
+     * either unregistered (no cascade action required) or are [SqlRepository] instances sharing
+     * this repository's [dataSource].
+     *
+     * Sharing the same [DataSource] instance is the criterion for atomicity: Exposed binds all
+     * SQL operations in a single `transaction(db = db) { }` to one JDBC connection, so parent and
+     * child writes commit or roll back together. Comparing [DataSource] reference identity
+     * (`===`) is safe and reliable — `Database.connect(dataSource)` in Exposed 1.3.0 creates a
+     * new [org.jetbrains.exposed.v1.jdbc.Database] wrapper each time rather than caching per
+     * DataSource, so `db ===` would fail even for repos that legitimately share a pool.
+     *
+     * A cascade target on a different DataSource, or a [JsonFileRepository] / `VolatileRepository`,
+     * cannot be made atomic and causes an immediate [LirpTransactionException] before any DB write.
+     */
+    private fun validateCascadeTargets(buffer: TransactionBuffer<K, R>) {
+        val entityClasses: Set<Class<*>> =
+            (buffer.inserts + buffer.updates.map { it.entity } + findDeletedEntitiesById(buffer.deletes))
+                .map { it::class.java }
+                .toSet()
+
+        for (entityClass in entityClasses) {
+            @Suppress("UNCHECKED_CAST")
+            val refAccessor = RegistryBase.publicRefAccessorFor(entityClass) ?: continue
+            val allEntries =
+                refAccessor.entries.map { it.referencedClass } +
+                    refAccessor.collectionEntries.map { it.referencedClass }
+            for (referencedClass in allEntries) {
+                val targetRegistry = LirpContext.default.registryFor(referencedClass) ?: continue
+                when {
+                    targetRegistry is SqlRepository<*, *> && targetRegistry.dataSource === dataSource ->
+                        // Same DataSource — cascade writes join the parent transaction via Exposed's
+                        // single JDBC connection binding; no additional routing required.
+                        Unit
+                    targetRegistry is SqlRepository<*, *> ->
+                        throw LirpTransactionException(
+                            "Transaction on '${tableDef.tableName}' has a cascade target '${referencedClass.simpleName}' " +
+                                "on a different DataSource. Cross-DataSource cascade cannot be made atomic — " +
+                                "use separate transactions for each DataSource."
+                        )
+                    else ->
+                        // Non-SQL store (JsonFileRepository, VolatileRepository, etc.) cannot join
+                        // a SQL transaction — reject before any partial commit.
+                        throw LirpTransactionException(
+                            "Transaction on '${tableDef.tableName}' has a cascade target '${referencedClass.simpleName}' " +
+                                "backed by a non-SQL repository (${targetRegistry::class.simpleName}). " +
+                                "Heterogeneous-store cascade cannot be made atomic in a single transaction."
+                        )
+                }
+            }
+        }
+    }
+
+    /**
+     * Returns the entities for delete operations in [deletes] by looking them up in memory.
+     * Used to resolve entity classes for cascade target validation when only (id, version) pairs
+     * are available in the buffer.
+     */
+    private fun findDeletedEntitiesById(deletes: List<Pair<K, Long?>>): List<R> =
+        deletes.mapNotNull { (id, _) -> findById(id).orElse(null) }
 
     /**
      * Recovers every accumulated optimistic-lock conflict after the main transaction has committed.

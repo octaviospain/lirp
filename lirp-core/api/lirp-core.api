@@ -699,11 +699,11 @@ public abstract class net/transgressoft/lirp/persistence/PersistentRepositoryBas
 	protected final fun addToMemoryOnly (Lnet/transgressoft/lirp/entity/ReactiveEntity;)V
 	public fun clear ()V
 	public fun close ()V
+	public fun commitTransactionBuffer (Lnet/transgressoft/lirp/persistence/TransactionBuffer;)V
 	protected fun extractVersion (Lnet/transgressoft/lirp/entity/ReactiveEntity;)Ljava/lang/Long;
 	protected final fun flush ()V
 	protected final fun getClosed ()Z
 	public final fun getDirty ()Ljava/util/concurrent/atomic/AtomicBoolean;
-	protected final fun getFlushLock ()Ljava/util/concurrent/locks/ReentrantLock;
 	protected final fun getLoadOnInit ()Z
 	protected fun handleOptimisticLockConflict (Lnet/transgressoft/lirp/persistence/OptimisticLockException;)V
 	public final fun isLoaded ()Z
@@ -849,6 +849,7 @@ public abstract class net/transgressoft/lirp/persistence/RegistryBase : net/tran
 	public fun lazySearch (Ljava/util/function/Predicate;)Lkotlin/sequences/Sequence;
 	public static final fun publicRawConstructorFor (Ljava/lang/Class;)Lnet/transgressoft/lirp/persistence/LirpRawConstructor;
 	public static final fun publicRawInitializerFor (Ljava/lang/Class;)Lnet/transgressoft/lirp/persistence/LirpRawInitializer;
+	public static final fun publicRefAccessorFor (Ljava/lang/Class;)Lnet/transgressoft/lirp/persistence/LirpRefAccessor;
 	public static final fun rawConstructorFor$net_transgressoft_lirp_core (Ljava/lang/Class;)Lnet/transgressoft/lirp/persistence/LirpRawConstructor;
 	public static final fun rawInitializerFor$net_transgressoft_lirp_core (Ljava/lang/Class;)Lnet/transgressoft/lirp/persistence/LirpRawInitializer;
 	public static final fun refAccessorFor$net_transgressoft_lirp_core (Ljava/lang/Class;)Lnet/transgressoft/lirp/persistence/LirpRefAccessor;
@@ -876,7 +877,29 @@ public final class net/transgressoft/lirp/persistence/RegistryBase$Companion {
 	public final fun deregisterRepository (Ljava/lang/Class;)V
 	public final fun publicRawConstructorFor (Ljava/lang/Class;)Lnet/transgressoft/lirp/persistence/LirpRawConstructor;
 	public final fun publicRawInitializerFor (Ljava/lang/Class;)Lnet/transgressoft/lirp/persistence/LirpRawInitializer;
+	public final fun publicRefAccessorFor (Ljava/lang/Class;)Lnet/transgressoft/lirp/persistence/LirpRefAccessor;
 	public final fun registerRepository (Ljava/lang/Class;Lnet/transgressoft/lirp/persistence/Repository;)V
+}
+
+public final class net/transgressoft/lirp/persistence/TransactionBuffer {
+	public fun <init> (Lnet/transgressoft/lirp/persistence/PersistentRepositoryBase;)V
+	public final fun getDeferredEvents ()Ljava/util/List;
+	public final fun getDeletes ()Ljava/util/List;
+	public final fun getEntitySnapshots ()Ljava/util/Map;
+	public final fun getInserts ()Ljava/util/List;
+	public final fun getRepo ()Lnet/transgressoft/lirp/persistence/PersistentRepositoryBase;
+	public final fun getUpdates ()Ljava/util/List;
+}
+
+public final class net/transgressoft/lirp/persistence/TransactionErrorContext {
+	public fun <init> (Ljava/lang/Throwable;Ljava/util/List;)V
+	public final fun getConflicts ()Ljava/util/List;
+	public final fun getThrowable ()Ljava/lang/Throwable;
+}
+
+public final class net/transgressoft/lirp/persistence/TransactionsKt {
+	public static final fun transaction (Lnet/transgressoft/lirp/persistence/PersistentRepositoryBase;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun transaction$default (Lnet/transgressoft/lirp/persistence/PersistentRepositoryBase;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
 }
 
 public final class net/transgressoft/lirp/persistence/ViaCollectionAccessorEntry {
@@ -950,6 +973,7 @@ public class net/transgressoft/lirp/persistence/json/JsonFileRepository : net/tr
 	public synthetic fun <init> (Ljava/io/File;Lkotlinx/serialization/KSerializer;Lkotlinx/serialization/modules/SerializersModule;JZLnet/transgressoft/lirp/persistence/json/JsonFkPolicy;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public synthetic fun <init> (Lnet/transgressoft/lirp/persistence/LirpContext;Ljava/io/File;Lkotlinx/serialization/KSerializer;Lkotlinx/serialization/modules/SerializersModule;JZLnet/transgressoft/lirp/persistence/json/JsonFkPolicy;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun close ()V
+	public fun commitTransactionBuffer (Lnet/transgressoft/lirp/persistence/TransactionBuffer;)V
 	public fun equals (Ljava/lang/Object;)Z
 	protected final fun getJson ()Lkotlinx/serialization/json/Json;
 	public final fun getJsonFile ()Ljava/io/File;

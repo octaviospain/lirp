@@ -859,6 +859,18 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
             rawInitializerFor(entityClass)
 
         /**
+         * Public cross-module entry point for [refAccessorFor].
+         *
+         * `lirp-sql` (a separate Gradle / Kotlin module) uses this to enumerate cascade targets
+         * for a given entity class when validating that all reachable cascade repositories share
+         * the same DataSource before committing a transaction. Returns `null` when the entity has
+         * no KSP-generated ref accessor (i.e., no `@ToOneAggregate` / `@ToManyAggregates` references).
+         */
+        @JvmStatic
+        fun publicRefAccessorFor(entityClass: Class<*>): LirpRefAccessor<Any>? =
+            refAccessorFor(entityClass)
+
+        /**
          * Returns the [LirpRawConstructor] for [entityClass], loading it via [KspAccessorLoader] on
          * first call and caching the result, or `null` when none exists.
          *

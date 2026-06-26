@@ -21,6 +21,7 @@ import net.transgressoft.lirp.entity.ReactiveEntity
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.StandardCrudEvent
+import net.transgressoft.lirp.persistence.ConflictInfo
 import net.transgressoft.lirp.persistence.LirpRawConstructor
 import net.transgressoft.lirp.persistence.LirpRawInitializer
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -120,17 +121,13 @@ internal class OptimisticLockRecovery<K : Comparable<K>, R : ReactiveEntity<K, R
         }
 
     /**
-     * Shared recovery path for a single conflict accumulated during a flush. Re-SELECTs the
-     * canonical row; if missing, emits a deletion-sentinel Conflict and removes the in-memory
-     * entity; otherwise reconciles state and emits Conflict with the canonical version.
+     * Re-SELECTs the canonical row for [id] in a new transaction and returns it along with the
+     * actual version value. Returns `null` for the row when the row no longer exists.
      *
-     * @param id The entity id whose write conflicted.
-     * @param expectedVersion The version the failed operation targeted.
+     * Extracted from [recoverEntityFromConflict] so that both the debounce-flush auto-recovery path
+     * and the transaction-commit [buildConflictInfo] path share the same SELECT-and-reconstruct logic.
      */
-    fun recoverEntityFromConflict(id: K, expectedVersion: Long) {
-        // Defensive: unreachable under normal flow — conflict implies versioned repo.
-        val vc = versionCol
-
+    private fun selectCanonical(id: K): Pair<ResultRow?, Long?> {
         val canonicalRow =
             transaction(db = db) {
                 table.selectAll()
@@ -140,6 +137,50 @@ internal class OptimisticLockRecovery<K : Comparable<K>, R : ReactiveEntity<K, R
                     }
                     .singleOrNull()
             }
+        val actualVersion = canonicalRow?.let { it[versionCol] }
+        return canonicalRow to actualVersion
+    }
+
+    /**
+     * Builds a [ConflictInfo] for a single `@Version` conflict detected during a transaction commit,
+     * without triggering auto-recovery or emitting a [StandardCrudEvent.Conflict].
+     *
+     * Re-SELECTs the canonical row to obtain the authoritative database state at conflict time.
+     * [preRollbackEntity] must be the in-memory entity captured **before** rollback so that
+     * [ConflictInfo.entity] carries the values that were attempted, not the restored pre-block values.
+     *
+     * Returns a [ConflictInfo] where:
+     * - [ConflictInfo.entity] is [preRollbackEntity] — the attempted (pre-rollback) state.
+     * - [ConflictInfo.canonical] is the reconstructed DB entity, or `null` when the row was deleted.
+     * - [ConflictInfo.version] is the actual DB version, or `-1` when the row was deleted.
+     *
+     * @param id the entity id whose write conflicted
+     * @param expectedVersion the version the failed operation targeted
+     * @param preRollbackEntity the in-memory entity with the attempted values, captured before rollback
+     */
+    internal fun buildConflictInfo(id: K, expectedVersion: Long, preRollbackEntity: R): ConflictInfo<K, R> {
+        val (canonicalRow, actualVersion) = selectCanonical(id)
+
+        if (canonicalRow == null) {
+            // Row was concurrently deleted — canonical is null and version signals deletion.
+            return ConflictInfo(entity = preRollbackEntity, canonical = null, version = -1L)
+        }
+
+        val reconstructed = reconstruct(canonicalRow)
+        hydrateJunctions(reconstructed)
+        return ConflictInfo(entity = preRollbackEntity, canonical = reconstructed, version = actualVersion)
+    }
+
+    /**
+     * Shared recovery path for a single conflict accumulated during a flush. Re-SELECTs the
+     * canonical row; if missing, emits a deletion-sentinel Conflict and removes the in-memory
+     * entity; otherwise reconciles state and emits Conflict with the canonical version.
+     *
+     * @param id The entity id whose write conflicted.
+     * @param expectedVersion The version the failed operation targeted.
+     */
+    fun recoverEntityFromConflict(id: K, expectedVersion: Long) {
+        val (canonicalRow, actualVersion) = selectCanonical(id)
 
         // Case 1: row was deleted by a third writer — treat as Conflict with oldEntity == newEntity
         // sentinel and actualVersion = -1L. The in-memory entity is dropped.
@@ -168,7 +209,8 @@ internal class OptimisticLockRecovery<K : Comparable<K>, R : ReactiveEntity<K, R
             return
         }
 
-        val actualVersion = canonicalRow[vc]
+        // canonicalRow is non-null here; actualVersion is the DB version from selectCanonical.
+        val resolvedVersion: Long = actualVersion ?: canonicalRow[versionCol]
         val inMemoryOpt = findById(id)
 
         if (inMemoryOpt.isPresent) {
@@ -189,7 +231,7 @@ internal class OptimisticLockRecovery<K : Comparable<K>, R : ReactiveEntity<K, R
                     oldEntity = oldSnapshot,
                     newEntity = inMemory,
                     expectedVersion = expectedVersion,
-                    actualVersion = actualVersion
+                    actualVersion = resolvedVersion
                 )
             )
         } else {
@@ -212,7 +254,7 @@ internal class OptimisticLockRecovery<K : Comparable<K>, R : ReactiveEntity<K, R
                     oldEntity = reconstructed,
                     newEntity = reconstructed,
                     expectedVersion = expectedVersion,
-                    actualVersion = actualVersion
+                    actualVersion = resolvedVersion
                 )
             )
         }

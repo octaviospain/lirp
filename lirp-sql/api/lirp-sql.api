@@ -42,6 +42,7 @@ public class net/transgressoft/lirp/persistence/sql/SqlRepository : net/transgre
 	public fun <init> (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ZZLnet/transgressoft/lirp/event/LirpErrorHandler;)V
 	public synthetic fun <init> (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ZZLnet/transgressoft/lirp/event/LirpErrorHandler;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun close ()V
+	public fun commitTransactionBuffer (Lnet/transgressoft/lirp/persistence/TransactionBuffer;)V
 	protected fun extractVersion (Lnet/transgressoft/lirp/entity/ReactiveEntity;)Ljava/lang/Long;
 	public final fun installEntityForeignKeys ()V
 	public final fun installJunctionForeignKeys ()V

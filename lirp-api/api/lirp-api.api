@@ -172,6 +172,7 @@ public final class net/transgressoft/lirp/event/LirpOperation : java/lang/Enum {
 	public static final field EMIT Lnet/transgressoft/lirp/event/LirpOperation;
 	public static final field FLUSH Lnet/transgressoft/lirp/event/LirpOperation;
 	public static final field RECOVER Lnet/transgressoft/lirp/event/LirpOperation;
+	public static final field TRANSACTION Lnet/transgressoft/lirp/event/LirpOperation;
 	public static final field UPDATE Lnet/transgressoft/lirp/event/LirpOperation;
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lnet/transgressoft/lirp/event/LirpOperation;
@@ -334,6 +335,21 @@ public final class net/transgressoft/lirp/persistence/ColumnType$VarcharType : n
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class net/transgressoft/lirp/persistence/ConflictInfo {
+	public fun <init> (Lnet/transgressoft/lirp/entity/ReactiveEntity;Lnet/transgressoft/lirp/entity/ReactiveEntity;Ljava/lang/Long;)V
+	public final fun component1 ()Lnet/transgressoft/lirp/entity/ReactiveEntity;
+	public final fun component2 ()Lnet/transgressoft/lirp/entity/ReactiveEntity;
+	public final fun component3 ()Ljava/lang/Long;
+	public final fun copy (Lnet/transgressoft/lirp/entity/ReactiveEntity;Lnet/transgressoft/lirp/entity/ReactiveEntity;Ljava/lang/Long;)Lnet/transgressoft/lirp/persistence/ConflictInfo;
+	public static synthetic fun copy$default (Lnet/transgressoft/lirp/persistence/ConflictInfo;Lnet/transgressoft/lirp/entity/ReactiveEntity;Lnet/transgressoft/lirp/entity/ReactiveEntity;Ljava/lang/Long;ILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/ConflictInfo;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCanonical ()Lnet/transgressoft/lirp/entity/ReactiveEntity;
+	public final fun getEntity ()Lnet/transgressoft/lirp/entity/ReactiveEntity;
+	public final fun getVersion ()Ljava/lang/Long;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class net/transgressoft/lirp/persistence/DurationColumnConverter : net/transgressoft/lirp/persistence/ColumnConverter {
 	public static final field INSTANCE Lnet/transgressoft/lirp/persistence/DurationColumnConverter;
 	public fun fromSql (J)Ljava/time/Duration;
@@ -391,6 +407,11 @@ public abstract interface annotation class net/transgressoft/lirp/persistence/Li
 public abstract interface class net/transgressoft/lirp/persistence/LirpTableDef {
 	public abstract fun getColumns ()Ljava/util/List;
 	public abstract fun getTableName ()Ljava/lang/String;
+}
+
+public class net/transgressoft/lirp/persistence/LirpTransactionException : java/lang/RuntimeException {
+	public fun <init> (Ljava/lang/String;Ljava/lang/Throwable;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 }
 
 public abstract interface class net/transgressoft/lirp/persistence/MutableAggregateCollectionRef : java/util/Collection, kotlin/jvm/internal/markers/KMutableCollection, net/transgressoft/lirp/persistence/AggregateCollectionRef {
@@ -531,6 +552,12 @@ public abstract interface annotation class net/transgressoft/lirp/persistence/To
 	public abstract fun bubbleUp ()Z
 	public abstract fun onDelete ()Lnet/transgressoft/lirp/entity/CascadeAction;
 	public abstract fun target ()Ljava/lang/Class;
+}
+
+public final class net/transgressoft/lirp/persistence/TransactionConflictException : net/transgressoft/lirp/persistence/LirpTransactionException {
+	public fun <init> (Ljava/lang/String;Ljava/util/List;Ljava/lang/Throwable;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/util/List;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getConflicts ()Ljava/util/List;
 }
 
 public final class net/transgressoft/lirp/persistence/UriColumnConverter : net/transgressoft/lirp/persistence/ColumnConverter {
