@@ -22,6 +22,25 @@ import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.PropertyChanged
 
 /**
+ * Carries the full delete intent captured inside a transaction block.
+ *
+ * Stores the entity alongside its key and expected version so the rollback path can re-add
+ * the entity to in-memory state without a repository lookup, and the commit path can build
+ * the `(id, expectedVersion)` pair needed by the SQL/JSON write pipeline.
+ *
+ * @param K the entity's key type
+ * @param R the reactive entity type
+ * @param id the entity's key
+ * @param entity the entity instance at remove() time
+ * @param expectedVersion the `@Version` value captured at remove() time; `null` for unversioned entities
+ */
+data class PendingDelete<K : Comparable<K>, R : ReactiveEntity<K, R>>(
+    val id: K,
+    val entity: R,
+    val expectedVersion: Long?
+)
+
+/**
  * Mutable container accumulating the captured state for a single transaction block on [repo].
  *
  * During a transaction, three categories of data are collected here rather than in the normal
@@ -57,8 +76,8 @@ class TransactionBuffer<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     /** Entities that were mutated (but not inserted or deleted) inside the transaction block. */
     val updates: MutableList<PendingUpdate<K, R>> = mutableListOf()
 
-    /** (id, expectedVersion) pairs for entities removed inside the transaction block. */
-    val deletes: MutableList<Pair<K, Long?>> = mutableListOf()
+    /** Delete intents captured inside the transaction block (id, entity, expectedVersion). */
+    val deletes: MutableList<PendingDelete<K, R>> = mutableListOf()
 
     /**
      * Pre-block property-value snapshots, keyed by entity id.
@@ -107,11 +126,17 @@ class TransactionBuffer<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                     collapsed[key] = pc
                 } else {
                     // Subsequent observation: keep first oldValue, update to latest newValue.
-                    collapsed[key] =
+                    val updatedPc =
                         (existing as PropertyChanged<K, R, Any?>).copy(
                             newValue = (pc as PropertyChanged<K, R, Any?>).newValue,
                             newIndexKey = pc.newIndexKey
                         )
+                    // A→B→A net-no-change: remove the entry entirely so no event fires.
+                    if (updatedPc.oldValue == updatedPc.newValue && updatedPc.oldIndexKey == updatedPc.newIndexKey) {
+                        collapsed.remove(key)
+                    } else {
+                        collapsed[key] = updatedPc
+                    }
                 }
             } else {
                 nonPropertyEvents.add(event)

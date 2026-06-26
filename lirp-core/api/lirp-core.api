@@ -675,6 +675,21 @@ public final class net/transgressoft/lirp/persistence/PendingCellKt {
 	public static final fun mergeWriterSide (Lnet/transgressoft/lirp/persistence/PendingCell;Lnet/transgressoft/lirp/persistence/PendingCell;)Lnet/transgressoft/lirp/persistence/PendingCell;
 }
 
+public final class net/transgressoft/lirp/persistence/PendingDelete {
+	public fun <init> (Ljava/lang/Comparable;Lnet/transgressoft/lirp/entity/ReactiveEntity;Ljava/lang/Long;)V
+	public final fun component1 ()Ljava/lang/Comparable;
+	public final fun component2 ()Lnet/transgressoft/lirp/entity/ReactiveEntity;
+	public final fun component3 ()Ljava/lang/Long;
+	public final fun copy (Ljava/lang/Comparable;Lnet/transgressoft/lirp/entity/ReactiveEntity;Ljava/lang/Long;)Lnet/transgressoft/lirp/persistence/PendingDelete;
+	public static synthetic fun copy$default (Lnet/transgressoft/lirp/persistence/PendingDelete;Ljava/lang/Comparable;Lnet/transgressoft/lirp/entity/ReactiveEntity;Ljava/lang/Long;ILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/PendingDelete;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEntity ()Lnet/transgressoft/lirp/entity/ReactiveEntity;
+	public final fun getExpectedVersion ()Ljava/lang/Long;
+	public final fun getId ()Ljava/lang/Comparable;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class net/transgressoft/lirp/persistence/PendingUpdate {
 	public fun <init> (Lnet/transgressoft/lirp/entity/ReactiveEntity;Ljava/lang/Long;)V
 	public synthetic fun <init> (Lnet/transgressoft/lirp/entity/ReactiveEntity;Ljava/lang/Long;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
@@ -704,6 +719,7 @@ public abstract class net/transgressoft/lirp/persistence/PersistentRepositoryBas
 	protected final fun flush ()V
 	protected final fun getClosed ()Z
 	public final fun getDirty ()Ljava/util/concurrent/atomic/AtomicBoolean;
+	protected final fun getFlushLock ()Ljava/util/concurrent/locks/ReentrantLock;
 	protected final fun getLoadOnInit ()Z
 	protected fun handleOptimisticLockConflict (Lnet/transgressoft/lirp/persistence/OptimisticLockException;)V
 	public final fun isLoaded ()Z

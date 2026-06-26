@@ -85,6 +85,9 @@ internal class JsonTransactionTest : StringSpec() {
                     }
                 }
                 reactive.advance()
+
+                // Assert while repo is still open so any in-flight debounce write would be observable.
+                jsonFile.readText() shouldBe contentBefore
             } finally {
                 try {
                     freshRepo.close()
@@ -92,7 +95,7 @@ internal class JsonTransactionTest : StringSpec() {
                 }
             }
 
-            // Original file must be identical to the pre-transaction content.
+            // Final check after close confirms file is still intact.
             jsonFile.readText() shouldBe contentBefore
         }
 

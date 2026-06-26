@@ -28,9 +28,13 @@ import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 
 /**
  * Tests for the [transaction] free function covering the Volatile-like repository path:
@@ -208,6 +212,120 @@ internal class TransactionTest : StringSpec() {
 
                 capturedThrowable?.message shouldBe "handled failure"
                 (repo.findById(7).get() as MutableAudioItem).title shouldBe "Somebody to Love"
+            } finally {
+                repo.close()
+            }
+        }
+
+        "entity added inside a failing block is absent from the repo after rollback" {
+            val repo = InMemoryAudioItemRepo()
+            try {
+                shouldThrow<LirpTransactionException> {
+                    transaction(repo) { r ->
+                        r.add(MutableAudioItem(8, "Flash", "The Game") as AudioItem)
+                        throw RuntimeException("block failure")
+                    }
+                }
+
+                // The insert was rolled back — entity must not be present.
+                repo.findById(8).isPresent shouldBe false
+                repo.size() shouldBe 0
+            } finally {
+                repo.close()
+            }
+        }
+
+        "entity removed inside a failing block is re-added to the repo after rollback" {
+            val repo = InMemoryAudioItemRepo()
+            repo.add(MutableAudioItem(9, "Innuendo", "Innuendo") as AudioItem)
+            try {
+                shouldThrow<LirpTransactionException> {
+                    transaction(repo) { r ->
+                        r.remove(r.findById(9).get())
+                        throw RuntimeException("block failure")
+                    }
+                }
+
+                // The delete was rolled back — entity must still be present.
+                repo.findById(9).shouldBePresent { it.title shouldBe "Innuendo" }
+            } finally {
+                repo.close()
+            }
+        }
+
+        "lastDateModified is restored to its pre-block value after a failing block" {
+            val repo = InMemoryAudioItemRepo()
+            val item = repo.create(10, "The Show Must Go On", "Innuendo")
+            val preDateModified = item.lastDateModified
+            try {
+                shouldThrow<LirpTransactionException> {
+                    transaction(repo) { r ->
+                        (r.findById(10).get() as MutableAudioItem).title = "mutated-title"
+                        throw RuntimeException("block failure")
+                    }
+                }
+
+                // lastDateModified must revert to the pre-block value after rollback.
+                item.lastDateModified shouldBe preDateModified
+            } finally {
+                repo.close()
+            }
+        }
+
+        "transaction block that suspends onto a different thread still captures scalar mutations" {
+            // Verifies that _txEventBuffer is propagated across coroutine suspension via
+            // asContextElement: a scalar mutation after a thread switch must still be buffered
+            // (not published directly) and committed in the same transaction.
+            val repo = InMemoryAudioItemRepo()
+            val item = repo.create(11, "Bicycle Race", "Jazz")
+            val events = mutableListOf<MutationEvent<Int, AudioItem>>()
+            item.subscribe { events.add(it) }
+
+            try {
+                transaction(repo) { r ->
+                    // Real suspension that resumes on a worker thread.
+                    withContext(Dispatchers.IO) { yield() }
+                    // Mutation after thread switch — must be buffered, not published.
+                    (r.findById(11).get() as MutableAudioItem).title = "Fat Bottomed Girls"
+                }
+
+                // Exactly one collapsed event fired after commit — none during the block.
+                events shouldHaveSize 1
+                (item as MutableAudioItem).title shouldBe "Fat Bottomed Girls"
+            } finally {
+                repo.close()
+            }
+        }
+
+        "transaction remove-then-add same pre-existing id results in committed UPDATE" {
+            val repo = InMemoryAudioItemRepo()
+            repo.create(20, "Killer Queen", "Sheer Heart Attack")
+            try {
+                transaction(repo) { r ->
+                    val existing = r.findById(20).get()
+                    r.remove(existing)
+                    r.add(MutableAudioItem(20, "Bohemian Rhapsody", "A Night at the Opera") as AudioItem)
+                }
+
+                // After commit: entity present with re-added value (no duplicate-key failure).
+                repo.findById(20).shouldBePresent { it.title shouldBe "Bohemian Rhapsody" }
+                repo.size() shouldBe 1
+            } finally {
+                repo.close()
+            }
+        }
+
+        "transaction add-then-remove same new id is a no-op after commit" {
+            val repo = InMemoryAudioItemRepo()
+            try {
+                transaction(repo) { r ->
+                    r.add(MutableAudioItem(21, "Radio Ga Ga", "The Works") as AudioItem)
+                    r.remove(r.findById(21).get())
+                }
+
+                // After commit: entity is absent because insert+delete cancel out.
+                repo.findById(21).isPresent shouldBe false
+                repo.size() shouldBe 0
             } finally {
                 repo.close()
             }

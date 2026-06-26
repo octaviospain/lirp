@@ -266,11 +266,20 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         private val clearEpoch = AtomicLong(0L)
 
         // Serializes flush() calls: prevents concurrent drains from the pending map and ensures
-        // close() waits for any in-flight flush to complete before draining itself. Internal so
+        // close() waits for any in-flight flush to complete before draining itself. Protected so
         // both subclasses and the transaction orchestration free function in the same module can
         // serialize writes against the same lock (e.g. JsonFileRepository's jsonFile setter,
         // Transactions.kt's pre-flush + block + commit sequence).
-        internal val flushLock = ReentrantLock()
+        protected val flushLock = ReentrantLock()
+
+        /** Acquires [flushLock]. For use by the transaction orchestration layer in the same module. */
+        internal fun lockFlush() = flushLock.lock()
+
+        /** Releases [flushLock]. Symmetric to [lockFlush]. */
+        internal fun unlockFlush() = flushLock.unlock()
+
+        /** Returns `true` when the calling thread currently holds [flushLock]. */
+        internal fun isFlushLockHeldByCurrentThread(): Boolean = flushLock.isHeldByCurrentThread
 
         /**
          * Nesting depth of the active transaction on this repository.
@@ -453,6 +462,68 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
             // No-op: memory is already updated in place; Volatile relies on this default.
         }
 
+        /**
+         * Derives [TransactionBuffer.updates] from [TransactionBuffer.deferredEvents] by collecting
+         * distinct entities that were mutated inside the block but are neither inserts nor deletes.
+         *
+         * Called immediately before [commitTransactionBuffer] so that the update list is populated
+         * for durable-store implementations (SQL, JSON) without requiring the reactive subscription
+         * path to fire during a transaction block.
+         */
+        internal fun captureDeferredUpdates(buffer: TransactionBuffer<K, R>) {
+            val insertIds = buffer.inserts.map { it.id }.toSet()
+            val deleteIds = buffer.deletes.map { it.id }.toSet()
+            val alreadyCaptured = buffer.updates.map { it.entity.id }.toSet()
+            buffer.deferredEvents
+                .mapNotNull { event ->
+                    event.entity.takeIf { entity ->
+                        entity.id !in insertIds && entity.id !in deleteIds && entity.id !in alreadyCaptured
+                    }
+                }
+                .distinctBy { it.id }
+                .forEach { entity ->
+                    buffer.updates.add(PendingUpdate(entity, extractVersion(entity)))
+                }
+        }
+
+        /**
+         * Coalesces contradictory insert and delete intents for the same entity id inside [buffer].
+         *
+         * When the same id appears in both [TransactionBuffer.inserts] and [TransactionBuffer.deletes]:
+         * - **Pre-existing id** (id is in [TransactionBuffer.entitySnapshots], meaning the row existed
+         *   before the block): the net effect is an UPDATE to the re-added value. The entity is moved
+         *   from inserts into [TransactionBuffer.updates] (if not already captured there), and the id
+         *   is removed from both lists.
+         * - **Transient id** (added and removed within the block, never persisted): the net effect is a
+         *   no-op. The id is removed from both lists without writing anything to the store.
+         *
+         * Must be called before [captureDeferredUpdates] so derived updates do not double-count ids
+         * already promoted here.
+         */
+        internal fun normalizeTransactionBuffer(buffer: TransactionBuffer<K, R>) {
+            val insertIds = buffer.inserts.map { it.id }.toSet()
+            val deleteIds = buffer.deletes.map { it.id }.toSet()
+            val overlapping = insertIds intersect deleteIds
+            if (overlapping.isEmpty()) return
+
+            val preExistingIds = buffer.entitySnapshots.keys
+
+            for (id in overlapping) {
+                val insertedEntity = buffer.inserts.firstOrNull { it.id == id } ?: continue
+                buffer.inserts.removeAll { it.id == id }
+                buffer.deletes.removeAll { it.id == id }
+
+                if (id in preExistingIds) {
+                    // Row existed before the block: promote the re-added entity to an UPDATE.
+                    val alreadyCaptured = buffer.updates.any { it.entity.id == id }
+                    if (!alreadyCaptured) {
+                        buffer.updates.add(PendingUpdate(insertedEntity, extractVersion(insertedEntity)))
+                    }
+                }
+                // Transient id (not pre-existing): remove from both lists — net no-op; nothing to write.
+            }
+        }
+
         // optimistic-lock failures follow the Conflict + auto-reload path and DO NOT
         // re-enqueue. The subclass recovery hook performs the auto-reload and emits the
         // StandardCrudEvent.Conflict event. Cells that arrived during the failed write are kept
@@ -520,13 +591,23 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         // volatile `closed` flag under the write lock so that this re-check is observable.
         private fun enqueueInsertLocked(entity: R) {
             if (closed) return
+            val txBuffer = activeTransactionBuffer
+            if (txBuffer != null) {
+                txBuffer.inserts.add(entity)
+                return
+            }
             pendingCells.compute(entity.id) { _, cur -> mergeWriterSide(cur, PendingCell.Insert(entity)) }
             dirty.set(true)
             scheduleFlush()
         }
 
-        private fun enqueueDeleteLocked(id: K, expectedVersion: Long?) {
+        private fun enqueueDeleteLocked(id: K, entity: R, expectedVersion: Long?) {
             if (closed) return
+            val txBuffer = activeTransactionBuffer
+            if (txBuffer != null) {
+                txBuffer.deletes.add(PendingDelete(id, entity, expectedVersion))
+                return
+            }
             pendingCells.compute(id) { _, cur -> mergeWriterSide(cur, PendingCell.Delete(expectedVersion)) }
             dirty.set(true)
             scheduleFlush()
@@ -641,6 +722,8 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
          * Used by subclasses during initialization to load entities from an external store
          * (e.g. DB or JSON file) without triggering a write-back for data already persisted.
          */
+        internal fun addToMemoryOnlyInternal(entity: R) = addToMemoryOnly(entity)
+
         protected fun addToMemoryOnly(entity: R) {
             super.add(entity)
             subscribeEntity(entity)
@@ -657,6 +740,8 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
          *
          * @return `true` if the entity was present and removed, `false` otherwise.
          */
+        internal fun removeFromMemoryOnlyInternal(entity: R): Boolean = removeFromMemoryOnly(entity)
+
         protected fun removeFromMemoryOnly(entity: R): Boolean {
             val removed = super.remove(entity)
             if (removed) {
@@ -919,7 +1004,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
                         // For `@Version`-aware subclasses, [extractVersion] captures the row's
                         // version at remove() time so the DELETE statement can check it in its
                         // WHERE clause.
-                        enqueueDeleteLocked(entity.id, extractVersion(entity))
+                        enqueueDeleteLocked(entity.id, entity, extractVersion(entity))
                     }
                     // Pre-#200 the lifecycle ran in the opposite order: super.remove() FIRST, then
                     // an `error(...)` invariant detector if the subscription was missing. That
@@ -945,7 +1030,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
                         // Per-entity version capture: each id carries its own expectedVersion so
                         // that a conflict on one id does not block deletions of the others.
                         presentEntities.forEach { entity ->
-                            enqueueDeleteLocked(entity.id, extractVersion(entity))
+                            enqueueDeleteLocked(entity.id, entity, extractVersion(entity))
                         }
                         presentEntities.forEach {
                             subscriptionsMap.remove(it.id)?.cancel()

@@ -54,6 +54,13 @@ import kotlin.reflect.jvm.isAccessible
 import kotlinx.coroutines.flow.SharedFlow
 
 /**
+ * Sentinel key used by [ReactiveEntityBase.captureSnapshot] to store `lastDateModified` in the
+ * snapshot map. The leading space cannot occur in a Kotlin property name, so it never collides
+ * with a delegate-backed property key.
+ */
+private const val LAST_MODIFIED_SNAPSHOT_KEY = " lastDateModified"
+
+/**
  * Abstract base class that provides reactive functionality for entities, enabling them to notify subscribers
  * about property changes through a reactive flow-based pattern.
  *
@@ -91,6 +98,7 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     private val publisherFactory: (String) -> LirpEventPublisher<MutationEvent.Type, MutationEvent<K, R>> =
         { id -> FlowEventPublisher(id, closeOnEmpty = true) }
 ) : ReactiveEntity<K, R> where K : Comparable<K> {
+
     private val log = KotlinLogging.logger {}
 
     /**
@@ -417,42 +425,36 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
         // rollback. This preserves event-isolation without data-isolation.
         val txBuffer = _txEventBuffer.get()
         if (txBuffer != null) {
-            val kprop1 = property as? KProperty1<R, V>
-            if (kprop1 != null) {
-                val indexEntries = loadIndexEntries()
-                val matchingIndex = indexEntries.firstOrNull { it.propertyName == property.name }
-                val event =
-                    PropertyChanged<K, R, V>(
-                        entity = this as R,
-                        property = kprop1,
-                        oldValue = oldValue,
-                        newValue = newValue,
-                        versionAtMutation = null,
-                        oldIndexKey = if (matchingIndex != null) oldValue else null,
-                        newIndexKey = if (matchingIndex != null) newValue else null
-                    )
-                txBuffer.add(event)
-            }
+            buildPropertyChangedEvent(property, oldValue, newValue)?.let { txBuffer.add(it) }
             return
         }
 
         if (!shouldEmit) return
 
-        val kprop1 = property as? KProperty1<R, V> ?: return
-        val indexEntries = loadIndexEntries()
-        val matchingIndex = indexEntries.firstOrNull { it.propertyName == property.name }
-        val event =
-            PropertyChanged<K, R, V>(
-                entity = this as R,
-                property = kprop1,
-                oldValue = oldValue,
-                newValue = newValue,
-                versionAtMutation = null,
-                oldIndexKey = if (matchingIndex != null) oldValue else null,
-                newIndexKey = if (matchingIndex != null) newValue else null
-            )
-        log.trace { "Firing property changed event on ${this::class.java.simpleName}: ${property.name} $oldValue -> $newValue" }
-        publisher.emitAsync(event)
+        buildPropertyChangedEvent(property, oldValue, newValue)?.let { event ->
+            log.trace { "Firing property changed event on ${this::class.java.simpleName}: ${property.name} $oldValue -> $newValue" }
+            publisher.emitAsync(event)
+        }
+    }
+
+    /**
+     * Builds the [PropertyChanged] event for a scalar reactive-property mutation, resolving the
+     * matching `@Indexed` entry so index keys are carried. Returns null when [property] is not a
+     * [KProperty1] of this entity, in which case no event can be constructed.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun <V> buildPropertyChangedEvent(property: KProperty<*>, oldValue: V, newValue: V): PropertyChanged<K, R, V>? {
+        val kprop1 = property as? KProperty1<R, V> ?: return null
+        val matchingIndex = loadIndexEntries().firstOrNull { it.propertyName == property.name }
+        return PropertyChanged(
+            entity = this as R,
+            property = kprop1,
+            oldValue = oldValue,
+            newValue = newValue,
+            versionAtMutation = null,
+            oldIndexKey = if (matchingIndex != null) oldValue else null,
+            newIndexKey = if (matchingIndex != null) newValue else null
+        )
     }
 
     /**
@@ -487,6 +489,29 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
             if (kprop1 != null) {
                 accumulator.add(FieldChange(kprop1, oldValue, newValue))
             }
+            return
+        }
+
+        // When a transaction buffer is active, defer the event instead of publishing.
+        val txBuffer = _txEventBuffer.get()
+        if (txBuffer != null) {
+            val kprop1 =
+                this::class.memberProperties
+                    .filterIsInstance<KProperty1<R, V>>()
+                    .firstOrNull { it.name == propertyName } ?: return
+            val indexEntries = loadIndexEntries()
+            val matchingIndex = indexEntries.firstOrNull { it.propertyName == propertyName }
+            val event =
+                PropertyChanged<K, R, V>(
+                    entity = this as R,
+                    property = kprop1,
+                    oldValue = oldValue,
+                    newValue = newValue,
+                    versionAtMutation = null,
+                    oldIndexKey = if (matchingIndex != null) oldValue else null,
+                    newIndexKey = if (matchingIndex != null) newValue else null
+                )
+            txBuffer.add(event)
             return
         }
 
@@ -665,6 +690,11 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
                     oldIndexKey = oldIndexKey,
                     newIndexKey = newIndexKey
                 )
+            val txBuf = _txEventBuffer.get()
+            if (txBuf != null) {
+                txBuf.add(event)
+                return result
+            }
             log.trace { "Firing batch changed event on ${this::class.java.simpleName}(id=$id) with ${accumulator.size} field(s)" }
             publisher.emitAsync(event)
         }
@@ -703,14 +733,16 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
 
     /**
      * Captures a shallow snapshot of all reactive-property values registered in [delegateRegistry],
-     * keyed by property name.
+     * keyed by property name. Also stores [lastDateModified] under [LAST_MODIFIED_SNAPSHOT_KEY] so
+     * that [restoreSnapshot] can revert the timestamp atomically with the other scalars.
      *
      * The snapshot is taken synchronously on the calling thread. Only [net.transgressoft.lirp.persistence.ReactivePropertyDelegate]
      * and [net.transgressoft.lirp.persistence.ReactivePropertyDelegateWithAccessors] entries are
      * captured — aggregate collection delegates manage their own identity collections and are not
-     * snapshotted here (Assumption A2: collection rollback is out of scope for the scalar rollback path).
+     * snapshotted here.
      *
-     * @return a map from property name to the current value for each reactive-property delegate
+     * @return a map from property name to the current value for each reactive-property delegate,
+     *   plus the [lastDateModified] sentinel entry
      */
     internal fun captureSnapshot(): Map<String, Any?> {
         val snapshot = mutableMapOf<String, Any?>()
@@ -721,24 +753,32 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
                 else -> { /* aggregate collection delegates — not snapshotted on the scalar rollback path */ }
             }
         }
+        snapshot[LAST_MODIFIED_SNAPSHOT_KEY] = lastDateModified
         return snapshot
     }
 
     /**
      * Restores reactive properties to the values in [snapshot], suppressing all mutation events
-     * during the restore to prevent observers from seeing intermediate reverted state.
+     * during the restore to prevent observers from seeing intermediate reverted state. Also restores
+     * [lastDateModified] from the sentinel entry written by [captureSnapshot].
      *
      * Runs inside [withEventsDisabled] and writes each property via the non-emitting
      * [setDirectly][net.transgressoft.lirp.persistence.ReactivePropertyDelegate.setDirectly]
-     * path so that neither [emitPropertyChanged] nor [lastDateModified] is updated during rollback.
-     * Only reactive-property delegates are processed; aggregate collection delegates are skipped
-     * because they manage their own backing-write paths.
+     * path so that neither [emitPropertyChanged] is triggered during rollback.
+     * Only reactive-property delegates are processed; aggregate collection delegates and the
+     * [LAST_MODIFIED_SNAPSHOT_KEY] sentinel are skipped in the delegate-matching loop.
      *
      * @param snapshot a property-name-to-value map previously returned by [captureSnapshot]
      */
     internal fun restoreSnapshot(snapshot: Map<String, Any?>) {
         withEventsDisabled {
+            val preDateModified = snapshot[LAST_MODIFIED_SNAPSHOT_KEY] as? java.time.LocalDateTime
+            if (preDateModified != null) {
+                lastDateModified = preDateModified
+            }
             snapshot.forEach { (name, value) ->
+                // Skip the timestamp sentinel — it is not a delegate-backed property.
+                if (name == LAST_MODIFIED_SNAPSHOT_KEY) return@forEach
                 when (val delegate = delegateRegistry[name]) {
                     is net.transgressoft.lirp.persistence.ReactivePropertyDelegate<*> -> {
                         @Suppress("UNCHECKED_CAST")
