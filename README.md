@@ -305,6 +305,7 @@ Deep coverage of the write pipeline, collapse algorithm, transactional guarantee
 - **Two subscription levels** — repository-level `CrudEvent`s and entity-level `MutationEvent`s
 - **DDD aggregate references** — cardinality-explicit annotations: `@ToOneAggregate` for single-entity refs — on the persisted FK scalar (KSP generates the navigation extension accessor) or on a `by aggregate { … }` / `by optionalAggregate { … }` delegate when the key is computed rather than a stored scalar; `@ToManyAggregates` on collection navigation properties (`aggregateList` / `aggregateSet`); and `polymorphicAggregate` for exactly-one-of-N typed references. The to-one/to-many split is compiler-enforced — `@ToOneAggregate` on a collection and `@ToManyAggregates` on a single reference are both rejected at build time. All four cascade modes (DETACH / CASCADE / RESTRICT / NONE) are enforced both app-side and at the database layer (FK constraints on scalar refs, junction tables for collection refs)
 - **JSON FK reconciliation** — `JsonFkPolicy.LOG_AND_RECONCILE` (default) silently repairs dangling refs at load; `JsonFkPolicy.STRICT` fails loudly — symmetric to SQL `ON DELETE RESTRICT`
+- **Soft delete** — `softDelete(entity)` marks an entity deleted by setting `deletedAt` without removing the row; all reads default-exclude soft-deleted entities. `restore(entity)` returns the entity to the active set. `includeDeleted()` and `onlyDeleted()` Query DSL verbs opt in to deleted visibility. Hard delete remains available via `remove()`. KSP auto-injects the `deleted_at` column for `SoftDeletable` entities
 - **Secondary indexes** — `@Indexed` for O(1) equality lookups
 - **Type-safe Query DSL** — Kotlin-native filtering, ordering, and pagination with automatic index routing
 - **Optimistic locking** — `@Version` triggers versioned UPDATE/DELETE; conflicts surface as `StandardCrudEvent.Conflict` with canonical state
@@ -392,9 +393,14 @@ Individual subscriptions can also carry an independent error handler via
 
 ## Upgrading to v3.1.0
 
-Version 3.1.0 removes two public API elements deprecated since 3.0.0. See **[CHANGELOG.md](CHANGELOG.md)**
-for the full migration guide, including:
+Version 3.1.0 adds first-class soft delete and removes two public API elements deprecated since 3.0.0.
+See **[CHANGELOG.md](CHANGELOG.md)** for the full migration guide, including:
 
+- **Soft delete** — `Repository.softDelete(entity)` / `restore(entity)`, default-exclude reads,
+  `includeDeleted()` / `onlyDeleted()` Query DSL verbs, new `StandardCrudEvent.SoftDelete` /
+  `Restore` events, and KSP-injected `deleted_at` column for `SoftDeletable` entities
+- **Breaking change** — `StandardCrudEvent.SoftDelete` and `Restore` are new sealed subtypes;
+  exhaustive `when` expressions over `StandardCrudEvent` must add both branches (or an `else`)
 - `MutationEvent.Type.MUTATE(301)` removed — use `PROPERTY_CHANGED(302)` or `BATCH_CHANGED(303)`
 - `ReactiveMutationEvent` class removed — use `PropertyChanged` or `BatchChanged` instead
 - Aggregate bubble-up events now report type 302 or 303 (derived from the child event) instead of 301

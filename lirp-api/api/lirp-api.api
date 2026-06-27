@@ -26,6 +26,11 @@ public final class net/transgressoft/lirp/entity/IdentifiableEntityKt {
 public abstract interface class net/transgressoft/lirp/entity/LirpEntity {
 }
 
+public abstract interface class net/transgressoft/lirp/entity/MutableSoftDeletable : net/transgressoft/lirp/entity/SoftDeletable {
+	public abstract fun getDeletedAt ()Ljava/time/Instant;
+	public abstract fun setDeletedAt (Ljava/time/Instant;)V
+}
+
 public abstract interface class net/transgressoft/lirp/entity/ReactiveEntity : java/lang/AutoCloseable, java/util/concurrent/Flow$Publisher, net/transgressoft/lirp/entity/IdentifiableEntity {
 	public synthetic fun clone ()Ljava/lang/Object;
 	public synthetic fun clone ()Lnet/transgressoft/lirp/entity/IdentifiableEntity;
@@ -79,6 +84,8 @@ public abstract interface class net/transgressoft/lirp/event/CrudEvent : net/tra
 	public fun isCreate ()Z
 	public fun isDelete ()Z
 	public fun isRead ()Z
+	public fun isRestore ()Z
+	public fun isSoftDelete ()Z
 	public fun isUpdate ()Z
 }
 
@@ -87,6 +94,8 @@ public final class net/transgressoft/lirp/event/CrudEvent$DefaultImpls {
 	public static fun isCreate (Lnet/transgressoft/lirp/event/CrudEvent;)Z
 	public static fun isDelete (Lnet/transgressoft/lirp/event/CrudEvent;)Z
 	public static fun isRead (Lnet/transgressoft/lirp/event/CrudEvent;)Z
+	public static fun isRestore (Lnet/transgressoft/lirp/event/CrudEvent;)Z
+	public static fun isSoftDelete (Lnet/transgressoft/lirp/event/CrudEvent;)Z
 	public static fun isUpdate (Lnet/transgressoft/lirp/event/CrudEvent;)Z
 }
 
@@ -96,6 +105,8 @@ public final class net/transgressoft/lirp/event/CrudEvent$Type : java/lang/Enum,
 	public static final field DELETE Lnet/transgressoft/lirp/event/CrudEvent$Type;
 	public static final field READ Lnet/transgressoft/lirp/event/CrudEvent$Type;
 	public static final field RECOVERY_FAILED Lnet/transgressoft/lirp/event/CrudEvent$Type;
+	public static final field RESTORE Lnet/transgressoft/lirp/event/CrudEvent$Type;
+	public static final field SOFT_DELETE Lnet/transgressoft/lirp/event/CrudEvent$Type;
 	public static final field UPDATE Lnet/transgressoft/lirp/event/CrudEvent$Type;
 	public fun getCode ()I
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
@@ -475,6 +486,8 @@ public abstract interface class net/transgressoft/lirp/persistence/PersistentRep
 public final class net/transgressoft/lirp/persistence/PersistentRepository$DefaultImpls {
 	public static fun minus (Lnet/transgressoft/lirp/persistence/PersistentRepository;Ljava/util/Collection;)Z
 	public static fun minus (Lnet/transgressoft/lirp/persistence/PersistentRepository;Lnet/transgressoft/lirp/entity/ReactiveEntity;)Z
+	public static fun restore (Lnet/transgressoft/lirp/persistence/PersistentRepository;Lnet/transgressoft/lirp/entity/ReactiveEntity;)Z
+	public static fun softDelete (Lnet/transgressoft/lirp/persistence/PersistentRepository;Lnet/transgressoft/lirp/entity/ReactiveEntity;)Z
 	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/PersistentRepository;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/PersistentRepository;Lkotlin/jvm/functions/Function2;Lnet/transgressoft/lirp/event/LirpErrorHandler;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 }
@@ -534,11 +547,15 @@ public abstract interface class net/transgressoft/lirp/persistence/Repository : 
 	public fun minus (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
 	public abstract fun remove (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
 	public abstract fun removeAll (Ljava/util/Collection;)Z
+	public fun restore (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
+	public fun softDelete (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
 }
 
 public final class net/transgressoft/lirp/persistence/Repository$DefaultImpls {
 	public static fun minus (Lnet/transgressoft/lirp/persistence/Repository;Ljava/util/Collection;)Z
 	public static fun minus (Lnet/transgressoft/lirp/persistence/Repository;Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
+	public static fun restore (Lnet/transgressoft/lirp/persistence/Repository;Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
+	public static fun softDelete (Lnet/transgressoft/lirp/persistence/Repository;Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
 	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/Repository;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/Repository;Lkotlin/jvm/functions/Function2;Lnet/transgressoft/lirp/event/LirpErrorHandler;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 }
@@ -589,6 +606,8 @@ public abstract interface class net/transgressoft/lirp/persistence/json/JsonRepo
 public final class net/transgressoft/lirp/persistence/json/JsonRepository$DefaultImpls {
 	public static fun minus (Lnet/transgressoft/lirp/persistence/json/JsonRepository;Ljava/util/Collection;)Z
 	public static fun minus (Lnet/transgressoft/lirp/persistence/json/JsonRepository;Lnet/transgressoft/lirp/entity/ReactiveEntity;)Z
+	public static fun restore (Lnet/transgressoft/lirp/persistence/json/JsonRepository;Lnet/transgressoft/lirp/entity/ReactiveEntity;)Z
+	public static fun softDelete (Lnet/transgressoft/lirp/persistence/json/JsonRepository;Lnet/transgressoft/lirp/entity/ReactiveEntity;)Z
 	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/json/JsonRepository;Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public static fun subscribeAsync (Lnet/transgressoft/lirp/persistence/json/JsonRepository;Lkotlin/jvm/functions/Function2;Lnet/transgressoft/lirp/event/LirpErrorHandler;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 }

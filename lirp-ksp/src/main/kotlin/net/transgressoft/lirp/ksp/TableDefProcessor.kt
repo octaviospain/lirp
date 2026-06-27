@@ -786,6 +786,30 @@ class TableDefProcessor(
     }
 
     /**
+     * Returns `true` when [classDecl]'s supertype hierarchy includes [SoftDeletable][SOFT_DELETABLE_FQN].
+     * Walks the full transitive supertype graph (class + interfaces) guarded by a visited set to
+     * handle diamond inheritance without infinite recursion. Used to decide whether a synthesized
+     * `deleted_at` column should be injected into the generated table descriptor.
+     */
+    private fun implementsSoftDeletable(classDecl: KSClassDeclaration): Boolean =
+        implementsSoftDeletableRecursive(classDecl, mutableSetOf())
+
+    private fun implementsSoftDeletableRecursive(
+        classDecl: KSClassDeclaration,
+        visited: MutableSet<String>
+    ): Boolean {
+        val fqn = classDecl.qualifiedName?.asString() ?: return false
+        if (!visited.add(fqn)) return false
+        for (superTypeRef in classDecl.superTypes) {
+            val superDecl = superTypeRef.resolve().declaration
+            val superFqn = superDecl.qualifiedName?.asString() ?: continue
+            if (superFqn == SOFT_DELETABLE_FQN) return true
+            if (superDecl is KSClassDeclaration && implementsSoftDeletableRecursive(superDecl, visited)) return true
+        }
+        return false
+    }
+
+    /**
      * Validates a @Version property — type must be non-nullable `kotlin.Long`, must be
      * declared with `var`, must be delegated (reactiveProperty or equivalent), and at most one
      * @Version per class. Emits [KSPLogger.error] on violation and returns `false`.
@@ -971,9 +995,37 @@ class TableDefProcessor(
 
         val tableName = resolveTableName(classDecl, className)
         val resolvedShape = collected
-        val columns = resolvedShape.columns
+        val columns = resolvedShape.columns.toMutableList()
         val ctorSlots = resolvedShape.ctorSlots
         val setterSlots = resolvedShape.setterSlots
+
+        // Synthesize a deleted_at column for entities whose supertype hierarchy includes SoftDeletable.
+        // The column is appended after the full property scan following the same ordering rule as the
+        // @Version column, so fromRow/toParams index alignment is preserved. Synthesis is skipped when
+        // the entity already maps the `deletedAt` PROPERTY (via an explicit @PersistenceMapping entry)
+        // so that a custom column name for deletedAt is respected. An unrelated property that happens
+        // to use the column name "deleted_at" is not treated as an explicit mapping and falls through
+        // to the normal column-name collision check below.
+        val hasDeletedAtMapping = columns.any { it.propertyName == "deletedAt" }
+        if (implementsSoftDeletable(classDecl) && !hasDeletedAtMapping) {
+            val instantConverter = DEFAULT_CONVERTERS.getValue(INSTANT_FQN)
+            columns.add(
+                ColumnMeta(
+                    name = "deleted_at",
+                    propertyName = "deletedAt",
+                    typeExpression = COLUMN_TYPE_TEXT_EXPR,
+                    typeFqn = INSTANT_FQN,
+                    nullable = true,
+                    isPrimaryKey = false,
+                    isEnum = false,
+                    isMutable = true,
+                    isCtorParam = false,
+                    isVersion = false,
+                    converterFqn = instantConverter.converterFqn,
+                    converterSqlFqn = instantConverter.sqlTypeFqn
+                )
+            )
+        }
 
         // column-name collision detection runs ONCE at the entity level on the fully
         // flattened column list, after all recursive @Embedded descents. Detection at this level

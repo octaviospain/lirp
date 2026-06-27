@@ -51,6 +51,47 @@ See [Migration from 3.0.0 to 3.1.0](#migration-from-300-to-310) for upgrade step
     `SCAN_ONLY`.
   See [#151](https://github.com/octaviospain/lirp/issues/151).
 
+- **First-class soft delete** — `Repository.softDelete(entity)` marks an entity as deleted by
+  setting its `deletedAt: Instant?` timestamp without removing the row from the database or
+  evicting the entity from memory. `Repository.restore(entity)` clears `deletedAt` and returns
+  the entity to the active set. Both operations are available only when the entity implements
+  `MutableSoftDeletable` (which extends `SoftDeletable`). `remove()` remains the hard-delete
+  primitive — soft delete is not an erasure operation.
+
+  **Default-exclude reads** — after `softDelete`, the entity is excluded from every read surface
+  by default: `findById`, registry iteration, `size()`, index lookups, and Query DSL results all
+  omit soft-deleted entities. Use `includeDeleted()` or `onlyDeleted()` in the Query DSL to
+  opt in:
+
+  ```kotlin
+  // Default: soft-deleted entities excluded
+  val active = repo.query { where { Track::genre eq "rock" } }.toList()
+
+  // Opt in to see all, including soft-deleted
+  val all = repo.query {
+      where { Track::genre eq "rock" }
+      includeDeleted()
+  }.toList()
+
+  // Query only soft-deleted entities
+  val deleted = repo.query { onlyDeleted() }.toList()
+  ```
+
+  **Events** — `softDelete` emits a `StandardCrudEvent.SoftDelete` and `restore` emits a
+  `StandardCrudEvent.Restore`. Both are subtypes of the existing `CrudEvent` sealed hierarchy.
+  The new `CrudEvent.Type` constants `SOFT_DELETE(410)` and `RESTORE(420)` accompany them.
+
+  **KSP codegen** — for entities annotated with `@PersistenceMapping` that implement
+  `SoftDeletable`, the KSP processor automatically injects a `deleted_at` column into the
+  generated table definition so no manual table annotation is needed.
+
+  **SQL and JSON persistence** — soft-delete persists as an UPDATE setting `deleted_at` to the
+  current instant (the row is not deleted). Restore persists as an UPDATE setting `deleted_at`
+  to `NULL`. Both operations pass through the existing debounced write pipeline, and entities
+  with `@Version` have their version incremented on each operation.
+
+  See [#283](https://github.com/octaviospain/lirp/issues/283).
+
 ### Changed
 
 - **`ViaStrategy` moved from `lirp-core` to `lirp-api`** — the enum class
@@ -139,6 +180,52 @@ aggregateEvents.filter { it.type == MutationEvent.Type.PROPERTY_CHANGED
 aggregateEvents.filterIsInstance<AggregateMutationEvent<*, *>>()
     .filter { it.childEvent is PropertyChanged<*, *, *> || it.childEvent is BatchChanged<*, *> }
 ```
+
+### Add `StandardCrudEvent.SoftDelete` and `Restore` branches to exhaustive `when` expressions
+
+`StandardCrudEvent` is a sealed class. Adding `SoftDelete` and `Restore` subtypes is a
+**source-breaking change** for any consumer code that has an exhaustive `when` expression over
+the sealed hierarchy without an `else` branch. The Kotlin compiler will report the new cases as
+missing and fail the build.
+
+Add the two new branches (or an `else`) to every exhaustive `when` over `StandardCrudEvent` or
+`CrudEvent`:
+
+```kotlin
+// Before — two-branch exhaustive when (fails to compile after this release)
+repo.subscribe { event ->
+    when (event) {
+        is StandardCrudEvent.Create  -> handleCreate(event)
+        is StandardCrudEvent.Update  -> handleUpdate(event)
+        is StandardCrudEvent.Delete  -> handleDelete(event)
+        is StandardCrudEvent.Conflict -> handleConflict(event)
+    }
+}
+
+// After — add the new soft-delete branches
+repo.subscribe { event ->
+    when (event) {
+        is StandardCrudEvent.Create    -> handleCreate(event)
+        is StandardCrudEvent.Update    -> handleUpdate(event)
+        is StandardCrudEvent.Delete    -> handleDelete(event)
+        is StandardCrudEvent.Conflict  -> handleConflict(event)
+        is StandardCrudEvent.SoftDelete -> handleSoftDelete(event)
+        is StandardCrudEvent.Restore    -> handleRestore(event)
+    }
+}
+
+// Alternatively — use an else branch to ignore events you do not handle
+repo.subscribe { event ->
+    when (event) {
+        is StandardCrudEvent.Create -> handleCreate(event)
+        is StandardCrudEvent.Update -> handleUpdate(event)
+        else -> { /* ignore delete, conflict, soft-delete, restore */ }
+    }
+}
+```
+
+If your code does not use an exhaustive `when` (e.g. `if`/`else if` chains, or `when` with an
+`else` branch), no change is required.
 
 ## [3.0.0] - 2026-06-23
 

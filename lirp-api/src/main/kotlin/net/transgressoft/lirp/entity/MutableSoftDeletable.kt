@@ -20,15 +20,12 @@ package net.transgressoft.lirp.entity
 import java.time.Instant
 
 /**
- * Marks an entity as supporting soft deletion via a nullable [deletedAt] timestamp.
+ * Extends [SoftDeletable] with a mutable [deletedAt] property so that the framework
+ * can set or clear the timestamp without reflection.
  *
- * An entity is considered soft-deleted when [deletedAt] is non-null. Default reads —
- * including [net.transgressoft.lirp.persistence.Repository.findById], registry iteration,
- * the Query DSL, and projections — exclude soft-deleted entities from their visible result
- * sets. Soft-deleted entities can be included via the `includeDeleted()` Query DSL opt-in,
- * or accessed exclusively via `onlyDeleted()`.
+ * Concrete entities back this with `override var deletedAt: Instant? by reactiveProperty(null)`.
  */
-interface SoftDeletable {
-    /** The instant at which the entity was soft-deleted, or `null` if it is active. */
-    val deletedAt: Instant?
+interface MutableSoftDeletable : SoftDeletable {
+    /** Sets or clears the soft-deletion timestamp. */
+    override var deletedAt: Instant?
 }

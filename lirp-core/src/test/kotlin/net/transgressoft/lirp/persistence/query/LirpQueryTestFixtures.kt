@@ -18,9 +18,12 @@
 package net.transgressoft.lirp.persistence.query
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
+import net.transgressoft.lirp.entity.MutableSoftDeletable
+import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.persistence.Indexed
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.VolatileRepository
+import java.time.Instant
 
 /**
  * Test entity with a mix of indexed and non-indexed properties for Query DSL tests.
@@ -66,4 +69,43 @@ class EmployeeVolatileRepo(context: LirpContext = LirpContext.default) :
     VolatileRepository<Int, Employee>(context, "Employees") {
     fun create(id: Int, department: String, level: Int, salary: Double, name: String): Employee =
         Employee(id, department, level, salary, name).also { add(it) }
+}
+
+/**
+ * Test entity that is both soft-deletable and carries an [Indexed] property.
+ * Used to verify that indexed predicates combined with [QueryBuilder.includeDeleted] /
+ * [QueryBuilder.onlyDeleted] correctly bypass the index (since soft-deleted entities are
+ * deindexed) and fall back to a raw-sequence scan.
+ */
+class IndexedSoftDeletableTrack(
+    override val id: Int,
+    genre: String
+) : ReactiveEntityBase<Int, IndexedSoftDeletableTrack>(), IdentifiableEntity<Int>, MutableSoftDeletable {
+    override val uniqueId: String get() = "indexed-soft-deletable-track-$id"
+
+    @Indexed
+    var genre: String by reactiveProperty(genre)
+
+    override var deletedAt: Instant? by reactiveProperty(null)
+
+    override fun clone(): IndexedSoftDeletableTrack = IndexedSoftDeletableTrack(id, genre).also { it.deletedAt = deletedAt }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is IndexedSoftDeletableTrack) return false
+        return id == other.id && genre == other.genre && deletedAt == other.deletedAt
+    }
+
+    override fun hashCode(): Int = 31 * (31 * id.hashCode() + genre.hashCode()) + (deletedAt?.hashCode() ?: 0)
+
+    override fun toString(): String = "IndexedSoftDeletableTrack(id=$id, genre='$genre', deletedAt=$deletedAt)"
+}
+
+/**
+ * Repository for [IndexedSoftDeletableTrack] entities.
+ */
+class IndexedSoftDeletableTrackRepo(context: LirpContext = LirpContext.default) :
+    VolatileRepository<Int, IndexedSoftDeletableTrack>(context, "IndexedSoftDeletableTracks") {
+    fun create(id: Int, genre: String): IndexedSoftDeletableTrack =
+        IndexedSoftDeletableTrack(id, genre).also { add(it) }
 }

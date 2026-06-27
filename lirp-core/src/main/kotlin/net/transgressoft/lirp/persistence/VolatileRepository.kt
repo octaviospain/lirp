@@ -18,13 +18,19 @@
 package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
+import net.transgressoft.lirp.entity.MutableSoftDeletable
 import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
 import net.transgressoft.lirp.event.CrudEvent.Type.DELETE
+import net.transgressoft.lirp.event.CrudEvent.Type.RESTORE
+import net.transgressoft.lirp.event.CrudEvent.Type.SOFT_DELETE
 import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.LirpErrorHandler
 import net.transgressoft.lirp.event.StandardCrudEvent.Create
 import net.transgressoft.lirp.event.StandardCrudEvent.Delete
+import net.transgressoft.lirp.event.StandardCrudEvent.Restore
+import net.transgressoft.lirp.event.StandardCrudEvent.SoftDelete
 import io.github.oshai.kotlinlogging.KotlinLogging
+import java.time.Instant
 import java.util.Objects
 import java.util.concurrent.ConcurrentHashMap
 
@@ -72,7 +78,7 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
         private val log = KotlinLogging.logger(javaClass.name)
 
         init {
-            activateEvents(CREATE, DELETE)
+            activateEvents(CREATE, DELETE, SOFT_DELETE, RESTORE)
         }
 
         /**
@@ -138,6 +144,45 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
                 publisher.emitAsync(Delete(allEntities))
                 log.debug { "${allEntities.size} entities were removed resulting in empty repository" }
             }
+        }
+
+        override fun softDelete(entity: T): Boolean {
+            val mutable = entity as? MutableSoftDeletable ?: return false
+            // Run the read-only RESTRICT validation BEFORE the parent's state is mutated so that
+            // a RESTRICT violation leaves the parent fully active and still indexed, with no event
+            // emitted. This preflight does not touch the cycle-guard visited set; cycle detection
+            // is handled by executeSoftCascadeForEntity after the parent has been safely transitioned.
+            validateRestrictForSoftDelete(entity)
+            // Guard the check-then-act on the entity's resident slot under a per-entity monitor so
+            // concurrent softDelete/restore/remove calls cannot double-emit events or double-run
+            // deindex/cascade. The synchronized block covers only the state transition; deindex and
+            // cascade happen outside the lock (they are idempotent and must not hold the lock while
+            // calling into other repositories, which could deadlock).
+            synchronized(entity) {
+                if (!entitiesById.containsKey(entity.id)) return false
+                if (mutable.deletedAt != null) return false
+                mutable.deletedAt = Instant.now()
+            }
+            deindexEntity(entity)
+            executeSoftCascadeForEntity(entity)
+            publisher.emitAsync(SoftDelete(entity))
+            log.debug { "Entity with id ${entity.id} was soft-deleted: $entity" }
+            return true
+        }
+
+        override fun restore(entity: T): Boolean {
+            val mutable = entity as? MutableSoftDeletable ?: return false
+            // Mirror the same atomicity pattern as softDelete to prevent concurrent restore calls
+            // from double-emitting Restore events or re-indexing the entity twice.
+            synchronized(entity) {
+                if (!entitiesById.containsKey(entity.id)) return false
+                if (mutable.deletedAt == null) return false
+                mutable.deletedAt = null
+            }
+            indexEntity(entity)
+            publisher.emitAsync(Restore(entity))
+            log.debug { "Entity with id ${entity.id} was restored: $entity" }
+            return true
         }
 
         override fun equals(other: Any?): Boolean {
