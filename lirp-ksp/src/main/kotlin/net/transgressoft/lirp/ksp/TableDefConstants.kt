@@ -23,6 +23,7 @@ internal const val REACTIVE_ENTITY_FQN = "net.transgressoft.lirp.entity.Reactive
 internal const val PERSISTENCE_MAPPING_FQN = "net.transgressoft.lirp.persistence.PersistenceMapping"
 internal const val PERSISTENCE_PROPERTY_FQN = "net.transgressoft.lirp.persistence.PersistenceProperty"
 internal const val VERSION_FQN = "net.transgressoft.lirp.persistence.Version"
+internal const val SOFT_DELETABLE_FQN = "net.transgressoft.lirp.entity.SoftDeletable"
 internal const val SQL_TABLE_DEF_FQN = "net.transgressoft.lirp.persistence.sql.SqlTableDef"
 internal const val UUID_FQN = "java.util.UUID"
 internal const val LOCAL_DATE_FQN = "java.time.LocalDate"

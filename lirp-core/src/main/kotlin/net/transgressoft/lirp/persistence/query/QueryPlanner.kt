@@ -20,6 +20,7 @@ package net.transgressoft.lirp.persistence.query
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.persistence.Registry
 import net.transgressoft.lirp.persistence.RegistryBase
+import net.transgressoft.lirp.persistence.isSoftDeleted
 import io.github.oshai.kotlinlogging.KotlinLogging
 import java.util.NavigableMap
 import kotlin.reflect.KProperty1
@@ -154,17 +155,39 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
         // ViaNormalizer is a no-op for predicates without Via* nodes, so this stays cheap
         // for queries that do not use cross-aggregate traversal.
         val pred = query.predicate?.let { normalize(it) }
-        val (strategy, indexLeaves, postFilterCount, viaStrat, candidates) = selectStrategyAndCandidates(pred, registry)
+        val (strategy, indexLeaves, postFilterCount, viaStrat, candidates) = selectStrategyAndCandidates(pred, registry, query)
         val ordered = applyOrdering(candidates, query.orderBy)
         val sliced = applyPagination(ordered, query.offset, query.limit)
         return PlanContext(strategy, indexLeaves, postFilterCount, viaStrat, sliced)
     }
 
+    /**
+     * Returns the base candidate sequence for the registry, respecting the soft-delete
+     * visibility flags from [query].
+     *
+     * - Default (both flags false): uses [Registry.asSequence] which applies the iterator()
+     *   override that excludes soft-deleted entities.
+     * - [Query.includeDeleted] true: uses [RegistryBase.rawIterator] so soft-deleted entities
+     *   are included alongside active ones.
+     * - [Query.onlyDeleted] true: uses [RegistryBase.rawIterator] and post-filters to only
+     *   entities with a non-null `deletedAt`.
+     */
+    private fun baseSequence(registry: Registry<*, T>, query: Query<T>): Sequence<T> {
+        if (!query.includeDeleted && !query.onlyDeleted) return registry.asSequence()
+        val rawBase =
+            (registry as? RegistryBase<*, T>)?.rawIterator()?.asSequence()
+                ?: registry.asSequence()
+        return if (query.onlyDeleted) rawBase.filter { isSoftDeleted(it) }
+        else rawBase
+    }
+
     private fun selectStrategyAndCandidates(
         pred: Predicate<T>?,
-        registry: Registry<*, T>
+        registry: Registry<*, T>,
+        query: Query<T> = Query(null, emptyList(), null, 0)
     ): SelectResult<T> {
-        if (pred == null) return SelectResult(Strategy.SCAN_ONLY, emptyList(), 0, null, registry.asSequence())
+        val base = baseSequence(registry, query)
+        if (pred == null) return SelectResult(Strategy.SCAN_ONLY, emptyList(), 0, null, base)
         // Empty-In short-circuit: x ∈ ∅ is always false — no entities can match.
         if (pred is Predicate.In<*, *> && (pred as Predicate.In<T, *>).values.isEmpty()) {
             return SelectResult(Strategy.INDEX_ONLY, emptyList(), 0, null, emptySequence())
@@ -175,6 +198,18 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
             // still SCAN_ONLY at the parent level (no index acceleration on Via* nodes).
             // The NonVia arm of a hybrid And(NonVia, Via*) is post-filtered, so its leaves
             // count toward postFilterCount; a bare or multi-Via* predicate has none.
+            //
+            // includeDeleted()/onlyDeleted() are not supported for Via queries: the parent
+            // enumeration inside ViaJoinExecutor uses Registry.iterator() which excludes
+            // soft-deleted parents, and threading the Query through the entire Via execution
+            // path would require invasive changes to ViaJoinExecutor's public API. Enforce
+            // this limitation explicitly so callers receive a clear error rather than silently
+            // wrong results.
+            check(!query.includeDeleted && !query.onlyDeleted) {
+                "Via queries do not support includeDeleted() or onlyDeleted(): soft-deleted parents " +
+                    "are not enumerated in the cross-aggregate join. Remove the visibility flag or use " +
+                    "a non-Via predicate to query soft-deleted entities."
+            }
             val viaStrat = strategyFor(pred, registry)
             val (nonViaArm, _) = splitHybridAnd(pred)
             val viaPostFilterCount = nonViaArm?.let { countLeaves(it) } ?: 0
@@ -183,9 +218,9 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
         val indexable = extractIndexableLeaves(pred)
         if (indexable.isEmpty()) {
             log.trace { "QueryPlanner: no indexable leaves — full scan on ${registry.size()} entities" }
-            return SelectResult(Strategy.SCAN_ONLY, emptyList(), countLeaves(pred), null, registry.asSequence().filter { pred.matches(it) })
+            return SelectResult(Strategy.SCAN_ONLY, emptyList(), countLeaves(pred), null, base.filter { pred.matches(it) })
         }
-        return indexAcceleratedCandidates(pred, indexable, registry)
+        return indexAcceleratedCandidates(pred, indexable, registry, query)
     }
 
     /**
@@ -220,7 +255,8 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
     private fun indexAcceleratedCandidates(
         pred: Predicate<T>,
         indexable: List<IndexableLeaf>,
-        registry: Registry<*, T>
+        registry: Registry<*, T>,
+        query: Query<T> = Query(null, emptyList(), null, 0)
     ): SelectResult<T> {
         // Use the internal non-copying index read when available (RegistryBase), falling back to the
         // public defensive-copy findByIndex for any other Registry implementation.
@@ -265,10 +301,19 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
                     if (working.isEmpty()) break
                 }
                 val candidateSet = working ?: emptySet()
+                val base = baseSequence(registry, query)
                 val resolved =
                     when {
-                        strategy == Strategy.INDEX_ONLY -> candidateSet.asSequence()
-                        nullInScan -> registry.asSequence().filter { pred.matches(it) }
+                        // When includeDeleted or onlyDeleted is requested, soft-deleted entities are
+                        // deindexed and therefore absent from the candidateSet. Bypass the index-derived
+                        // candidates entirely and resolve from the raw base sequence so deleted rows
+                        // are correctly included or exclusively returned.
+                        query.includeDeleted || query.onlyDeleted ->
+                            base.filter { pred.matches(it) }
+                        // INDEX_ONLY (active-only): all leaves resolved via index — no post-filtering needed.
+                        strategy == Strategy.INDEX_ONLY ->
+                            candidateSet.asSequence().filter { !isSoftDeleted(it) }
+                        nullInScan -> base.filter { pred.matches(it) }
                         else -> candidateSet.asSequence().filter { pred.matches(it) }
                     }
                 yieldAll(resolved)

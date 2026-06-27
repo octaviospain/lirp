@@ -19,9 +19,9 @@ package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.CascadeAction
 import net.transgressoft.lirp.entity.IdentifiableEntity
+import net.transgressoft.lirp.entity.MutableSoftDeletable
 import net.transgressoft.lirp.entity.ReactiveEntity
 import net.transgressoft.lirp.entity.ReactiveEntityBase
-import net.transgressoft.lirp.entity.SoftDeletable
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.LirpEventSubscriber
 import net.transgressoft.lirp.event.LirpEventSubscriberBase
@@ -122,10 +122,10 @@ class MutableAudioItem
 /**
  * Audio item that supports soft deletion via a reactive [deletedAt] property.
  *
- * Implements both [AudioItem] and [SoftDeletable], allowing it to be stored in
- * [AudioItemVolatileRepository] and used to exercise soft-delete-aware projections.
- * Setting [deletedAt] to a non-null value emits a normal [CrudEvent.Update] through
- * the repository, triggering projection removal.
+ * Implements both [AudioItem] and [MutableSoftDeletable], allowing it to be stored in
+ * [AudioItemVolatileRepository] and used to exercise soft-delete-aware repository operations.
+ * Setting [deletedAt] via [Repository.softDelete] sets the timestamp and additionally emits a
+ * [net.transgressoft.lirp.event.StandardCrudEvent.SoftDelete] event.
  *
  * Not declared `internal` so it is accessible from all test source sets.
  */
@@ -135,7 +135,7 @@ class SoftDeletableMutableAudioItem
         override val id: Int,
         title: String,
         albumName: String = ""
-    ) : ReactiveEntityBase<Int, AudioItem>(), AudioItem, SoftDeletable {
+    ) : ReactiveEntityBase<Int, AudioItem>(), AudioItem, MutableSoftDeletable {
         override val uniqueId: String get() = "soft-deletable-audio-item-$id"
 
         override var title: String by reactiveProperty(title)
@@ -227,12 +227,13 @@ class MultiKeyAudioItemVolatileRepository internal constructor(context: LirpCont
 // ---------------------------------------------------------------------------
 
 /**
- * Soft-deletable variant of [MutableMultiKeyAudioItem] that implements both [SoftDeletable]
+ * Soft-deletable variant of [MutableMultiKeyAudioItem] that implements both [MutableSoftDeletable]
  * and [Comparable]. Used in multi-key projection tests to verify that soft-deleting an entity
  * removes it from ALL its genre buckets and from the reverse index.
  *
- * Setting [deletedAt] to a non-null value emits a normal [CrudEvent.Update] through
- * the repository, triggering multi-key projection removal across all buckets.
+ * Setting [deletedAt] via [Repository.softDelete] sets the timestamp and additionally emits a
+ * [net.transgressoft.lirp.event.StandardCrudEvent.SoftDelete] event, triggering multi-key
+ * projection removal across all buckets.
  */
 class SoftDeletableMultiKeyAudioItem
     @JvmOverloads
@@ -242,7 +243,7 @@ class SoftDeletableMultiKeyAudioItem
         genres: Set<String> = emptySet()
     ) : ReactiveEntityBase<Int, SoftDeletableMultiKeyAudioItem>(),
         IdentifiableEntity<Int>,
-        SoftDeletable,
+        MutableSoftDeletable,
         Comparable<SoftDeletableMultiKeyAudioItem> {
         override val uniqueId: String get() = "soft-deletable-multi-key-audio-item-$id"
 
@@ -568,15 +569,18 @@ class DefaultPlaylistHierarchy internal constructor(repository: Repository<Int, 
 
 /**
  * Audio playlist variant with [CascadeAction.CASCADE] on [audioItems]: removing this entity
- * also removes all referenced audio items.
+ * also removes all referenced audio items; soft-deleting it soft-deletes them.
+ * Implements [MutableSoftDeletable] to participate in the soft-delete cascade path.
  */
 class CascadeAudioPlaylist(
     override val id: Int,
     initialAudioItemIds: List<Int> = emptyList()
-) : ReactiveEntityBase<Int, CascadeAudioPlaylist>(), IdentifiableEntity<Int> {
+) : ReactiveEntityBase<Int, CascadeAudioPlaylist>(), IdentifiableEntity<Int>, MutableSoftDeletable {
     override val uniqueId: String get() = "cascade-audio-playlist-$id"
 
     var name: String by reactiveProperty("")
+
+    override var deletedAt: java.time.Instant? by reactiveProperty(null)
 
     @ToManyAggregates(onDelete = CascadeAction.CASCADE)
     val audioItems by mutableAggregateList<Int, AudioItem>(initialAudioItemIds)
@@ -598,16 +602,20 @@ class CascadeAudioPlaylist(
 
 /**
  * Audio playlist variant with [CascadeAction.RESTRICT] on [audioItems]: removing this entity is
- * blocked if any referenced audio items are still referenced by other entities.
+ * blocked if any referenced audio items are still active; soft-deleting it is similarly blocked
+ * when active children exist.
+ * Implements [MutableSoftDeletable] to participate in the soft-delete cascade path.
  */
 class RestrictAudioPlaylist(
     override val id: Int,
     name: String,
     initialAudioItemIds: List<Int> = emptyList()
-) : ReactiveEntityBase<Int, RestrictAudioPlaylist>(), IdentifiableEntity<Int> {
+) : ReactiveEntityBase<Int, RestrictAudioPlaylist>(), IdentifiableEntity<Int>, MutableSoftDeletable {
     override val uniqueId: String get() = "restrict-audio-playlist-$id"
 
     var name: String by reactiveProperty(name)
+
+    override var deletedAt: java.time.Instant? by reactiveProperty(null)
 
     @ToManyAggregates(onDelete = CascadeAction.RESTRICT)
     val audioItems by mutableAggregateList<Int, AudioItem>(initialAudioItemIds)
@@ -628,16 +636,19 @@ class RestrictAudioPlaylist(
 
 /**
  * Audio playlist variant with [CascadeAction.NONE] on [audioItems]: removing this entity does
- * nothing to the referenced audio items.
+ * nothing to the referenced audio items; soft-deleting it also leaves children unchanged.
+ * Implements [MutableSoftDeletable] to participate in the soft-delete cascade path.
  */
 class NoneAudioPlaylist(
     override val id: Int,
     name: String,
     initialAudioItemIds: List<Int> = emptyList()
-) : ReactiveEntityBase<Int, NoneAudioPlaylist>(), IdentifiableEntity<Int> {
+) : ReactiveEntityBase<Int, NoneAudioPlaylist>(), IdentifiableEntity<Int>, MutableSoftDeletable {
     override val uniqueId: String get() = "none-audio-playlist-$id"
 
     var name: String by reactiveProperty(name)
+
+    override var deletedAt: java.time.Instant? by reactiveProperty(null)
 
     @ToManyAggregates(onDelete = CascadeAction.NONE)
     val audioItems by mutableAggregateList<Int, AudioItem>(initialAudioItemIds)
@@ -808,15 +819,18 @@ class ImmutablePlaylistGroupVolatileRepo internal constructor(context: LirpConte
 
 /**
  * Audio playlist variant with [CascadeAction.DETACH] on [audioItems]: removing this entity does
- * nothing to the referenced audio items (the reference is simply detached with no side effects).
+ * nothing to the referenced audio items; soft-deleting it also leaves children unchanged.
+ * Implements [MutableSoftDeletable] to participate in the soft-delete cascade path.
  */
 class DetachAudioPlaylist(
     override val id: Int,
     initialAudioItemIds: List<Int> = emptyList()
-) : ReactiveEntityBase<Int, DetachAudioPlaylist>(), IdentifiableEntity<Int> {
+) : ReactiveEntityBase<Int, DetachAudioPlaylist>(), IdentifiableEntity<Int>, MutableSoftDeletable {
     override val uniqueId: String get() = "detach-audio-playlist-$id"
 
     var name: String by reactiveProperty("")
+
+    override var deletedAt: java.time.Instant? by reactiveProperty(null)
 
     @ToManyAggregates(onDelete = CascadeAction.DETACH)
     val audioItems by mutableAggregateList<Int, AudioItem>(initialAudioItemIds)
@@ -1381,6 +1395,87 @@ class CyclicPlaylistChildRepo internal constructor(context: LirpContext) :
     }
 
 // ---------------------------------------------------------------------------
+// Soft-deletable cyclic fixtures — cycle detection in soft-delete cascade
+// ---------------------------------------------------------------------------
+
+/**
+ * Soft-deletable playlist forming a cyclic aggregate graph: [SoftDeletableCyclicPlaylist]
+ * references [SoftDeletableCyclicPlaylistChild] with [CascadeAction.CASCADE], and the child
+ * references back with [CascadeAction.CASCADE]. Used to verify cycle detection in the
+ * soft-delete cascade guard.
+ */
+class SoftDeletableCyclicPlaylist(
+    override val id: Long,
+    var childId: Long
+) : ReactiveEntityBase<Long, SoftDeletableCyclicPlaylist>(), IdentifiableEntity<Long>, MutableSoftDeletable {
+    override val uniqueId: String get() = "soft-deletable-cyclic-playlist-$id"
+    override var deletedAt: Instant? by reactiveProperty(null)
+
+    @ToOneAggregate(target = SoftDeletableCyclicPlaylistChild::class, onDelete = CascadeAction.CASCADE)
+    val child by aggregate<Long, SoftDeletableCyclicPlaylistChild> { childId }
+
+    override fun clone(): SoftDeletableCyclicPlaylist = SoftDeletableCyclicPlaylist(id, childId)
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is SoftDeletableCyclicPlaylist) return false
+        return id == other.id && childId == other.childId
+    }
+
+    override fun hashCode(): Int = 31 * id.hashCode() + childId.hashCode()
+
+    override fun toString(): String = "SoftDeletableCyclicPlaylist(id=$id, childId=$childId)"
+}
+
+/**
+ * Soft-deletable child forming a cyclic aggregate graph: references [SoftDeletableCyclicPlaylist]
+ * with [CascadeAction.CASCADE]. Used together with [SoftDeletableCyclicPlaylist] to verify cycle
+ * detection in the soft-delete cascade guard.
+ */
+class SoftDeletableCyclicPlaylistChild(
+    override val id: Long,
+    var parentId: Long
+) : ReactiveEntityBase<Long, SoftDeletableCyclicPlaylistChild>(), IdentifiableEntity<Long>, MutableSoftDeletable {
+    override val uniqueId: String get() = "soft-deletable-cyclic-playlist-child-$id"
+    override var deletedAt: Instant? by reactiveProperty(null)
+
+    @ToOneAggregate(target = SoftDeletableCyclicPlaylist::class, onDelete = CascadeAction.CASCADE)
+    val parent by aggregate<Long, SoftDeletableCyclicPlaylist> { parentId }
+
+    override fun clone(): SoftDeletableCyclicPlaylistChild = SoftDeletableCyclicPlaylistChild(id, parentId)
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is SoftDeletableCyclicPlaylistChild) return false
+        return id == other.id && parentId == other.parentId
+    }
+
+    override fun hashCode(): Int = 31 * id.hashCode() + parentId.hashCode()
+
+    override fun toString(): String = "SoftDeletableCyclicPlaylistChild(id=$id, parentId=$parentId)"
+}
+
+/** Repository for [SoftDeletableCyclicPlaylist] entities. */
+@LirpRepository
+class SoftDeletableCyclicPlaylistRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Long, SoftDeletableCyclicPlaylist>(context, "SoftDeletableCyclicPlaylists") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Long, childId: Long): SoftDeletableCyclicPlaylist =
+            SoftDeletableCyclicPlaylist(id, childId).also { add(it) }
+    }
+
+/** Repository for [SoftDeletableCyclicPlaylistChild] entities. */
+@LirpRepository
+class SoftDeletableCyclicPlaylistChildRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Long, SoftDeletableCyclicPlaylistChild>(context, "SoftDeletableCyclicPlaylistChildren") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Long, parentId: Long): SoftDeletableCyclicPlaylistChild =
+            SoftDeletableCyclicPlaylistChild(id, parentId).also { add(it) }
+    }
+
+// ---------------------------------------------------------------------------
 // Scalar cascade-mode variants — exercise AggregateRefDelegate code paths
 // ---------------------------------------------------------------------------
 
@@ -1456,4 +1551,86 @@ class NoneRefPlaylistRepo internal constructor(context: LirpContext) :
 
         fun create(id: Int, audioItemId: Int): NoneRefPlaylist =
             NoneRefPlaylist(id, audioItemId).also { add(it) }
+    }
+
+// ---------------------------------------------------------------------------
+// Single-ref soft-delete cascade variants — exercise executeSoftCascadeForEntity with @ToOneAggregate
+// ---------------------------------------------------------------------------
+
+/**
+ * Soft-deletable playlist with a [CascadeAction.CASCADE] scalar reference to an [AudioItem].
+ * Soft-deleting this entity propagates soft-deletion to the referenced audio item when it
+ * implements [MutableSoftDeletable].
+ */
+class CascadeScalarRefPlaylist(
+    override val id: Int,
+    val audioItemId: Int
+) : ReactiveEntityBase<Int, CascadeScalarRefPlaylist>(), IdentifiableEntity<Int>, MutableSoftDeletable {
+    override val uniqueId: String get() = "cascade-scalar-ref-playlist-$id"
+
+    override var deletedAt: java.time.Instant? by reactiveProperty(null)
+
+    @ToOneAggregate(target = AudioItem::class, onDelete = CascadeAction.CASCADE)
+    val audioItem by aggregate<Int, AudioItem> { audioItemId }
+
+    override fun clone(): CascadeScalarRefPlaylist = CascadeScalarRefPlaylist(id, audioItemId)
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is CascadeScalarRefPlaylist) return false
+        return id == other.id && audioItemId == other.audioItemId
+    }
+
+    override fun hashCode(): Int = 31 * id.hashCode() + audioItemId.hashCode()
+
+    override fun toString(): String = "CascadeScalarRefPlaylist(id=$id, audioItemId=$audioItemId)"
+}
+
+/** Repository for [CascadeScalarRefPlaylist] entities. */
+@LirpRepository
+class CascadeScalarRefPlaylistRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Int, CascadeScalarRefPlaylist>(context, "CascadeScalarRefPlaylists") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Int, audioItemId: Int): CascadeScalarRefPlaylist =
+            CascadeScalarRefPlaylist(id, audioItemId).also { add(it) }
+    }
+
+/**
+ * Soft-deletable playlist with a [CascadeAction.RESTRICT] scalar reference to an [AudioItem].
+ * Soft-deleting this entity is blocked when the referenced audio item is still active (has a
+ * null `deletedAt`).
+ */
+class RestrictScalarRefPlaylist(
+    override val id: Int,
+    val audioItemId: Int
+) : ReactiveEntityBase<Int, RestrictScalarRefPlaylist>(), IdentifiableEntity<Int>, MutableSoftDeletable {
+    override val uniqueId: String get() = "restrict-scalar-ref-playlist-$id"
+
+    override var deletedAt: java.time.Instant? by reactiveProperty(null)
+
+    @ToOneAggregate(target = AudioItem::class, onDelete = CascadeAction.RESTRICT)
+    val audioItem by aggregate<Int, AudioItem> { audioItemId }
+
+    override fun clone(): RestrictScalarRefPlaylist = RestrictScalarRefPlaylist(id, audioItemId)
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is RestrictScalarRefPlaylist) return false
+        return id == other.id && audioItemId == other.audioItemId
+    }
+
+    override fun hashCode(): Int = 31 * id.hashCode() + audioItemId.hashCode()
+
+    override fun toString(): String = "RestrictScalarRefPlaylist(id=$id, audioItemId=$audioItemId)"
+}
+
+/** Repository for [RestrictScalarRefPlaylist] entities. */
+@LirpRepository
+class RestrictScalarRefPlaylistRepo internal constructor(context: LirpContext) :
+    VolatileRepository<Int, RestrictScalarRefPlaylist>(context, "RestrictScalarRefPlaylists") {
+        constructor() : this(LirpContext.default)
+
+        fun create(id: Int, audioItemId: Int): RestrictScalarRefPlaylist =
+            RestrictScalarRefPlaylist(id, audioItemId).also { add(it) }
     }

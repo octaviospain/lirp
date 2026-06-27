@@ -32,6 +32,10 @@ import kotlin.reflect.KProperty1
  * }
  * ```
  *
+ * Soft-delete visibility is opt-in: by default the query excludes soft-deleted entities.
+ * Call [includeDeleted] to include soft-deleted entities alongside active ones, or
+ * [onlyDeleted] to return only soft-deleted entities. The two verbs are mutually exclusive.
+ *
  * @param T the entity type being queried
  */
 class QueryBuilder<T : IdentifiableEntity<*>> {
@@ -51,6 +55,20 @@ class QueryBuilder<T : IdentifiableEntity<*>> {
 
     /** The number of results to skip before returning. */
     var offset: Int = 0
+        private set
+
+    /**
+     * Whether to include soft-deleted entities alongside active ones. Mutually exclusive with [onlyDeleted].
+     * Set via [includeDeleted]; `false` by default (fail-closed soft-delete exclusion).
+     */
+    var includeDeleted: Boolean = false
+        private set
+
+    /**
+     * Whether to return only soft-deleted entities. Mutually exclusive with [includeDeleted].
+     * Set via [onlyDeleted]; `false` by default.
+     */
+    var onlyDeleted: Boolean = false
         private set
 
     /**
@@ -109,9 +127,35 @@ class QueryBuilder<T : IdentifiableEntity<*>> {
     }
 
     /**
+     * Requests that soft-deleted entities be returned alongside active ones.
+     *
+     * Mutually exclusive with [onlyDeleted]; calling both throws [IllegalStateException].
+     *
+     * @throws IllegalStateException if [onlyDeleted] has already been called
+     */
+    fun includeDeleted(): QueryBuilder<T> {
+        check(!onlyDeleted) { "includeDeleted() and onlyDeleted() are mutually exclusive" }
+        includeDeleted = true
+        return this
+    }
+
+    /**
+     * Requests that only soft-deleted entities be returned, excluding active ones.
+     *
+     * Mutually exclusive with [includeDeleted]; calling both throws [IllegalStateException].
+     *
+     * @throws IllegalStateException if [includeDeleted] has already been called
+     */
+    fun onlyDeleted(): QueryBuilder<T> {
+        check(!includeDeleted) { "onlyDeleted() and includeDeleted() are mutually exclusive" }
+        onlyDeleted = true
+        return this
+    }
+
+    /**
      * Builds the immutable [Query] from the current builder state.
      *
      * @return the configured [Query]
      */
-    fun build(): Query<T> = Query(predicate, _orders.toList(), limit, offset)
+    fun build(): Query<T> = Query(predicate, _orders.toList(), limit, offset, includeDeleted, onlyDeleted)
 }

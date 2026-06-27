@@ -83,13 +83,27 @@ object DatabaseTestSupport {
      * keeps the polling loop cheap.
      */
     fun readRow(dataSource: HikariDataSource, table: String, id: String, vararg columns: String): Map<String, Any?>? =
+        readRowById(dataSource, table, id, columns)
+
+    /**
+     * Variant of [readRow] for integer primary keys. Uses [java.sql.PreparedStatement.setInt] to
+     * avoid type-mismatch errors on strict JDBC drivers (e.g. PostgreSQL rejects
+     * `integer = varchar` without an explicit cast).
+     */
+    fun readRow(dataSource: HikariDataSource, table: String, id: Int, vararg columns: String): Map<String, Any?>? =
+        readRowById(dataSource, table, id, columns)
+
+    private fun readRowById(dataSource: HikariDataSource, table: String, id: Any, columns: Array<out String>): Map<String, Any?>? =
         dataSource.connection.use { conn ->
             // Quote identifiers with the dialect's own quote string so reserved words (e.g. `year`)
             // parse on every engine — MySQL/MariaDB use backticks, the rest use double quotes.
             val q = conn.metaData.identifierQuoteString.takeIf { it.isNotBlank() } ?: "\""
             val selectCols = columns.joinToString(", ") { "$q$it$q" }
             conn.prepareStatement("SELECT $selectCols FROM $q$table$q WHERE id = ?").use { ps ->
-                ps.setString(1, id)
+                when (id) {
+                    is Int -> ps.setInt(1, id)
+                    else -> ps.setString(1, id.toString())
+                }
                 ps.executeQuery().use { rs ->
                     if (!rs.next()) {
                         null

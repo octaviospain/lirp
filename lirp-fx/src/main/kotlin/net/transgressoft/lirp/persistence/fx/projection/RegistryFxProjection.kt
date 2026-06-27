@@ -254,7 +254,7 @@ class RegistryFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : Identifia
         Collections.unmodifiableList(ArrayList(elements))
 
     /**
-     * Cancels the registry subscription held by the core map and the in-place-update subscription,
+     * Cancels the registry subscriptions held by the core map and the in-place-update subscription,
      * releasing the projection's hold on the event stream. Idempotent and safe to call before first
      * access (no-op when not yet initialized). After closing, the projection no longer receives updates.
      */

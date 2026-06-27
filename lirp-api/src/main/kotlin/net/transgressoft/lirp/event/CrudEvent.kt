@@ -40,6 +40,20 @@ interface CrudEvent<K, out T: IdentifiableEntity<K>>: LirpEvent<CrudEvent.Type> 
         DELETE(400),
 
         /**
+         * Emitted by a repository when an entity is soft-deleted.
+         * The entity remains in memory with a non-null [net.transgressoft.lirp.entity.SoftDeletable.deletedAt]
+         * and is excluded from default reads until restored.
+         */
+        SOFT_DELETE(410),
+
+        /**
+         * Emitted by a repository when a soft-deleted entity is restored.
+         * The entity's [net.transgressoft.lirp.entity.SoftDeletable.deletedAt] is cleared to `null`
+         * and the entity becomes visible to default reads again.
+         */
+        RESTORE(420),
+
+        /**
          * Fired when an optimistic lock failure is detected during a persistent write.
          * Carries both the attempted local state and the canonical state re-fetched from the store.
          * See [net.transgressoft.lirp.event.StandardCrudEvent.Conflict].
@@ -81,4 +95,8 @@ interface CrudEvent<K, out T: IdentifiableEntity<K>>: LirpEvent<CrudEvent.Type> 
     fun isDelete() = type == Type.DELETE
 
     fun isConflict() = type == Type.CONFLICT
+
+    fun isSoftDelete() = type == Type.SOFT_DELETE
+
+    fun isRestore() = type == Type.RESTORE
 }

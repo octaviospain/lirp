@@ -29,6 +29,7 @@ import net.transgressoft.lirp.persistence.ReactivePropertyDelegate
 import net.transgressoft.lirp.persistence.ReactivePropertyDelegateWithAccessors
 import net.transgressoft.lirp.persistence.ReactivePropertyEntry
 import net.transgressoft.lirp.persistence.writeReactivePropertyBackingField
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlin.reflect.KClass
 import kotlin.reflect.KParameter
 import kotlin.reflect.KProperty1
@@ -88,6 +89,8 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
     sampleInstance: E,
     private val serializersModule: SerializersModule = EmptySerializersModule()
 ) : KSerializer<E> {
+
+    private val log = KotlinLogging.logger {}
 
     /**
      * Describes a constructor parameter that contributes to the serialized form.
@@ -496,8 +499,11 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
      * Attempts to load the KSP-generated reactive-property accessor for the entity class.
      *
      * Returns `null` when no generated accessor exists (the entity's module did not apply lirp-ksp,
-     * or the entity carries no reactive-property delegates). The caller substitutes a reflection
-     * fallback ([reflectionReactivePropertyAccessor]) when the entity does have reactive delegates.
+     * or the entity carries no reactive-property delegates), or when the accessor's constructor
+     * fails — for example when the entity has a property whose type requires a contextual serializer
+     * (such as `java.time.Instant`) that is not available at construction time. In that case the
+     * caller substitutes [reflectionReactivePropertyAccessor], which resolves serializers through
+     * the supplied [serializersModule] and therefore honours contextual registrations.
      */
     @Suppress("UNCHECKED_CAST")
     private fun tryLoadReactivePropertyAccessor(): LirpReactivePropertyAccessor<E>? =
@@ -510,6 +516,15 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
                 )
             accessorClass.getDeclaredConstructor().newInstance() as LirpReactivePropertyAccessor<E>
         } catch (_: ClassNotFoundException) {
+            null
+        } catch (e: ReflectiveOperationException) {
+            // The accessor class exists but its constructor threw. This is expected when a reactive
+            // property's type (e.g. java.time.Instant) is not natively serializable and the
+            // inline serializer<T>() call in the generated accessor fails at construction time.
+            // Fall through to reflectionReactivePropertyAccessor so the serializersModule contextual
+            // entries are used. Log at DEBUG so genuine codegen regressions (NoSuchMethodException,
+            // InstantiationException, etc.) are visible without changing normal behaviour.
+            log.debug(e) { "KSP accessor for ${kClass.simpleName} failed to instantiate; falling back to reflection accessor" }
             null
         }
 

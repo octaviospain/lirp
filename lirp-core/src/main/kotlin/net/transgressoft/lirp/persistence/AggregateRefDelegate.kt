@@ -153,6 +153,13 @@ class AggregateRefDelegate<K : Comparable<K>, E : IdentifiableEntity<K>>(
     }
 
     /**
+     * Returns the bound [Registry] for this delegate, or `null` if not yet bound.
+     * Used by [net.transgressoft.lirp.persistence.RegistryBase] to route soft-delete cascade actions
+     * through the already-bound registry rather than performing a context lookup.
+     */
+    internal fun boundRegistryInternal(): Registry<K, E>? = registryRef.get()
+
+    /**
      * Lazily resolves the referenced entity from the bound [Registry].
      *
      * If bubble-up is configured and the reference ID has changed since the last successful wiring,

@@ -20,6 +20,7 @@ package net.transgressoft.lirp.persistence
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.entity.ReactiveEntity
 import net.transgressoft.lirp.entity.ReactiveEntityBase
+import net.transgressoft.lirp.entity.SoftDeletable
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
 import net.transgressoft.lirp.event.FlowEventPublisher
@@ -591,15 +592,137 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
         }
     }
 
+    /**
+     * Read-only RESTRICT validation pass for soft-delete cascade: checks all RESTRICT references
+     * on [entity] without adding to the cycle-guard visited set or performing any mutation.
+     *
+     * Called by [VolatileRepository] during [net.transgressoft.lirp.persistence.VolatileRepository.softDelete]
+     * BEFORE the parent's `deletedAt` is set, so a RESTRICT violation leaves the parent fully
+     * active and still indexed. The caller manages the cycle-guard visited set separately.
+     *
+     * @throws IllegalStateException if a RESTRICT child is still active
+     */
+    @Suppress("UNCHECKED_CAST")
+    protected fun validateRestrictForSoftDelete(entity: T) {
+        val entries = refEntries
+        val collEntries = collectionRefEntries
+        if (entries != null) {
+            for (entry in entries) {
+                if (entry.cascadeAction != net.transgressoft.lirp.entity.CascadeAction.RESTRICT) continue
+                val delegate = entry.delegateGetter(entity)
+                val delegate2 = delegate as? AggregateRefDelegate<*, *> ?: continue
+
+                @Suppress("UNCHECKED_CAST")
+                val typedDelegate = delegate2 as AggregateRefDelegate<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>
+                // Use rawIterator to look up the child — bypasses the default-exclude soft-delete
+                // filter so a previously-soft-deleted child is visible (and thus allowed by RESTRICT).
+                val boundReg = typedDelegate.boundRegistryInternal() as? RegistryBase<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>
+                val refId = runCatching { typedDelegate.referenceId }.getOrNull()
+                val child = if (boundReg != null && refId != null) boundReg.rawIterator().asSequence().firstOrNull { it.id == refId } else null
+                check(child == null || (child as? SoftDeletable)?.deletedAt != null) {
+                    "Cannot soft-delete '${entity.uniqueId}': referenced scalar child is still active (deletedAt is null)"
+                }
+            }
+        }
+        if (collEntries != null) {
+            for (entry in collEntries) {
+                if (entry.cascadeAction != net.transgressoft.lirp.entity.CascadeAction.RESTRICT) continue
+                val delegate = entry.delegateGetter(entity)
+                val inner = unwrapCollectionDelegate(delegate) ?: continue
+                val repo = inner.boundRegistryInternal() ?: continue
+                val ids = inner.referenceIds.toSet()
+                for (id in ids) {
+                    val child =
+                        (repo as Registry<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>)
+                            .findById(id as Comparable<Any>).orElse(null)
+                    check(child == null || (child as? SoftDeletable)?.deletedAt != null) {
+                        "Cannot soft-delete '${entity.uniqueId}': referenced child (id=$id) is still active (deletedAt is null)"
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Executes soft-delete cascade actions for all aggregate references declared on [entity],
+     * covering both scalar ([refEntries]) and collection ([collectionRefEntries]) references.
+     *
+     * Called by [VolatileRepository] during [net.transgressoft.lirp.persistence.VolatileRepository.softDelete]
+     * AFTER [validateRestrictForSoftDelete] has passed and the parent's `deletedAt` has been set.
+     * The cascade mode declared on each reference drives the routing:
+     *
+     * - [net.transgressoft.lirp.entity.CascadeAction.CASCADE]: soft-deletes each referenced child
+     *   via its owning repository's `softDelete` path.
+     * - [net.transgressoft.lirp.entity.CascadeAction.RESTRICT]: no-op here — already validated by
+     *   [validateRestrictForSoftDelete] before any parent mutation.
+     * - [net.transgressoft.lirp.entity.CascadeAction.DETACH] and
+     *   [net.transgressoft.lirp.entity.CascadeAction.NONE]: no-op; children are left unchanged.
+     *
+     * Uses the same [ThreadLocal] visited set as [executeCascadeForEntity] to detect and reject
+     * cyclic cascade graphs. If [entity] is already being cascaded on the current thread,
+     * an [IllegalStateException] is thrown immediately. The set is cleared after the top-level
+     * cascade entry point returns.
+     */
+    @Suppress("UNCHECKED_CAST")
+    protected fun executeSoftCascadeForEntity(entity: T) {
+        val entries = refEntries
+        val collEntries = collectionRefEntries
+        if (entries == null && collEntries == null) return
+        val visited = context.cascadeVisited.get()
+        val isTopLevel = visited.isEmpty()
+        val key = cascadeKey(entity.javaClass, entity.id)
+        try {
+            check(visited.add(key)) {
+                "Cascade cycle detected: entity '${entity.uniqueId}' is already being cascaded on this thread"
+            }
+            // CASCADE mutation pass only — RESTRICT was already checked before the parent was mutated.
+            if (entries != null) {
+                for (entry in entries) {
+                    if (entry.cascadeAction != net.transgressoft.lirp.entity.CascadeAction.CASCADE) continue
+                    val delegate = entry.delegateGetter(entity)
+                    val delegate2 = delegate as? AggregateRefDelegate<*, *> ?: continue
+
+                    @Suppress("UNCHECKED_CAST")
+                    val typedDelegate = delegate2 as AggregateRefDelegate<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>
+                    val repo = typedDelegate.boundRegistryInternal() as? Repository<Comparable<Any>, IdentifiableEntity<Comparable<Any>>> ?: continue
+                    val child = typedDelegate.resolve().orElse(null) ?: continue
+                    check(repo.softDelete(child) || isSoftDeleted(child)) {
+                        "Cannot cascade soft-delete '${entity.uniqueId}': referenced child '${child.uniqueId}' was not soft-deleted"
+                    }
+                }
+            }
+            if (collEntries != null) {
+                for (entry in collEntries) {
+                    if (entry.cascadeAction != net.transgressoft.lirp.entity.CascadeAction.CASCADE) continue
+                    val delegate = entry.delegateGetter(entity)
+                    val inner = unwrapCollectionDelegate(delegate) ?: continue
+                    val repo = inner.boundRegistryInternal() ?: continue
+                    if (repo !is Repository<*, *>) continue
+                    val typedRepo = repo as Repository<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>
+                    val ids = inner.referenceIds.toSet()
+                    for (id in ids) {
+                        val child = typedRepo.findById(id as Comparable<Any>).orElse(null) ?: continue
+                        check(typedRepo.softDelete(child) || isSoftDeleted(child)) {
+                            "Cannot cascade soft-delete '${entity.uniqueId}': referenced child '${child.uniqueId}' was not soft-deleted"
+                        }
+                    }
+                }
+            }
+        } finally {
+            if (isTopLevel) visited.clear()
+        }
+    }
+
     override fun findByIndex(indexName: String, value: Any): Set<T> {
         val sortedBucket = sortedIndexes[indexName]
         if (sortedBucket != null) {
-            return sortedBucket[requireComparableKey(indexName, value)]?.toSet() ?: emptySet()
+            return sortedBucket[requireComparableKey(indexName, value)]
+                ?.filter { !isSoftDeleted(it) }?.toSet() ?: emptySet()
         }
         val hashBucket =
             hashIndexes[indexName]
                 ?: throw IllegalArgumentException("No index declared for property '$indexName'")
-        return hashBucket[value]?.toSet() ?: emptySet()
+        return hashBucket[value]?.filter { !isSoftDeleted(it) }?.toSet() ?: emptySet()
     }
 
     /**
@@ -627,12 +750,14 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
     override fun findFirstByIndex(indexName: String, value: Any): Optional<out T> {
         val sortedBucket = sortedIndexes[indexName]
         if (sortedBucket != null) {
-            return Optional.ofNullable(sortedBucket[requireComparableKey(indexName, value)]?.firstOrNull())
+            return Optional.ofNullable(
+                sortedBucket[requireComparableKey(indexName, value)]?.firstOrNull { !isSoftDeleted(it) }
+            )
         }
         val hashBucket =
             hashIndexes[indexName]
                 ?: throw IllegalArgumentException("No index declared for property '$indexName'")
-        return Optional.ofNullable(hashBucket[value]?.firstOrNull())
+        return Optional.ofNullable(hashBucket[value]?.firstOrNull { !isSoftDeleted(it) })
     }
 
     // Sorted-index buckets are NavigableMaps keyed by Comparable<Any>; an unchecked cast on a
@@ -646,15 +771,39 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
                     "got ${value::class.qualifiedName ?: value::class.java.name}"
             )
 
-    override fun iterator(): Iterator<T> = entitiesById.values.iterator()
+    /**
+     * Returns an iterator over active entities only, excluding any that have been soft-deleted.
+     *
+     * Soft-deleted entities (those implementing [SoftDeletable] with a non-null `deletedAt`)
+     * are invisible by default on every read surface. Use [rawIterator] when all entities,
+     * including soft-deleted ones, are needed (e.g. for the `includeDeleted` query path or
+     * projection seeding before this filter was applied).
+     */
+    override fun iterator(): Iterator<T> =
+        entitiesById.values.asSequence().filter { !isSoftDeleted(it) }.iterator()
 
-    override fun contains(id: K) = entitiesById.containsKey(id)
+    /**
+     * Returns an iterator over ALL entities in the registry, including soft-deleted ones.
+     *
+     * This method is for internal consumers — the query planner's `includeDeleted` / `onlyDeleted`
+     * candidate sourcing and projection seeding — that must bypass the default-exclude filter.
+     * External callers must use [iterator] (or the [Repository] API) which applies the
+     * fail-closed soft-delete exclusion.
+     */
+    internal fun rawIterator(): Iterator<T> = entitiesById.values.iterator()
+
+    override fun contains(id: K): Boolean {
+        val entity = entitiesById[id] ?: return false
+        // contains(id) consults entitiesById directly, bypassing iterator(). Apply the same
+        // soft-delete exclusion guard so a soft-deleted id is not reported as present.
+        return !isSoftDeleted(entity)
+    }
 
     override fun contains(predicate: Predicate<in T>): Boolean =
-        entitiesById.values.asSequence().any { predicate.test(it) }
+        entitiesById.values.asSequence().any { !isSoftDeleted(it) && predicate.test(it) }
 
     override fun lazySearch(predicate: Predicate<in T>): Sequence<T> =
-        entitiesById.values.asSequence().filter { predicate.test(it) }
+        entitiesById.values.asSequence().filter { !isSoftDeleted(it) && predicate.test(it) }
 
     override fun searchStream(predicate: Predicate<in T>): Stream<T> =
         StreamSupport.stream(lazySearch(predicate).asIterable().spliterator(), false)
@@ -666,30 +815,48 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
         lazySearch(predicate).take(size).toSet().also { publisher.emitAsync(Read(it)) }
 
     override fun findFirst(predicate: Predicate<in T>): Optional<out T> =
-        Optional.ofNullable(entitiesById.values.firstOrNull { predicate.test(it) })
+        Optional.ofNullable(entitiesById.values.firstOrNull { !isSoftDeleted(it) && predicate.test(it) })
             .also {
                 if (it.isPresent)
                     publisher.emitAsync(Read(it.get()))
             }
 
-    override fun findById(id: K): Optional<out T> =
-        Optional.ofNullable(entitiesById[id])
+    override fun findById(id: K): Optional<out T> {
+        val entity = entitiesById[id]
+        // Soft-deleted entities remain resident in entitiesById but are excluded from reads.
+        val result = if (entity != null && !isSoftDeleted(entity)) entity else null
+        return Optional.ofNullable(result)
             .also {
                 if (it.isPresent)
                     publisher.emitAsync(Read(it.get()))
             }
+    }
 
     override fun findByUniqueId(uniqueId: String): Optional<out T> =
-        Optional.ofNullable(entitiesById.values.asSequence().firstOrNull { it.uniqueId == uniqueId })
+        Optional.ofNullable(entitiesById.values.asSequence().firstOrNull { !isSoftDeleted(it) && it.uniqueId == uniqueId })
             .also {
                 if (it.isPresent)
                     publisher.emitAsync(Read(it.get()))
             }
 
-    override fun size() = entitiesById.size
+    /** Returns the count of active entities, excluding soft-deleted ones. */
+    override fun size() = entitiesById.values.count { !isSoftDeleted(it) }
 
+    /** Returns `true` when all entities in the registry are soft-deleted or there are none. */
     override val isEmpty: Boolean
-        get() = entitiesById.isEmpty()
+        get() = entitiesById.values.all { isSoftDeleted(it) }
+
+    /**
+     * Returns `true` when [entity] has been soft-deleted (i.e., implements [SoftDeletable]
+     * and has a non-null `deletedAt`). Non-[SoftDeletable] entities always return `false`.
+     *
+     * Used as the canonical predicate for the fail-closed soft-delete exclusion across all
+     * read surfaces: [iterator], [findById], [size], [isEmpty], [contains], [findByIndex],
+     * [findFirstByIndex], [lazySearch], [search], [findFirst], [findByUniqueId], and [searchStream].
+     * Only [rawIterator] bypasses this guard intentionally, for internal consumers such as the
+     * query planner's `includeDeleted` / `onlyDeleted` path and projection seeding.
+     */
+    private fun isSoftDeleted(entity: T): Boolean = isSoftDeleted(entity as IdentifiableEntity<*>)
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -759,7 +926,11 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
                 if (otherRegistry !is RegistryBase<*, *>) continue
                 @Suppress("UNCHECKED_CAST")
                 val typed = otherRegistry as RegistryBase<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>
-                for (entity in typed) {
+                // Use rawIterator so that soft-deleted residents are also rebound. A soft-deleted
+                // entity that is later restored must have its aggregate refs already wired to any
+                // repository registered after it was added; iterator() skips soft-deleted entities
+                // and would leave their delegates permanently unbound.
+                for (entity in typed.rawIterator()) {
                     // Look up the accessor by the entity's concrete runtime class — refAccessorFor
                     // resolves "${concreteClass.name}_LirpRefAccessor", and that class is generated
                     // per concrete aggregate-annotated entity, not per registered interface.
@@ -899,3 +1070,14 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
             rawConstructorFor(entityClass)
     }
 }
+
+/**
+ * Returns `true` when [entity] has been soft-deleted, i.e. it implements [SoftDeletable]
+ * and its `deletedAt` is non-null. Non-[SoftDeletable] entities always return `false`.
+ *
+ * This is the canonical soft-delete predicate for all registry and query planner
+ * components in `lirp-core`. Using one definition avoids divergence if the soft-delete
+ * condition ever changes (e.g., gains an additional tombstone flag).
+ */
+internal fun isSoftDeleted(entity: IdentifiableEntity<*>): Boolean =
+    (entity as? SoftDeletable)?.deletedAt != null

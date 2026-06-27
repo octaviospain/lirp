@@ -75,4 +75,35 @@ interface Repository<K, T: IdentifiableEntity<K>> : Registry<K, T> where K : Com
      * Removes all entities from the repository, leaving it empty.
      */
     fun clear()
+
+    /**
+     * Soft-deletes [entity] by setting its [net.transgressoft.lirp.entity.SoftDeletable.deletedAt]
+     * to the current instant. The entity remains in memory and is excluded from default reads.
+     *
+     * Honors the cascade mode declared on every aggregate reference — both scalar
+     * (`@ToOneAggregate`) and collection (`@ToManyAggregates`) references:
+     * - **CASCADE**: propagates soft deletion to each referenced child.
+     * - **RESTRICT**: blocks when at least one referenced child is still active (`deletedAt == null`).
+     *   All RESTRICT checks are evaluated before any CASCADE mutation, so the check reflects the
+     *   pre-cascade state of children. Throws [IllegalStateException] when a RESTRICT child is active.
+     * - **DETACH** and **NONE**: leave referenced children unchanged.
+     *
+     * Emits [net.transgressoft.lirp.event.CrudEvent.Type.SOFT_DELETE] on success.
+     *
+     * @param entity The entity to soft-delete; must implement [net.transgressoft.lirp.entity.MutableSoftDeletable]
+     * @return `true` if the entity was soft-deleted, `false` if it was not found or was already soft-deleted
+     * @throws IllegalStateException if a RESTRICT cascade check finds an active referenced child
+     */
+    fun softDelete(entity: T): Boolean = throw UnsupportedOperationException("This repository does not support soft delete")
+
+    /**
+     * Restores a soft-deleted [entity] by clearing its
+     * [net.transgressoft.lirp.entity.SoftDeletable.deletedAt] to `null`.
+     *
+     * Emits [net.transgressoft.lirp.event.CrudEvent.Type.RESTORE] on success.
+     *
+     * @param entity The entity to restore; must implement [net.transgressoft.lirp.entity.MutableSoftDeletable]
+     * @return `true` if the entity was restored, `false` if it was not found or was not soft-deleted
+     */
+    fun restore(entity: T): Boolean = throw UnsupportedOperationException("This repository does not support soft delete")
 }

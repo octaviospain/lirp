@@ -18,11 +18,11 @@
 package net.transgressoft.lirp.persistence.projection
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
-import net.transgressoft.lirp.entity.SoftDeletable
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.StandardCrudEvent
 import net.transgressoft.lirp.persistence.Registry
+import net.transgressoft.lirp.persistence.isSoftDeleted
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.reflect.KProperty
 
@@ -141,7 +141,9 @@ class MultiKeyRegistryProjection<K : Comparable<K>, PK : Comparable<PK>, E : Ide
                 registry.subscribeAsync(
                     CrudEvent.Type.CREATE,
                     CrudEvent.Type.UPDATE,
-                    CrudEvent.Type.DELETE
+                    CrudEvent.Type.DELETE,
+                    CrudEvent.Type.SOFT_DELETE,
+                    CrudEvent.Type.RESTORE
                 ) { event -> if (!seedBuffer.deferIfSeeding(event)) handleCrudEvent(event) }
             for (entity in registry) {
                 if (!isSoftDeleted(entity)) addToBucket(entity)
@@ -156,6 +158,8 @@ class MultiKeyRegistryProjection<K : Comparable<K>, PK : Comparable<PK>, E : Ide
             is StandardCrudEvent.Create -> event.entities.values.forEach(::onCreated)
             is StandardCrudEvent.Delete -> event.entities.values.forEach(::onDeleted)
             is StandardCrudEvent.Update -> event.entities.forEach { (id, entity) -> onUpdated(id, entity) }
+            is StandardCrudEvent.SoftDelete -> event.entities.keys.forEach(::removeSoftDeleted)
+            is StandardCrudEvent.Restore -> event.entities.values.forEach(::onCreated)
             else -> { /* CONFLICT, RECOVERY_FAILED — not subscribed */ }
         }
     }
@@ -222,9 +226,6 @@ class MultiKeyRegistryProjection<K : Comparable<K>, PK : Comparable<PK>, E : Ide
         for (key in oldKeys) core.removeByIdFromBucketSilent(id, key)?.let { changed += it }
         core.fireBucketsChanged(changed)
     }
-
-    private fun isSoftDeleted(entity: E): Boolean =
-        (entity as? SoftDeletable)?.deletedAt != null
 
     /**
      * Returns the current contents of the [key] bucket WITHOUT triggering lazy initialization.

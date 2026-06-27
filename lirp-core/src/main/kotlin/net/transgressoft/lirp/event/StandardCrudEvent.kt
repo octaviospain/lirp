@@ -76,6 +76,32 @@ sealed class StandardCrudEvent {
     }
 
     /**
+     * Emitted when an entity is soft-deleted. The entity remains resident in memory
+     * with a non-null [net.transgressoft.lirp.entity.SoftDeletable.deletedAt] and is
+     * excluded from default reads until restored.
+     */
+    data class SoftDelete<K, out T: IdentifiableEntity<K>>(override val entities: Map<K, T>): CrudEvent<K, T> where K: Comparable<K> {
+        constructor(entity: T): this(mapOf(entity.id to entity))
+        constructor(entities: Collection<T>): this(entities.associateBy { it.id })
+
+        override val oldEntities: Map<K, T> = emptyMap()
+        override val type: CrudEvent.Type = CrudEvent.Type.SOFT_DELETE
+    }
+
+    /**
+     * Emitted when a soft-deleted entity is restored. Its
+     * [net.transgressoft.lirp.entity.SoftDeletable.deletedAt] is `null` at emission time
+     * and the entity becomes visible to default reads again.
+     */
+    data class Restore<K, out T: IdentifiableEntity<K>>(override val entities: Map<K, T>): CrudEvent<K, T> where K: Comparable<K> {
+        constructor(entity: T): this(mapOf(entity.id to entity))
+        constructor(entities: Collection<T>): this(entities.associateBy { it.id })
+
+        override val oldEntities: Map<K, T> = emptyMap()
+        override val type: CrudEvent.Type = CrudEvent.Type.RESTORE
+    }
+
+    /**
      * Emitted when a `SqlRepository` detects an optimistic lock conflict during UPDATE or DELETE.
      *
      * The entity in [entities] (the `newEntity` argument) reflects the canonical state after

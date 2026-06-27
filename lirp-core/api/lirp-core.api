@@ -265,6 +265,8 @@ public final class net/transgressoft/lirp/event/StandardCrudEvent$Conflict : net
 	public fun isCreate ()Z
 	public fun isDelete ()Z
 	public fun isRead ()Z
+	public fun isRestore ()Z
+	public fun isSoftDelete ()Z
 	public fun isUpdate ()Z
 	public fun toString ()Ljava/lang/String;
 }
@@ -286,6 +288,8 @@ public final class net/transgressoft/lirp/event/StandardCrudEvent$Create : net/t
 	public fun isCreate ()Z
 	public fun isDelete ()Z
 	public fun isRead ()Z
+	public fun isRestore ()Z
+	public fun isSoftDelete ()Z
 	public fun isUpdate ()Z
 	public fun toString ()Ljava/lang/String;
 }
@@ -307,6 +311,8 @@ public final class net/transgressoft/lirp/event/StandardCrudEvent$Delete : net/t
 	public fun isCreate ()Z
 	public fun isDelete ()Z
 	public fun isRead ()Z
+	public fun isRestore ()Z
+	public fun isSoftDelete ()Z
 	public fun isUpdate ()Z
 	public fun toString ()Ljava/lang/String;
 }
@@ -328,6 +334,8 @@ public final class net/transgressoft/lirp/event/StandardCrudEvent$Read : net/tra
 	public fun isCreate ()Z
 	public fun isDelete ()Z
 	public fun isRead ()Z
+	public fun isRestore ()Z
+	public fun isSoftDelete ()Z
 	public fun isUpdate ()Z
 	public fun toString ()Ljava/lang/String;
 }
@@ -352,6 +360,54 @@ public final class net/transgressoft/lirp/event/StandardCrudEvent$RecoveryFailed
 	public fun isCreate ()Z
 	public fun isDelete ()Z
 	public fun isRead ()Z
+	public fun isRestore ()Z
+	public fun isSoftDelete ()Z
+	public fun isUpdate ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/event/StandardCrudEvent$Restore : net/transgressoft/lirp/event/CrudEvent {
+	public fun <init> (Ljava/util/Collection;)V
+	public fun <init> (Ljava/util/Map;)V
+	public fun <init> (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)V
+	public final fun component1 ()Ljava/util/Map;
+	public final fun copy (Ljava/util/Map;)Lnet/transgressoft/lirp/event/StandardCrudEvent$Restore;
+	public static synthetic fun copy$default (Lnet/transgressoft/lirp/event/StandardCrudEvent$Restore;Ljava/util/Map;ILjava/lang/Object;)Lnet/transgressoft/lirp/event/StandardCrudEvent$Restore;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getEntities ()Ljava/util/Map;
+	public fun getOldEntities ()Ljava/util/Map;
+	public fun getType ()Lnet/transgressoft/lirp/event/CrudEvent$Type;
+	public synthetic fun getType ()Lnet/transgressoft/lirp/event/EventType;
+	public fun hashCode ()I
+	public fun isConflict ()Z
+	public fun isCreate ()Z
+	public fun isDelete ()Z
+	public fun isRead ()Z
+	public fun isRestore ()Z
+	public fun isSoftDelete ()Z
+	public fun isUpdate ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/event/StandardCrudEvent$SoftDelete : net/transgressoft/lirp/event/CrudEvent {
+	public fun <init> (Ljava/util/Collection;)V
+	public fun <init> (Ljava/util/Map;)V
+	public fun <init> (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)V
+	public final fun component1 ()Ljava/util/Map;
+	public final fun copy (Ljava/util/Map;)Lnet/transgressoft/lirp/event/StandardCrudEvent$SoftDelete;
+	public static synthetic fun copy$default (Lnet/transgressoft/lirp/event/StandardCrudEvent$SoftDelete;Ljava/util/Map;ILjava/lang/Object;)Lnet/transgressoft/lirp/event/StandardCrudEvent$SoftDelete;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getEntities ()Ljava/util/Map;
+	public fun getOldEntities ()Ljava/util/Map;
+	public fun getType ()Lnet/transgressoft/lirp/event/CrudEvent$Type;
+	public synthetic fun getType ()Lnet/transgressoft/lirp/event/EventType;
+	public fun hashCode ()I
+	public fun isConflict ()Z
+	public fun isCreate ()Z
+	public fun isDelete ()Z
+	public fun isRead ()Z
+	public fun isRestore ()Z
+	public fun isSoftDelete ()Z
 	public fun isUpdate ()Z
 	public fun toString ()Ljava/lang/String;
 }
@@ -374,6 +430,8 @@ public final class net/transgressoft/lirp/event/StandardCrudEvent$Update : net/t
 	public fun isCreate ()Z
 	public fun isDelete ()Z
 	public fun isRead ()Z
+	public fun isRestore ()Z
+	public fun isSoftDelete ()Z
 	public fun isUpdate ()Z
 	public fun toString ()Ljava/lang/String;
 }
@@ -846,6 +904,7 @@ public abstract class net/transgressoft/lirp/persistence/RegistryBase : net/tran
 	public synthetic fun emitAsync (Lnet/transgressoft/lirp/event/LirpEvent;)V
 	public fun equals (Ljava/lang/Object;)Z
 	protected final fun executeCascadeForEntity (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)V
+	protected final fun executeSoftCascadeForEntity (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)V
 	public fun findById (Ljava/lang/Comparable;)Ljava/util/Optional;
 	public fun findByIndex (Ljava/lang/String;Ljava/lang/Object;)Ljava/util/Set;
 	public fun findByUniqueId (Ljava/lang/String;)Ljava/util/Optional;
@@ -885,6 +944,7 @@ public abstract class net/transgressoft/lirp/persistence/RegistryBase : net/tran
 	public fun subscribeAsync (Lkotlin/jvm/functions/Function2;Lnet/transgressoft/lirp/event/LirpErrorHandler;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public fun subscribeAsync ([Lnet/transgressoft/lirp/event/CrudEvent$Type;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 	public synthetic fun subscribeAsync ([Lnet/transgressoft/lirp/event/EventType;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	protected final fun validateRestrictForSoftDelete (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)V
 	public static final fun viaAccessorFor$net_transgressoft_lirp_core (Ljava/lang/Class;)Lnet/transgressoft/lirp/persistence/LirpViaAccessor;
 	protected final fun wireRefBubbleUp (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)V
 }
@@ -962,6 +1022,8 @@ public class net/transgressoft/lirp/persistence/VolatileRepository : net/transgr
 	public fun minus (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
 	public fun remove (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
 	public fun removeAll (Ljava/util/Collection;)Z
+	public fun restore (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
+	public fun softDelete (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
 }
 
 public class net/transgressoft/lirp/persistence/json/FlexibleJsonFileRepository : net/transgressoft/lirp/persistence/json/JsonFileRepository {
@@ -1339,16 +1401,21 @@ public final class net/transgressoft/lirp/persistence/query/Predicate$Or : net/t
 }
 
 public final class net/transgressoft/lirp/persistence/query/Query {
-	public fun <init> (Lnet/transgressoft/lirp/persistence/query/Predicate;Ljava/util/List;Ljava/lang/Integer;I)V
+	public fun <init> (Lnet/transgressoft/lirp/persistence/query/Predicate;Ljava/util/List;Ljava/lang/Integer;IZZ)V
+	public synthetic fun <init> (Lnet/transgressoft/lirp/persistence/query/Predicate;Ljava/util/List;Ljava/lang/Integer;IZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Lnet/transgressoft/lirp/persistence/query/Predicate;
 	public final fun component2 ()Ljava/util/List;
 	public final fun component3 ()Ljava/lang/Integer;
 	public final fun component4 ()I
-	public final fun copy (Lnet/transgressoft/lirp/persistence/query/Predicate;Ljava/util/List;Ljava/lang/Integer;I)Lnet/transgressoft/lirp/persistence/query/Query;
-	public static synthetic fun copy$default (Lnet/transgressoft/lirp/persistence/query/Query;Lnet/transgressoft/lirp/persistence/query/Predicate;Ljava/util/List;Ljava/lang/Integer;IILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/query/Query;
+	public final fun component5 ()Z
+	public final fun component6 ()Z
+	public final fun copy (Lnet/transgressoft/lirp/persistence/query/Predicate;Ljava/util/List;Ljava/lang/Integer;IZZ)Lnet/transgressoft/lirp/persistence/query/Query;
+	public static synthetic fun copy$default (Lnet/transgressoft/lirp/persistence/query/Query;Lnet/transgressoft/lirp/persistence/query/Predicate;Ljava/util/List;Ljava/lang/Integer;IZZILjava/lang/Object;)Lnet/transgressoft/lirp/persistence/query/Query;
 	public fun equals (Ljava/lang/Object;)Z
+	public final fun getIncludeDeleted ()Z
 	public final fun getLimit ()Ljava/lang/Integer;
 	public final fun getOffset ()I
+	public final fun getOnlyDeleted ()Z
 	public final fun getOrderBy ()Ljava/util/List;
 	public final fun getPredicate ()Lnet/transgressoft/lirp/persistence/query/Predicate;
 	public fun hashCode ()I
@@ -1358,12 +1425,16 @@ public final class net/transgressoft/lirp/persistence/query/Query {
 public final class net/transgressoft/lirp/persistence/query/QueryBuilder {
 	public fun <init> ()V
 	public final fun build ()Lnet/transgressoft/lirp/persistence/query/Query;
+	public final fun getIncludeDeleted ()Z
 	public final fun getLimit ()Ljava/lang/Integer;
 	public final fun getOffset ()I
+	public final fun getOnlyDeleted ()Z
 	public final fun getOrders ()Ljava/util/List;
 	public final fun getPredicate ()Lnet/transgressoft/lirp/persistence/query/Predicate;
+	public final fun includeDeleted ()Lnet/transgressoft/lirp/persistence/query/QueryBuilder;
 	public final fun limit (I)V
 	public final fun offset (I)V
+	public final fun onlyDeleted ()Lnet/transgressoft/lirp/persistence/query/QueryBuilder;
 	public final fun orderBy (Lkotlin/reflect/KProperty1;Lnet/transgressoft/lirp/persistence/query/Direction;)V
 	public static synthetic fun orderBy$default (Lnet/transgressoft/lirp/persistence/query/QueryBuilder;Lkotlin/reflect/KProperty1;Lnet/transgressoft/lirp/persistence/query/Direction;ILjava/lang/Object;)V
 	public final fun where (Lkotlin/jvm/functions/Function0;)V

@@ -44,22 +44,34 @@ data class OrderClause<T : IdentifiableEntity<*>>(
 )
 
 /**
- * Immutable representation of a typed query with optional predicate, ordering, and pagination.
+ * Immutable representation of a typed query with optional predicate, ordering, pagination,
+ * and soft-delete visibility flags.
+ *
+ * By default (both flags `false`) queries exclude soft-deleted entities (fail-closed).
+ * Set [includeDeleted] to include them alongside active entities, or [onlyDeleted] to
+ * return only soft-deleted entities. The two flags are mutually exclusive.
  *
  * @param T the entity type
  * @param predicate the filter predicate, or `null` for no filtering
  * @param orderBy the list of order clauses (applied in order)
  * @param limit maximum number of results to return, or `null` for unlimited
  * @param offset number of results to skip before returning
+ * @param includeDeleted whether to include soft-deleted entities alongside active ones
+ * @param onlyDeleted whether to return only soft-deleted entities
  */
 data class Query<T : IdentifiableEntity<*>>(
     val predicate: Predicate<T>?,
     val orderBy: List<OrderClause<T>>,
     val limit: Int?,
-    val offset: Int
+    val offset: Int,
+    val includeDeleted: Boolean = false,
+    val onlyDeleted: Boolean = false
 ) {
     init {
         require(offset >= 0) { "offset must be >= 0" }
         require(limit == null || limit >= 0) { "limit must be >= 0" }
+        require(!(includeDeleted && onlyDeleted)) {
+            "includeDeleted and onlyDeleted are mutually exclusive"
+        }
     }
 }
