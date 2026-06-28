@@ -92,6 +92,27 @@ See [Migration from 3.0.0 to 3.1.0](#migration-from-300-to-310) for upgrade step
 
   See [#283](https://github.com/octaviospain/lirp/issues/283).
 
+- **Soft-delete visibility through cross-aggregate `via()` queries** — the `includeDeleted()` /
+  `onlyDeleted()` Query DSL visibility flags are now honored for cross-aggregate `via()` queries,
+  not just direct predicates. A single visibility mode defines one visible set that is applied to
+  **both** parent enumeration and child resolution (strict mirror), across all four via operators
+  (`anyMatch` / `allMatch` / `noneMatch` / `where`) and multi-`via` compounds combined with
+  `and` / `or` / `not`. Under `onlyDeleted()`, an `allMatch` / `noneMatch` over a parent with no
+  soft-deleted children matches vacuously (`true`), mirroring Kotlin stdlib semantics.
+
+  ```kotlin
+  // Soft-deleted playlists that reference a soft-deleted track priced over 100.
+  val deletedHits = playlists.query {
+      onlyDeleted()
+      where { Playlist::trackIds via tracks anyMatch { Track::price gt 100.0 } }
+  }.toList()
+  ```
+
+  The default (no-flag) `via()` path is unchanged and remains active-only. This removes the
+  temporary fail-fast guard that previously threw `IllegalStateException` when a `via()` query
+  was combined with a visibility flag — that combination is now fully supported.
+  See [#294](https://github.com/octaviospain/lirp/issues/294).
+
 ### Changed
 
 - **`ViaStrategy` moved from `lirp-core` to `lirp-api`** — the enum class

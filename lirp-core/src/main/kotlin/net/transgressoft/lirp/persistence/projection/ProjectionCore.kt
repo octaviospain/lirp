@@ -303,7 +303,7 @@ internal class ProjectionCore<K : Comparable<K>, PK : Comparable<PK>, E : Identi
         val oldIndex = bucket.indexOfFirst { it.id == newEntity.id }
         if (oldIndex < 0) return
         // Build the bucket without the entity to compute its new sorted position.
-        val withoutEntity = bucket.toMutableList().also { it.removeAt(oldIndex) }
+        val withoutEntity = bucket.filterIndexed { index, _ -> index != oldIndex }
         var lo = 0
         var hi = withoutEntity.size
         while (lo < hi) {
@@ -333,7 +333,7 @@ internal class ProjectionCore<K : Comparable<K>, PK : Comparable<PK>, E : Identi
         val bucket = backingMap[key] ?: return null
         val oldIndex = bucket.indexOfFirst { it.id == newEntity.id }
         if (oldIndex < 0) return null
-        val withoutEntity = bucket.toMutableList().also { it.removeAt(oldIndex) }
+        val withoutEntity = bucket.filterIndexed { index, _ -> index != oldIndex }
         var lo = 0
         var hi = withoutEntity.size
         while (lo < hi) {

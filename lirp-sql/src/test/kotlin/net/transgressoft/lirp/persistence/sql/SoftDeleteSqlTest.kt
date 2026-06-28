@@ -75,8 +75,11 @@ internal class SoftDeleteSqlTest : StringSpec({
             repo2.softDelete(loaded)
             // The deletedAt mutation propagates to the SQL write pipeline asynchronously and is
             // persisted by the debounced background writer. Poll for the persisted version bump
-            // instead of racing a fixed sleep against async event delivery.
-            eventually(2.seconds) {
+            // instead of racing a fixed sleep against async event delivery. The window is generous
+            // because the debounced writer (max ~1s) plus container/JVM warmup can exceed a tight
+            // 2s budget under CI load; eventually returns as soon as the bump is observed, so the
+            // larger ceiling only affects the rare slow case.
+            eventually(5.seconds) {
                 val row = DatabaseTestSupport.readRow(dataSource, tableDef.tableName, 2, "version", "deleted_at")
                 row.shouldNotBeNull()
                 val dbVersion = (row["version"] as? Long) ?: (row["version"] as? Number)?.toLong()

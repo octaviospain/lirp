@@ -17,6 +17,7 @@
 
 package net.transgressoft.lirp.persistence.query
 
+import net.transgressoft.lirp.persistence.LirpContext
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
@@ -297,6 +298,126 @@ internal class ViaPlannerTest : FunSpec({
         context.viaStrategy shouldBe planner.strategyFor(via, playlists)
         // A bare via predicate has no non-via post-filter arm.
         context.postFilterCount shouldBe 0
+    }
+
+    test("HASH_JOIN and PER_PARENT_LOOP return identical result sets under includeDeleted with soft-deletable fixtures") {
+        val ctx = LirpContext()
+        val trackRepo =
+            SoftDeletableTrackRepo(ctx).apply {
+                create(1, "Active Track", 10.0)
+                create(2, "Another Active Track", 20.0)
+                val deletedTrack = create(3, "Deleted Track", 30.0)
+                softDelete(deletedTrack)
+            }
+        val playlistRepo =
+            SoftDeletablePlaylistRepo(ctx).apply {
+                create(1, "Active Playlist", listOf(1))
+                val deletedPl = create(2, "Deleted Playlist", listOf(3))
+                softDelete(deletedPl)
+            }
+
+        val via = SoftDeletablePlaylist::trackIds via trackRepo anyMatch { SoftDeletableTrack::price gt 5.0 }
+        val query = Query<SoftDeletablePlaylist>(predicate = via, orderBy = emptyList(), limit = null, offset = 0, includeDeleted = true)
+        val (ppl, hj) = viaResultsUnderBothStrategies(via, playlistRepo, query)
+
+        // Both strategies must produce the same result set.
+        ppl shouldBe hj
+        // Both active and soft-deleted playlists referencing matching tracks should appear.
+        ppl.map { it.id }.toSet() shouldBe setOf(1, 2)
+
+        ctx.close()
+    }
+
+    test("HASH_JOIN and PER_PARENT_LOOP return identical result sets under onlyDeleted with soft-deletable fixtures") {
+        val ctx = LirpContext()
+        val trackRepo =
+            SoftDeletableTrackRepo(ctx).apply {
+                create(1, "Active Track", 10.0)
+                val deletedTrack = create(2, "Deleted Track", 20.0)
+                softDelete(deletedTrack)
+            }
+        val playlistRepo =
+            SoftDeletablePlaylistRepo(ctx).apply {
+                // Deleted playlist referencing active child — strict-mirror: should NOT appear in onlyDeleted.
+                val deletedPlActiveChild = create(1, "Deleted with active child", listOf(1))
+                softDelete(deletedPlActiveChild)
+                // Deleted playlist referencing deleted child — strict-mirror: SHOULD appear.
+                val deletedPlDeletedChild = create(2, "Deleted with deleted child", listOf(2))
+                softDelete(deletedPlDeletedChild)
+                // Active playlist — should NOT appear under onlyDeleted.
+                create(3, "Active Playlist", listOf(2))
+            }
+
+        val via = SoftDeletablePlaylist::trackIds via trackRepo anyMatch { SoftDeletableTrack::price gt 5.0 }
+        val query = Query<SoftDeletablePlaylist>(predicate = via, orderBy = emptyList(), limit = null, offset = 0, onlyDeleted = true)
+        val (ppl, hj) = viaResultsUnderBothStrategies(via, playlistRepo, query)
+
+        // Both strategies must produce the same result set.
+        ppl shouldBe hj
+        // Only the deleted playlist whose referenced track is also deleted should appear.
+        ppl.map { it.id }.toSet() shouldBe setOf(2)
+
+        ctx.close()
+    }
+
+    test("allMatch HASH_JOIN and PER_PARENT_LOOP return identical result sets under onlyDeleted") {
+        val ctx = LirpContext()
+        val trackRepo =
+            SoftDeletableTrackRepo(ctx).apply {
+                create(1, "Active Track", 2.0)
+                val deletedCheap = create(2, "Deleted Cheap", 8.0)
+                val deletedExpensive = create(3, "Deleted Expensive", 30.0)
+                softDelete(deletedCheap)
+                softDelete(deletedExpensive)
+            }
+        val playlistRepo =
+            SoftDeletablePlaylistRepo(ctx).apply {
+                // All soft-deleted children (8, 30) are > 5 → allMatch true.
+                softDelete(create(1, "Deleted all match", listOf(2, 3)))
+                // Soft-deleted child 2 (8) > 5 but references active child 1 (invisible) → scoped {8} all match.
+                softDelete(create(2, "Deleted mixed", listOf(1, 2)))
+                // No soft-deleted children referenced (only active 1) → scoped empty → vacuously true.
+                softDelete(create(3, "Deleted vacuous", listOf(1)))
+            }
+
+        val via = SoftDeletablePlaylist::trackIds via trackRepo allMatch { SoftDeletableTrack::price gt 5.0 }
+        val query = Query<SoftDeletablePlaylist>(predicate = via, orderBy = emptyList(), limit = null, offset = 0, onlyDeleted = true)
+        val (ppl, hj) = viaResultsUnderBothStrategies(via, playlistRepo, query)
+
+        ppl shouldBe hj
+        ppl.map { it.id }.toSet() shouldBe setOf(1, 2, 3)
+
+        ctx.close()
+    }
+
+    test("noneMatch HASH_JOIN and PER_PARENT_LOOP return identical result sets under onlyDeleted") {
+        val ctx = LirpContext()
+        val trackRepo =
+            SoftDeletableTrackRepo(ctx).apply {
+                create(1, "Active Expensive", 100.0)
+                val deletedCheap = create(2, "Deleted Cheap", 8.0)
+                val deletedExpensive = create(3, "Deleted Expensive", 300.0)
+                softDelete(deletedCheap)
+                softDelete(deletedExpensive)
+            }
+        val playlistRepo =
+            SoftDeletablePlaylistRepo(ctx).apply {
+                // Soft-deleted child 3 (300) > 50 → noneMatch false → excluded.
+                softDelete(create(1, "Deleted has expensive", listOf(3)))
+                // Soft-deleted child 2 (8) not > 50 → noneMatch true → included.
+                softDelete(create(2, "Deleted cheap only", listOf(2)))
+                // References active expensive only (invisible) → scoped empty → vacuously true → included.
+                softDelete(create(3, "Deleted vacuous", listOf(1)))
+            }
+
+        val via = SoftDeletablePlaylist::trackIds via trackRepo noneMatch { SoftDeletableTrack::price gt 50.0 }
+        val query = Query<SoftDeletablePlaylist>(predicate = via, orderBy = emptyList(), limit = null, offset = 0, onlyDeleted = true)
+        val (ppl, hj) = viaResultsUnderBothStrategies(via, playlistRepo, query)
+
+        ppl shouldBe hj
+        ppl.map { it.id }.toSet() shouldBe setOf(2, 3)
+
+        ctx.close()
     }
 
     test("hybrid predicate result preserves Sequence laziness - taking only first N elements does not iterate beyond N parents") {
