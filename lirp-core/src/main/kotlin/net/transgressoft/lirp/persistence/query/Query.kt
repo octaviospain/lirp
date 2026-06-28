@@ -75,3 +75,33 @@ data class Query<T : IdentifiableEntity<*>>(
         }
     }
 }
+
+/**
+ * Soft-delete visibility mode for a query's read path, derived from a [Query]'s
+ * [Query.includeDeleted] / [Query.onlyDeleted] flags.
+ *
+ * Used to thread visibility through read-path components that need only the mode and not the
+ * full generic [Query] (e.g. the cross-aggregate via executor), avoiding a `Query<*>`
+ * element-type coupling at those boundaries.
+ */
+internal enum class Visibility {
+    /** Active entities only — the fail-closed default. */
+    ACTIVE_ONLY,
+
+    /** Active and soft-deleted entities. */
+    INCLUDE_DELETED,
+
+    /** Soft-deleted entities only (strict mirror). */
+    ONLY_DELETED
+}
+
+/** The [Visibility] mode implied by this query's mutually-exclusive soft-delete flags. */
+internal fun Query<*>.visibility(): Visibility =
+    when {
+        onlyDeleted -> Visibility.ONLY_DELETED
+        includeDeleted -> Visibility.INCLUDE_DELETED
+        else -> Visibility.ACTIVE_ONLY
+    }
+
+/** A predicate-free, ordering-free, active-only query — the canonical default for optional `query` parameters. */
+internal fun <T : IdentifiableEntity<*>> activeOnlyQuery(): Query<T> = Query(null, emptyList(), null, 0)

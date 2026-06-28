@@ -602,42 +602,44 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
      *
      * @throws IllegalStateException if a RESTRICT child is still active
      */
-    @Suppress("UNCHECKED_CAST")
     protected fun validateRestrictForSoftDelete(entity: T) {
-        val entries = refEntries
-        val collEntries = collectionRefEntries
-        if (entries != null) {
-            for (entry in entries) {
-                if (entry.cascadeAction != net.transgressoft.lirp.entity.CascadeAction.RESTRICT) continue
-                val delegate = entry.delegateGetter(entity)
-                val delegate2 = delegate as? AggregateRefDelegate<*, *> ?: continue
+        refEntries?.let { validateScalarRestrictForSoftDelete(entity, it) }
+        collectionRefEntries?.let { validateCollectionRestrictForSoftDelete(entity, it) }
+    }
 
-                @Suppress("UNCHECKED_CAST")
-                val typedDelegate = delegate2 as AggregateRefDelegate<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>
-                // Use rawIterator to look up the child — bypasses the default-exclude soft-delete
-                // filter so a previously-soft-deleted child is visible (and thus allowed by RESTRICT).
-                val boundReg = typedDelegate.boundRegistryInternal() as? RegistryBase<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>
-                val refId = runCatching { typedDelegate.referenceId }.getOrNull()
-                val child = if (boundReg != null && refId != null) boundReg.rawIterator().asSequence().firstOrNull { it.id == refId } else null
-                check(child == null || (child as? SoftDeletable)?.deletedAt != null) {
-                    "Cannot soft-delete '${entity.uniqueId}': referenced scalar child is still active (deletedAt is null)"
-                }
+    /** A RESTRICT-referenced child permits the parent's soft-delete only when it is absent or itself already soft-deleted. */
+    private fun Any?.isInactiveOrAbsent(): Boolean =
+        this == null || (this as? SoftDeletable)?.deletedAt != null
+
+    /** Scalar-reference RESTRICT pass for [validateRestrictForSoftDelete]: a still-active scalar child blocks soft-delete. */
+    @Suppress("UNCHECKED_CAST")
+    private fun validateScalarRestrictForSoftDelete(entity: T, entries: List<RefEntry<*, T>>) {
+        for (entry in entries) {
+            if (entry.cascadeAction != net.transgressoft.lirp.entity.CascadeAction.RESTRICT) continue
+            val typedDelegate =
+                entry.delegateGetter(entity) as AggregateRefDelegate<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>
+            // Use rawIterator to look up the child — bypasses the default-exclude soft-delete
+            // filter so a previously-soft-deleted child is visible (and thus allowed by RESTRICT).
+            val boundReg = typedDelegate.boundRegistryInternal() as? RegistryBase<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>
+            val refId = runCatching { typedDelegate.referenceId }.getOrNull()
+            val child = if (boundReg != null && refId != null) boundReg.rawIterator().asSequence().firstOrNull { it.id == refId } else null
+            check(child.isInactiveOrAbsent()) {
+                "Cannot soft-delete '${entity.uniqueId}': referenced scalar child is still active (deletedAt is null)"
             }
         }
-        if (collEntries != null) {
-            for (entry in collEntries) {
-                if (entry.cascadeAction != net.transgressoft.lirp.entity.CascadeAction.RESTRICT) continue
-                val delegate = entry.delegateGetter(entity)
-                val inner = unwrapCollectionDelegate(delegate) ?: continue
-                val repo = inner.boundRegistryInternal() ?: continue
-                val ids = inner.referenceIds.toSet()
-                for (id in ids) {
-                    val child =
-                        (repo as Registry<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>)
-                            .findById(id as Comparable<Any>).orElse(null)
-                    check(child == null || (child as? SoftDeletable)?.deletedAt != null) {
-                        "Cannot soft-delete '${entity.uniqueId}': referenced child (id=$id) is still active (deletedAt is null)"
-                    }
+    }
+
+    /** Collection-reference RESTRICT pass for [validateRestrictForSoftDelete]: any still-active member blocks soft-delete. */
+    @Suppress("UNCHECKED_CAST")
+    private fun validateCollectionRestrictForSoftDelete(entity: T, collEntries: List<CollectionRefEntry<*, T>>) {
+        for (entry in collEntries) {
+            if (entry.cascadeAction != net.transgressoft.lirp.entity.CascadeAction.RESTRICT) continue
+            val inner = unwrapCollectionDelegate(entry.delegateGetter(entity)) ?: continue
+            val repo = inner.boundRegistryInternal() as? Registry<Comparable<Any>, IdentifiableEntity<Comparable<Any>>> ?: continue
+            for (id in inner.referenceIds.toSet()) {
+                val child = repo.findById(id as Comparable<Any>).orElse(null)
+                check(child.isInactiveOrAbsent()) {
+                    "Cannot soft-delete '${entity.uniqueId}': referenced child (id=$id) is still active (deletedAt is null)"
                 }
             }
         }
@@ -663,7 +665,6 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
      * an [IllegalStateException] is thrown immediately. The set is cleared after the top-level
      * cascade entry point returns.
      */
-    @Suppress("UNCHECKED_CAST")
     protected fun executeSoftCascadeForEntity(entity: T) {
         val entries = refEntries
         val collEntries = collectionRefEntries
@@ -676,40 +677,41 @@ abstract class RegistryBase<K, T : IdentifiableEntity<K>> internal constructor(
                 "Cascade cycle detected: entity '${entity.uniqueId}' is already being cascaded on this thread"
             }
             // CASCADE mutation pass only — RESTRICT was already checked before the parent was mutated.
-            if (entries != null) {
-                for (entry in entries) {
-                    if (entry.cascadeAction != net.transgressoft.lirp.entity.CascadeAction.CASCADE) continue
-                    val delegate = entry.delegateGetter(entity)
-                    val delegate2 = delegate as? AggregateRefDelegate<*, *> ?: continue
-
-                    @Suppress("UNCHECKED_CAST")
-                    val typedDelegate = delegate2 as AggregateRefDelegate<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>
-                    val repo = typedDelegate.boundRegistryInternal() as? Repository<Comparable<Any>, IdentifiableEntity<Comparable<Any>>> ?: continue
-                    val child = typedDelegate.resolve().orElse(null) ?: continue
-                    check(repo.softDelete(child) || isSoftDeleted(child)) {
-                        "Cannot cascade soft-delete '${entity.uniqueId}': referenced child '${child.uniqueId}' was not soft-deleted"
-                    }
-                }
-            }
-            if (collEntries != null) {
-                for (entry in collEntries) {
-                    if (entry.cascadeAction != net.transgressoft.lirp.entity.CascadeAction.CASCADE) continue
-                    val delegate = entry.delegateGetter(entity)
-                    val inner = unwrapCollectionDelegate(delegate) ?: continue
-                    val repo = inner.boundRegistryInternal() ?: continue
-                    if (repo !is Repository<*, *>) continue
-                    val typedRepo = repo as Repository<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>
-                    val ids = inner.referenceIds.toSet()
-                    for (id in ids) {
-                        val child = typedRepo.findById(id as Comparable<Any>).orElse(null) ?: continue
-                        check(typedRepo.softDelete(child) || isSoftDeleted(child)) {
-                            "Cannot cascade soft-delete '${entity.uniqueId}': referenced child '${child.uniqueId}' was not soft-deleted"
-                        }
-                    }
-                }
-            }
+            entries?.let { softCascadeScalarRefs(entity, it) }
+            collEntries?.let { softCascadeCollectionRefs(entity, it) }
         } finally {
             if (isTopLevel) visited.clear()
+        }
+    }
+
+    /** Scalar-reference CASCADE pass for [executeSoftCascadeForEntity]: soft-deletes each referenced child. */
+    @Suppress("UNCHECKED_CAST")
+    private fun softCascadeScalarRefs(entity: T, entries: List<RefEntry<*, T>>) {
+        for (entry in entries) {
+            if (entry.cascadeAction != net.transgressoft.lirp.entity.CascadeAction.CASCADE) continue
+            val typedDelegate =
+                entry.delegateGetter(entity) as AggregateRefDelegate<Comparable<Any>, IdentifiableEntity<Comparable<Any>>>
+            val repo = typedDelegate.boundRegistryInternal() as? Repository<Comparable<Any>, IdentifiableEntity<Comparable<Any>>> ?: continue
+            val child = typedDelegate.resolve().orElse(null) ?: continue
+            check(repo.softDelete(child) || isSoftDeleted(child)) {
+                "Cannot cascade soft-delete '${entity.uniqueId}': referenced child '${child.uniqueId}' was not soft-deleted"
+            }
+        }
+    }
+
+    /** Collection-reference CASCADE pass for [executeSoftCascadeForEntity]: soft-deletes every referenced member. */
+    @Suppress("UNCHECKED_CAST")
+    private fun softCascadeCollectionRefs(entity: T, collEntries: List<CollectionRefEntry<*, T>>) {
+        for (entry in collEntries) {
+            if (entry.cascadeAction != net.transgressoft.lirp.entity.CascadeAction.CASCADE) continue
+            val inner = unwrapCollectionDelegate(entry.delegateGetter(entity)) ?: continue
+            val typedRepo = inner.boundRegistryInternal() as? Repository<Comparable<Any>, IdentifiableEntity<Comparable<Any>>> ?: continue
+            for (id in inner.referenceIds.toSet()) {
+                val child = typedRepo.findById(id as Comparable<Any>).orElse(null) ?: continue
+                check(typedRepo.softDelete(child) || isSoftDeleted(child)) {
+                    "Cannot cascade soft-delete '${entity.uniqueId}': referenced child '${child.uniqueId}' was not soft-deleted"
+                }
+            }
         }
     }
 

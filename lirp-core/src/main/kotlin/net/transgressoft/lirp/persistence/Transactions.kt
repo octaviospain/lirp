@@ -132,7 +132,12 @@ suspend fun <K : Comparable<K>, R : ReactiveEntity<K, R>> transaction(
             repo.activeTransactionBuffer = buffer
 
             // Capture snapshots and install event buffering on all currently loaded entities.
-            loadedEntities = repo.mapNotNull { it as? ReactiveEntityBase<K, R> }
+            // The element cast is a safe runtime `is ReactiveEntityBase` check (mapNotNull drops
+            // non-matches); only the erased K/R type arguments are unchecked, which is sound here
+            // because every entity resident in this repository is a ReactiveEntityBase<K, R>.
+            @Suppress("UNCHECKED_CAST")
+            val resident: List<ReactiveEntityBase<K, R>> = repo.mapNotNull { it as? ReactiveEntityBase<K, R> }
+            loadedEntities = resident
             loadedEntities.forEach { entity ->
                 buffer.entitySnapshots[entity.id] = entity.captureSnapshot()
                 entity._txEventBuffer.set(buffer.deferredEvents)

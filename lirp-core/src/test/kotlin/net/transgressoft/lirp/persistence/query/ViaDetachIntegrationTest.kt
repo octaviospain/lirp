@@ -42,7 +42,7 @@ import io.kotest.matchers.shouldBe
  * observe the predicate at the in-loop read boundary; only an in-flight iterator does.
  *
  * **Simulating DETACH at the in-memory layer.** In-memory cascade for collection refs is a
- * no-op (Phase 53's SQL DETACH nulls FKs at the persistence layer, observed on reload).
+ * no-op (the SQL DETACH cascade nulls FKs at the persistence layer, observed on reload).
  * To exercise the same observable post-DETACH state inside a single JVM, the tests use
  * mutable parent entities and mutate the FK-bearing property directly — clearing the
  * matching id from the collection (cases 1, 3, 4) or setting the nullable single ref to
@@ -79,7 +79,7 @@ internal class ViaDetachIntegrationTest : FunSpec({
         before shouldContain 100
 
         // Simulate DETACH: delete child Track(1) and reconcile the parent's collection
-        // (mirrors what Phase 53 SQL DETACH produces after a junction-table reconciliation).
+        // (mirrors what the SQL DETACH cascade produces after a junction-table reconciliation).
         tracks.remove(tracks.findById(1).orElseThrow())
         val parent = playlists.findById(100).orElseThrow()
         (parent.trackIds as MutableList<Int>).remove(1)
@@ -110,7 +110,7 @@ internal class ViaDetachIntegrationTest : FunSpec({
         before shouldContain 1
 
         // Simulate DETACH single-ref: deleting the referenced owner sets the FK to null
-        // (Phase 53 ON DELETE SET NULL on a nullable column).
+        // (the SQL DETACH cascade issues ON DELETE SET NULL on a nullable column).
         owners.remove(owners.findById(10).orElseThrow())
         val orphan = parents.findById(1).orElseThrow()
         orphan.ownerId = null
@@ -215,6 +215,66 @@ internal class ViaDetachIntegrationTest : FunSpec({
         // Parent 49 had id 5 cleared mid-iteration. The HASH_JOIN parent loop calls
         // parentProp.get(p).any { it in matchingIds } LIVE — so the mutated parent is dropped.
         drained shouldNotContain 49
+
+        ctx.close()
+    }
+
+    /**
+     * Proves the live-read invariant is preserved under a non-default visibility flag when
+     * [QueryPlanner.executeViaSequence] is driven with an explicit [Query] carrying
+     * [Query.includeDeleted]. Mid-iteration mutation of a parent's `trackIds` is reflected on
+     * the very next yield, identical to the active-only path.
+     *
+     * Uses [SoftDeletablePlaylist] / [SoftDeletableTrackRepo] so that both active and
+     * soft-deleted playlists are enumerated (parent side). Forces PER_PARENT_LOOP via fixture
+     * sizing (many matching children, few refs per parent).
+     */
+    test("Via anyMatch with includeDeleted — mid-iteration mutation of parentProp is still reflected (live read invariant preserved)") {
+        val ctx = LirpContext()
+        val trackRepo =
+            SoftDeletableTrackRepo(ctx).apply {
+                // 100 matching active children — forces PER_PARENT_LOOP against 5 parents × 1 ref = 5 crossover.
+                repeat(100) { add(SoftDeletableTrack(it + 1, "match", 100.0)) }
+            }
+        val playlistRepo = SoftDeletablePlaylistRepo(ctx)
+        // Build and track the 5 playlists so we can mutate them directly mid-iteration.
+        val playlists =
+            (0 until 5).map { p ->
+                val pl = SoftDeletablePlaylist(p, "p$p", mutableListOf(p + 1))
+                playlistRepo.add(pl)
+                // Soft-delete the even-indexed playlists so that includeDeleted is needed to enumerate them.
+                if (p % 2 == 0) playlistRepo.softDelete(pl)
+                pl
+            }
+
+        val via = SoftDeletablePlaylist::trackIds via trackRepo anyMatch { SoftDeletableTrack::price gt 50.0 }
+        val includeDeletedQuery =
+            Query<SoftDeletablePlaylist>(
+                predicate = via,
+                orderBy = emptyList(),
+                limit = null,
+                offset = 0,
+                includeDeleted = true
+            )
+        val planner = QueryPlanner<SoftDeletablePlaylist>(isIndexed = { false }, indexNameFor = { it.name })
+        planner.strategyFor(via, playlistRepo) shouldBe ViaStrategy.PER_PARENT_LOOP
+
+        val iter = planner.executeViaSequence(via, playlistRepo, includeDeletedQuery).iterator()
+
+        // Advance one element so the iterator is mid-flight.
+        val firstYielded = iter.next().id
+        // Mutate the trackIds of every not-yet-yielded parent to an empty list mid-iteration.
+        // The live-read invariant means matches() reads parentProp.get(p) at yield time, so the
+        // mutation will be picked up on the very next yield.
+        val mutated = playlists.filter { it.id != firstYielded }
+        mutated.forEach { it.trackIds = mutableListOf() }
+
+        val drained = mutableListOf<Int>()
+        while (iter.hasNext()) drained.add(iter.next().id)
+
+        // Every mutated parent's matches() now reads an empty collection live, so none of them
+        // may appear in the drained tail. This proves the live-read invariant under includeDeleted.
+        drained shouldBe emptyList()
 
         ctx.close()
     }

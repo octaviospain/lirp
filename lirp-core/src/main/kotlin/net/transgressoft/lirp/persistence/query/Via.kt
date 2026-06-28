@@ -293,6 +293,20 @@ infix fun <TParent : IdentifiableEntity<*>, K : Comparable<K>, TChild : Identifi
     ViaWhere(parentProp, childRegistry, block())
 
 /**
+ * Whether [this] predicate node is one of the four cross-aggregate `Via*` leaves
+ * ([ViaAnyMatch], [ViaAllMatch], [ViaNoneMatch], [ViaWhere]).
+ *
+ * Canonical leaf test shared by the planner's `containsVia` / `detectTopLevelVia` and the
+ * executor's compound traversal, so a new `Via*` subtype is recognised everywhere by updating
+ * this single function.
+ */
+internal fun Predicate<*>.isViaLeaf(): Boolean =
+    this is ViaAnyMatch<*, *, *> ||
+        this is ViaAllMatch<*, *, *> ||
+        this is ViaNoneMatch<*, *, *> ||
+        this is ViaWhere<*, *, *>
+
+/**
  * Walks [predicate] counting nested `Via*` nodes; returns the maximum chain depth observed.
  *
  * `Predicate.And`/`Or`/`Not` are descended into but do not increment the count themselves.

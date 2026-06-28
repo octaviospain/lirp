@@ -506,7 +506,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
             val overlapping = insertIds intersect deleteIds
             if (overlapping.isEmpty()) return
 
-            val preExistingIds = buffer.entitySnapshots.keys
+            val preExistingIds = buffer.entitySnapshots.keys.toSet()
 
             for (id in overlapping) {
                 val insertedEntity = buffer.inserts.firstOrNull { it.id == id } ?: continue

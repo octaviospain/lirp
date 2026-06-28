@@ -184,7 +184,7 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
     private fun selectStrategyAndCandidates(
         pred: Predicate<T>?,
         registry: Registry<*, T>,
-        query: Query<T> = Query(null, emptyList(), null, 0)
+        query: Query<T> = activeOnlyQuery()
     ): SelectResult<T> {
         val base = baseSequence(registry, query)
         if (pred == null) return SelectResult(Strategy.SCAN_ONLY, emptyList(), 0, null, base)
@@ -199,21 +199,13 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
             // The NonVia arm of a hybrid And(NonVia, Via*) is post-filtered, so its leaves
             // count toward postFilterCount; a bare or multi-Via* predicate has none.
             //
-            // includeDeleted()/onlyDeleted() are not supported for Via queries: the parent
-            // enumeration inside ViaJoinExecutor uses Registry.iterator() which excludes
-            // soft-deleted parents, and threading the Query through the entire Via execution
-            // path would require invasive changes to ViaJoinExecutor's public API. Enforce
-            // this limitation explicitly so callers receive a clear error rather than silently
-            // wrong results.
-            check(!query.includeDeleted && !query.onlyDeleted) {
-                "Via queries do not support includeDeleted() or onlyDeleted(): soft-deleted parents " +
-                    "are not enumerated in the cross-aggregate join. Remove the visibility flag or use " +
-                    "a non-Via predicate to query soft-deleted entities."
-            }
+            // Visibility flags (includeDeleted/onlyDeleted) flow through to ViaJoinExecutor,
+            // which applies the same flag-scoped visible set to both parent enumeration and
+            // child resolution. The default (no-flag) active-only fast path is preserved.
             val viaStrat = strategyFor(pred, registry)
             val (nonViaArm, _) = splitHybridAnd(pred)
             val viaPostFilterCount = nonViaArm?.let { countLeaves(it) } ?: 0
-            return SelectResult(Strategy.SCAN_ONLY, emptyList(), viaPostFilterCount, viaStrat, executeViaPlan(pred, registry))
+            return SelectResult(Strategy.SCAN_ONLY, emptyList(), viaPostFilterCount, viaStrat, executeViaPlan(pred, registry, query))
         }
         val indexable = extractIndexableLeaves(pred)
         if (indexable.isEmpty()) {
@@ -256,7 +248,7 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
         pred: Predicate<T>,
         indexable: List<IndexableLeaf>,
         registry: Registry<*, T>,
-        query: Query<T> = Query(null, emptyList(), null, 0)
+        query: Query<T> = activeOnlyQuery()
     ): SelectResult<T> {
         // Use the internal non-copying index read when available (RegistryBase), falling back to the
         // public defensive-copy findByIndex for any other Registry implementation.
@@ -536,20 +528,19 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
      * `And`/`Or`/`Not`). Drives the cross-aggregate branch in [execute].
      */
     private fun containsVia(pred: Predicate<T>): Boolean =
-        when (pred) {
-            is ViaAnyMatch<*, *, *>, is ViaAllMatch<*, *, *>,
-            is ViaNoneMatch<*, *, *>, is ViaWhere<*, *, *> -> true
-            is Predicate.And<*> -> {
+        when {
+            pred.isViaLeaf() -> true
+            pred is Predicate.And<*> -> {
                 @Suppress("UNCHECKED_CAST")
                 val a = pred as Predicate.And<T>
                 containsVia(a.left) || containsVia(a.right)
             }
-            is Predicate.Or<*> -> {
+            pred is Predicate.Or<*> -> {
                 @Suppress("UNCHECKED_CAST")
                 val o = pred as Predicate.Or<T>
                 containsVia(o.left) || containsVia(o.right)
             }
-            is Predicate.Not<*> -> {
+            pred is Predicate.Not<*> -> {
                 @Suppress("UNCHECKED_CAST")
                 val n = pred as Predicate.Not<T>
                 containsVia(n.inner)
@@ -564,11 +555,7 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
      * (including multi-Via* compounds, `Or`-wrapped Via*, or Via* nested under `Not`).
      */
     private fun detectTopLevelVia(pred: Predicate<T>): Predicate<T>? =
-        when (pred) {
-            is ViaAnyMatch<*, *, *>, is ViaAllMatch<*, *, *>,
-            is ViaNoneMatch<*, *, *>, is ViaWhere<*, *, *> -> pred
-            else -> null
-        }
+        if (pred.isViaLeaf()) pred else null
 
     /**
      * Splits an outermost `And(NonVia, Via*)` (or `And(Via*, NonVia)`) into the pair
@@ -621,6 +608,12 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
         parentRegistry: Registry<*, T>,
         sampleCeiling: Int = 100
     ): ViaStrategy {
+        // Cardinality estimation intentionally samples the active-only registry view, even when the
+        // query carries includeDeleted()/onlyDeleted(). This is a performance hint only: both
+        // strategies return identical result sets under any visibility mode (the executor sources
+        // both from one flag-scoped sequence), so an estimate skewed by hidden soft-deleted entities
+        // can pick a worse plan but never a wrong result. Flag-scoped sampling is deferred as a
+        // future tuning refinement.
         val parentSize = parentRegistry.size()
         if (parentSize == 0) return ViaStrategy.PER_PARENT_LOOP
 
@@ -681,9 +674,13 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
      * @param parentRegistry the registry holding the parent entities
      * @return a lazy [Sequence] of parents matching the predicate under the chosen strategy
      */
-    internal fun executeViaSequence(predicate: Predicate<T>, parentRegistry: Registry<*, T>): Sequence<T> {
+    internal fun executeViaSequence(
+        predicate: Predicate<T>,
+        parentRegistry: Registry<*, T>,
+        query: Query<T> = activeOnlyQuery()
+    ): Sequence<T> {
         val normalised = normalize(predicate)
-        return executeViaPlan(normalised, parentRegistry)
+        return executeViaPlan(normalised, parentRegistry, query)
     }
 
     /**
@@ -703,10 +700,12 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
     /**
      * Core Via execution: delegates to [ViaJoinExecutor] which handles strategy dispatch
      * and all hash-join / per-parent-loop implementations. Strategy selection via
-     * [chooseStrategy] and the [ViaStrategy] enum remain in this class.
+     * [chooseStrategy] and the [ViaStrategy] enum remain in this class. The [query] is
+     * forwarded to the executor so visibility flags are applied to both parent enumeration
+     * and child resolution.
      */
-    private fun executeViaPlan(pred: Predicate<T>, parentRegistry: Registry<*, T>): Sequence<T> =
-        viaJoinExecutor.executeViaPlan(pred, parentRegistry, ::splitHybridAnd, ::chooseStrategy)
+    private fun executeViaPlan(pred: Predicate<T>, parentRegistry: Registry<*, T>, query: Query<*>): Sequence<T> =
+        viaJoinExecutor.executeViaPlan(pred, parentRegistry, ::splitHybridAnd, ::chooseStrategy, query.visibility())
 
     /**
      * Composes a [Comparator] from a list of [OrderClause]s.
