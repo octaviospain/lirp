@@ -126,6 +126,16 @@ See [Migration from 3.0.0 to 3.1.0](#migration-from-300-to-310) for upgrade step
   `event.childEvent` directly (which carries the full per-property detail and is unaffected by
   this change).
 
+### Fixed
+
+- **`transaction { }` deadlock when the block switches threads** — a `transaction(repo) { ... }`
+  whose body suspended and resumed on a different thread (for example via
+  `withContext(Dispatchers.IO) { ... }`) could leak the repository's flush lock, causing the next
+  `close()` (or a subsequent transaction) to block forever. The transaction critical section now
+  runs on a dedicated thread-pinned dispatcher (`ReactiveScope.transactionDispatcher`) so the
+  thread-owned flush lock is always released by its owning thread.
+  See [#292](https://github.com/octaviospain/lirp/issues/292).
+
 ## Migration from 3.0.0 to 3.1.0
 
 ### Replace `MutationEvent.Type.MUTATE` references

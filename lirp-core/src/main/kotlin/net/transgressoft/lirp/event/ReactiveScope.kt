@@ -18,10 +18,13 @@
 package net.transgressoft.lirp.event
 
 import io.github.oshai.kotlinlogging.KotlinLogging
+import java.util.concurrent.Executors
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 
 /**
  * Centralized manager for coroutine scopes used throughout the reactive system.
@@ -84,11 +87,37 @@ object ReactiveScope {
      */
     var ioScope: CoroutineScope = defaultIoScope
 
+    /**
+     * Single-thread, thread-pinned dispatcher dedicated to the explicit `transaction { }`
+     * critical section.
+     *
+     * [ioScope] uses `Dispatchers.IO.limitedParallelism(1)`, which serializes coroutines but may
+     * resume a suspended coroutine on a different physical thread of the shared I/O pool. The
+     * transaction commit path holds a thread-owned [java.util.concurrent.locks.ReentrantLock]
+     * across a suspending user block (which may itself switch dispatchers), so its acquire and
+     * release must occur on the same thread — a migrating dispatcher would release the lock from a
+     * non-owner thread, throw `IllegalMonitorStateException`, and leak the lock. This dispatcher
+     * pins that lifecycle to one daemon thread, guaranteeing same-thread lock ownership.
+     */
+    private val defaultTransactionDispatcher: CoroutineDispatcher =
+        Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "lirp-transaction").apply { isDaemon = true }
+        }.asCoroutineDispatcher()
+
+    /**
+     * Dispatcher used to run the explicit `transaction { }` lifecycle on a pinned thread.
+     */
+    var transactionDispatcher: CoroutineDispatcher = defaultTransactionDispatcher
+
     fun resetDefaultFlowScope() {
         flowScope = defaultFlowScope
     }
 
     fun resetDefaultIoScope() {
         ioScope = defaultIoScope
+    }
+
+    fun resetDefaultTransactionDispatcher() {
+        transactionDispatcher = defaultTransactionDispatcher
     }
 }
