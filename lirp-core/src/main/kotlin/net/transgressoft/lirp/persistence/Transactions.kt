@@ -105,12 +105,21 @@ suspend fun <K : Comparable<K>, R : ReactiveEntity<K, R>> transaction(
     // coroutine from contending for the lock while the transaction holds it.
     repo.cancelDebounce()
 
-    // Run the entire transaction on the IO scope.
+    // Run the entire transaction on the dedicated, thread-pinned transaction dispatcher.
     // Because the block is suspend and Kotlin forbids suspending inside withLock { }, the
-    // flush lock is managed with explicit lock/unlock under a try/finally.
-    // The IO scope's single-thread constraint (limitedParallelism = 1) ensures the
-    // thread-local activeTransactionCount and per-entity _txEventBuffer checks are reliable.
-    withContext(ReactiveScope.ioScope.coroutineContext + activeTransactionCount.asContextElement(activeTransactionCount.get())) {
+    // flush lock is managed with explicit lock/unlock under a try/finally. [flushLock] is a
+    // thread-owned ReentrantLock, so its acquire (lockFlush) and release (unlockFlush) MUST run
+    // on the same thread even though the user block may suspend and switch dispatchers. ioScope's
+    // limitedParallelism(1) dispatcher serializes coroutines but can resume them on a different
+    // pool thread, which would release the lock from a non-owner thread and leak it; the pinned
+    // [ReactiveScope.transactionDispatcher] guarantees same-thread lock ownership. ioScope's Job and
+    // exception-handler are retained (only the dispatcher is swapped). The single-thread guarantee
+    // also keeps the thread-local activeTransactionCount and per-entity _txEventBuffer checks reliable.
+    withContext(
+        ReactiveScope.ioScope.coroutineContext.minusKey(kotlin.coroutines.ContinuationInterceptor) +
+            ReactiveScope.transactionDispatcher +
+            activeTransactionCount.asContextElement(activeTransactionCount.get())
+    ) {
         repo.lockFlush()
         // The lock is acquired outside the try only on the line above; everything that can throw —
         // including snapshot capture and event-buffer installation — runs inside so the finally

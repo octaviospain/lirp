@@ -34,6 +34,7 @@ import io.kotest.matchers.types.shouldBeInstanceOf
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 
 /**
@@ -328,6 +329,32 @@ internal class TransactionTest : StringSpec() {
                 repo.size() shouldBe 0
             } finally {
                 repo.close()
+            }
+        }
+
+        "cross-thread transaction releases the flush lock so later transactions and close do not deadlock" {
+            // Regression guard: the transaction holds a thread-owned flush lock across the suspending
+            // block. When the block switches dispatchers, the lock must be released on its owning
+            // thread; otherwise it leaks and the next flush-lock acquisition (a later transaction or
+            // close()) blocks forever. withTimeout turns a regression into a fast failure instead of a
+            // hung suite.
+            withTimeout(10_000) {
+                val repo = InMemoryAudioItemRepo()
+                repo.create(30, "Don't Stop Me Now", "Jazz")
+                try {
+                    transaction(repo) { r ->
+                        withContext(Dispatchers.IO) { yield() }
+                        (r.findById(30).get() as MutableAudioItem).title = "Somebody to Love"
+                    }
+                    // Would hang here if the first cross-thread transaction leaked the flush lock.
+                    transaction(repo) { r ->
+                        withContext(Dispatchers.Default) { yield() }
+                        (r.findById(30).get() as MutableAudioItem).title = "Under Pressure"
+                    }
+                    repo.findById(30).shouldBePresent { it.title shouldBe "Under Pressure" }
+                } finally {
+                    repo.close()
+                }
             }
         }
     }

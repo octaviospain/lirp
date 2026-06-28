@@ -194,10 +194,13 @@ public final class net/transgressoft/lirp/event/ReactiveScope {
 	public static final field INSTANCE Lnet/transgressoft/lirp/event/ReactiveScope;
 	public final fun getFlowScope ()Lkotlinx/coroutines/CoroutineScope;
 	public final fun getIoScope ()Lkotlinx/coroutines/CoroutineScope;
+	public final fun getTransactionDispatcher ()Lkotlinx/coroutines/CoroutineDispatcher;
 	public final fun resetDefaultFlowScope ()V
 	public final fun resetDefaultIoScope ()V
+	public final fun resetDefaultTransactionDispatcher ()V
 	public final fun setFlowScope (Lkotlinx/coroutines/CoroutineScope;)V
 	public final fun setIoScope (Lkotlinx/coroutines/CoroutineScope;)V
+	public final fun setTransactionDispatcher (Lkotlinx/coroutines/CoroutineDispatcher;)V
 }
 
 public final class net/transgressoft/lirp/event/StandardAggregateMutationEvent : net/transgressoft/lirp/event/AggregateMutationEvent {
