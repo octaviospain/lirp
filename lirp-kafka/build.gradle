@@ -1,0 +1,58 @@
+description = 'LIRP Kafka - Transactional Outbox Event Publishing for Kafka'
+
+sourceSets {
+    integrationTest {
+        kotlin.srcDirs = ['src/integrationTest/kotlin']
+        resources.srcDirs = ['src/integrationTest/resources']
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+configurations {
+    integrationTestImplementation.extendsFrom implementation
+    integrationTestRuntimeOnly.extendsFrom runtimeOnly
+}
+
+dependencies {
+    api project(':lirp-api')
+    implementation project(':lirp-sql')             // brings lirp-core + lirp-sql-api transitively
+
+    implementation libs.kafka.clients
+    implementation libs.coroutines.core
+    implementation libs.kotlin.logging
+    implementation libs.serialization.json
+
+    testImplementation platform(libs.junit.bom)
+    testImplementation libs.bundles.kotest
+    testImplementation libs.coroutines.test
+    testImplementation libs.junit.jupiter
+    testRuntimeOnly libs.junit.platform.launcher
+
+    integrationTestImplementation platform(libs.junit.bom)
+    integrationTestImplementation libs.bundles.kotest
+    integrationTestImplementation libs.kotest.extensions.testcontainers
+    integrationTestImplementation libs.testcontainers.kafka
+    integrationTestImplementation libs.coroutines.test
+    integrationTestImplementation libs.junit.jupiter
+    integrationTestRuntimeOnly libs.junit.platform.launcher
+
+    integrationTestImplementation testFixtures(project(':lirp-core'))
+    integrationTestImplementation testFixtures(project(':lirp-sql'))
+}
+
+tasks.register('integrationTest', Test) {
+    description = 'Runs Kafka integration tests.'
+    group = 'verification'
+    testClassesDirs = sourceSets.integrationTest.output.classesDirs
+    classpath = sourceSets.integrationTest.runtimeClasspath
+    useJUnitPlatform()
+    shouldRunAfter test
+}
+
+check.dependsOn integrationTest
+
+jacocoTestReport {
+    dependsOn test, integrationTest
+    executionData fileTree(layout.buildDirectory.get().asFile).include('jacoco/*.exec')
+}
