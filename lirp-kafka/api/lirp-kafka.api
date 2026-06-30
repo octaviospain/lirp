@@ -1,0 +1,18 @@
+public final class net/transgressoft/lirp/kafka/KafkaEventPublisher : java/lang/AutoCloseable {
+	public fun <init> (Ljava/lang/String;)V
+	public fun close ()V
+	public final fun publish (Ljava/lang/String;Ljava/lang/String;[B)V
+}
+
+public final class net/transgressoft/lirp/kafka/LirpKafkaConfig : java/lang/AutoCloseable {
+	public static final field Companion Lnet/transgressoft/lirp/kafka/LirpKafkaConfig$Companion;
+	public synthetic fun <init> (Ljava/lang/String;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun close ()V
+	public final fun getBootstrapServers ()Ljava/lang/String;
+	public final fun publisher ()Lnet/transgressoft/lirp/kafka/KafkaEventPublisher;
+}
+
+public final class net/transgressoft/lirp/kafka/LirpKafkaConfig$Companion {
+	public final fun create (Ljava/lang/String;)Lnet/transgressoft/lirp/kafka/LirpKafkaConfig;
+}
+
