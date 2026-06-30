@@ -44,9 +44,13 @@ public class net/transgressoft/lirp/persistence/sql/SqlRepository : net/transgre
 	public fun close ()V
 	public fun commitTransactionBuffer (Lnet/transgressoft/lirp/persistence/TransactionBuffer;)V
 	protected fun extractVersion (Lnet/transgressoft/lirp/entity/ReactiveEntity;)Ljava/lang/Long;
+	protected final fun getDb ()Lorg/jetbrains/exposed/v1/jdbc/Database;
+	protected final fun getExposedTable ()Lnet/transgressoft/lirp/persistence/sql/ExposedTable;
 	public final fun installEntityForeignKeys ()V
 	public final fun installJunctionForeignKeys ()V
 	protected fun loadFromStore ()Ljava/util/Map;
+	protected fun onAfterEntityWritesInTransaction (Lnet/transgressoft/lirp/persistence/TransactionBuffer;)V
+	protected fun onAfterEntityWritesInWritePending (Ljava/util/List;Ljava/util/List;Ljava/util/List;)V
 	protected fun onEntityMutated (Lnet/transgressoft/lirp/event/MutationEvent;)V
 	protected fun writePending (Ljava/util/List;Ljava/util/List;Ljava/util/List;Z)V
 }

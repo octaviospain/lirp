@@ -18,6 +18,9 @@ dependencies {
     api project(':lirp-api')
     implementation project(':lirp-sql')             // brings lirp-core + lirp-sql-api transitively
 
+    implementation platform(libs.exposed.bom)
+    implementation libs.exposed.jdbc               // exposed-jdbc is implementation in lirp-sql, so not transitive
+
     implementation libs.kafka.clients
     implementation libs.coroutines.core
     implementation libs.kotlin.logging
@@ -27,6 +30,10 @@ dependencies {
     testImplementation libs.bundles.kotest
     testImplementation libs.coroutines.test
     testImplementation libs.junit.jupiter
+    testImplementation libs.h2
+    testImplementation libs.hikari
+    testImplementation testFixtures(project(':lirp-core'))
+    testImplementation testFixtures(project(':lirp-sql'))
     testRuntimeOnly libs.junit.platform.launcher
 
     integrationTestImplementation platform(libs.junit.bom)
@@ -37,6 +44,8 @@ dependencies {
     integrationTestImplementation libs.junit.jupiter
     integrationTestRuntimeOnly libs.junit.platform.launcher
 
+    integrationTestImplementation libs.hikari
+    integrationTestImplementation libs.h2
     integrationTestImplementation testFixtures(project(':lirp-core'))
     integrationTestImplementation testFixtures(project(':lirp-sql'))
 }

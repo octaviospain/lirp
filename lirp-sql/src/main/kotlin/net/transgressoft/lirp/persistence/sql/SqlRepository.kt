@@ -87,7 +87,9 @@ private class ConflictRollbackSignal : Exception()
  * **Non-guarantees:**
  * - No multi-aggregate transactions. Each `SqlRepository` transacts only over its own table.
  * - No saga orchestration. Consumers compose cross-aggregate workflows via `CrudEvent` subscribers.
- * - No outbox pattern. `CrudEvent`s go directly to subscribers; durable event logs are a consumer concern.
+ * - No built-in outbox. `CrudEvent`s go directly to subscribers; durable event capture is opt-in
+ *   through the `onAfterEntityWritesInTransaction` / `onAfterEntityWritesInWritePending` hooks, which
+ *   let a subclass persist events atomically with the entity flush.
  *
  * See the wiki page "Transactional Boundaries" for prose and a saga/compensation example.
  *
@@ -169,11 +171,23 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     ) : this(buildDataSource(jdbcUrl, poolSize, schema), tableDef, true, loadOnInit, onError)
 
     private val interpreter = ExposedTableInterpreter()
-    private val exposedTable: ExposedTable = interpreter.interpret(tableDef)
+
+    /**
+     * The interpreted Exposed table for this repository's entity. Exposed to subclasses so
+     * template-method hooks can reuse it (e.g. for field-snapshot extraction) instead of
+     * re-interpreting the same [SqlTableDef].
+     */
+    protected val exposedTable: ExposedTable = interpreter.interpret(tableDef)
     private val table: Table = exposedTable.table
     private val pkCol: Column<*> = exposedTable.columnsByName.getValue(tableDef.columns.first { it.primaryKey }.name)
     private val versionCol: Column<Long>? = exposedTable.versionCol
-    private val db: Database = Database.connect(dataSource)
+
+    /**
+     * The Exposed [Database] bound to this repository's [dataSource]. Exposed to subclasses so
+     * one-time setup (such as auxiliary-table DDL) can run on the same connection registration
+     * the repository already holds, rather than opening a second one.
+     */
+    protected val db: Database = Database.connect(dataSource)
     private val log = KotlinLogging.logger(javaClass.name)
     private val schemaInstaller: SqlSchemaInstaller<K, R>
     private val entityLoader: SqlEntityLoader<K, R>
@@ -413,6 +427,16 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                 deletes.size > 1 -> writePipeline.executeBatchDeleteList(deletes, conflicts)
                 deletes.size == 1 -> writePipeline.executeDeleteSingle(deletes.first(), conflicts)
             }
+            // Optimistic-lock conflicts are accumulated rather than thrown here, so the transaction
+            // still commits the non-conflicting writes. Exclude the conflicted entities from the
+            // capture hook: their UPDATE/DELETE affected zero rows, so a subclass must not record an
+            // event for a state change the database rejected. Inserts never conflict.
+            val conflictedIds = conflicts.mapTo(mutableSetOf()) { it.id }
+            onAfterEntityWritesInWritePending(
+                inserts,
+                updates.filterNot { it.entity.id in conflictedIds },
+                deletes.filterNot { it.first in conflictedIds }
+            )
         }
         // The main transaction has committed. Recover every accumulated conflict outside it.
         recoverConflicts(conflicts)
@@ -474,6 +498,7 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                     bufferDeletePairs.size > 1 -> writePipeline.executeBatchDeleteList(bufferDeletePairs, conflicts)
                     bufferDeletePairs.size == 1 -> writePipeline.executeDeleteSingle(bufferDeletePairs.first(), conflicts)
                 }
+                onAfterEntityWritesInTransaction(buffer)
                 if (conflicts.isNotEmpty()) throw ConflictRollbackSignal()
             }
         } catch (signal: ConflictRollbackSignal) {
@@ -509,6 +534,44 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
 
         dirty.set(false)
     }
+
+    /**
+     * Called from inside the `transaction(db = db) { }` block of [commitTransactionBuffer], after all
+     * entity inserts, updates, and deletes have been written and before the transaction closes.
+     *
+     * Because this hook runs inside an active Exposed transaction on the same thread-bound JDBC
+     * connection, any Exposed DSL executed here — such as inserting rows into a side table — participates
+     * in the same JDBC commit. A throw from this hook rolls back both the entity writes and any rows
+     * written by the hook atomically.
+     *
+     * The default implementation is a no-op, leaving vanilla [SqlRepository] behavior unchanged.
+     * Subclasses override this method to co-write rows in the same transaction.
+     *
+     * @param buffer The transaction buffer containing the inserts, updates, and deletes being committed.
+     */
+    protected open fun onAfterEntityWritesInTransaction(buffer: TransactionBuffer<K, R>) = Unit
+
+    /**
+     * Called from inside the `transaction(db = db) { }` block of [writePending], after all
+     * entity inserts, updates, and deletes have been written and before the transaction closes.
+     *
+     * Because this hook runs inside an active Exposed transaction on the same thread-bound JDBC
+     * connection, any Exposed DSL executed here — such as inserting rows into a side table — participates
+     * in the same JDBC commit. A throw from this hook rolls back both the entity writes and any rows
+     * written by the hook atomically.
+     *
+     * The default implementation is a no-op, leaving vanilla [SqlRepository] behavior unchanged.
+     * Subclasses override this method to co-write rows in the same transaction.
+     *
+     * @param inserts Entities being inserted in this flush cycle.
+     * @param updates Pending updates carrying the entity and expected version for optimistic locking.
+     * @param deletes Pairs of entity key and expected version for deletions.
+     */
+    protected open fun onAfterEntityWritesInWritePending(
+        inserts: List<R>,
+        updates: List<PendingUpdate<K, R>>,
+        deletes: List<Pair<K, Long?>>
+    ) = Unit
 
     /**
      * Validates that all cascade target repositories reachable from the entities in [buffer] are

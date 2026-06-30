@@ -4,6 +4,11 @@ public final class net/transgressoft/lirp/kafka/KafkaEventPublisher : java/lang/
 	public final fun publish (Ljava/lang/String;Ljava/lang/String;[B)V
 }
 
+public final class net/transgressoft/lirp/kafka/KafkaOutboxSqlRepository : net/transgressoft/lirp/persistence/sql/SqlRepository {
+	public fun <init> (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;Z)V
+	public synthetic fun <init> (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+}
+
 public final class net/transgressoft/lirp/kafka/LirpKafkaConfig : java/lang/AutoCloseable {
 	public static final field Companion Lnet/transgressoft/lirp/kafka/LirpKafkaConfig$Companion;
 	public synthetic fun <init> (Ljava/lang/String;Lkotlin/jvm/internal/DefaultConstructorMarker;)V

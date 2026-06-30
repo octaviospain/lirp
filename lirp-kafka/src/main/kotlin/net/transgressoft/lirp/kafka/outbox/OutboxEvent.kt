@@ -1,5 +1,5 @@
 /******************************************************************************
- *     Copyright (C) 2025  Octavio Calleya Garcia                             *
+ *     Copyright (C) 2026  Octavio Calleya Garcia                             *
  *                                                                            *
  *     This program is free software: you can redistribute it and/or modify   *
  *     it under the terms of the GNU General Public License as published by   *
@@ -17,44 +17,40 @@
 
 package net.transgressoft.lirp.kafka.outbox
 
-import java.time.Instant
 import java.util.UUID
+import kotlin.time.Instant
 
 /**
  * Represents a single pending outbox record awaiting relay to Kafka.
  *
- * Instances are created during a committed entity transaction and consumed by the relay
- * process. All scalar fields are immutable after creation. The [payload] field is a
- * [ByteArray]: callers must not mutate the array after passing it to the constructor,
- * and [copy] shares the same array reference — treat the bytes as read-only once the
- * record is created. Equality and hashing are based solely on [id] to avoid issues with
- * [ByteArray] structural equality.
+ * Each instance captures one entity change — create, update, or delete — together with a
+ * serializer-neutral JSON field snapshot of the entity's persisted column values at the time the
+ * change was committed. The relay process reads these records via [OutboxStore] and encodes
+ * [payload] into the wire format before publishing to Kafka.
  *
- * Use [OutboxEvent.of] to construct instances with an automatic defensive copy of the
- * payload bytes.
+ * The [payload] is a JSON object whose keys are SQL column names and whose values are the
+ * entity's field values at capture time, matching exactly what the SQL persistence layer wrote.
+ * Consumers that need field-level encryption or transformation should apply it at the persistence
+ * mapping level so that both the SQL row and the outbox payload remain consistent.
+ *
+ * The [eventTypeCode] maps directly to [net.transgressoft.lirp.event.EventType.code], covering
+ * standard CRUD codes (100 = Create, 300 = Update, 400 = Delete), mutation codes
+ * (302 = PropertyChanged, 303 = BatchChanged), and any consumer-defined custom codes.
+ *
+ * Equality and hashing are based solely on [id] to guarantee stable set membership regardless
+ * of relay-managed fields such as [retryCount] and [lastError].
  */
 internal data class OutboxEvent(
     val id: UUID,
     val aggregateType: String,
     val aggregateId: String,
-    val eventTypeCode: String,
-    val payload: ByteArray,
+    val eventTypeCode: Int,
+    val payload: String,
     val createdAt: Instant,
-    val sentAt: Instant? = null
+    val sentAt: Instant? = null,
+    val retryCount: Int = 0,
+    val lastError: String? = null
 ) {
-    companion object {
-        /** Creates an [OutboxEvent] with a defensive copy of [payload]. */
-        fun of(
-            id: UUID,
-            aggregateType: String,
-            aggregateId: String,
-            eventTypeCode: String,
-            payload: ByteArray,
-            createdAt: Instant,
-            sentAt: Instant? = null
-        ) = OutboxEvent(id, aggregateType, aggregateId, eventTypeCode, payload.copyOf(), createdAt, sentAt)
-    }
-
     override fun equals(other: Any?): Boolean =
         other is OutboxEvent && id == other.id
 
