@@ -1,0 +1,51 @@
+direction: right
+
+title: Projection Map Architecture {
+    near: top-center
+    shape: text
+    style.font-size: 24
+    style.bold: true
+}
+
+sources: "Source (read-only input)" {
+    style.fill: "#e3f2fd"
+    aggregate: "Aggregate collection\nowned by an entity\n(aggregateList / aggregateSet)"
+    registry: "Registry (repository)\nentire entity set"
+}
+
+drivers: "Change driver" {
+    style.fill: "#fff8e1"
+    collEvent: "CollectionChangeEvent\n(no registration held)"
+    crudSub: "CrudEvent subscription\n(AutoCloseable)"
+}
+
+projections: "Projection — Map<PK, List<E>>\nConcurrentSkipListMap backing\n(sorted keys, CME-free reads, lazy init)" {
+    style.fill: "#e8f5e9"
+    core: "lirp-core\nprojection / registryProjection"
+    fx: "lirp-fx (ObservableMap)\nfxProjection / registryFxProjection"
+}
+
+capabilities: "Optional capabilities\n(compose on every variant)" {
+    style.fill: "#f3e5f5"
+    transform: "Value transform\n(album, items) -> V"
+    multikey: "Multi-key\none entity -> many buckets"
+    ordering: "Per-bucket entryOrdering\n(registry source)"
+}
+
+sources.aggregate -> drivers.collEvent
+sources.registry -> drivers.crudSub
+drivers.collEvent -> projections.core: "aggregate source"
+drivers.crudSub -> projections.core: "registry source"
+projections.core -> projections.fx: "fx-prefixed siblings"
+projections -> capabilities: "layer on"
+
+notes: Notes {
+    near: bottom-center
+    shape: text
+    style.font-size: 13
+    |md
+    - A projection holds no IDs and is not an aggregate — it is a derived read-only view of another collection's content.
+    - Registry-source projections hold a live subscription and are `AutoCloseable`; aggregate-source projections own no registration.
+    - Registry-source variants reflect in-place key-set changes via the `UPDATE` path; aggregate-source variants do not.
+    |
+}

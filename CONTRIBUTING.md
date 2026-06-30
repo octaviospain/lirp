@@ -16,7 +16,7 @@ Thank you for your interest in contributing to lirp! This document provides guid
 
 ## Code of Conduct
 
-This project adheres to a Code of Conduct that sets expectations for participation. By participating, you are expected to uphold this code. Please report unacceptable behavior to [your-email@example.com].
+This project adheres to a Code of Conduct that sets expectations for participation. By participating, you are expected to uphold this code. Please report unacceptable behavior to octavio@transgressoft.net.
 
 ## How Can I Contribute?
 

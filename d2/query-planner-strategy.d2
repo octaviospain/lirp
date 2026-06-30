@@ -1,0 +1,73 @@
+direction: down
+
+title: Query Planner Strategy Selection {
+    near: top-center
+    shape: text
+    style.font-size: 24
+    style.bold: true
+}
+
+predicate: "Query predicate" {
+    shape: oval
+    style.fill: "#e3f2fd"
+}
+
+via: "Contains a cross-aggregate\n`via` arm?" {
+    shape: diamond
+    style.fill: "#fff8e1"
+}
+
+single: "Single `Via*` arm?" {
+    shape: diamond
+    style.fill: "#fff8e1"
+}
+
+leaves: "How are the leaf predicates indexed?" {
+    shape: diamond
+    style.fill: "#fff8e1"
+}
+
+indexOnly: "INDEX_ONLY\nevery leaf is an indexed `eq`\n→ read from secondary indexes,\nzero re-filtering" {
+    style.fill: "#e8f5e9"
+}
+indexThenFilter: "INDEX_THEN_FILTER\nsome leaves indexed `eq`, others not\n(also OR / NOT fallback)\n→ index the eq leaves, post-filter the rest" {
+    style.fill: "#e8f5e9"
+}
+scanOnly: "SCAN_ONLY\nno indexed `eq` leaves\n→ full in-memory scan" {
+    style.fill: "#e8f5e9"
+}
+
+sample: "Cardinality sample\n(up to 100 parents, fresh per query)" {
+    shape: diamond
+    style.fill: "#fff8e1"
+}
+hashJoin: "HASH_JOIN\nmatchingChildCount <\nparentSize × avgRefsPerParent\n→ build matching-child id set,\nscan parents and intersect" {
+    style.fill: "#f3e5f5"
+}
+perParentLoop: "PER_PARENT_LOOP\nfew parents / unselective child predicate,\nempty parent registry, or multi-`Via*` arm\n→ iterate parents, resolve children, evaluate" {
+    style.fill: "#f3e5f5"
+}
+
+predicate -> via
+via -> leaves: "no"
+via -> single: "yes"
+
+leaves -> indexOnly
+leaves -> indexThenFilter
+leaves -> scanOnly
+
+single -> sample: "yes"
+single -> perParentLoop: "no (compound)"
+sample -> hashJoin: "selective child set"
+sample -> perParentLoop: "otherwise"
+
+notes: Notes {
+    near: bottom-center
+    shape: text
+    style.font-size: 13
+    |md
+    - The single-property strategy and the `via` strategy are chosen independently per query; neither is cached.
+    - `HASH_JOIN` and `PER_PARENT_LOOP` always return identical result sets under every visibility mode.
+    - `explainQuery` / `queryWithDiagnostics` report the chosen strategy without running side effects.
+    |
+}

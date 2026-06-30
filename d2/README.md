@@ -22,6 +22,10 @@ This directory contains [D2](https://d2lang.com) diagram source files — the si
 | `junction-table.d2` | Junction-table layout for collection aggregates (parent/item FK cascade policies) |
 | `optimistic-lock-conflict.d2` | Sequence: versioned UPDATE → zero rows → re-SELECT → reconcile → `Conflict` event |
 | `sqlite-factory.d2` | SQLite factory selection (fileBacked vs inMemory), pool pinning, and PRAGMA bundle |
+| `query-planner-strategy.d2` | Decision tree: `INDEX_ONLY` / `INDEX_THEN_FILTER` / `SCAN_ONLY` and the `via` `HASH_JOIN` / `PER_PARENT_LOOP` split |
+| `saga-compensation.d2` | Sequence: cross-aggregate saga forward step and `Conflict`-driven compensation |
+| `projection-architecture.d2` | Projection map architecture: aggregate vs registry source, core vs fx flavour, optional capabilities |
+| `fx-thread-dispatch.d2` | JavaFX notification routing for `dispatchToFxThread` true/false |
 
 ## Local Rendering
 

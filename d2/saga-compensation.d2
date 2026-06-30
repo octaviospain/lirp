@@ -1,0 +1,49 @@
+direction: down
+
+title: Cross-Aggregate Saga with Compensation {
+    near: top-center
+    shape: text
+    style.font-size: 24
+    style.bold: true
+}
+
+flow: "" {
+    shape: sequence_diagram
+
+    caller: "caller"
+    orderRepo: "orderRepo"
+    customerRepo: "customerRepo"
+    subs: "subscribers"
+
+    caller -> orderRepo: "add(order)" {
+        style.bold: true
+    }
+    orderRepo -> subs: "emit Create<Order>"
+
+    subs -> customerRepo: "forward: findById(order.customerId)\ncustomer.orderCount += 1\n(optimistic mutation)" {
+        style.bold: true
+    }
+
+    customerRepo -> customerRepo: "versioned UPDATE\nWHERE version = expected"
+    customerRepo -> subs: "emit Conflict<Customer>\n(concurrent writer won)" {
+        style.stroke: "#c62828"
+        style.bold: true
+    }
+
+    subs -> orderRepo: "compensation: remove(order)\nwhere version == 0L" {
+        style.stroke: "#1565c0"
+        style.bold: true
+    }
+}
+
+notes: Notes {
+    near: bottom-center
+    shape: text
+    style.font-size: 13
+    |md
+    - LIRP provides no multi-aggregate transaction; the saga is composed from `CrudEvent` subscribers.
+    - `subscribeAsync` delivers on a coroutine, so cross-aggregate mutations never block the writer.
+    - The forward step is optimistic; the compensation step is driven solely by the `Conflict` event.
+    - There is no orchestrator, outbox, or distributed coordination — compensation logic is the consumer's responsibility.
+    |
+}

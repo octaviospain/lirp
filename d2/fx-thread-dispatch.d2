@@ -1,0 +1,49 @@
+direction: down
+
+title: JavaFX Notification Dispatch {
+    near: top-center
+    shape: text
+    style.font-size: 24
+    style.bold: true
+}
+
+mutation: "Mutation on an fx delegate\n(scalar set or collection change)" {
+    shape: oval
+    style.fill: "#e3f2fd"
+}
+
+flag: "dispatchToFxThread?" {
+    shape: diamond
+    style.fill: "#fff8e1"
+}
+
+onThread: "Already on the\nFX Application Thread?" {
+    shape: diamond
+    style.fill: "#fff8e1"
+}
+
+sync: "Fire JavaFX listeners synchronously\non the calling (FX) thread" {
+    style.fill: "#e8f5e9"
+}
+runLater: "Re-dispatch JavaFX listeners\nvia Platform.runLater" {
+    style.fill: "#e8f5e9"
+}
+flowScope: "Dispatch JavaFX listeners and\nlirp CollectionChangeEvent together\non ReactiveScope.flowScope (async)" {
+    style.fill: "#f3e5f5"
+}
+
+mutation -> flag
+flag -> onThread: "true (default)"
+flag -> flowScope: "false"
+onThread -> sync: "yes"
+onThread -> runLater: "no"
+
+notes: Notes {
+    near: bottom-center
+    shape: text
+    style.font-size: 13
+    |md
+    - `true` keeps JavaFX listeners on the FX thread, satisfying the JavaFX threading contract for UI bindings.
+    - `false` routes both JavaFX listeners and lirp events through the same `flowScope`, for a consistent asynchronous model off the UI thread.
+    |
+}

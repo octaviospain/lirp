@@ -1,18 +1,38 @@
+[![License](https://img.shields.io/github/license/octaviospain/lirp)](https://www.gnu.org/licenses/gpl-3.0)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.4.0-blue?logo=kotlin)](https://kotlinlang.org)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/octaviospain/lirp)
+[![lirp-api javadoc](https://javadoc.io/badge2/net.transgressoft/lirp-api/javadoc.svg?label=lirp-api%20javadoc)](https://javadoc.io/doc/net.transgressoft/lirp-api)
+[![lirp-core javadoc](https://javadoc.io/badge2/net.transgressoft/lirp-core/javadoc.svg?label=lirp-core%20javadoc)](https://javadoc.io/doc/net.transgressoft/lirp-core)
+[![lirp-sql javadoc](https://javadoc.io/badge2/net.transgressoft/lirp-sql/javadoc.svg?label=lirp-sql%20javadoc)](https://javadoc.io/doc/net.transgressoft/lirp-sql)
+[![lirp-fx javadoc](https://javadoc.io/badge2/net.transgressoft/lirp-fx/javadoc.svg?label=lirp-fx%20javadoc)](https://javadoc.io/doc/net.transgressoft/lirp-fx)
 ![Maven Central Version](https://img.shields.io/maven-central/v/net.transgressoft/lirp-api)
-![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/octaviospain/lirp/.github%2Fworkflows%2Fmaster.yml?logo=github)
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=octaviospain_lirp&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=octaviospain_lirp)
 [![Bugs](https://sonarcloud.io/api/project_badges/measure?project=octaviospain_lirp&metric=bugs)](https://sonarcloud.io/summary/new_code?id=octaviospain_lirp)
 [![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=octaviospain_lirp&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=octaviospain_lirp)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=octaviospain_lirp&metric=coverage)](https://sonarcloud.io/summary/new_code?id=octaviospain_lirp)
 [![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=octaviospain_lirp&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=octaviospain_lirp)
-[![Duplicated Lines (%)](https://sonarcloud.io/api/project_badges/measure?project=octaviospain_lirp&metric=duplicated_lines_density)](https://sonarcloud.io/summary/new_code?id=octaviospain_lirp)
 [![Technical Debt](https://sonarcloud.io/api/project_badges/measure?project=octaviospain_lirp&metric=sqale_index)](https://sonarcloud.io/summary/new_code?id=octaviospain_lirp)
 [![Vulnerabilities](https://sonarcloud.io/api/project_badges/measure?project=octaviospain_lirp&metric=vulnerabilities)](https://sonarcloud.io/summary/new_code?id=octaviospain_lirp)
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/octaviospain/lirp/.github%2Fworkflows%2Fmaster.yml?logo=github)
 
 # LIRP - Lightweight Reactive Persistence
 
 A Kotlin/Java library where domain entities own their reactivity — property changes automatically notify subscribers, and repositories persist transparently.
+
+## Contents
+
+- [What is LIRP?](#what-is-lirp)
+- [Why LIRP?](#why-lirp)
+- [Quick Start](#quick-start)
+- [SQL Persistence](#sql-persistence)
+- [Query DSL](#query-dsl)
+- [Features](#features)
+- [Limitations and Design Trade-offs](#limitations-and-design-trade-offs)
+- [Performance](#performance)
+- [Logging](#logging)
+- [Upgrading](#upgrading-to-v310)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [License and Attributions](#license-and-attributions)
 
 ## What is LIRP?
 
@@ -32,7 +52,7 @@ LIRP solves a specific problem: **most reactive libraries make you wire streams 
 
 LIRP's sweet spot: **small-to-medium datasets where entities need both reactivity and persistence with zero boilerplate** — configuration stores, user preferences, catalog management, any bounded context where the working set fits in memory.
 
-Built on Kotlin Coroutines and Kotlin Serialization. Targets **JVM 21 toolchain, JVM 17+ runtime, Kotlin 2.3.10**.
+Built on Kotlin Coroutines and Kotlin Serialization. Targets **JVM 21 toolchain, JVM 17+ runtime, Kotlin 2.4.0**.
 
 ## Quick Start
 
@@ -435,11 +455,16 @@ The **[LIRP Wiki](https://github.com/octaviospain/lirp/wiki)** is the canonical 
 | [DDD & Aggregates](https://github.com/octaviospain/lirp/wiki/DDD-and-Aggregates) | `@ToOneAggregate`, `@ToManyAggregates`, `polymorphicAggregate`, collection delegates, cascade, bubble-up, `CollectionChangeEvent`, app-side ↔ SQL FK mapping |
 | [Persistence](https://github.com/octaviospain/lirp/wiki/Persistence) | Repository hierarchy, `PersistentRepositoryBase`, debounced write pipeline, deferred loading |
 | [SQL Persistence](https://github.com/octaviospain/lirp/wiki/SQL-Persistence) | `SqlRepository`, entity annotations, type mapping, dialect support, batch SQL, foreign keys & junction tables, deferred FK installation |
+| [SQL Mappings](https://github.com/octaviospain/lirp/wiki/SQL-Mappings) | Column types, custom converters, embeddable value objects, element collections, `@PersistenceCreator`, `@Indexed`, UUID storage |
+| [SQL Schema & Relationships](https://github.com/octaviospain/lirp/wiki/SQL-Schema-and-Relationships) | Auto table creation, foreign keys & junction tables, `SqlTableDef` capability interfaces, dialect notes |
 | [Transactional Boundaries](https://github.com/octaviospain/lirp/wiki/Transactional-Boundaries) | Single-aggregate atomicity, `@Version` optimistic locking, `Conflict` event, saga/compensation pattern |
+| [Soft Delete](https://github.com/octaviospain/lirp/wiki/Soft-Delete) | Reversible deletes, `SoftDelete`/`Restore` events, cross-aggregate `via()` visibility |
 | [JSON Persistence](https://github.com/octaviospain/lirp/wiki/JSON-Persistence) | `JsonFileRepository`, `LirpEntitySerializer`, polymorphic serializers, deferred loading, `JsonFkPolicy` reconciliation |
 | [JavaFX Integration](https://github.com/octaviospain/lirp/wiki/JavaFX-Integration) | `lirp-fx`, `fxAggregateList`/`fxAggregateSet`, scalar delegates, dual notification, FX thread dispatch |
 | [Projection Maps](https://github.com/octaviospain/lirp/wiki/Projection-Maps) | `projection`/`registryProjection` and `fxProjection`/`registryFxProjection` — read-only grouped views, with value-transform and multi-key variants |
 | [Java Interop](https://github.com/octaviospain/lirp/wiki/Java-Interop) | Full Java examples for entities, repositories, subscriptions, collection events |
+| [Desktop & Embedded Setup](https://github.com/octaviospain/lirp/wiki/Desktop-Embedded-Setup) | SQLite configuration walkthrough for desktop and embedded deployments |
+| [Performance Benchmarks](https://github.com/octaviospain/lirp/wiki/Performance-Benchmarks) | JMH throughput and latency numbers across backends and operations |
 | [Architecture Overview](https://github.com/octaviospain/lirp/wiki/Architecture-Overview) | Entity hierarchy, event flow, module dependency, repository lifecycle diagrams |
 
 ### Module overview
