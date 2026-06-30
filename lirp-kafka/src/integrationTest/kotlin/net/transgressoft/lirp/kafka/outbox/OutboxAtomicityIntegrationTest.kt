@@ -124,16 +124,12 @@ private fun readFirstOutboxRow(dataSource: HikariDataSource): Map<String, Any?>?
     }
 
 /**
- * Drops the `lirp_kafka_outbox` table if it exists, swallowing the "table not found" dialect
- * variants across PostgreSQL/MySQL/MariaDB/SQLite/H2.
+ * Drops the `lirp_kafka_outbox` table if it exists. `DROP TABLE IF EXISTS` is supported by all five
+ * target dialects (PostgreSQL/MySQL/MariaDB/SQLite/H2), so a thrown exception indicates a real
+ * setup or driver failure and is allowed to surface rather than be swallowed.
  */
 private fun dropOutboxTableIfExists(dataSource: HikariDataSource) {
-    try {
-        dataSource.connection.use { conn ->
-            conn.prepareStatement("DROP TABLE IF EXISTS lirp_kafka_outbox").use { it.execute() }
-        }
-    } catch (_: Exception) {
-        // Some drivers throw on DROP TABLE IF EXISTS even when the table doesn't exist;
-        // ignore and let KafkaOutboxSqlRepository.init create it fresh.
+    dataSource.connection.use { conn ->
+        conn.prepareStatement("DROP TABLE IF EXISTS lirp_kafka_outbox").use { it.execute() }
     }
 }

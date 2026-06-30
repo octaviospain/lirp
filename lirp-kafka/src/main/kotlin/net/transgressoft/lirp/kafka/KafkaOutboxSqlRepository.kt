@@ -136,17 +136,7 @@ class KafkaOutboxSqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         val updateRows = updates.map { buildRow(it.entity, CrudEvent.Type.UPDATE.code) }
         // On the writePending path, deleted entities are already removed from in-memory state.
         // Only the key is available; payload is recorded as an empty JSON object.
-        val deleteRows =
-            deletes.map { (key, _) ->
-                OutboxEvent(
-                    id = UUID.randomUUID(),
-                    aggregateType = tableDef.tableName,
-                    aggregateId = key.toString(),
-                    eventTypeCode = CrudEvent.Type.DELETE.code,
-                    payload = "{}",
-                    createdAt = Clock.System.now()
-                )
-            }
+        val deleteRows = deletes.map { (key, _) -> buildRow(key.toString(), CrudEvent.Type.DELETE.code, "{}") }
         insertRows(insertRows + updateRows + deleteRows)
     }
 
@@ -177,15 +167,18 @@ class KafkaOutboxSqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         )
     }
 
-    private fun buildRow(entity: R, eventTypeCode: Int): OutboxEvent =
+    private fun buildRow(aggregateId: String, eventTypeCode: Int, payload: String): OutboxEvent =
         OutboxEvent(
             id = UUID.randomUUID(),
             aggregateType = tableDef.tableName,
-            aggregateId = entity.id.toString(),
+            aggregateId = aggregateId,
             eventTypeCode = eventTypeCode,
-            payload = buildPayload(entity),
+            payload = payload,
             createdAt = Clock.System.now()
         )
+
+    private fun buildRow(entity: R, eventTypeCode: Int): OutboxEvent =
+        buildRow(entity.id.toString(), eventTypeCode, buildPayload(entity))
 
     private fun buildCrudOutboxRows(
         inserts: List<Pair<R, CrudEvent.Type>>,

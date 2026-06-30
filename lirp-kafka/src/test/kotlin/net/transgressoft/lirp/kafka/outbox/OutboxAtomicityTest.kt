@@ -19,6 +19,7 @@ package net.transgressoft.lirp.kafka.outbox
 
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.event.CrudEvent
+import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.kafka.KafkaOutboxSqlRepository
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.LirpTransactionException
@@ -45,8 +46,10 @@ import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.jetbrains.exposed.v1.jdbc.update
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 
 /**
  * H2 unit tests for [KafkaOutboxSqlRepository] transactional outbox capture.
@@ -65,6 +68,24 @@ internal class OutboxAtomicityTest : StringSpec() {
     fun countOutboxRows(dataSource: HikariDataSource): Long {
         val db = Database.connect(dataSource)
         return transaction(db) { OutboxEventTable.selectAll().count() }
+    }
+
+    /**
+     * Polls [countOutboxRows] until it reaches [expected] or the timeout elapses. The debounced
+     * write pipeline flushes within a short window, but its scheduling can lag on a loaded CI host,
+     * so the poll budget is intentionally wider than the flush window.
+     */
+    suspend fun waitForOutboxCount(
+        dataSource: HikariDataSource,
+        expected: Long,
+        timeoutMs: Int = 3000,
+        pollMs: Long = 50
+    ) {
+        var waited = 0
+        while (countOutboxRows(dataSource) < expected && waited < timeoutMs) {
+            delay(pollMs)
+            waited += pollMs.toInt()
+        }
     }
 
     init {
@@ -139,14 +160,9 @@ internal class OutboxAtomicityTest : StringSpec() {
                 // Add without an explicit transaction — debounce flush path.
                 repo.add(item)
 
-                // Wait for the debounce pipeline to flush (default 100 ms window, up to 1 s max).
-                runBlocking {
-                    var waited = 0
-                    while (countOutboxRows(dataSource) == 0L && waited < 3000) {
-                        delay(50)
-                        waited += 50
-                    }
-                }
+                // The debounce flush window is short (≈100 ms, up to ~1 s); poll well beyond it so
+                // a loaded CI host does not flake.
+                runBlocking { waitForOutboxCount(dataSource, 1L) }
 
                 countOutboxRows(dataSource) shouldBe 1L
 
@@ -170,22 +186,10 @@ internal class OutboxAtomicityTest : StringSpec() {
             try {
                 // Create, then delete — both on the debounce path (no explicit transaction).
                 repo.add(item)
-                runBlocking {
-                    var waited = 0
-                    while (countOutboxRows(dataSource) < 1L && waited < 3000) {
-                        delay(50)
-                        waited += 50
-                    }
-                }
+                runBlocking { waitForOutboxCount(dataSource, 1L) }
 
                 repo.remove(item)
-                runBlocking {
-                    var waited = 0
-                    while (countOutboxRows(dataSource) < 2L && waited < 3000) {
-                        delay(50)
-                        waited += 50
-                    }
-                }
+                runBlocking { waitForOutboxCount(dataSource, 2L) }
 
                 val db = Database.connect(dataSource)
                 val deleteRow =
@@ -245,13 +249,7 @@ internal class OutboxAtomicityTest : StringSpec() {
             seedRepo.close()
 
             // Wait for the debounce flush triggered by seedRepo.close() to complete.
-            runBlocking {
-                var waited = 0
-                while (countOutboxRows(dataSource) == 0L && waited < 3000) {
-                    delay(50)
-                    waited += 50
-                }
-            }
+            runBlocking { waitForOutboxCount(dataSource, 1L) }
             val outboxRowsBeforeConflict = countOutboxRows(dataSource)
 
             val repo = KafkaOutboxSqlRepository<Int, TestVersionedPerson>(dataSource, TestVersionedPersonTableDef)
@@ -297,6 +295,52 @@ internal class OutboxAtomicityTest : StringSpec() {
             }
         }
 
+        "OutboxAtomicityTest debounced writePending conflict records no outbox row for the rejected update" {
+            // The debounce flush accumulates optimistic-lock conflicts instead of throwing, so it
+            // commits the non-conflicting writes and is not rolled back. The capture hook must exclude
+            // the conflicted entity, whose UPDATE matched zero rows — otherwise the outbox would carry
+            // a phantom UPDATE event for a change the database rejected.
+            val dataSource = H2ContainerSupport.buildH2DataSource()
+            val repo = KafkaOutboxSqlRepository<Int, TestVersionedPerson>(dataSource, TestVersionedPersonTableDef)
+            try {
+                repo.add(TestVersionedPerson(30).apply { firstName = "Brian" })
+                runBlocking { waitForOutboxCount(dataSource, 1L) } // CREATE row; DB version 0
+
+                // Bump the DB row's version externally so the in-memory entity (version 0) is stale.
+                val exposedTable = ExposedTableInterpreter().interpret(TestVersionedPersonTableDef)
+                val db = Database.connect(dataSource)
+                transaction(db) {
+                    @Suppress("UNCHECKED_CAST")
+                    exposedTable.table.update({
+                        (exposedTable.table.columns.first { it.name == "id" } as Column<Int>) eq 30
+                    }) { row ->
+                        @Suppress("UNCHECKED_CAST")
+                        row[exposedTable.table.columns.first { it.name == "version" } as Column<Long>] = 1L
+                    }
+                }
+
+                // Mutating the stale entity schedules a debounced UPDATE that matches zero rows and is
+                // recovered as a conflict. The Conflict event signals the flush + recovery completed.
+                val conflict = CompletableDeferred<Unit>()
+                repo.subscribe(CrudEvent.Type.CONFLICT) { conflict.complete(Unit) }
+                repo.findById(30).get().firstName = "BrianMutation"
+                runBlocking { withTimeout(3000) { conflict.await() } }
+
+                // The conflicted UPDATE must not have produced an outbox row — only the CREATE remains.
+                val updateRows =
+                    transaction(db) {
+                        OutboxEventTable.selectAll()
+                            .where { OutboxEventTable.eventTypeCode eq CrudEvent.Type.UPDATE.code }
+                            .count()
+                    }
+                updateRows shouldBe 0L
+                countOutboxRows(dataSource) shouldBe 1L
+            } finally {
+                repo.close()
+                dataSource.close()
+            }
+        }
+
         "OutboxAtomicityTest entity flush captures Crud and MutationEvent families in one run" {
             // A single flush produces outbox rows spanning the two event families reachable inside
             // the JDBC commit, each routed through the hook's generic event.type.code mapping:
@@ -332,8 +376,8 @@ internal class OutboxAtomicityTest : StringSpec() {
 
                 codes shouldContainAll
                     setOf(
-                        CrudEvent.Type.CREATE.code, // 100 — Crud family
-                        302 // MutationEvent.Type.PROPERTY_CHANGED — Mutation family
+                        CrudEvent.Type.CREATE.code, // Crud family
+                        MutationEvent.Type.PROPERTY_CHANGED.code // Mutation family
                     )
             } finally {
                 repo.close()

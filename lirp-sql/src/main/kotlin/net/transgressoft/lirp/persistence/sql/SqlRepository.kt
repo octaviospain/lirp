@@ -427,7 +427,16 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
                 deletes.size > 1 -> writePipeline.executeBatchDeleteList(deletes, conflicts)
                 deletes.size == 1 -> writePipeline.executeDeleteSingle(deletes.first(), conflicts)
             }
-            onAfterEntityWritesInWritePending(inserts, updates, deletes)
+            // Optimistic-lock conflicts are accumulated rather than thrown here, so the transaction
+            // still commits the non-conflicting writes. Exclude the conflicted entities from the
+            // capture hook: their UPDATE/DELETE affected zero rows, so a subclass must not record an
+            // event for a state change the database rejected. Inserts never conflict.
+            val conflictedIds = conflicts.mapTo(mutableSetOf()) { it.id }
+            onAfterEntityWritesInWritePending(
+                inserts,
+                updates.filterNot { it.entity.id in conflictedIds },
+                deletes.filterNot { it.first in conflictedIds }
+            )
         }
         // The main transaction has committed. Recover every accumulated conflict outside it.
         recoverConflicts(conflicts)
