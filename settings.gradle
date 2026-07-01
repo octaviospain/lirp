@@ -1,2 +1,2 @@
 rootProject.name = 'lirp'
-include 'lirp-api', 'lirp-core', 'lirp-ksp', 'lirp-sql-api', 'lirp-sql', 'lirp-fx', 'lirp-benchmark', 'lirp-gradle-plugin', 'lirp-kafka'
+include 'lirp-api', 'lirp-core', 'lirp-ksp', 'lirp-sql-api', 'lirp-sql', 'lirp-fx', 'lirp-benchmark', 'lirp-gradle-plugin', 'lirp-kafka', 'lirp-e2e'

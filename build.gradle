@@ -92,6 +92,7 @@ sonar {
 apiValidation {
     ignoredProjects.add('lirp-benchmark')
     ignoredProjects.add('lirp-gradle-plugin')
+    ignoredProjects.add('lirp-e2e')
     nonPublicMarkers.add('net.transgressoft.lirp.InternalLirpApi')
 }
 
