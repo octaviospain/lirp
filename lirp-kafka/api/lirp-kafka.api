@@ -1,7 +1,23 @@
-public final class net/transgressoft/lirp/kafka/KafkaEventPublisher : java/lang/AutoCloseable {
-	public fun <init> (Ljava/lang/String;)V
+public final class net/transgressoft/lirp/kafka/KafkaEventPublisher : net/transgressoft/lirp/event/LirpEventPublisher {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Lorg/jetbrains/exposed/v1/jdbc/Database;Ljava/util/Map;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Lorg/jetbrains/exposed/v1/jdbc/Database;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun activateEvents ([Lnet/transgressoft/lirp/event/EventType;)V
 	public fun close ()V
-	public final fun publish (Ljava/lang/String;Ljava/lang/String;[B)V
+	public fun disableEvents ([Lnet/transgressoft/lirp/event/EventType;)V
+	public fun emitAsync (Lnet/transgressoft/lirp/event/LirpEvent;)V
+	public fun getChanges ()Lkotlinx/coroutines/flow/SharedFlow;
+	public fun getSubscriberCount ()I
+	public fun isClosed ()Z
+	public fun isEventActive (Lnet/transgressoft/lirp/event/EventType;)Z
+	public final fun publish (Ljava/lang/String;Ljava/lang/String;[BLjava/lang/Iterable;)V
+	public static synthetic fun publish$default (Lnet/transgressoft/lirp/kafka/KafkaEventPublisher;Ljava/lang/String;Ljava/lang/String;[BLjava/lang/Iterable;ILjava/lang/Object;)V
+	public fun subscribe (Ljava/util/concurrent/Flow$Subscriber;)V
+	public fun subscribe (Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribe ([Lnet/transgressoft/lirp/event/EventType;Lkotlin/jvm/functions/Function1;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribeAsync (Ljava/util/function/Consumer;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribeAsync (Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribeAsync (Lkotlin/jvm/functions/Function2;Lnet/transgressoft/lirp/event/LirpErrorHandler;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
+	public fun subscribeAsync ([Lnet/transgressoft/lirp/event/EventType;Lkotlin/jvm/functions/Function2;)Lnet/transgressoft/lirp/event/LirpEventSubscription;
 }
 
 public final class net/transgressoft/lirp/kafka/KafkaOutboxConfig {
@@ -41,12 +57,82 @@ public final class net/transgressoft/lirp/kafka/LirpKafkaConfig : java/lang/Auto
 	public fun close ()V
 	public final fun getBootstrapServers ()Ljava/lang/String;
 	public final fun publisher ()Lnet/transgressoft/lirp/kafka/KafkaEventPublisher;
-	public final fun startRelay (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/kafka/KafkaOutboxConfig;Lnet/transgressoft/lirp/event/LirpErrorHandler;)V
-	public static synthetic fun startRelay$default (Lnet/transgressoft/lirp/kafka/LirpKafkaConfig;Ljavax/sql/DataSource;Lnet/transgressoft/lirp/kafka/KafkaOutboxConfig;Lnet/transgressoft/lirp/event/LirpErrorHandler;ILjava/lang/Object;)V
+	public final fun startRelay (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/kafka/KafkaOutboxConfig;Ljava/util/Map;Lnet/transgressoft/lirp/kafka/spi/LirpEventSerializer;Lnet/transgressoft/lirp/kafka/spi/TopicResolver;Lnet/transgressoft/lirp/event/LirpErrorHandler;)V
+	public static synthetic fun startRelay$default (Lnet/transgressoft/lirp/kafka/LirpKafkaConfig;Ljavax/sql/DataSource;Lnet/transgressoft/lirp/kafka/KafkaOutboxConfig;Ljava/util/Map;Lnet/transgressoft/lirp/kafka/spi/LirpEventSerializer;Lnet/transgressoft/lirp/kafka/spi/TopicResolver;Lnet/transgressoft/lirp/event/LirpErrorHandler;ILjava/lang/Object;)V
 	public final fun stopRelay ()V
 }
 
 public final class net/transgressoft/lirp/kafka/LirpKafkaConfig$Companion {
 	public final fun create (Ljava/lang/String;)Lnet/transgressoft/lirp/kafka/LirpKafkaConfig;
+}
+
+public final class net/transgressoft/lirp/kafka/spi/CloudEventsBinarySerializer : net/transgressoft/lirp/kafka/spi/LirpEventSerializer {
+	public fun <init> ()V
+	public fun deserialize ([BLjava/util/Map;)Lnet/transgressoft/lirp/kafka/spi/LirpEventEnvelope;
+	public fun serialize (Lnet/transgressoft/lirp/kafka/spi/LirpEventEnvelope;)Lnet/transgressoft/lirp/kafka/spi/SerializedEvent;
+}
+
+public final class net/transgressoft/lirp/kafka/spi/LirpEventEnvelope {
+	public static final field Companion Lnet/transgressoft/lirp/kafka/spi/LirpEventEnvelope$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()I
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;)Lnet/transgressoft/lirp/kafka/spi/LirpEventEnvelope;
+	public static synthetic fun copy$default (Lnet/transgressoft/lirp/kafka/spi/LirpEventEnvelope;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lnet/transgressoft/lirp/kafka/spi/LirpEventEnvelope;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAggregateId ()Ljava/lang/String;
+	public final fun getAggregateType ()Ljava/lang/String;
+	public final fun getCreatedAt ()Ljava/lang/String;
+	public final fun getEventId ()Ljava/lang/String;
+	public final fun getEventTypeCode ()I
+	public final fun getPayload ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class net/transgressoft/lirp/kafka/spi/LirpEventEnvelope$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lnet/transgressoft/lirp/kafka/spi/LirpEventEnvelope$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lnet/transgressoft/lirp/kafka/spi/LirpEventEnvelope;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lnet/transgressoft/lirp/kafka/spi/LirpEventEnvelope;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class net/transgressoft/lirp/kafka/spi/LirpEventEnvelope$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public abstract interface class net/transgressoft/lirp/kafka/spi/LirpEventSerializer {
+	public abstract fun deserialize ([BLjava/util/Map;)Lnet/transgressoft/lirp/kafka/spi/LirpEventEnvelope;
+	public abstract fun serialize (Lnet/transgressoft/lirp/kafka/spi/LirpEventEnvelope;)Lnet/transgressoft/lirp/kafka/spi/SerializedEvent;
+}
+
+public abstract interface class net/transgressoft/lirp/kafka/spi/OutboxRoutableEvent : net/transgressoft/lirp/event/LirpEvent {
+	public abstract fun getAggregateId ()Ljava/lang/String;
+	public abstract fun getPayload ()Ljava/lang/String;
+}
+
+public final class net/transgressoft/lirp/kafka/spi/SerializedEvent {
+	public fun <init> ([BLjava/util/Map;)V
+	public final fun component1 ()[B
+	public final fun component2 ()Ljava/util/Map;
+	public final fun copy ([BLjava/util/Map;)Lnet/transgressoft/lirp/kafka/spi/SerializedEvent;
+	public static synthetic fun copy$default (Lnet/transgressoft/lirp/kafka/spi/SerializedEvent;[BLjava/util/Map;ILjava/lang/Object;)Lnet/transgressoft/lirp/kafka/spi/SerializedEvent;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getHeaders ()Ljava/util/Map;
+	public final fun getValue ()[B
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class net/transgressoft/lirp/kafka/spi/TopicResolver {
+	public abstract fun resolve (Lnet/transgressoft/lirp/kafka/spi/LirpEventEnvelope;)Ljava/lang/String;
 }
 

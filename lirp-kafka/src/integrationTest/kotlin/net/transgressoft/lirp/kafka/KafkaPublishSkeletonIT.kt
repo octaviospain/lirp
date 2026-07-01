@@ -17,6 +17,7 @@
 
 package net.transgressoft.lirp.kafka
 
+import net.transgressoft.lirp.persistence.sql.PostgresContainerSupport
 import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
@@ -44,8 +45,14 @@ internal class KafkaPublishSkeletonIT : StringSpec({
                 put("auto.offset.reset", "earliest")
             }
 
-        KafkaEventPublisher(bootstrapServers).use { publisher ->
-            publisher.publish(topic, "aggregate-1", "skeleton-payload".toByteArray())
+        val dataSource = PostgresContainerSupport.buildDataSource()
+        val lirpConfig = LirpKafkaConfig.create(bootstrapServers)
+        try {
+            lirpConfig.startRelay(dataSource)
+            lirpConfig.publisher().publish(topic, "aggregate-1", "skeleton-payload".toByteArray())
+        } finally {
+            lirpConfig.close()
+            dataSource.close()
         }
 
         KafkaConsumer<String, ByteArray>(consumerProps).use { consumer ->

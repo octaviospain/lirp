@@ -19,12 +19,14 @@ package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import net.transgressoft.lirp.entity.MutableSoftDeletable
+import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.CrudEvent.Type.CREATE
 import net.transgressoft.lirp.event.CrudEvent.Type.DELETE
 import net.transgressoft.lirp.event.CrudEvent.Type.RESTORE
 import net.transgressoft.lirp.event.CrudEvent.Type.SOFT_DELETE
 import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.LirpErrorHandler
+import net.transgressoft.lirp.event.LirpEventPublisher
 import net.transgressoft.lirp.event.StandardCrudEvent.Create
 import net.transgressoft.lirp.event.StandardCrudEvent.Delete
 import net.transgressoft.lirp.event.StandardCrudEvent.Restore
@@ -55,13 +57,20 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
         context: LirpContext,
         name: String,
         initialEntities: MutableMap<K, T>,
-        onError: LirpErrorHandler? = null
-    ) : RegistryBase<K, T>(context, initialEntities, FlowEventPublisher(name, onError = onError)), Repository<K, T> {
+        publisher: LirpEventPublisher<CrudEvent.Type, CrudEvent<K, T>>
+    ) : RegistryBase<K, T>(context, initialEntities, publisher), Repository<K, T> {
+
+        internal constructor(
+            context: LirpContext,
+            name: String,
+            initialEntities: MutableMap<K, T>,
+            onError: LirpErrorHandler? = null
+        ) : this(context, name, initialEntities, FlowEventPublisher(name, onError = onError))
 
         internal constructor(
             context: LirpContext,
             name: String
-        ) : this(context, name, ConcurrentHashMap())
+        ) : this(context, name, ConcurrentHashMap(), null as LirpErrorHandler?)
 
         @JvmOverloads
         constructor(
@@ -74,6 +83,25 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
              */
             onError: LirpErrorHandler? = null
         ) : this(LirpContext.default, name, initialEntities, onError)
+
+        /**
+         * Creates a [VolatileRepository] that routes CRUD events to the supplied [publisher]
+         * instead of the default [FlowEventPublisher].
+         *
+         * This constructor allows injecting any [LirpEventPublisher] implementation
+         * interchangeably with the default in-process publisher, enabling transparent
+         * Kafka publishing of CRUD events when paired with a
+         * [net.transgressoft.lirp.kafka.KafkaEventPublisher].
+         *
+         * @param name A descriptive name for this repository, used in logging
+         * @param initialEntities Optional map of entities to initialize the repository with
+         * @param publisher The event publisher that will receive all CRUD events emitted by this repository
+         */
+        constructor(
+            name: String = "Repository",
+            initialEntities: MutableMap<K, T> = ConcurrentHashMap(),
+            publisher: LirpEventPublisher<CrudEvent.Type, CrudEvent<K, T>>
+        ) : this(LirpContext.default, name, initialEntities, publisher)
 
         private val log = KotlinLogging.logger(javaClass.name)
 
