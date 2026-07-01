@@ -1,0 +1,73 @@
+plugins {
+    alias libs.plugins.kotlin.jvm
+    id 'com.google.devtools.ksp'
+    id 'idea'
+}
+
+description = 'LIRP E2E - End-to-End Fleet PoC Integration Tests'
+
+ktlint {
+    filter {
+        exclude { it.file.path.contains("/generated/") }
+    }
+}
+
+sourceSets {
+    integrationTest {
+        kotlin.srcDirs = ['src/integrationTest/kotlin']
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+// Mark the integrationTest source set as test sources so IntelliJ imports it as a test root
+// and offers the test run gutter for FleetKafkaChainTest (custom source sets default to production).
+idea {
+    module {
+        testSources.from(sourceSets.integrationTest.kotlin.srcDirs)
+    }
+}
+
+configurations {
+    integrationTestImplementation.extendsFrom implementation
+    integrationTestRuntimeOnly.extendsFrom runtimeOnly
+}
+
+dependencies {
+    implementation project(':lirp-core')
+    implementation project(':lirp-sql')
+    implementation project(':lirp-kafka')
+    ksp project(':lirp-ksp')
+    ksp project(':lirp-sql')
+
+    integrationTestImplementation platform(libs.junit.bom)
+    integrationTestImplementation libs.bundles.kotest
+    integrationTestImplementation libs.kotest.extensions.testcontainers
+    integrationTestImplementation libs.testcontainers.postgresql
+    integrationTestImplementation libs.testcontainers.kafka
+    integrationTestImplementation libs.coroutines.test
+    integrationTestImplementation libs.junit.jupiter
+    integrationTestImplementation libs.hikari
+    integrationTestImplementation testFixtures(project(':lirp-sql'))
+    integrationTestImplementation libs.kafka.clients
+    integrationTestRuntimeOnly libs.junit.platform.launcher
+    integrationTestRuntimeOnly libs.postgresql
+}
+
+tasks.register('integrationTest', Test) {
+    description = 'Runs lirp-e2e integration tests.'
+    group = 'verification'
+    testClassesDirs = sourceSets.integrationTest.output.classesDirs
+    classpath = sourceSets.integrationTest.runtimeClasspath
+    useJUnitPlatform()
+    shouldRunAfter test
+}
+
+check.dependsOn integrationTest
+
+// E2E dogfood module is never published to Maven Central (like lirp-benchmark)
+tasks.withType(PublishToMavenRepository).configureEach { enabled = false }
+tasks.withType(PublishToMavenLocal).configureEach { enabled = false }
+
+// No API docs for the dogfood module
+tasks.matching { it.name.startsWith('dokka') }.configureEach { enabled = false }

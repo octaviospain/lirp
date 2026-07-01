@@ -257,6 +257,70 @@ internal class LirpRepositoryProcessorTest : FunSpec({
         result.messages shouldContain "must have exactly one Repository-typed constructor parameter"
     }
 
+    test("generates _LirpRegistryInfo for repository extending SqlRepository directly") {
+        val result =
+            KspTestSupport.compile(
+                LirpRepositoryProcessorProvider(),
+                SourceFile.kotlin(
+                    "ItemSqlRepo.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.LirpRepository
+                    import net.transgressoft.lirp.persistence.sql.SqlRepository
+                    import net.transgressoft.lirp.persistence.sql.SqlTableDef
+                    import javax.sql.DataSource
+
+                    data class ItemEntity(override val id: Int) : ReactiveEntityBase<Int, ItemEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                    }
+
+                    @LirpRepository
+                    class ItemSqlRepo(dataSource: DataSource, tableDef: SqlTableDef<ItemEntity>) :
+                        SqlRepository<Int, ItemEntity>(dataSource, tableDef)
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("ItemSqlRepo_LirpRegistryInfo.kt")
+        content shouldContain "`ItemSqlRepo_LirpRegistryInfo`"
+        content shouldContain "ItemEntity::class.java"
+    }
+
+    test("generates _LirpRegistryInfo for repository extending KafkaOutboxSqlRepository") {
+        val result =
+            KspTestSupport.compile(
+                LirpRepositoryProcessorProvider(),
+                SourceFile.kotlin(
+                    "EventSqlRepo.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.LirpRepository
+                    import net.transgressoft.lirp.kafka.KafkaOutboxSqlRepository
+                    import net.transgressoft.lirp.persistence.sql.SqlTableDef
+                    import javax.sql.DataSource
+
+                    data class EventEntity(override val id: Int) : ReactiveEntityBase<Int, EventEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                    }
+
+                    @LirpRepository
+                    class EventSqlRepo(dataSource: DataSource, tableDef: SqlTableDef<EventEntity>) :
+                        KafkaOutboxSqlRepository<Int, EventEntity>(dataSource, tableDef)
+                    """
+                )
+            )
+
+        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        val content = result.generatedFileContent("EventSqlRepo_LirpRegistryInfo.kt")
+        content shouldContain "`EventSqlRepo_LirpRegistryInfo`"
+        content shouldContain "EventEntity::class.java"
+    }
+
     test("class annotated with @LirpRepository that neither extends base nor delegates gets warn-and-skip") {
         val result =
             KspTestSupport.compile(

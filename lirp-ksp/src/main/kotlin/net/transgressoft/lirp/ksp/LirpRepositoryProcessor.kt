@@ -35,7 +35,9 @@ private val REPOSITORY_BASE_FQN_SET =
         "net.transgressoft.lirp.persistence.VolatileRepository",
         "net.transgressoft.lirp.persistence.PersistentRepositoryBase",
         "net.transgressoft.lirp.persistence.json.JsonFileRepository",
-        "net.transgressoft.lirp.persistence.json.FlexibleJsonFileRepository"
+        "net.transgressoft.lirp.persistence.json.FlexibleJsonFileRepository",
+        "net.transgressoft.lirp.persistence.sql.SqlRepository",
+        "net.transgressoft.lirp.kafka.KafkaOutboxSqlRepository"
     )
 
 /**

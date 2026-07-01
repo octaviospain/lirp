@@ -70,7 +70,7 @@ import kotlinx.serialization.json.put
  * @param loadOnInit When `true` (default), rows are loaded from the database immediately during
  *   construction.
  */
-class KafkaOutboxSqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
+open class KafkaOutboxSqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     dataSource: DataSource,
     private val tableDef: SqlTableDef<R>,
     loadOnInit: Boolean = true

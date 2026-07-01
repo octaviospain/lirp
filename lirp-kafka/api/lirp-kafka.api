@@ -46,9 +46,11 @@ public final class net/transgressoft/lirp/kafka/KafkaOutboxConfig$Companion {
 	public final fun getDEFAULT ()Lnet/transgressoft/lirp/kafka/KafkaOutboxConfig;
 }
 
-public final class net/transgressoft/lirp/kafka/KafkaOutboxSqlRepository : net/transgressoft/lirp/persistence/sql/SqlRepository {
+public class net/transgressoft/lirp/kafka/KafkaOutboxSqlRepository : net/transgressoft/lirp/persistence/sql/SqlRepository {
 	public fun <init> (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;Z)V
 	public synthetic fun <init> (Ljavax/sql/DataSource;Lnet/transgressoft/lirp/persistence/sql/SqlTableDef;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	protected fun onAfterEntityWritesInTransaction (Lnet/transgressoft/lirp/persistence/TransactionBuffer;)V
+	protected fun onAfterEntityWritesInWritePending (Ljava/util/List;Ljava/util/List;Ljava/util/List;)V
 }
 
 public final class net/transgressoft/lirp/kafka/LirpKafkaConfig : java/lang/AutoCloseable {
