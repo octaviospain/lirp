@@ -197,34 +197,39 @@ internal class OutboxRelayTest : StringSpec() {
             }
         }
 
-        "OutboxRelayTest exhausted retries move row to dead-letter table without further publish attempt" {
+        "OutboxRelayTest exhausted retries move row to dead-letter table after a failed delivery attempt" {
             val dataSource = H2ContainerSupport.buildH2DataSource()
             val publisher = mockk<KafkaEventPublisher>()
+            every { publisher.publish(any(), any(), any()) } throws NetworkException("broker unavailable")
 
-            // Seed a row directly with retryCount = maxRetries so it is already exhausted
+            // Seed a row directly with retryCount = maxRetries so its retry budget is exhausted
             val db = Database.connect(dataSource)
-            transaction(db) {
-                SchemaUtils.create(OutboxEventTable)
-                SchemaUtils.create(DeadLetterTable)
-                OutboxEventTable.insert {
-                    it[OutboxEventTable.id] = java.util.UUID.randomUUID().toKotlinUuid()
-                    it[OutboxEventTable.aggregateType] = "audio_items"
-                    it[OutboxEventTable.aggregateId] = "99"
-                    it[OutboxEventTable.eventTypeCode] = 100
-                    it[OutboxEventTable.payload] = "{}"
-                    it[OutboxEventTable.createdAt] = Clock.System.now()
-                    it[OutboxEventTable.retryCount] = 3 // = fastConfig.maxRetries
+            try {
+                transaction(db) {
+                    SchemaUtils.create(OutboxEventTable)
+                    SchemaUtils.create(DeadLetterTable)
+                    OutboxEventTable.insert {
+                        it[OutboxEventTable.id] = java.util.UUID.randomUUID().toKotlinUuid()
+                        it[OutboxEventTable.aggregateType] = "audio_items"
+                        it[OutboxEventTable.aggregateId] = "99"
+                        it[OutboxEventTable.eventTypeCode] = 100
+                        it[OutboxEventTable.payload] = "{}"
+                        it[OutboxEventTable.createdAt] = Clock.System.now()
+                        it[OutboxEventTable.retryCount] = 3 // = fastConfig.maxRetries
+                    }
                 }
+
+                val relay = OutboxRelay(db, publisher, fastConfig)
+                relay.pollAndRelay()
+
+                // A retriable failure on a row with no retry budget left moves it to the dead-letter table
+                transaction(db) { OutboxEventTable.selectAll().count() } shouldBe 0L
+                transaction(db) { DeadLetterTable.selectAll().count() } shouldBe 1L
+                // Delivery is attempted exactly once before dead-lettering — never skipped
+                verify(exactly = 1) { publisher.publish(any(), any(), any()) }
+            } finally {
+                dataSource.close()
             }
-
-            val relay = OutboxRelay(db, publisher, fastConfig)
-            relay.pollAndRelay()
-
-            // The row should be in the dead-letter table, not in the outbox
-            transaction(db) { OutboxEventTable.selectAll().count() } shouldBe 0L
-            transaction(db) { DeadLetterTable.selectAll().count() } shouldBe 1L
-            // Publisher must not have been called
-            verify(exactly = 0) { publisher.publish(any(), any(), any()) }
         }
 
         "OutboxRelayTest computeNextRetryAt grows exponentially within retryBaseDelayMs and retryMaxDelayMs" {
@@ -287,6 +292,7 @@ internal class OutboxRelayTest : StringSpec() {
         "OutboxRelayTest exhausted retries also invoke onDeadLetter callback" {
             val dataSource = H2ContainerSupport.buildH2DataSource()
             val publisher = mockk<KafkaEventPublisher>()
+            every { publisher.publish(any(), any(), any()) } throws NetworkException("broker unavailable")
 
             var callbackInvoked = false
             val callback =
@@ -296,24 +302,28 @@ internal class OutboxRelayTest : StringSpec() {
                 }
 
             val db = Database.connect(dataSource)
-            transaction(db) {
-                SchemaUtils.create(OutboxEventTable)
-                SchemaUtils.create(DeadLetterTable)
-                OutboxEventTable.insert {
-                    it[OutboxEventTable.id] = java.util.UUID.randomUUID().toKotlinUuid()
-                    it[OutboxEventTable.aggregateType] = "audio_items"
-                    it[OutboxEventTable.aggregateId] = "77"
-                    it[OutboxEventTable.eventTypeCode] = 100
-                    it[OutboxEventTable.payload] = "{}"
-                    it[OutboxEventTable.createdAt] = Clock.System.now()
-                    it[OutboxEventTable.retryCount] = 3 // = fastConfig.maxRetries
+            try {
+                transaction(db) {
+                    SchemaUtils.create(OutboxEventTable)
+                    SchemaUtils.create(DeadLetterTable)
+                    OutboxEventTable.insert {
+                        it[OutboxEventTable.id] = java.util.UUID.randomUUID().toKotlinUuid()
+                        it[OutboxEventTable.aggregateType] = "audio_items"
+                        it[OutboxEventTable.aggregateId] = "77"
+                        it[OutboxEventTable.eventTypeCode] = 100
+                        it[OutboxEventTable.payload] = "{}"
+                        it[OutboxEventTable.createdAt] = Clock.System.now()
+                        it[OutboxEventTable.retryCount] = 3 // = fastConfig.maxRetries
+                    }
                 }
+
+                val relay = OutboxRelay(db, publisher, fastConfig, callback)
+                relay.pollAndRelay()
+
+                callbackInvoked shouldBe true
+            } finally {
+                dataSource.close()
             }
-
-            val relay = OutboxRelay(db, publisher, fastConfig, callback)
-            relay.pollAndRelay()
-
-            callbackInvoked shouldBe true
         }
 
         "OutboxRelayTest calling start when relay is already running throws IllegalStateException" {

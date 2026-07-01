@@ -81,22 +81,26 @@ class LirpKafkaConfig private constructor(val bootstrapServers: String) : AutoCl
      * @param config Relay behaviour knobs — poll interval, batch size, retry limits, backoff.
      * @param onDeadLetter Optional callback invoked when a row is moved to the dead-letter table.
      */
+    @Synchronized
     fun startRelay(
         dataSource: DataSource,
         config: KafkaOutboxConfig = KafkaOutboxConfig.DEFAULT,
         onDeadLetter: LirpErrorHandler? = null
     ) {
+        check(relay == null) { "Relay is already running; call stopRelay() first" }
         val db = Database.connect(dataSource)
         relay = OutboxRelay(db, publisher(), config, onDeadLetter).also { it.start() }
     }
 
     /** Stops the relay without closing the [KafkaEventPublisher]. */
+    @Synchronized
     fun stopRelay() {
         relay?.stop()
         relay = null
     }
 
     /** Stops the relay (if running) and closes the [KafkaEventPublisher]. */
+    @Synchronized
     override fun close() {
         relay?.stop()
         relay = null

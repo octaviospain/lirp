@@ -35,12 +35,15 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import org.apache.kafka.clients.admin.AdminClient
+import org.apache.kafka.clients.admin.NewPartitions
 import org.apache.kafka.clients.admin.NewTopic
 import org.apache.kafka.clients.consumer.KafkaConsumer
+import org.apache.kafka.common.errors.TopicExistsException
 import org.apache.kafka.common.serialization.ByteArrayDeserializer
 import org.apache.kafka.common.serialization.StringDeserializer
 import java.time.Duration
 import java.util.Properties
+import java.util.concurrent.ExecutionException
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -95,6 +98,7 @@ internal class OutboxRelayIT : FunSpec({
                 }
 
                 try {
+                    createMultiPartitionTopic(topic, 1)
                     KafkaConsumer<String, ByteArray>(consumerProps("relay-normal-drain-${System.currentTimeMillis()}")).use { consumer ->
                         awaitConsumerAssignment(consumer, listOf(topic))
                         lirpConfig.startRelay(dataSource, fastRelayConfig())
@@ -162,6 +166,7 @@ internal class OutboxRelayIT : FunSpec({
                 // Second relay run (crash recovery): subscribe consumer FIRST (latest offset),
                 // then start the relay. The redelivered record for key "10" must appear.
                 val lirpConfig2 = LirpKafkaConfig.create(KafkaContainerSupport.bootstrapServers)
+                createMultiPartitionTopic(topic, 1)
                 KafkaConsumer<String, ByteArray>(consumerProps("relay-crash-recovery-${System.currentTimeMillis()}")).use { consumer ->
                     awaitConsumerAssignment(consumer, listOf(topic))
                     lirpConfig2.startRelay(dataSource, fastRelayConfig())
@@ -208,15 +213,24 @@ internal class OutboxRelayIT : FunSpec({
                 val lirpConfig1 = LirpKafkaConfig.create(KafkaContainerSupport.bootstrapServers)
                 val lirpConfig2 = LirpKafkaConfig.create(KafkaContainerSupport.bootstrapServers)
 
+                createMultiPartitionTopic(topic, 1)
                 KafkaConsumer<String, ByteArray>(consumerProps("relay-concurrent-${System.currentTimeMillis()}")).use { consumer ->
                     awaitConsumerAssignment(consumer, listOf(topic))
                     lirpConfig1.startRelay(pgDataSource, fastRelayConfig())
                     lirpConfig2.startRelay(pgDataSource, fastRelayConfig())
                     try {
                         val receivedKeys = mutableListOf<String>()
+                        val expectedKeys = (100 until 100 + n).map { it.toString() }.toSet()
                         eventually(30.seconds) {
                             consumer.poll(Duration.ofMillis(200)).forEach { receivedKeys.add(it.key()) }
-                            receivedKeys.size shouldBe n
+                            countUnsentOutboxRows(pgDataSource) shouldBe 0L
+                            receivedKeys.toSet() shouldBe expectedKeys
+                        }
+                        // Keep draining briefly after the outbox is empty: a duplicate published slightly
+                        // later by the peer relay would otherwise be missed, false-passing the guarantee.
+                        val quietUntil = System.currentTimeMillis() + 2_000L
+                        while (System.currentTimeMillis() < quietUntil) {
+                            consumer.poll(Duration.ofMillis(200)).forEach { receivedKeys.add(it.key()) }
                         }
                         // Each aggregate id must appear exactly once — SKIP LOCKED ensures no double-publish.
                         receivedKeys.groupBy { it }.values.forEach { group ->
@@ -267,16 +281,16 @@ internal class OutboxRelayIT : FunSpec({
                     awaitConsumerAssignment(consumer, listOf(topic))
                     lirpConfig.startRelay(dataSource, fastRelayConfig())
                     try {
-                        val receivedOffsets = mutableListOf<Long>()
+                        val receivedPayloads = mutableListOf<String>()
                         eventually(20.seconds) {
                             consumer.poll(Duration.ofMillis(200))
                                 .filter { it.key() == aggregateId }
-                                .forEach { receivedOffsets.add(it.offset()) }
-                            receivedOffsets.size shouldBe eventCount
+                                .forEach { receivedPayloads.add(String(it.value(), Charsets.UTF_8)) }
+                            receivedPayloads.size shouldBe eventCount
                         }
-                        // All records for the same key land on one partition so offsets are
-                        // monotonically increasing — proving per-aggregate in-order delivery.
-                        receivedOffsets shouldBe receivedOffsets.sorted()
+                        // Records for the same key land on one partition; asserting the decoded payload
+                        // sequence (not just increasing offsets) proves the relay published oldest-first.
+                        receivedPayloads shouldBe (0 until eventCount).map { """{"seq":$it}""" }
                     } finally {
                         lirpConfig.close()
                     }
@@ -331,6 +345,7 @@ internal class OutboxRelayIT : FunSpec({
 
                 val lirpConfig = LirpKafkaConfig.create(KafkaContainerSupport.bootstrapServers)
                 // Valid sibling row must be published to Kafka
+                createMultiPartitionTopic(validTopic, 1)
                 KafkaConsumer<String, ByteArray>(consumerProps("relay-dead-letter-${System.currentTimeMillis()}")).use { consumer ->
                     awaitConsumerAssignment(consumer, listOf(validTopic))
                     lirpConfig.startRelay(dataSource, relayConfig)
@@ -411,8 +426,11 @@ private fun <K, V> awaitConsumerAssignment(consumer: KafkaConsumer<K, V>, topics
 }
 
 /**
- * Pre-creates a Kafka topic with [partitions] partitions via [AdminClient].
- * A no-op when the topic already exists.
+ * Ensures a Kafka topic named [topic] exists with at least [partitions] partitions via [AdminClient].
+ *
+ * When the topic already exists on the shared broker its partition count is grown to [partitions] if
+ * necessary, so an existing single-partition topic cannot silently defeat a multi-partition test.
+ * Any admin failure other than [TopicExistsException] is re-thrown rather than swallowed.
  */
 private fun createMultiPartitionTopic(topic: String, partitions: Int) {
     val adminProps =
@@ -422,8 +440,13 @@ private fun createMultiPartitionTopic(topic: String, partitions: Int) {
     AdminClient.create(adminProps).use { admin ->
         try {
             admin.createTopics(listOf(NewTopic(topic, partitions, 1.toShort()))).all().get()
-        } catch (_: Exception) {
-            // Topic may already exist — proceed without failure
+        } catch (e: ExecutionException) {
+            if (e.cause !is TopicExistsException) throw e
+            val existing = admin.describeTopics(listOf(topic)).allTopicNames().get()[topic]
+            val currentPartitions = existing?.partitions()?.size ?: 0
+            if (currentPartitions < partitions) {
+                admin.createPartitions(mapOf(topic to NewPartitions.increaseTo(partitions))).all().get()
+            }
         }
     }
 }
@@ -510,21 +533,27 @@ private fun resetSentAt(dataSource: HikariDataSource, aggregateId: String) {
 
 /**
  * Inserts [count] raw outbox rows for [aggregateType]/[aggregateId] via raw JDBC.
- * Each row gets a unique UUID, CREATE event code (100), and an empty JSON payload.
+ *
+ * Each row gets a unique UUID, CREATE event code (100), a distinguishable `{"seq":i}` payload, and a
+ * strictly increasing `created_at` (base + i ms). The distinct payloads and monotonic timestamps let
+ * a consumer assert the relay published rows in creation order, rather than merely observing that
+ * single-partition offsets increase (which they always do).
  */
 private fun insertRawOutboxRows(dataSource: HikariDataSource, aggregateType: String, aggregateId: String, count: Int) {
+    val baseCreatedAt = java.time.Instant.now()
     dataSource.connection.use { conn ->
-        repeat(count) {
+        repeat(count) { i ->
             conn.prepareStatement(
                 "INSERT INTO lirp_kafka_outbox " +
                     "(id, aggregate_type, aggregate_id, event_type_code, payload, created_at) " +
-                    "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)"
+                    "VALUES (?, ?, ?, ?, ?, ?)"
             ).use { stmt ->
                 stmt.setObject(1, java.util.UUID.randomUUID())
                 stmt.setString(2, aggregateType)
                 stmt.setString(3, aggregateId)
                 stmt.setInt(4, 100)
-                stmt.setString(5, "{}")
+                stmt.setString(5, """{"seq":$i}""")
+                stmt.setTimestamp(6, java.sql.Timestamp.from(baseCreatedAt.plusMillis(i.toLong())))
                 stmt.executeUpdate()
             }
         }

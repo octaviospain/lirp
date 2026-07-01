@@ -41,6 +41,11 @@ import org.jetbrains.exposed.v1.datetime.timestamp
  *
  * All failure-metadata columns (`failed_at`, `attempt_count`, `last_error`) are non-nullable
  * because rows are only inserted here after a terminal failure has been recorded.
+ *
+ * **Retention:** dead-lettered rows — including their `payload` snapshot — are retained
+ * indefinitely; the relay never purges this table. Deployments whose payloads may carry sensitive
+ * data are responsible for their own retention policy (for example a scheduled purge keyed on
+ * `failed_at`) to satisfy any applicable compliance requirements.
  */
 internal object DeadLetterTable : Table("lirp_kafka_dead_letter") {
 

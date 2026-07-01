@@ -33,24 +33,31 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Instant
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 /**
  * Background relay loop that drains the transactional outbox by publishing each unsent row to
  * Kafka and marking it as sent only after the broker acknowledges the record.
  *
- * Each poll cycle executes inside a single Exposed transaction: the transaction polls unsent rows
- * (using dialect-appropriate row locking on PostgreSQL/MySQL/MariaDB), publishes each row via
- * [publisher], and commits [SqlOutboxStore.markSent] after a successful publish. A crash between
- * publish and commit rolls the transaction back, leaving the row available for redelivery on the
- * next cycle — the at-least-once guarantee.
+ * Each row is processed inside its own Exposed transaction: the transaction claims a single unsent
+ * row (using dialect-appropriate row locking on PostgreSQL/MySQL/MariaDB so concurrent relays skip
+ * it), publishes it via [publisher], and commits [SqlOutboxStore.markSent] after a successful
+ * publish. A crash between publish and commit rolls back only that row's transaction, leaving it
+ * available for redelivery on the next cycle — the at-least-once guarantee. Scoping each row to its
+ * own transaction keeps a transient persistence failure on one row from rolling back rows already
+ * published and marked in the same cycle.
  *
  * **Failure classification:** a [RetriableException] from the Kafka client increments
- * [OutboxEvent.retryCount] and schedules the next attempt via exponential backoff. Any other
- * exception, and any row whose [OutboxEvent.retryCount] is already at [KafkaOutboxConfig.maxRetries],
- * is moved atomically to the dead-letter table and the [onDeadLetter] callback is invoked.
+ * [OutboxEvent.retryCount] and schedules the next attempt via exponential backoff while retries
+ * remain; once [OutboxEvent.retryCount] reaches [KafkaOutboxConfig.maxRetries] a further retriable
+ * failure moves the row to the dead-letter table. Any non-retriable exception moves the row
+ * immediately. Delivery is always attempted at least once — a [KafkaOutboxConfig.maxRetries] of 0
+ * dead-letters a row only after its first delivery attempt fails. The [onDeadLetter] callback is
+ * invoked on every dead-letter move.
  *
  * **Topic routing:** each row is published to `"${row.aggregateType}.events"`. This default routing
  * is suitable for most single-aggregate deployments; pluggable topic resolution is deferred to a
@@ -106,9 +113,15 @@ internal class OutboxRelay(
             }
     }
 
-    /** Cancels the background poll loop. A stopped relay can be [start]ed again. */
+    /**
+     * Cancels the background poll loop and waits for it to finish before returning, so callers can
+     * safely close the underlying [DataSource][javax.sql.DataSource] afterwards. A stopped relay can
+     * be [start]ed again.
+     */
     fun stop() {
-        job?.cancel()
+        val current = job ?: return
+        runBlocking { current.cancelAndJoin() }
+        job = null
     }
 
     override fun close() {
@@ -117,26 +130,31 @@ internal class OutboxRelay(
 
     internal fun pollAndRelay() {
         val now = Clock.System.now()
-        transaction(db) {
-            val rows = store.findUnsentForRelay(config.batchSize, now)
-            rows.forEach { row -> processRow(row) }
+        var processed = 0
+        while (processed < config.batchSize) {
+            val handled =
+                transaction(db) {
+                    val row = store.findUnsentForRelay(1, now).firstOrNull() ?: return@transaction false
+                    processRow(row)
+                    true
+                }
+            if (!handled) break
+            processed++
         }
     }
 
     internal fun processRow(row: OutboxEvent) {
-        if (row.retryCount >= config.maxRetries) {
-            val cause = RuntimeException("Max retries (${config.maxRetries}) exceeded for outbox event ${row.id}")
-            store.moveToDeadLetter(row, Clock.System.now(), cause.message!!)
-            invokeDeadLetterCallback(cause)
-            return
-        }
-
         try {
             publisher.publish(topicFor(row), row.aggregateId, row.payload.toByteArray())
             store.markSent(row.id)
         } catch (e: RetriableException) {
-            val nextRetryAt = computeNextRetryAt(row.retryCount, config)
-            store.scheduleRetry(row.id, nextRetryAt, e.message ?: e.javaClass.simpleName)
+            if (row.retryCount >= config.maxRetries) {
+                store.moveToDeadLetter(row, Clock.System.now(), e.message ?: e.javaClass.simpleName)
+                invokeDeadLetterCallback(e)
+            } else {
+                val nextRetryAt = computeNextRetryAt(row.retryCount, config)
+                store.scheduleRetry(row.id, nextRetryAt, e.message ?: e.javaClass.simpleName)
+            }
         } catch (e: Exception) {
             store.moveToDeadLetter(row, Clock.System.now(), e.message ?: e.javaClass.simpleName)
             invokeDeadLetterCallback(e)
@@ -165,7 +183,10 @@ internal class OutboxRelay(
         internal fun computeNextRetryAt(retryCount: Int, config: KafkaOutboxConfig): Instant {
             val baseMs = config.retryBaseDelayMs
             val capMs = config.retryMaxDelayMs
-            val raw = minOf(baseMs * (1L shl retryCount), capMs)
+            // Clamp the shift distance: `Long shl` masks to the low 6 bits, so a retryCount >= 64
+            // would silently wrap to a small exponent instead of saturating at capMs.
+            val safeShift = minOf(retryCount, 62)
+            val raw = minOf(baseMs * (1L shl safeShift), capMs)
             val jittered = raw * (0.8 + Math.random() * 0.4)
             return Clock.System.now() + jittered.toLong().milliseconds
         }
