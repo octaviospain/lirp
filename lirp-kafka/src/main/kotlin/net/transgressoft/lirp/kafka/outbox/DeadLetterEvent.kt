@@ -21,39 +21,32 @@ import java.util.UUID
 import kotlin.time.Instant
 
 /**
- * Represents a single pending outbox record awaiting relay to Kafka.
+ * Represents a single dead-letter record that the relay could not deliver to Kafka.
  *
- * Each instance captures one entity change — create, update, or delete — together with a
- * serializer-neutral JSON field snapshot of the entity's persisted column values at the time the
- * change was committed. The relay process reads these records via [OutboxStore] and encodes
- * [payload] into the wire format before publishing to Kafka.
+ * Instances are created when the relay moves a row from the outbox to the dead-letter table —
+ * either because it exceeded the maximum retry count or because it encountered a non-retriable
+ * error. The [id] is preserved from the original outbox row for end-to-end traceability.
  *
- * The [payload] is a JSON object whose keys are SQL column names and whose values are the
- * entity's field values at capture time, matching exactly what the SQL persistence layer wrote.
- * Consumers that need field-level encryption or transformation should apply it at the persistence
- * mapping level so that both the SQL row and the outbox payload remain consistent.
+ * The [payload] is the same serializer-neutral JSON field snapshot that was captured at commit
+ * time. Consumers inspecting the dead-letter table can use it to replay or diagnose the failed
+ * delivery without referring back to the entity table.
  *
- * The [eventTypeCode] maps directly to [net.transgressoft.lirp.event.EventType.code], covering
- * standard CRUD codes (100 = Create, 300 = Update, 400 = Delete), mutation codes
- * (302 = PropertyChanged, 303 = BatchChanged), and any consumer-defined custom codes.
- *
- * Equality and hashing are based solely on [id] to guarantee stable set membership regardless
- * of relay-managed fields such as [retryCount], [lastError], and [nextRetryAt].
+ * Equality and hashing are based solely on [id], matching the identity semantics of the
+ * original [OutboxEvent].
  */
-internal data class OutboxEvent(
+internal data class DeadLetterEvent(
     val id: UUID,
     val aggregateType: String,
     val aggregateId: String,
     val eventTypeCode: Int,
     val payload: String,
     val createdAt: Instant,
-    val sentAt: Instant? = null,
-    val nextRetryAt: Instant? = null,
-    val retryCount: Int = 0,
-    val lastError: String? = null
+    val failedAt: Instant,
+    val attemptCount: Int,
+    val lastError: String
 ) {
     override fun equals(other: Any?): Boolean =
-        other is OutboxEvent && id == other.id
+        other is DeadLetterEvent && id == other.id
 
     override fun hashCode(): Int = id.hashCode()
 }

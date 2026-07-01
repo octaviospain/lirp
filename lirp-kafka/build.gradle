@@ -34,6 +34,7 @@ dependencies {
     testImplementation libs.hikari
     testImplementation testFixtures(project(':lirp-core'))
     testImplementation testFixtures(project(':lirp-sql'))
+    testImplementation libs.mockk
     testRuntimeOnly libs.junit.platform.launcher
 
     integrationTestImplementation platform(libs.junit.bom)
