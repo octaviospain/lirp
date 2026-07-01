@@ -67,4 +67,14 @@ internal interface OutboxStore {
      * encountered a non-retriable error. Must be called inside an active Exposed transaction.
      */
     fun moveToDeadLetter(event: OutboxEvent, failedAt: Instant, errorMessage: String)
+
+    /**
+     * Inserts a single outbox row using bare Exposed DSL.
+     *
+     * Intended for use by [net.transgressoft.lirp.kafka.KafkaEventPublisher.emitAsync] to capture
+     * custom events that do not flow through the transactional flush hook. When called inside an
+     * active Exposed transaction the INSERT joins that transaction atomically; when no transaction
+     * is active the caller is responsible for opening one.
+     */
+    fun insert(event: OutboxEvent)
 }

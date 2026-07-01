@@ -1017,6 +1017,8 @@ public class net/transgressoft/lirp/persistence/VolatileRepository : net/transgr
 	public fun <init> (Ljava/lang/String;Ljava/util/Map;)V
 	public fun <init> (Ljava/lang/String;Ljava/util/Map;Lnet/transgressoft/lirp/event/LirpErrorHandler;)V
 	public synthetic fun <init> (Ljava/lang/String;Ljava/util/Map;Lnet/transgressoft/lirp/event/LirpErrorHandler;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljava/lang/String;Ljava/util/Map;Lnet/transgressoft/lirp/event/LirpEventPublisher;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/util/Map;Lnet/transgressoft/lirp/event/LirpEventPublisher;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun add (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)Z
 	public fun clear ()V
 	public fun equals (Ljava/lang/Object;)Z

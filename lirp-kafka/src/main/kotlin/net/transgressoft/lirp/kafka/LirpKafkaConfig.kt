@@ -19,6 +19,10 @@ package net.transgressoft.lirp.kafka
 
 import net.transgressoft.lirp.event.LirpErrorHandler
 import net.transgressoft.lirp.kafka.outbox.OutboxRelay
+import net.transgressoft.lirp.kafka.spi.CloudEventsBinarySerializer
+import net.transgressoft.lirp.kafka.spi.DefaultTopicResolver
+import net.transgressoft.lirp.kafka.spi.LirpEventSerializer
+import net.transgressoft.lirp.kafka.spi.TopicResolver
 import org.jetbrains.exposed.v1.jdbc.Database
 import javax.sql.DataSource
 
@@ -45,8 +49,7 @@ import javax.sql.DataSource
  */
 class LirpKafkaConfig private constructor(val bootstrapServers: String) : AutoCloseable {
 
-    private val publisherDelegate = lazy { KafkaEventPublisher(bootstrapServers) }
-    private val _publisher: KafkaEventPublisher by publisherDelegate
+    private var _publisher: KafkaEventPublisher<*, *>? = null
     private var relay: OutboxRelay? = null
 
     companion object {
@@ -64,10 +67,12 @@ class LirpKafkaConfig private constructor(val bootstrapServers: String) : AutoCl
     /**
      * Returns the [KafkaEventPublisher] owned by this config.
      *
-     * The publisher is created lazily on first call and reused on subsequent calls.
+     * The publisher is initialized when [startRelay] is called and reused on subsequent calls.
      * Its lifecycle is tied to this config — call [close] to release broker connections.
+     *
+     * @throws IllegalStateException if called before [startRelay]
      */
-    fun publisher(): KafkaEventPublisher = _publisher
+    fun publisher(): KafkaEventPublisher<*, *> = checkNotNull(_publisher) { "Publisher not initialized — call startRelay first" }
 
     /**
      * Starts the outbox relay against the given [dataSource].
@@ -79,17 +84,36 @@ class LirpKafkaConfig private constructor(val bootstrapServers: String) : AutoCl
      *
      * @param dataSource JDBC data source for the outbox and dead-letter tables.
      * @param config Relay behaviour knobs — poll interval, batch size, retry limits, backoff.
+     * @param producerConfig Optional producer properties overlaid on the safe defaults
+     *   (`delivery.timeout.ms=30000`, `request.timeout.ms=10000`, `max.block.ms=10000`). These
+     *   defaults bound the window the relay holds a HikariCP connection open while waiting for
+     *   broker acknowledgement; pass overrides here to tighten or relax the bounds.
+     * @param serializer Strategy for serializing each [net.transgressoft.lirp.kafka.spi.LirpEventEnvelope]
+     *   to wire bytes and CloudEvents `ce_*` headers before publishing. Defaults to
+     *   [CloudEventsBinarySerializer].
+     * @param topicResolver Strategy for resolving the Kafka topic name from each
+     *   [net.transgressoft.lirp.kafka.spi.LirpEventEnvelope]. Defaults to [DefaultTopicResolver],
+     *   which returns `"${aggregateType}.events"`.
      * @param onDeadLetter Optional callback invoked when a row is moved to the dead-letter table.
      */
     @Synchronized
     fun startRelay(
         dataSource: DataSource,
         config: KafkaOutboxConfig = KafkaOutboxConfig.DEFAULT,
+        producerConfig: Map<String, String> = emptyMap(),
+        serializer: LirpEventSerializer = CloudEventsBinarySerializer(),
+        topicResolver: TopicResolver = DefaultTopicResolver,
         onDeadLetter: LirpErrorHandler? = null
     ) {
         check(relay == null) { "Relay is already running; call stopRelay() first" }
         val db = Database.connect(dataSource)
-        relay = OutboxRelay(db, publisher(), config, onDeadLetter).also { it.start() }
+        // Reuse the cached publisher across relay restarts so a prior stopRelay() does not leave the
+        // previous producer/broker connection open when a new relay is started.
+        val publisher =
+            _publisher
+                ?: KafkaEventPublisher<Nothing, Nothing>("lirp-kafka", bootstrapServers, db, producerConfig)
+                    .also { _publisher = it }
+        relay = OutboxRelay(db, publisher, config, serializer, topicResolver, onDeadLetter).also { it.start() }
     }
 
     /** Stops the relay without closing the [KafkaEventPublisher]. */
@@ -104,6 +128,7 @@ class LirpKafkaConfig private constructor(val bootstrapServers: String) : AutoCl
     override fun close() {
         relay?.stop()
         relay = null
-        if (publisherDelegate.isInitialized()) _publisher.close()
+        _publisher?.close()
+        _publisher = null
     }
 }

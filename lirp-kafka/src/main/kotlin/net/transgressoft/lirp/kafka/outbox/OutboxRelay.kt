@@ -23,8 +23,14 @@ import net.transgressoft.lirp.event.LirpOperation
 import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.kafka.KafkaEventPublisher
 import net.transgressoft.lirp.kafka.KafkaOutboxConfig
+import net.transgressoft.lirp.kafka.spi.CloudEventsBinarySerializer
+import net.transgressoft.lirp.kafka.spi.DefaultTopicResolver
+import net.transgressoft.lirp.kafka.spi.LirpEventEnvelope
+import net.transgressoft.lirp.kafka.spi.LirpEventSerializer
+import net.transgressoft.lirp.kafka.spi.TopicResolver
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.apache.kafka.common.errors.RetriableException
+import org.apache.kafka.common.header.internals.RecordHeaders
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
@@ -59,9 +65,10 @@ import kotlinx.coroutines.runBlocking
  * dead-letters a row only after its first delivery attempt fails. The [onDeadLetter] callback is
  * invoked on every dead-letter move.
  *
- * **Topic routing:** each row is published to `"${row.aggregateType}.events"`. This default routing
- * is suitable for most single-aggregate deployments; pluggable topic resolution is deferred to a
- * later release.
+ * **Topic routing:** each row's topic is resolved via the pluggable [TopicResolver]. The default
+ * resolver returns `"${aggregateType}.events"`, which is suitable for most single-aggregate
+ * deployments. Pass a custom [TopicResolver] to [net.transgressoft.lirp.kafka.LirpKafkaConfig.startRelay]
+ * to override routing for specific aggregate types or event-type codes.
  *
  * **Ordering:** records are keyed by [OutboxEvent.aggregateId] so the Kafka producer routes
  * all events for a given aggregate to the same partition, preserving per-aggregate ordering.
@@ -74,14 +81,20 @@ import kotlinx.coroutines.runBlocking
  * @param db Exposed [Database] handle for the outbox and dead-letter tables.
  * @param publisher Kafka publisher used to send each outbox row.
  * @param config Relay behaviour knobs — poll interval, batch size, retry limits, backoff.
+ * @param serializer Strategy for serializing a [LirpEventEnvelope] to wire bytes and CloudEvents
+ *   `ce_*` headers. Defaults to [CloudEventsBinarySerializer].
+ * @param topicResolver Strategy for resolving the Kafka topic name from a [LirpEventEnvelope].
+ *   Defaults to [DefaultTopicResolver] which returns `"${aggregateType}.events"`.
  * @param onDeadLetter Optional callback invoked when a row is moved to the dead-letter table.
  *   The callback receives the terminal exception and a [LirpErrorContext] describing the failure.
  *   Exceptions thrown by the callback are swallowed.
  */
 internal class OutboxRelay(
     private val db: Database,
-    private val publisher: KafkaEventPublisher,
+    private val publisher: KafkaEventPublisher<*, *>,
     private val config: KafkaOutboxConfig,
+    private val serializer: LirpEventSerializer = CloudEventsBinarySerializer(),
+    private val topicResolver: TopicResolver = DefaultTopicResolver,
     private val onDeadLetter: LirpErrorHandler? = null
 ) : AutoCloseable {
 
@@ -114,9 +127,25 @@ internal class OutboxRelay(
     }
 
     /**
-     * Cancels the background poll loop and waits for it to finish before returning, so callers can
-     * safely close the underlying [DataSource][javax.sql.DataSource] afterwards. A stopped relay can
-     * be [start]ed again.
+     * Cancels the background poll loop and suspends until it finishes, then clears the job.
+     *
+     * Prefer this over [stop] when calling from a coroutine context to avoid blocking a thread.
+     * A stopped relay can be [start]ed again.
+     */
+    suspend fun stopAndJoin() {
+        job?.cancelAndJoin()
+        job = null
+    }
+
+    /**
+     * Cancels the background poll loop and blocks the calling thread until it finishes, so callers
+     * can safely close the underlying [DataSource][javax.sql.DataSource] afterwards. A stopped relay
+     * can be [start]ed again.
+     *
+     * **Precondition:** this method must NOT be called from a thread running on
+     * [ReactiveScope.ioScope] (the relay's own dispatcher). Doing so will deadlock because
+     * [runBlocking] cannot complete the [kotlinx.coroutines.cancelAndJoin] suspension while the
+     * calling thread is occupied. Coroutine callers must use [stopAndJoin] instead.
      */
     fun stop() {
         val current = job ?: return
@@ -145,14 +174,22 @@ internal class OutboxRelay(
 
     internal fun processRow(row: OutboxEvent) {
         try {
-            publisher.publish(topicFor(row), row.aggregateId, row.payload.toByteArray())
+            val envelope = LirpEventEnvelope.from(row)
+            val topic = topicResolver.resolve(envelope)
+            require(topic.isNotBlank()) {
+                "TopicResolver returned a blank topic for aggregateType='${envelope.aggregateType}'"
+            }
+            val serialized = serializer.serialize(envelope)
+            val recordHeaders = RecordHeaders()
+            serialized.headers.forEach { (k, v) -> recordHeaders.add(k, v) }
+            publisher.publish(topic, row.aggregateId, serialized.value, recordHeaders)
             store.markSent(row.id)
         } catch (e: RetriableException) {
             if (row.retryCount >= config.maxRetries) {
                 store.moveToDeadLetter(row, Clock.System.now(), e.message ?: e.javaClass.simpleName)
                 invokeDeadLetterCallback(e)
             } else {
-                val nextRetryAt = computeNextRetryAt(row.retryCount, config)
+                val nextRetryAt = computeNextRetryAt(row.retryCount + 1, config)
                 store.scheduleRetry(row.id, nextRetryAt, e.message ?: e.javaClass.simpleName)
             }
         } catch (e: Exception) {
@@ -170,8 +207,6 @@ internal class OutboxRelay(
     }
 
     internal companion object {
-
-        internal fun topicFor(row: OutboxEvent): String = "${row.aggregateType}.events"
 
         /**
          * Computes the next retry timestamp using exponential backoff with ±20% jitter.

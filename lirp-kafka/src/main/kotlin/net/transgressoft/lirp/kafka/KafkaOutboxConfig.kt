@@ -24,6 +24,10 @@ package net.transgressoft.lirp.kafka
  * including the `next_retry_at` column; use [KafkaOutboxConfig.DEFAULT] unless you need to
  * tune the delivery characteristics for a specific deployment.
  *
+ * **Defaults:** poll interval 500 ms, batch size 100, max retries 5. Invalid values (non-positive
+ * poll interval or batch size, negative max retries, or max delay less than base delay) are
+ * rejected at construction with an [IllegalArgumentException].
+ *
  * Operators tune [pollIntervalMs] and [batchSize] to balance delivery latency against
  * database load: a lower poll interval reduces end-to-end latency but increases the number of
  * DB round trips; a larger batch size amortises transaction overhead at the cost of longer

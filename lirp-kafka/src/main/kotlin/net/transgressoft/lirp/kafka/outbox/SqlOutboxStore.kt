@@ -115,6 +115,17 @@ internal class SqlOutboxStore(private val db: Database) : OutboxStore {
         }
     }
 
+    override fun insert(event: OutboxEvent) {
+        OutboxEventTable.insert {
+            it[OutboxEventTable.id] = event.id.toKotlinUuid()
+            it[OutboxEventTable.aggregateType] = event.aggregateType
+            it[OutboxEventTable.aggregateId] = event.aggregateId
+            it[OutboxEventTable.eventTypeCode] = event.eventTypeCode
+            it[OutboxEventTable.payload] = event.payload
+            it[OutboxEventTable.createdAt] = event.createdAt
+        }
+    }
+
     override fun moveToDeadLetter(event: OutboxEvent, failedAt: Instant, errorMessage: String) {
         DeadLetterTable.insert {
             it[id] = event.id.toKotlinUuid()
