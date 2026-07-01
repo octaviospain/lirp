@@ -17,6 +17,7 @@
 
 package net.transgressoft.lirp.kafka.spi
 
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
@@ -71,6 +72,37 @@ internal class CloudEventsBinarySerializerTest : StringSpec() {
 
         "CloudEventsBinarySerializerTest record value UTF-8-decodes to the envelope payload" {
             serialized.value.toString(Charsets.UTF_8) shouldBe envelope.payload
+        }
+
+        "CloudEventsBinarySerializerTest deserialize round-trips a serialized envelope without loss" {
+            serializer.deserialize(serialized.value, serialized.headers) shouldBe envelope
+        }
+
+        "CloudEventsBinarySerializerTest deserialize rejects a missing ce_specversion header" {
+            shouldThrow<IllegalStateException> {
+                serializer.deserialize(serialized.value, serialized.headers - "ce_specversion")
+            }
+        }
+
+        "CloudEventsBinarySerializerTest deserialize rejects an unsupported ce_specversion" {
+            val headers = serialized.headers + ("ce_specversion" to "0.3".toByteArray(Charsets.UTF_8))
+            shouldThrow<IllegalArgumentException> { serializer.deserialize(serialized.value, headers) }
+        }
+
+        "CloudEventsBinarySerializerTest deserialize rejects a ce_source not in lirp format" {
+            val headers = serialized.headers + ("ce_source" to "other/audio_items".toByteArray(Charsets.UTF_8))
+            shouldThrow<IllegalArgumentException> { serializer.deserialize(serialized.value, headers) }
+        }
+
+        "CloudEventsBinarySerializerTest deserialize rejects a missing content-type header" {
+            shouldThrow<IllegalStateException> {
+                serializer.deserialize(serialized.value, serialized.headers - "content-type")
+            }
+        }
+
+        "CloudEventsBinarySerializerTest deserialize rejects an unsupported content-type" {
+            val headers = serialized.headers + ("content-type" to "application/xml".toByteArray(Charsets.UTF_8))
+            shouldThrow<IllegalArgumentException> { serializer.deserialize(serialized.value, headers) }
         }
     }
 }

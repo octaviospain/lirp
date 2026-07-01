@@ -24,6 +24,7 @@ import io.kotest.matchers.shouldBe
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.common.serialization.ByteArrayDeserializer
 import org.apache.kafka.common.serialization.StringDeserializer
+import org.jetbrains.exposed.v1.jdbc.Database
 import org.junit.jupiter.api.DisplayName
 import java.time.Duration
 import java.util.Properties
@@ -45,13 +46,16 @@ internal class KafkaPublishSkeletonIT : StringSpec({
                 put("auto.offset.reset", "earliest")
             }
 
+        // This test exercises the direct synchronous publish path only, so it constructs the
+        // publisher directly rather than starting the relay — starting the relay would launch a
+        // poll loop against an outbox table this test never creates.
         val dataSource = PostgresContainerSupport.buildDataSource()
-        val lirpConfig = LirpKafkaConfig.create(bootstrapServers)
+        val db = Database.connect(dataSource)
+        val publisher = KafkaEventPublisher<Nothing, Nothing>("lirp-skeleton", bootstrapServers, db)
         try {
-            lirpConfig.startRelay(dataSource)
-            lirpConfig.publisher().publish(topic, "aggregate-1", "skeleton-payload".toByteArray())
+            publisher.publish(topic, "aggregate-1", "skeleton-payload".toByteArray())
         } finally {
-            lirpConfig.close()
+            publisher.close()
             dataSource.close()
         }
 

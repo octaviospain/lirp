@@ -107,8 +107,12 @@ class LirpKafkaConfig private constructor(val bootstrapServers: String) : AutoCl
     ) {
         check(relay == null) { "Relay is already running; call stopRelay() first" }
         val db = Database.connect(dataSource)
-        val publisher = KafkaEventPublisher<Nothing, Nothing>("lirp-kafka", bootstrapServers, db, producerConfig)
-        _publisher = publisher
+        // Reuse the cached publisher across relay restarts so a prior stopRelay() does not leave the
+        // previous producer/broker connection open when a new relay is started.
+        val publisher =
+            _publisher
+                ?: KafkaEventPublisher<Nothing, Nothing>("lirp-kafka", bootstrapServers, db, producerConfig)
+                    .also { _publisher = it }
         relay = OutboxRelay(db, publisher, config, serializer, topicResolver, onDeadLetter).also { it.start() }
     }
 

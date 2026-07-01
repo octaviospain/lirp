@@ -249,9 +249,12 @@ internal class OutboxRelayTest : StringSpec() {
             withOutboxDb { _, db ->
                 val publisher = mockk<KafkaEventPublisher<*, *>>(relaxed = true)
                 val relay = OutboxRelay(db, publisher, fastConfig)
-                relay.start()
-                shouldThrow<IllegalStateException> { relay.start() }
-                relay.stop()
+                try {
+                    relay.start()
+                    shouldThrow<IllegalStateException> { relay.start() }
+                } finally {
+                    relay.stop()
+                }
             }
         }
     }

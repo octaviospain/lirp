@@ -18,11 +18,13 @@
 package net.transgressoft.lirp.kafka
 
 import net.transgressoft.lirp.entity.LirpEntity
+import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.EventType
 import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.LirpEvent
 import net.transgressoft.lirp.event.LirpEventPublisher
 import net.transgressoft.lirp.event.LirpEventSubscription
+import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.kafka.outbox.OutboxEvent
 import net.transgressoft.lirp.kafka.outbox.OutboxStore
 import net.transgressoft.lirp.kafka.outbox.SqlOutboxStore
@@ -48,10 +50,10 @@ import kotlinx.coroutines.flow.SharedFlow
  * [FlowEventPublisher], preserving in-process reactive delivery when this publisher is
  * injected in place of [FlowEventPublisher].
  *
- * [emitAsync] captures custom (non-flush-managed) events into the transactional outbox
- * **before** delivering them to local in-process subscribers, so a capture failure leaves
- * neither the outbox nor local subscribers in an inconsistent state. Standard CRUD and mutation
- * codes are already captured by the flush hook in [KafkaOutboxSqlRepository] and are only
+ * [emitAsync] captures custom events into the transactional outbox **before** delivering them to
+ * local in-process subscribers, so a capture failure leaves neither the outbox nor local
+ * subscribers in an inconsistent state. Framework-owned [CrudEvent.Type] and [MutationEvent.Type]
+ * events are already captured by the flush hook in [KafkaOutboxSqlRepository] and are only
  * delivered locally here.
  *
  * Custom events emitted via [emitAsync] must implement [OutboxRoutableEvent] to supply an
@@ -125,13 +127,6 @@ class KafkaEventPublisher<ET : EventType, E : LirpEvent<ET>>
                 }
             )
 
-        // Event type codes that are already captured by the in-commit flush hook
-        // (KafkaOutboxSqlRepository) and must NOT be re-captured via emitAsync to
-        // prevent duplicate outbox rows. These cover all standard CRUD and mutation codes:
-        // CREATE(100), UPDATE(300), DELETE(400), PROPERTY_CHANGED(302), BATCH_CHANGED(303),
-        // SOFT_DELETE(410), RESTORE(420), CONFLICT(950).
-        private val flushManagedCodes = setOf(100, 300, 400, 302, 303, 410, 420, 950)
-
         override val changes: SharedFlow<E> get() = delegate.changes
 
         override val isClosed: Boolean get() = delegate.isClosed
@@ -159,29 +154,33 @@ class KafkaEventPublisher<ET : EventType, E : LirpEvent<ET>>
         override fun subscribe(subscriber: Flow.Subscriber<in E>) = delegate.subscribe(subscriber)
 
         /**
-         * Emits [event] to local in-process subscribers and, when the event type code is not in the
-         * flush-managed set, inserts an outbox row to ensure at-least-once Kafka delivery.
+         * Emits [event] to local in-process subscribers and, when the event is not a framework-owned
+         * [CrudEvent.Type] or [MutationEvent.Type], inserts an outbox row to ensure at-least-once
+         * Kafka delivery.
          *
          * Outbox capture happens **before** local delivery so that a capture failure leaves
-         * neither the outbox nor local subscribers with an inconsistent view. Standard CRUD/mutation
-         * codes (flush-managed) are captured by the [KafkaOutboxSqlRepository] flush hook; for
-         * those, only local delivery is performed here.
+         * neither the outbox nor local subscribers with an inconsistent view. Framework-owned
+         * CRUD/mutation events are captured by the [KafkaOutboxSqlRepository] flush hook; for those,
+         * only local delivery is performed here. The gate keys off the framework event-type classes
+         * rather than their numeric codes, so a consumer-defined [EventType] that happens to reuse a
+         * framework code (e.g. `100`) is still captured into the outbox.
          *
          * If the event type is currently disabled, both local delivery and outbox capture are suppressed.
-         * When an active Exposed transaction is detected the outbox INSERT joins that transaction;
-         * otherwise a fresh single-row transaction is opened.
+         * When an active Exposed transaction bound to this publisher's [db] is detected the outbox
+         * INSERT joins that transaction; otherwise a fresh single-row transaction on [db] is opened.
          *
          * Custom events must implement [OutboxRoutableEvent]; emitting a non-routable custom event
          * throws immediately so the misconfiguration is surfaced as a bug.
          */
         override fun emitAsync(event: E) {
             if (!delegate.isEventActive(event.type)) return
-            if (flushManagedCodes.contains(event.type.code)) {
+            if (event.type is CrudEvent.Type || event.type is MutationEvent.Type) {
                 delegate.emitAsync(event)
                 return
             }
             val outboxEvent = buildOutboxEvent(event)
-            if (TransactionManager.currentOrNull() != null) {
+            val currentTransaction = TransactionManager.currentOrNull()
+            if (currentTransaction != null && currentTransaction.db == db) {
                 outboxStore.insert(outboxEvent)
             } else {
                 transaction(db) {

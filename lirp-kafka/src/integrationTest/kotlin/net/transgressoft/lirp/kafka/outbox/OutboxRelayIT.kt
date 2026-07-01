@@ -125,7 +125,9 @@ internal class OutboxRelayIT : FunSpec({
                     r.add(MutableAudioItem(10, "Radio Ga Ga", "The Works") as AudioItem)
                 }
 
-                // First relay run: publish the record to Kafka and set sent_at.
+                // First relay run: publish the record to Kafka and set sent_at. Pre-create the topic
+                // so this run does not depend on broker auto-topic creation, matching the later runs.
+                createMultiPartitionTopic(audioItemsTopic, 1)
                 LirpKafkaConfig.create(KafkaContainerSupport.bootstrapServers).use { firstRelay ->
                     firstRelay.startRelay(dataSource, fastRelayConfig())
                     eventually(15.seconds) {

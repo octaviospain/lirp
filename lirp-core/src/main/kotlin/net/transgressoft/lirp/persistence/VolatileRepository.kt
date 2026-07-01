@@ -93,6 +93,10 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
          * Kafka publishing of CRUD events when paired with a
          * [net.transgressoft.lirp.kafka.KafkaEventPublisher].
          *
+         * **Ownership:** the repository takes ownership of [publisher] and closes it when the
+         * repository is closed. Do not share a single publisher instance across repositories —
+         * closing one repository would shut down publishing for the others.
+         *
          * @param name A descriptive name for this repository, used in logging
          * @param initialEntities Optional map of entities to initialize the repository with
          * @param publisher The event publisher that will receive all CRUD events emitted by this repository

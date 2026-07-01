@@ -49,9 +49,26 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 @DisplayName("KafkaEventPublisherTest")
 internal class KafkaEventPublisherTest : StringSpec() {
 
-    /** A consumer-defined custom event type with a code outside the flush-managed set. */
+    /** A consumer-defined custom event type with a code outside the framework CRUD/mutation range. */
     enum class PlaybackEventType(override val code: Int) : EventType {
         STARTED(999)
+    }
+
+    /**
+     * A consumer-defined event type that deliberately reuses the framework CREATE code (`100`),
+     * used to prove the outbox gate keys off the event-type class rather than its numeric code.
+     */
+    enum class CollidingEventType(override val code: Int) : EventType {
+        RENAMED(100)
+    }
+
+    /** Custom routable event carrying [CollidingEventType] so it can be captured into the outbox. */
+    data class CollidingEvent(
+        override val type: CollidingEventType,
+        val trackId: Int
+    ) : OutboxRoutableEvent<CollidingEventType> {
+        override val aggregateId: String get() = trackId.toString()
+        override val payload: String get() = """{"trackId":$trackId}"""
     }
 
     /**
@@ -141,6 +158,27 @@ internal class KafkaEventPublisherTest : StringSpec() {
                 rowCount shouldBe 0L
             } finally {
                 kafkaPublisher.close()
+                dataSource.close()
+            }
+        }
+
+        "KafkaEventPublisherTest custom event reusing a framework code is still captured to the outbox" {
+            val dataSource = H2ContainerSupport.buildH2DataSource()
+            val db = Database.connect(dataSource)
+            transaction(db) { SchemaUtils.create(OutboxEventTable) }
+            val publisher = KafkaEventPublisher<CollidingEventType, CollidingEvent>("test-collision", "localhost:9092", db)
+            publisher.activateEvents(CollidingEventType.RENAMED)
+
+            try {
+                // RENAMED reuses CREATE's code (100) but is not a framework CrudEvent.Type, so the
+                // gate must NOT treat it as flush-managed — the row has to reach the outbox.
+                publisher.emitAsync(CollidingEvent(CollidingEventType.RENAMED, trackId = 100))
+                val rows = transaction(db) { OutboxEventTable.selectAll().toList() }
+                rows.size shouldBe 1
+                rows.single()[OutboxEventTable.eventTypeCode] shouldBe 100
+                rows.single()[OutboxEventTable.aggregateId] shouldBe "100"
+            } finally {
+                publisher.close()
                 dataSource.close()
             }
         }

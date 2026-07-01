@@ -35,8 +35,10 @@ package net.transgressoft.lirp.kafka.spi
  * - `ce_time`: ISO-8601 UTC capture timestamp (`createdAt`).
  * - `content-type`: Always `"application/json"` — the record value is a JSON string.
  *
- * All header values are encoded as UTF-8 bytes. Missing required headers on [deserialize] cause
- * an `error()` invocation (bug detector — do not downgrade to logging).
+ * All header values are encoded as UTF-8 bytes. [deserialize] fails fast on any record that does
+ * not honour this contract: a missing required header, an unsupported `ce_specversion` or
+ * `content-type`, or a `ce_source` that is not in the `lirp/{aggregateType}` form all raise an
+ * exception rather than yield a bogus envelope (bug detector — do not downgrade to logging).
  *
  * No external CloudEvents SDK is required. Hand-rolled with kotlinx-serialization only.
  */
@@ -57,8 +59,11 @@ class CloudEventsBinarySerializer : LirpEventSerializer {
 
     override fun deserialize(value: ByteArray, headers: Map<String, ByteArray>): LirpEventEnvelope {
         val payload = value.toString(Charsets.UTF_8)
+        val specVersion = headers["ce_specversion"]?.toString(Charsets.UTF_8) ?: error("missing required ce_specversion header")
+        require(specVersion == "1.0") { "unsupported ce_specversion '$specVersion'" }
         val eventId = headers["ce_id"]?.toString(Charsets.UTF_8) ?: error("missing required ce_id header")
         val source = headers["ce_source"]?.toString(Charsets.UTF_8) ?: error("missing required ce_source header")
+        require(source.startsWith("lirp/")) { "ce_source '$source' does not use the expected lirp/{aggregateType} format" }
         val aggregateType = source.removePrefix("lirp/")
         val ceType = headers["ce_type"]?.toString(Charsets.UTF_8) ?: error("missing required ce_type header")
         val eventTypeCode =
@@ -66,6 +71,8 @@ class CloudEventsBinarySerializer : LirpEventSerializer {
                 ?: error("ce_type '$ceType' does not end in a numeric event-type code")
         val aggregateId = headers["ce_subject"]?.toString(Charsets.UTF_8) ?: error("missing required ce_subject header")
         val createdAt = headers["ce_time"]?.toString(Charsets.UTF_8) ?: error("missing required ce_time header")
+        val contentType = headers["content-type"]?.toString(Charsets.UTF_8) ?: error("missing required content-type header")
+        require(contentType == "application/json") { "unsupported content-type '$contentType'" }
         return LirpEventEnvelope(eventId, aggregateType, aggregateId, eventTypeCode, payload, createdAt)
     }
 }
