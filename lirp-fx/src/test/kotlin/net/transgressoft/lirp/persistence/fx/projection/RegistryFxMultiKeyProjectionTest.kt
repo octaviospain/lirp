@@ -638,4 +638,159 @@ class RegistryFxMultiKeyProjectionTest : StringSpec({
         reactive.advance()
         keys shouldBe emptyList() // and delivers nothing after
     }
+
+    // ---- bucketKeyOrdering and bucketValueOrdering FX multi-key tests ----
+
+    "RegistryFxMultiKeyProjection with bucketKeyOrdering iterates observable map in comparator key order" {
+        trackRepo.create(1, "Track A", setOf("Rock"))
+        trackRepo.create(2, "Track B", setOf("Jazz"))
+        trackRepo.create(3, "Track C", setOf("Blues"))
+
+        val projection =
+            RegistryFxMultiKeyProjection(
+                trackRepo,
+                { it.genres },
+                dispatchToFxThread = false,
+                bucketKeyOrdering = compareBy { it }
+            )
+        projection.addListener(MapChangeListener { })
+
+        projection.keys.toList() shouldBe listOf("Blues", "Jazz", "Rock")
+    }
+
+    "RegistryFxMultiKeyProjection with null bucketKeyOrdering iterates in PK natural order" {
+        trackRepo.create(1, "Track A", setOf("Rock"))
+        trackRepo.create(2, "Track B", setOf("Jazz"))
+        trackRepo.create(3, "Track C", setOf("Blues"))
+
+        val projection =
+            RegistryFxMultiKeyProjection(
+                trackRepo,
+                { it.genres },
+                dispatchToFxThread = false
+            )
+        projection.addListener(MapChangeListener { })
+
+        projection.keys.toList() shouldBe listOf("Blues", "Jazz", "Rock")
+    }
+
+    "RegistryFxMultiKeyProjection bucketKeyOrdering PK tiebreak retains both equal-sort keys" {
+        trackRepo.create(1, "Track A", setOf("rock"))
+        trackRepo.create(2, "Track B", setOf("Rock"))
+        trackRepo.create(3, "Track C", setOf("Jazz"))
+
+        val projection =
+            RegistryFxMultiKeyProjection(
+                trackRepo,
+                { it.genres },
+                dispatchToFxThread = false,
+                bucketKeyOrdering = Comparator { a, b -> a.lowercase().compareTo(b.lowercase()) }
+            )
+        projection.addListener(MapChangeListener { })
+
+        projection.keys.size shouldBe 3
+        projection.containsKey("rock") shouldBe true
+        projection.containsKey("Rock") shouldBe true
+        projection.containsKey("Jazz") shouldBe true
+    }
+
+    "RegistryFxMultiKeyProjection bucketKeyOrdering MapChangeListener observes ordered iteration" {
+        trackRepo.create(1, "Track A", setOf("Rock"))
+        trackRepo.create(2, "Track B", setOf("Jazz"))
+
+        val projection =
+            RegistryFxMultiKeyProjection(
+                trackRepo,
+                { it.genres },
+                dispatchToFxThread = false,
+                bucketKeyOrdering = compareBy { it }
+            )
+        projection.addListener(MapChangeListener { })
+
+        val listenerCapturedKeys = mutableListOf<String>()
+        projection.addListener(MapChangeListener { listenerCapturedKeys.addAll(projection.keys) })
+
+        trackRepo.create(3, "Track C", setOf("Blues"))
+        reactive.advance()
+
+        listenerCapturedKeys shouldBe listOf("Blues", "Jazz", "Rock")
+    }
+
+    "TransformedRegistryFxMultiKeyProjection with bucketValueOrdering iterates in value-primary order" {
+        trackRepo.create(1, "Track A", setOf("Rock"))
+        trackRepo.create(2, "Track B", setOf("Jazz"))
+        trackRepo.create(3, "Track C", setOf("Blues"))
+
+        val projection =
+            registryFxMultiKeyProjection(
+                trackRepo,
+                { it.genres },
+                valueTransform = { pk, _ -> pk },
+                dispatchToFxThread = false,
+                bucketValueOrdering = compareBy { it }
+            )
+        projection.addListener(MapChangeListener { })
+
+        projection.keys.toList() shouldBe listOf("Blues", "Jazz", "Rock")
+    }
+
+    "TransformedRegistryFxMultiKeyProjection with null comparators iterates in PK natural order" {
+        trackRepo.create(3, "Track C", setOf("Rock"))
+        trackRepo.create(1, "Track A", setOf("Jazz"))
+        trackRepo.create(2, "Track B", setOf("Blues"))
+
+        val projection =
+            registryFxMultiKeyProjection(
+                trackRepo,
+                { it.genres },
+                valueTransform = { pk, _ -> pk },
+                dispatchToFxThread = false
+            )
+        projection.addListener(MapChangeListener { })
+
+        projection.keys.toList() shouldBe listOf("Blues", "Jazz", "Rock")
+    }
+
+    "TransformedRegistryFxMultiKeyProjection bucketValueOrdering PK tiebreak retains equal-sort-value buckets" {
+        trackRepo.create(1, "Track A", setOf("Jazz"))
+        trackRepo.create(2, "Track B", setOf("Rock"))
+
+        // Value is the genre string length: "Jazz" and "Rock" both have length 4 -> compare equal
+        val projection =
+            registryFxMultiKeyProjection(
+                trackRepo,
+                { it.genres },
+                valueTransform = { pk, _ -> pk.length },
+                dispatchToFxThread = false,
+                bucketValueOrdering = compareBy { it }
+            )
+        projection.addListener(MapChangeListener { })
+
+        projection.keys.size shouldBe 2
+        projection.containsKey("Jazz") shouldBe true
+        projection.containsKey("Rock") shouldBe true
+    }
+
+    "TransformedRegistryFxMultiKeyProjection bucketValueOrdering MapChangeListener observes ordered observable map" {
+        trackRepo.create(1, "Track A", setOf("Rock"))
+        trackRepo.create(2, "Track B", setOf("Jazz"))
+
+        val projection =
+            registryFxMultiKeyProjection(
+                trackRepo,
+                { it.genres },
+                valueTransform = { pk, _ -> pk },
+                dispatchToFxThread = false,
+                bucketValueOrdering = compareBy { it }
+            )
+        projection.addListener(MapChangeListener { })
+
+        val listenerCapturedKeys = mutableListOf<String>()
+        projection.addListener(MapChangeListener { listenerCapturedKeys.addAll(projection.keys) })
+
+        trackRepo.create(3, "Track C", setOf("Blues"))
+        reactive.advance()
+
+        listenerCapturedKeys shouldBe listOf("Blues", "Jazz", "Rock")
+    }
 })

@@ -9,6 +9,29 @@ see the [GitHub releases](https://github.com/octaviospain/lirp/releases).
 
 ## [Unreleased]
 
+### Added
+
+- **Bucket-level ordering for registry projections.** The registry projection factories now
+  accept optional comparators that order the projection's buckets: `bucketKeyOrdering` orders
+  buckets by their key on every registry projection (core and JavaFX), and `bucketValueOrdering`
+  orders buckets by their transformed value on the value-transformed variants. Both compose over a
+  primary-key natural-order final tiebreak so distinct buckets that compare equal are never
+  collapsed. Ordering is maintained incrementally as entries change — no full re-sort — and on the
+  JavaFX side it is applied before the FX-thread pulse, so listeners observe the ordered iteration.
+  Both parameters are nullable with a `null` default, so existing call sites are unaffected and the
+  change is binary compatible.
+  See [#298](https://github.com/octaviospain/lirp/issues/298).
+
+### Changed
+
+- **Value-transformed registry projections now iterate buckets in primary-key natural order by
+  default.** Previously the iteration order of `entries` / `keys` / `values` on the value-transformed
+  registry projections was unspecified (hash order). They now default to primary-key natural order,
+  matching the non-transformed variants. This is a behavioral change to iteration order only; it is
+  binary compatible and is **not** a breaking API change. Callers that require a specific order can
+  supply `bucketKeyOrdering` or `bucketValueOrdering`.
+  See [#298](https://github.com/octaviospain/lirp/issues/298).
+
 ## [3.2.0] - 2026-07-02
 
 Version 3.2.0 introduces the new `lirp-kafka` module, which adds transactional-outbox Kafka

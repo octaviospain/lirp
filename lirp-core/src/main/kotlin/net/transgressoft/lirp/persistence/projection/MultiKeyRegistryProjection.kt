@@ -72,11 +72,15 @@ import kotlin.reflect.KProperty
  *   each returned key names one bucket the entity belongs to
  * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
  *   `null` (the default) preserves insertion order. Equal elements retain arrival order.
+ * @param bucketKeyOrdering optional comparator that orders buckets (map entries) by their projection
+ *   key; `null` (the default) preserves PK natural order. A mandatory `Comparator.naturalOrder<PK>()`
+ *   tiebreak is always composed in to guarantee a stable total order over distinct keys.
  */
 class MultiKeyRegistryProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
     private val registry: Registry<K, E>,
     private val keyExtractor: (E) -> Collection<PK>,
-    private val entryOrdering: Comparator<E>? = null
+    private val entryOrdering: Comparator<E>? = null,
+    bucketKeyOrdering: Comparator<PK>? = null
 ) : AbstractMap<PK, List<E>>(), AutoCloseable {
 
     // Bucket engine — stores one List<E> per PK bucket key in a ConcurrentSkipListMap.
@@ -85,7 +89,8 @@ class MultiKeyRegistryProjection<K : Comparable<K>, PK : Comparable<PK>, E : Ide
     private val core =
         ProjectionCore<K, PK, E>(
             keyExtractor = { error("ProjectionCore keyExtractor must not be called in MultiKeyRegistryProjection") },
-            entryOrdering = entryOrdering
+            entryOrdering = entryOrdering,
+            bucketKeyOrdering = bucketKeyOrdering
         )
 
     /**

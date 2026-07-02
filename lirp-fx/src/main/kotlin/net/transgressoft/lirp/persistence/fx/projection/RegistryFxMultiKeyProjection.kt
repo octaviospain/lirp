@@ -70,16 +70,26 @@ import kotlinx.coroutines.launch
  * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
  *   ordering is applied on the background thread before the FX-thread dispatch. When `null` (default),
  *   buckets retain insertion order and existing behaviour is preserved.
+ * @param bucketKeyOrdering optional comparator that orders buckets (map entries) by their projection
+ *   key. When non-null the observable map iterates keys in the given order with a mandatory PK
+ *   natural-order tiebreak, so two distinct keys that compare equal under the comparator are both
+ *   retained. When `null` (default), keys iterate in PK natural order.
  */
 class RegistryFxMultiKeyProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
     private val registry: Registry<K, E>,
     private val keyExtractor: (E) -> Collection<PK>,
     val dispatchToFxThread: Boolean = true,
-    val entryOrdering: Comparator<E>? = null
+    val entryOrdering: Comparator<E>? = null,
+    val bucketKeyOrdering: Comparator<PK>? = null
 ) : ObservableMap<PK, List<E>>, AutoCloseable {
 
     private val innerObservableMap: ObservableMap<PK, List<E>> =
-        FXCollections.observableMap(ConcurrentSkipListMap<PK, List<E>>())
+        FXCollections.observableMap(
+            if (bucketKeyOrdering != null)
+                ConcurrentSkipListMap<PK, List<E>>(bucketKeyOrdering.thenComparing(Comparator.naturalOrder<PK>()))
+            else
+                ConcurrentSkipListMap<PK, List<E>>()
+        )
 
     @Volatile
     private var initialized = false
@@ -98,7 +108,7 @@ class RegistryFxMultiKeyProjection<K : Comparable<K>, PK : Comparable<PK>, E : I
     private val flushScheduled = AtomicBoolean(false)
 
     private val core: MultiKeyRegistryProjection<K, PK, E> =
-        MultiKeyRegistryProjection(registry, keyExtractor, entryOrdering)
+        MultiKeyRegistryProjection(registry, keyExtractor, entryOrdering, bucketKeyOrdering)
 
     init {
         mutationChannel?.let { channel ->

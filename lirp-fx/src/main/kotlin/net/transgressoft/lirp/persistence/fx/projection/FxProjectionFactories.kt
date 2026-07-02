@@ -81,15 +81,20 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> fxProjec
  * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
  *   applied on the background thread before the FX-thread dispatch. Equal elements retain arrival
  *   order (stable-after-equals). When `null` (default), buckets retain insertion order.
+ * @param bucketKeyOrdering optional comparator that orders buckets (map entries) by their projection
+ *   key. When non-null the observable map iterates keys in the given order with a mandatory PK
+ *   natural-order tiebreak, so two distinct keys that compare equal under the comparator are both
+ *   retained. When `null` (default), keys iterate in PK natural order.
  * @return a read-only observable projection map delegate incrementally updated from the registry
  */
 fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryFxProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> PK,
     dispatchToFxThread: Boolean = true,
-    entryOrdering: Comparator<E>? = null
+    entryOrdering: Comparator<E>? = null,
+    bucketKeyOrdering: Comparator<PK>? = null
 ): RegistryFxProjection<K, PK, E> =
-    RegistryFxProjection(registry, keyExtractor, dispatchToFxThread, entryOrdering)
+    RegistryFxProjection(registry, keyExtractor, dispatchToFxThread, entryOrdering, bucketKeyOrdering)
 
 /**
  * Creates a value-transformed read-only [ObservableMap] projection that groups entities from an
@@ -216,6 +221,13 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : A
  * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
  *   applied on the background thread so [valueTransform] receives an already-ordered list. Equal
  *   elements retain arrival order (stable-after-equals). When `null` (default), insertion order is kept.
+ * @param bucketKeyOrdering optional comparator that orders buckets by the bucket key itself.
+ *   When non-null the observable map iterates keys in this order with a mandatory PK natural-order
+ *   tiebreak. When `null` (default), key-level ordering is skipped.
+ * @param bucketValueOrdering optional comparator that orders buckets by their transformed value `V`.
+ *   When non-null, the observable collection iterates in value-primary order (then key, then PK
+ *   natural order as the mandatory tiebreak), applied before the FX-thread pulse.
+ *   When `null` (default), value-primary ordering is skipped.
  * @return an [FxObservableProjection] grouping transformed bucket values by secondary key;
  *   its [addOnEntriesChangedListener][ObservableProjection.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
@@ -225,9 +237,11 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
     keyExtractor: (E) -> PK,
     valueTransform: (PK, List<E>) -> V,
     dispatchToFxThread: Boolean = true,
-    entryOrdering: Comparator<E>? = null
+    entryOrdering: Comparator<E>? = null,
+    bucketKeyOrdering: Comparator<PK>? = null,
+    bucketValueOrdering: Comparator<V>? = null
 ): FxObservableProjection<PK, V> =
-    TransformedRegistryFxProjection(registry, keyExtractor, valueTransform, dispatchToFxThread, entryOrdering)
+    TransformedRegistryFxProjection(registry, keyExtractor, valueTransform, dispatchToFxThread, entryOrdering, bucketKeyOrdering, bucketValueOrdering)
 
 /**
  * Creates a two-phase value-transformed read-only [ObservableMap] projection that groups all entities
@@ -271,6 +285,13 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
  *   applied on the background thread so [dataTransform] receives an already-ordered list. Equal
  *   elements retain arrival order (stable-after-equals). When `null` (default), insertion order is kept.
+ * @param bucketKeyOrdering optional comparator that orders buckets by the bucket key itself.
+ *   When non-null the observable map iterates keys in this order with a mandatory PK natural-order
+ *   tiebreak. When `null` (default), key-level ordering is skipped.
+ * @param bucketValueOrdering optional comparator that orders buckets by their transformed value `V`.
+ *   When non-null, the observable collection iterates in value-primary order (then key, then PK
+ *   natural order as the mandatory tiebreak), applied before the FX-thread pulse.
+ *   When `null` (default), value-primary ordering is skipped.
  * @return an [FxObservableProjection] grouping transformed bucket values by secondary key;
  *   its [addOnEntriesChangedListener][ObservableProjection.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
@@ -282,7 +303,9 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : A
     dataTransform: (PK, List<E>) -> D,
     fxFactory: (PK, D) -> V,
     dispatchToFxThread: Boolean = true,
-    entryOrdering: Comparator<E>? = null
+    entryOrdering: Comparator<E>? = null,
+    bucketKeyOrdering: Comparator<PK>? = null,
+    bucketValueOrdering: Comparator<V>? = null
 ): FxObservableProjection<PK, V> =
     TransformedRegistryFxProjection(
         registry,
@@ -290,7 +313,9 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : A
         dataTransform as (PK, List<E>) -> Any?,
         fxFactory as (PK, Any?) -> V,
         dispatchToFxThread,
-        entryOrdering
+        entryOrdering,
+        bucketKeyOrdering,
+        bucketValueOrdering
     )
 
 /**
@@ -448,15 +473,20 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E, D, V : Any> fxMultiKeyProjection
  * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
  *   applied on the background thread before the FX-thread dispatch. Equal elements retain arrival
  *   order (stable-after-equals). When `null` (default), buckets retain insertion order.
+ * @param bucketKeyOrdering optional comparator that orders buckets (map entries) by their projection
+ *   key. When non-null the observable map iterates keys in the given order with a mandatory PK
+ *   natural-order tiebreak, so two distinct keys that compare equal under the comparator are both
+ *   retained. When `null` (default), keys iterate in PK natural order.
  * @return a read-only multi-key projection map delegate incrementally updated from the registry
  */
 fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryFxMultiKeyProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> Collection<PK>,
     dispatchToFxThread: Boolean = true,
-    entryOrdering: Comparator<E>? = null
+    entryOrdering: Comparator<E>? = null,
+    bucketKeyOrdering: Comparator<PK>? = null
 ): RegistryFxMultiKeyProjection<K, PK, E> =
-    RegistryFxMultiKeyProjection(registry, keyExtractor, dispatchToFxThread, entryOrdering)
+    RegistryFxMultiKeyProjection(registry, keyExtractor, dispatchToFxThread, entryOrdering, bucketKeyOrdering)
 
 /**
  * Creates a value-transformed read-only [ObservableMap] multi-key projection delegate that groups
@@ -486,6 +516,13 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registry
  * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
  *   applied on the background thread so [valueTransform] receives an already-ordered list. Equal
  *   elements retain arrival order (stable-after-equals). When `null` (default), insertion order is kept.
+ * @param bucketKeyOrdering optional comparator that orders buckets by the bucket key itself.
+ *   When non-null the observable map iterates keys in this order with a mandatory PK natural-order
+ *   tiebreak. When `null` (default), key-level ordering is skipped.
+ * @param bucketValueOrdering optional comparator that orders buckets by their transformed value `V`.
+ *   When non-null, the observable collection iterates in value-primary order (then key, then PK
+ *   natural order as the mandatory tiebreak), applied before the FX-thread pulse.
+ *   When `null` (default), value-primary ordering is skipped.
  * @return an [FxObservableProjection] grouping transformed bucket values by multiple secondary keys;
  *   its [addOnEntriesChangedListener][ObservableProjection.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
@@ -495,9 +532,11 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
     keyExtractor: (E) -> Collection<PK>,
     valueTransform: (PK, List<E>) -> V,
     dispatchToFxThread: Boolean = true,
-    entryOrdering: Comparator<E>? = null
+    entryOrdering: Comparator<E>? = null,
+    bucketKeyOrdering: Comparator<PK>? = null,
+    bucketValueOrdering: Comparator<V>? = null
 ): FxObservableProjection<PK, V> =
-    TransformedRegistryFxMultiKeyProjection(registry, keyExtractor, valueTransform, dispatchToFxThread, entryOrdering)
+    TransformedRegistryFxMultiKeyProjection(registry, keyExtractor, valueTransform, dispatchToFxThread, entryOrdering, bucketKeyOrdering, bucketValueOrdering)
 
 /**
  * Creates a two-phase value-transformed read-only [ObservableMap] multi-key projection delegate that
@@ -542,6 +581,13 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
  *   applied on the background thread so [dataTransform] receives an already-ordered list. Equal
  *   elements retain arrival order (stable-after-equals). When `null` (default), insertion order is kept.
+ * @param bucketKeyOrdering optional comparator that orders buckets by the bucket key itself.
+ *   When non-null the observable map iterates keys in this order with a mandatory PK natural-order
+ *   tiebreak. When `null` (default), key-level ordering is skipped.
+ * @param bucketValueOrdering optional comparator that orders buckets by their transformed value `V`.
+ *   When non-null, the observable collection iterates in value-primary order (then key, then PK
+ *   natural order as the mandatory tiebreak), applied before the FX-thread pulse.
+ *   When `null` (default), value-primary ordering is skipped.
  * @return an [FxObservableProjection] grouping transformed bucket values by multiple secondary keys;
  *   its [addOnEntriesChangedListener][ObservableProjection.addOnEntriesChangedListener]
  *   emits per-key old/new transformed values in addition to the [ObservableMap]/[javafx.collections.MapChangeListener] surface
@@ -553,7 +599,9 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : A
     dataTransform: (PK, List<E>) -> D,
     fxFactory: (PK, D) -> V,
     dispatchToFxThread: Boolean = true,
-    entryOrdering: Comparator<E>? = null
+    entryOrdering: Comparator<E>? = null,
+    bucketKeyOrdering: Comparator<PK>? = null,
+    bucketValueOrdering: Comparator<V>? = null
 ): FxObservableProjection<PK, V> =
     TransformedRegistryFxMultiKeyProjection(
         registry,
@@ -561,5 +609,7 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, D, V : A
         dataTransform as (PK, List<E>) -> Any?,
         fxFactory as (PK, Any?) -> V,
         dispatchToFxThread,
-        entryOrdering
+        entryOrdering,
+        bucketKeyOrdering,
+        bucketValueOrdering
     )
