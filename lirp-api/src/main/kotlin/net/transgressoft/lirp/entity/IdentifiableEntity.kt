@@ -38,6 +38,8 @@ interface IdentifiableEntity<K> : LirpEntity, Cloneable where K : Comparable<K> 
     public override fun clone(): IdentifiableEntity<K>
 }
 
+/** Returns the ids of the entities in this list, preserving order. */
 fun <K : Comparable<K>> List<IdentifiableEntity<K>>.toIds() = map { it.id }.toList()
 
+/** Returns the ids of the entities in this set, as a set. */
 fun <K : Comparable<K>> Set<IdentifiableEntity<K>>.toIds() = map { it.id }.toSet()

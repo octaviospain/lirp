@@ -86,17 +86,24 @@ interface CrudEvent<K, out T: IdentifiableEntity<K>>: LirpEvent<CrudEvent.Type> 
      */
     val oldEntities: Map<K, T>
 
+    /** Returns `true` if this event was emitted for a create operation. */
     fun isCreate() = type == Type.CREATE
 
+    /** Returns `true` if this event was emitted for a read operation. */
     fun isRead() = type == Type.READ
 
+    /** Returns `true` if this event was emitted for an update operation. */
     fun isUpdate() = type == Type.UPDATE
 
+    /** Returns `true` if this event was emitted for a hard-delete operation. */
     fun isDelete() = type == Type.DELETE
 
+    /** Returns `true` if this event reports an optimistic-lock conflict. */
     fun isConflict() = type == Type.CONFLICT
 
+    /** Returns `true` if this event was emitted for a soft-delete operation. */
     fun isSoftDelete() = type == Type.SOFT_DELETE
 
+    /** Returns `true` if this event was emitted when a soft-deleted entity was restored. */
     fun isRestore() = type == Type.RESTORE
 }
