@@ -18,8 +18,10 @@ see the [GitHub releases](https://github.com/octaviospain/lirp/releases).
   primary-key natural-order final tiebreak so distinct buckets that compare equal are never
   collapsed. Ordering is maintained incrementally as entries change — no full re-sort — and on the
   JavaFX side it is applied before the FX-thread pulse, so listeners observe the ordered iteration.
-  Both parameters are nullable with a `null` default, so existing call sites are unaffected and the
-  change is binary compatible.
+  Both parameters are nullable with a `null` default, so existing Kotlin call sites are unaffected.
+  As trailing default parameters without `@JvmOverloads`, they are a Kotlin source-compatible
+  addition (the prior JVM method descriptors are not retained), consistent with the library's
+  Kotlin-first API convention.
   See [#298](https://github.com/octaviospain/lirp/issues/298).
 
 ### Changed

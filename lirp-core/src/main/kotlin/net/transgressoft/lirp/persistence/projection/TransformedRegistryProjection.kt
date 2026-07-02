@@ -134,8 +134,11 @@ internal class TransformedRegistryProjection<K : Comparable<K>, PK : Comparable<
                                         val newValue = valueTransform(key, bucket)
                                         // Reposition in orderedIndex: remove at old position (while
                                         // cache still holds old value), update cache, re-insert at
-                                        // new position (comparator now sees the new value).
-                                        orderedIndex.remove(key)
+                                        // new position (comparator now sees the new value). The remove
+                                        // only applies to an existing key — for a brand-new key the
+                                        // cache has no entry yet, so a value-ordering comparator would
+                                        // dereference an absent value and throw during the removal walk.
+                                        if (oldValue != null) orderedIndex.remove(key)
                                         transformCache[key] = newValue
                                         orderedIndex[key] = Unit
                                         if (newValue != oldValue) add(ProjectionEntryChange(key, oldValue, newValue))

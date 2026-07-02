@@ -1210,4 +1210,58 @@ class RegistryFxProjectionTest : StringSpec({
 
         projection.keys.toList() shouldBe listOf("Jazz", "Rock", "Blues")
     }
+
+    "TransformedRegistryFxProjection with bucketValueOrdering repositions a bucket and drops no entries when its value changes" {
+        trackRepo.create(1, "Track A", "Alpha") // Alpha: 1 title
+        trackRepo.create(2, "Track B", "Beta") // Beta: 1 title
+        trackRepo.create(3, "Track C", "Beta") // Beta: 2 titles
+
+        val projection =
+            TransformedRegistryFxProjection(
+                trackRepo,
+                AudioItem::albumName,
+                valueTransform = { pk, items -> RegistryAlbumBucket(pk, items.map { it.title }) },
+                dispatchToFxThread = false,
+                bucketValueOrdering = compareBy { it.titles.size }
+            )
+        projection.addListener(MapChangeListener { })
+
+        // ascending by title count: Alpha(1), Beta(2)
+        projection.keys.toList() shouldBe listOf("Alpha", "Beta")
+
+        // Grow Alpha to 3 titles so it must move after Beta. The skip-list backing is removed at the
+        // old value position (comparator still reads the old staged value) before the new value is
+        // staged and re-inserted; a stale/duplicate node would surface as a wrong size or order here.
+        trackRepo.create(4, "Track D", "Alpha")
+        trackRepo.create(5, "Track E", "Alpha")
+        reactive.advance()
+
+        projection.keys.size shouldBe 2
+        projection.keys.toList() shouldBe listOf("Beta", "Alpha")
+        projection["Alpha"]!!.titles.size shouldBe 3
+    }
+
+    "TransformedRegistryFxProjection with bucketValueOrdering removes an emptied bucket cleanly" {
+        val alphaTrack = trackRepo.create(1, "Track A", "Alpha")
+        trackRepo.create(2, "Track B", "Beta")
+
+        val projection =
+            TransformedRegistryFxProjection(
+                trackRepo,
+                AudioItem::albumName,
+                valueTransform = { pk, _ -> RegistryAlbumBucket(pk, listOf(pk)) },
+                dispatchToFxThread = false,
+                bucketValueOrdering = compareBy { it.key }
+            )
+        projection.addListener(MapChangeListener { })
+        projection.keys.toList() shouldBe listOf("Alpha", "Beta")
+
+        // Emptying the Alpha bucket must remove its key from the value-ordered backing — the removal
+        // runs while the old staged value is still present so the comparator locates the node.
+        trackRepo.remove(alphaTrack)
+        reactive.advance()
+
+        projection.keys.toList() shouldBe listOf("Beta")
+        projection.containsKey("Alpha") shouldBe false
+    }
 })

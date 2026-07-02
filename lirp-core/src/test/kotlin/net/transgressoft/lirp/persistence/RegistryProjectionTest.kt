@@ -1539,6 +1539,71 @@ internal class RegistryProjectionTest : StringSpec({
         projection.keys.toList() shouldContainExactly listOf("Rock", "Jazz", "Classical")
     }
 
+    "TransformedRegistryProjection with bucketValueOrdering inserts a bucket key created after seed without error" {
+        // Seed two buckets so the ordered index is non-empty before the incremental create.
+        trackRepo.create(1, "Track A", "Bravo")
+        trackRepo.create(2, "Track B", "Delta")
+
+        val projection =
+            registryProjection<Int, String, AudioItem, String>(
+                trackRepo, { it.albumName },
+                bucketValueOrdering = compareBy { it }
+            ) { pk, _ -> pk }
+
+        projection.keys.toList() shouldContainExactly listOf("Bravo", "Delta")
+
+        // A CREATE introducing a brand-new bucket key while the ordered index is non-empty must not
+        // throw: the reposition-remove is skipped for a key absent from the value cache, so the
+        // value-ordering comparator never dereferences a missing cached value.
+        trackRepo.create(3, "Track C", "Charlie")
+        reactive.advance()
+
+        projection.keys.toList() shouldContainExactly listOf("Bravo", "Charlie", "Delta")
+    }
+
+    "TransformedMultiKeyRegistryProjection with bucketValueOrdering inserts a bucket key created after seed without error" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        multiKeyRepo.create(1, "Artist A", setOf("Bravo"))
+        multiKeyRepo.create(2, "Artist B", setOf("Delta"))
+
+        val projection =
+            registryMultiKeyProjection<Int, String, MutableMultiKeyAudioItem, String>(
+                multiKeyRepo, { it.genres },
+                bucketValueOrdering = compareBy { it }
+            ) { pk, _ -> pk }
+
+        projection.keys.toList() shouldContainExactly listOf("Bravo", "Delta")
+
+        multiKeyRepo.create(3, "Artist C", setOf("Charlie"))
+        reactive.advance()
+
+        projection.keys.toList() shouldContainExactly listOf("Bravo", "Charlie", "Delta")
+    }
+
+    "TransformedRegistryProjection with bucketValueOrdering repositions a bucket when its transformed value changes" {
+        trackRepo.create(1, "Track A", "Alpha") // Alpha: 1 entry
+        trackRepo.create(2, "Track B", "Beta") // Beta: 1 entry
+        trackRepo.create(3, "Track C", "Beta") // Beta: 2 entries
+
+        // Order by bucket size stringified, ascending: "1" < "2".
+        val projection =
+            registryProjection<Int, String, AudioItem, String>(
+                trackRepo, { it.albumName },
+                bucketValueOrdering = compareBy { it }
+            ) { _, items -> "${items.size}" }
+
+        projection.keys.toList() shouldContainExactly listOf("Alpha", "Beta")
+
+        // Grow Alpha to 3 entries so its value ("3") sorts after Beta ("2"); the reposition must move
+        // the existing key without dropping or duplicating it.
+        trackRepo.create(4, "Track D", "Alpha")
+        trackRepo.create(5, "Track E", "Alpha")
+        reactive.advance()
+
+        projection.keys.size shouldBe 2
+        projection.keys.toList() shouldContainExactly listOf("Beta", "Alpha")
+    }
+
     "MultiKeyRegistryProjection iterates without ConcurrentModificationException under concurrent key-set churn stress"
         .config(tags = setOf(Stress)) {
             extension(ReactiveScopeSerialization)

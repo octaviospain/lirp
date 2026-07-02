@@ -148,7 +148,9 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  * By default, buckets are exposed in PK natural order. When [bucketValueOrdering] is supplied,
  * buckets are ordered value-primary (by the cached transformed value, never re-invoking the transform),
  * then by [bucketKeyOrdering] as a tiebreak, and finally by PK natural order as the mandatory
- * deterministic final tiebreak. Omitting either comparator is binary compatible.
+ * deterministic final tiebreak. Omitting both comparators keeps the default PK-natural order and is
+ * source-compatible for existing Kotlin callers (these trailing parameters are not annotated with
+ * `@JvmOverloads`, so the prior JVM method descriptor is not retained).
  *
  * Usage:
  * ```kotlin
@@ -172,8 +174,10 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  *   Equal elements retain arrival order.
  * @param bucketKeyOrdering optional comparator that orders buckets by their projection key; buckets
  *   that compare equal under this comparator are further resolved by PK natural order so that distinct
- *   keys are never collapsed. Used as a tiebreak after [bucketValueOrdering] when both are supplied.
- *   `null` (the default) skips key-level ordering beyond the mandatory PK final tiebreak.
+ *   keys are never collapsed. Supplied on its own it is the primary bucket comparator (before the
+ *   mandatory PK final tiebreak); supplied together with [bucketValueOrdering] it is the tiebreak
+ *   applied after the value comparator. `null` (the default) skips key-level ordering beyond the
+ *   mandatory PK final tiebreak.
  * @param bucketValueOrdering optional comparator that orders buckets by their cached transformed value;
  *   the comparator reads the pre-computed `V` — it never re-invokes [valueTransform]. Buckets that
  *   compare equal under this comparator are further resolved by [bucketKeyOrdering] (when supplied)
@@ -315,7 +319,9 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registry
  * By default, buckets are exposed in PK natural order. When [bucketValueOrdering] is supplied,
  * buckets are ordered value-primary (by the cached transformed value, never re-invoking the transform),
  * then by [bucketKeyOrdering] as a tiebreak, and finally by PK natural order as the mandatory
- * deterministic final tiebreak. Omitting either comparator is binary compatible.
+ * deterministic final tiebreak. Omitting both comparators keeps the default PK-natural order and is
+ * source-compatible for existing Kotlin callers (these trailing parameters are not annotated with
+ * `@JvmOverloads`, so the prior JVM method descriptor is not retained).
  *
  * **Weak cross-key consistency:** Two consecutive reads on different keys are NOT a single
  * snapshot. Iteration is CME-free (snapshot-based from the ordered index) but each call
@@ -332,8 +338,10 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registry
  *   Equal elements retain arrival order.
  * @param bucketKeyOrdering optional comparator that orders buckets by their projection key; buckets
  *   that compare equal under this comparator are further resolved by PK natural order so that distinct
- *   keys are never collapsed. Used as a tiebreak after [bucketValueOrdering] when both are supplied.
- *   `null` (the default) skips key-level ordering beyond the mandatory PK final tiebreak.
+ *   keys are never collapsed. Supplied on its own it is the primary bucket comparator (before the
+ *   mandatory PK final tiebreak); supplied together with [bucketValueOrdering] it is the tiebreak
+ *   applied after the value comparator. `null` (the default) skips key-level ordering beyond the
+ *   mandatory PK final tiebreak.
  * @param bucketValueOrdering optional comparator that orders buckets by their cached transformed value;
  *   the comparator reads the pre-computed `V` — it never re-invokes [valueTransform]. Buckets that
  *   compare equal under this comparator are further resolved by [bucketKeyOrdering] (when supplied)
