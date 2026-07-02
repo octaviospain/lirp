@@ -3,7 +3,76 @@
 All notable changes to **LIRP (Lightweight Reactive Persistence)** are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
-project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Detailed release
+notes begin with 3.0.0; for earlier releases (including SQLite as a fourth SQL dialect in 2.5.0)
+see the [GitHub releases](https://github.com/octaviospain/lirp/releases).
+
+## [Unreleased]
+
+## [3.2.0] - 2026-07-02
+
+Version 3.2.0 introduces the new `lirp-kafka` module, which adds transactional-outbox Kafka
+publishing of domain events. All changes in this release are additive and non-breaking — no
+migration steps are required. The module is published to Maven Central under the `net.transgressoft`
+group and scopes `kafka-clients` exclusively as an implementation dependency (see
+[#289](https://github.com/octaviospain/lirp/issues/289)).
+
+### Added
+
+- **`lirp-kafka` module — transactional-outbox Kafka publishing.** A repository extends
+  `KafkaOutboxSqlRepository<K, R>` (a `SqlRepository` subclass) so every create, update, and
+  soft-delete co-inserts an outbox row into the `lirp_kafka_outbox` table atomically inside the same
+  JDBC commit that persists the entity — no dual-write window exists. Capture covers both the explicit
+  `transaction { }` path (including buffered `PropertyChanged` / `BatchChanged` mutation events) and
+  the debounced write-pending path. Only SQL-backed repositories participate; `JsonFileRepository` and
+  `VolatileRepository` are unsupported for atomic outbox writes.
+  See [#285](https://github.com/octaviospain/lirp/issues/285),
+  [#286](https://github.com/octaviospain/lirp/issues/286).
+
+- **Outbox relay.** `LirpKafkaConfig.create(bootstrapServers)` builds the entry-point configuration,
+  and `startRelay(dataSource, config)` launches a background coroutine that polls unsent outbox rows,
+  publishes each to Kafka, and marks it sent only after the broker acknowledges — at-least-once
+  delivery with no loss. The Kafka record key is the aggregate id (per-aggregate ordering). Rows that
+  exhaust the configured retry limit (default 5) or encounter a non-retriable error are moved to a
+  dead-letter table. `LirpKafkaConfig` is `AutoCloseable`; calling `close()` stops the relay and
+  releases broker connections.
+  See [#287](https://github.com/octaviospain/lirp/issues/287).
+
+- **`KafkaEventPublisher`.** Implements `LirpEventPublisher<ET, E>` so it is injectable
+  interchangeably with `FlowEventPublisher`. All `subscribe` / `subscribeAsync` / `changes`
+  operations delegate to an internal `FlowEventPublisher`, preserving in-process reactive delivery.
+  `emitAsync` routes custom events through the transactional outbox before delivering them to local
+  subscribers. Framework-owned `CrudEvent.Type` and `MutationEvent.Type` events are captured by
+  the `KafkaOutboxSqlRepository` flush hook and only delivered locally by this publisher. Custom
+  events must implement `OutboxRoutableEvent` to supply an `aggregateId` and `payload`; emitting a
+  non-routable event throws immediately to surface the misconfiguration.
+  See [#288](https://github.com/octaviospain/lirp/issues/288).
+
+- **Pluggable serialization and topic SPIs.** `LirpEventSerializer` serializes and deserializes
+  `LirpEventEnvelope` instances to and from wire bytes. The default implementation,
+  `CloudEventsBinarySerializer`, encodes events as CloudEvents v1.0 binary content mode: `ce_*`
+  Kafka record headers carry CloudEvents attributes (`ce_specversion`, `ce_id`, `ce_source`,
+  `ce_type`, `ce_subject`, `ce_time`, `content-type`) and the neutral JSON field snapshot is the raw
+  record value, readable by non-LIRP consumers without a CloudEvents SDK. The `ce_id` header carries
+  the outbox row UUID and serves as an idempotency key for consumer-side deduplication.
+  `TopicResolver` is a `fun interface` that resolves the Kafka topic name from an envelope; the
+  default `DefaultTopicResolver` returns `"${aggregateType}.events"`. Consumers can substitute
+  alternative wire encodings (Avro, Protobuf) and routing strategies by passing custom
+  implementations to `startRelay`.
+  See [#288](https://github.com/octaviospain/lirp/issues/288).
+
+- **`KafkaOutboxConfig` relay knobs.** A `data class` with documented, startup-validated defaults:
+  poll interval 500 ms, batch size 100, max retries 5, retry base delay 1 000 ms, retry max delay
+  60 000 ms. Invalid values (non-positive poll interval or batch size, negative max retries, max
+  delay less than base delay) are rejected at construction with `IllegalArgumentException`.
+  `KafkaOutboxConfig.DEFAULT` covers most deployments without tuning.
+
+- **Additive `@LirpRepository` and `KafkaOutboxSqlRepository` changes (dogfooding).** The KSP
+  processor now resolves `@LirpRepository` annotations on `SqlRepository` and
+  `KafkaOutboxSqlRepository` subclasses, so Kafka-backed repositories participate in `LirpContext`
+  wiring without any extra configuration. `KafkaOutboxSqlRepository` is now `open`, allowing
+  consumers to subclass it further. Both changes are additive and backward compatible.
+  See [#299](https://github.com/octaviospain/lirp/issues/299).
 
 ## [3.1.0] - 2026-06-29
 
@@ -396,14 +465,14 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
   `@ToManyAggregates`. The annotation's parameters (`bubbleUp`, `onDelete`) are unchanged.
   `@ToManyAggregates` is now **collection-only**: applying it to a single (non-collection) reference
   is a compile error directing you to `@ToOneAggregate`, making the to-one/to-many split
-  self-enforcing. See [Migration](#migration-aggregate-to-tomanyaggregates) below.
+  self-enforcing. See [Migration](#aggregate-renamed-to-tomanyaggregates) below.
 
 ### Removed
 
 - **Single-entity `@Aggregate` (to-one) removed** — the two-declaration pattern (`var xId` scalar
   + `@Aggregate @PersistenceIgnore val x by optionalAggregate { xId }`) is replaced entirely by
   `@ToOneAggregate` placed directly on the persisted FK scalar. All single-entity `@Aggregate`
-  usages must be migrated to `@ToOneAggregate`. See [Migration](#migration-toone-aggregate) below.
+  usages must be migrated to `@ToOneAggregate`. See [Migration](#single-entity-aggregate-replaced-by-tooneaggregate) below.
 
 - **Core projection package** — all projection types moved from `net.transgressoft.lirp.persistence`
   to `net.transgressoft.lirp.persistence.projection`, and the `CoreFactories` file was renamed to
@@ -437,7 +506,7 @@ These are **breaking changes**; see [Migration from 2.x to 3.0.0](#migration-fro
 
 ## Migration from 2.x to 3.0
 
-### Single-entity `@Aggregate` replaced by `@ToOneAggregate` {#migration-toone-aggregate}
+### Single-entity `@Aggregate` replaced by `@ToOneAggregate`
 
 The two-declaration pattern for single-entity FK references is replaced by a single annotation on
 the persisted FK scalar. The `@Aggregate` annotation is removed; use `@ToOneAggregate` instead. The
@@ -517,7 +586,7 @@ reference — `resolve()` returns `Optional.empty()` when the FK is null. A non-
 
 See [GitHub #255](https://github.com/octaviospain/lirp/issues/255) for background.
 
-### `@Aggregate` renamed to `@ToManyAggregates` {#migration-aggregate-to-tomanyaggregates}
+### `@Aggregate` renamed to `@ToManyAggregates`
 
 All `@Aggregate` annotations on collection-typed properties must be renamed to `@ToManyAggregates`.
 The parameters are identical:

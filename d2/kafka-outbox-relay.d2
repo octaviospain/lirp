@@ -1,0 +1,59 @@
+direction: down
+
+title: Kafka Transactional-Outbox Relay {
+    near: top-center
+    shape: text
+    style.font-size: 24
+    style.bold: true
+}
+
+flow: "" {
+    shape: sequence_diagram
+
+    app: "application"
+    repo: KafkaOutboxSqlRepository
+    db: "SQL backend\n(entity + lirp_kafka_outbox)"
+    relay: OutboxRelay
+    kafka: "Kafka broker"
+    consumer: consumer
+
+    app -> repo: "mutation / transaction { } commit"
+    repo -> db: "INSERT entity rows +\nINSERT outbox row\n(same JDBC commit)" {
+        style.bold: true
+    }
+    db -> repo: "COMMIT — atomic\n(rollback leaves no outbox row)" {
+        style.stroke: "#2e7d32"
+    }
+
+    relay -> db: "poll unsent outbox rows\n(every pollIntervalMs, batchSize)"
+    db -> relay: "unsent rows"
+    relay -> kafka: "publish, key = aggregateId\n(per-aggregate ordering)" {
+        style.bold: true
+    }
+    kafka -> relay: "broker ACK" {
+        style.stroke: "#1565c0"
+    }
+    relay -> db: "mark row sent\n(only after ACK → at-least-once)" {
+        style.bold: true
+    }
+    kafka -> consumer: "delivered event\n(application-owned consumer)"
+
+    retry: "on failure: retry up to maxRetries,\nthen move to lirp_kafka_dead_letter" {
+        style.stroke: "#c62828"
+    }
+    relay -> retry: "publish/ACK failure" {
+        style.stroke: "#c62828"
+    }
+}
+
+notes: Notes {
+    near: bottom-center
+    shape: text
+    style.font-size: 13
+    |md
+    - The outbox row is co-inserted in the **same JDBC commit** as the entity — no dual-write window.
+    - Only SQL-backed repositories participate; `JsonFileRepository` / `VolatileRepository` are unsupported.
+    - A row is marked sent **only after** the broker acknowledges, giving at-least-once delivery (consumers must be idempotent).
+    - Rows that exhaust `maxRetries` (default 5) or hit a non-retriable error move to the dead-letter table.
+    |
+}

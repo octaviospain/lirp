@@ -25,6 +25,7 @@ A Kotlin/Java library where domain entities own their reactivity — property ch
 - [Quick Start](#quick-start)
 - [SQL Persistence](#sql-persistence)
 - [Query DSL](#query-dsl)
+- [Kafka Integration](#kafka-integration)
 - [Features](#features)
 - [Limitations and Design Trade-offs](#limitations-and-design-trade-offs)
 - [Performance](#performance)
@@ -63,7 +64,7 @@ reactive entity + in-memory / JSON repository surface; add `lirp-sql` for the SQ
 `lirp-fx` for the JavaFX bridge. The `net.transgressoft.lirp.sql` Gradle plugin wires up the KSP
 processor for you so generated accessors are produced at build time.
 
-**Requirements:** JVM 21 toolchain (JVM 17+ runtime), Kotlin 2.3.10.
+**Requirements:** JVM 21 toolchain (JVM 17+ runtime), Kotlin 2.4.0.
 
 Gradle (Kotlin DSL):
 ```kotlin
@@ -318,6 +319,59 @@ The returned `Sequence<T>` is lazy — no evaluation occurs until a terminal ope
 
 Deep coverage of the write pipeline, collapse algorithm, transactional guarantees, `@Version` optimistic locking, aggregate references, cascade semantics, collection delegates, JSON persistence, and JavaFX integration lives on the wiki — see [Documentation](#documentation) below.
 
+## Kafka Integration
+
+`lirp-kafka` publishes domain mutations to Kafka using the **transactional outbox** pattern: the
+outbox row and the entity row are written in the same JDBC commit, eliminating the dual-write /
+lost-event window. A background relay polls the outbox and delivers each row to the broker.
+
+### Zero per-event wiring
+
+Extend `KafkaOutboxSqlRepository<K, R>` instead of `SqlRepository<K, R>`. Every create, update, and
+soft-delete co-inserts an outbox row in the same transaction that persists the entity — no manual
+event emission needed:
+
+```kotlin
+@LirpRepository
+class VehicleRepository(dataSource: DataSource) :
+    KafkaOutboxSqlRepository<UUID, Vehicle>(dataSource, Vehicle_LirpTableDef)
+```
+
+### Starting the relay
+
+Create a `LirpKafkaConfig` with the broker address, then call `startRelay` with the shared
+`DataSource`. The relay runs on a background coroutine and stops when `close` is called:
+
+```kotlin
+val kafka = LirpKafkaConfig.create(bootstrapServers)
+kafka.startRelay(dataSource, KafkaOutboxConfig.DEFAULT)
+
+// ...
+
+kafka.close()  // stops the relay and releases the broker connection
+```
+
+`KafkaOutboxConfig` exposes relay tuning knobs: `pollIntervalMs` (default 500 ms), `batchSize`
+(default 100), `maxRetries` (default 5), and exponential `retryBaseDelayMs` / `retryMaxDelayMs`.
+Pass `KafkaOutboxConfig.DEFAULT` or a custom instance to `startRelay`.
+
+### Delivery semantics
+
+Publishing is **at-least-once**: if the relay crashes after sending a record but before marking it sent, the row is eligible for redelivery on the next polling cycle.
+Each Kafka record carries the aggregate id as the
+key (preserving per-aggregate ordering) and a `ce_id` CloudEvents header set to the outbox row's
+UUID — consumers use it as an idempotency key for dedup. Rows that exhaust all retries move to a
+dead-letter table.
+
+### Supported store
+
+Only SQL-backed repositories participate in the transactional outbox. `JsonFileRepository` and
+`VolatileRepository` cannot guarantee atomic outbox writes and are explicitly unsupported.
+
+For architecture details, the serialization (`LirpEventSerializer` / CloudEvents default) and topic
+(`TopicResolver`) SPIs, redelivery behaviour, and the inbound-consumption DIY pattern see
+[Kafka Integration](https://github.com/octaviospain/lirp/wiki/Kafka-Integration) on the wiki.
+
 ## Features
 
 - **Transparent SQL persistence** — add an entity, change a property, the database stays in sync automatically
@@ -338,6 +392,7 @@ Deep coverage of the write pipeline, collapse algorithm, transactional guarantee
 - **Repository-as-factory** — typed `create()` methods with automatic `@LirpRepository` registration
 - **JavaFX integration** (`lirp-fx`) — `fxAggregateList`/`fxAggregateSet` bridging lirp collections with `ObservableList`/`ObservableSet`, scalar delegates (`fxString`, `fxInteger`, etc.), read-only `ObservableMap` projections
 - **Non-FX projection maps** — `projection` (aggregate source) and `registryProjection` (whole-registry source) in `lirp-core` group entities into a `Map<PK, List<E>>` with no JavaFX dependency. An optional value-transform (`{ pk, items -> V }`) maps each bucket to a derived value, recomputed only for affected buckets, and a multi-key extractor (`multiKeyProjection`) places one entity in every bucket its key set yields. Registry-backed projections are `AutoCloseable`
+- **Kafka event publishing** (`lirp-kafka`) — domain mutations are published to Kafka through a transactional outbox with zero per-event wiring; a repository extends `KafkaOutboxSqlRepository` and a background relay delivers each committed change at-least-once to a Kafka topic
 - **Full Java interoperability**
 
 ## Limitations and Design Trade-offs
@@ -411,6 +466,12 @@ val repo = SqlRepository<Int, Album>(
 Individual subscriptions can also carry an independent error handler via
 `subscribeAsync(action, onError)`, independent of the repository-level handler.
 
+## Upgrading to v3.2.0
+
+Version 3.2.0 adds the optional `lirp-kafka` module for transactional-outbox Kafka publishing. All
+changes are additive and non-breaking — existing code requires no migration. Opt in by adding the
+`lirp-kafka` dependency; see the [Kafka Integration](https://github.com/octaviospain/lirp/wiki/Kafka-Integration) wiki page.
+
 ## Upgrading to v3.1.0
 
 Version 3.1.0 adds first-class soft delete and removes two public API elements deprecated since 3.0.0.
@@ -458,6 +519,7 @@ The **[LIRP Wiki](https://github.com/octaviospain/lirp/wiki)** is the canonical 
 | [SQL Mappings](https://github.com/octaviospain/lirp/wiki/SQL-Mappings) | Column types, custom converters, embeddable value objects, element collections, `@PersistenceCreator`, `@Indexed`, UUID storage |
 | [SQL Schema & Relationships](https://github.com/octaviospain/lirp/wiki/SQL-Schema-and-Relationships) | Auto table creation, foreign keys & junction tables, `SqlTableDef` capability interfaces, dialect notes |
 | [Transactional Boundaries](https://github.com/octaviospain/lirp/wiki/Transactional-Boundaries) | Single-aggregate atomicity, `@Version` optimistic locking, `Conflict` event, saga/compensation pattern |
+| [Kafka Integration](https://github.com/octaviospain/lirp/wiki/Kafka-Integration) | `lirp-kafka` architecture (mutation → outbox → relay → Kafka → consumer), setup, the serialization + topic SPIs, delivery semantics (at-least-once, idempotency key, redelivery, dead-letter), and the inbound-consumption DIY pattern |
 | [Soft Delete](https://github.com/octaviospain/lirp/wiki/Soft-Delete) | Reversible deletes, `SoftDelete`/`Restore` events, cross-aggregate `via()` visibility |
 | [JSON Persistence](https://github.com/octaviospain/lirp/wiki/JSON-Persistence) | `JsonFileRepository`, `LirpEntitySerializer`, polymorphic serializers, deferred loading, `JsonFkPolicy` reconciliation |
 | [JavaFX Integration](https://github.com/octaviospain/lirp/wiki/JavaFX-Integration) | `lirp-fx`, `fxAggregateList`/`fxAggregateSet`, scalar delegates, dual notification, FX thread dispatch |
@@ -477,6 +539,7 @@ The **[LIRP Wiki](https://github.com/octaviospain/lirp/wiki)** is the canonical 
 | `lirp-sql-api` | Pure SQL contracts: `SqlTableDef`, `JunctionAware`, `ForeignKeyAware`, `VersionedTableDef`. Sits between `lirp-api` and `lirp-sql` — no implementation, no Exposed/HikariCP dependency. |
 | `lirp-sql` | `SqlRepository` built on JetBrains Exposed + HikariCP. Supports PostgreSQL/MySQL/MariaDB/SQLite (MS SQL/Oracle untested). |
 | `lirp-fx` | JavaFX bridge: `fxAggregateList`/`fxAggregateSet`, scalar delegates (`fxString`, `fxInteger`...), read-only `ObservableMap` projections, FX thread dispatch. |
+| `lirp-kafka` | Kafka event publishing via the transactional outbox — `KafkaOutboxSqlRepository` (co-inserts an outbox row in the same JDBC commit as the entity), `LirpKafkaConfig` / `KafkaOutboxConfig` (background relay), `KafkaEventPublisher`, and pluggable `LirpEventSerializer` (CloudEvents default) / `TopicResolver` SPIs. Builds on `lirp-sql`. |
 | `lirp-gradle-plugin` | `net.transgressoft.lirp.sql` Gradle plugin auto-configuring KSP for consumers. |
 | `lirp-benchmark` | JMH benchmarks. |
 

@@ -26,6 +26,7 @@ This directory contains [D2](https://d2lang.com) diagram source files — the si
 | `saga-compensation.d2` | Sequence: cross-aggregate saga forward step and `Conflict`-driven compensation |
 | `projection-architecture.d2` | Projection map architecture: aggregate vs registry source, core vs fx flavour, optional capabilities |
 | `fx-thread-dispatch.d2` | JavaFX notification routing for `dispatchToFxThread` true/false |
+| `kafka-outbox-relay.d2` | Sequence: transactional-outbox co-insert → relay poll → Kafka publish → mark-sent-after-ACK (at-least-once) |
 
 ## Local Rendering
 

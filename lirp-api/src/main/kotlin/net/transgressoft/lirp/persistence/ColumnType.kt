@@ -28,16 +28,22 @@ package net.transgressoft.lirp.persistence
  * module, which translates them into JetBrains Exposed column definitions.
  */
 sealed class ColumnType {
+    /** 32-bit signed integer column. */
     data object IntType : ColumnType()
 
+    /** 64-bit signed integer column. */
     data object LongType : ColumnType()
 
+    /** Unbounded text column, mapped to the dialect's largest character type. */
     data object TextType : ColumnType()
 
+    /** Boolean column, mapped to the dialect's native boolean or its closest equivalent. */
     data object BooleanType : ColumnType()
 
+    /** Double-precision floating-point column. */
     data object DoubleType : ColumnType()
 
+    /** Single-precision floating-point column. */
     data object FloatType : ColumnType()
 
     /**
@@ -56,8 +62,10 @@ sealed class ColumnType {
      */
     data object UuidType : ColumnType()
 
+    /** Date-only column (no time component). */
     data object DateType : ColumnType()
 
+    /** Timestamp column carrying both date and time. */
     data object DateTimeType : ColumnType()
 
     /**
