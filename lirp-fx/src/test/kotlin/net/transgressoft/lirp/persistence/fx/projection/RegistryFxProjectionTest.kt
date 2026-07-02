@@ -1007,4 +1007,207 @@ class RegistryFxProjectionTest : StringSpec({
         reactive.advance()
         keys shouldBe emptyList() // and delivers nothing after
     }
+
+    // ---- bucketKeyOrdering and bucketValueOrdering FX tests ----
+
+    "RegistryFxProjection with bucketKeyOrdering iterates observable map in comparator key order" {
+        trackRepo.create(1, "Track A", "Rock")
+        trackRepo.create(2, "Track B", "Jazz")
+        trackRepo.create(3, "Track C", "Blues")
+
+        val projection =
+            RegistryFxProjection(
+                trackRepo,
+                AudioItem::albumName,
+                dispatchToFxThread = false,
+                bucketKeyOrdering = compareBy { it }
+            )
+        projection.addListener(MapChangeListener { })
+
+        projection.keys.toList() shouldBe listOf("Blues", "Jazz", "Rock")
+    }
+
+    "RegistryFxProjection with null bucketKeyOrdering iterates in PK natural order" {
+        trackRepo.create(1, "Track A", "Rock")
+        trackRepo.create(2, "Track B", "Jazz")
+        trackRepo.create(3, "Track C", "Blues")
+
+        val projection =
+            RegistryFxProjection(
+                trackRepo,
+                AudioItem::albumName,
+                dispatchToFxThread = false
+            )
+        projection.addListener(MapChangeListener { })
+
+        // PK natural order for Strings: Blues < Jazz < Rock
+        projection.keys.toList() shouldBe listOf("Blues", "Jazz", "Rock")
+    }
+
+    "RegistryFxProjection with reverse bucketKeyOrdering iterates in reverse key order" {
+        trackRepo.create(1, "Track A", "Rock")
+        trackRepo.create(2, "Track B", "Jazz")
+        trackRepo.create(3, "Track C", "Blues")
+
+        val projection =
+            RegistryFxProjection(
+                trackRepo,
+                AudioItem::albumName,
+                dispatchToFxThread = false,
+                bucketKeyOrdering = compareByDescending { it }
+            )
+        projection.addListener(MapChangeListener { })
+
+        projection.keys.toList() shouldBe listOf("Rock", "Jazz", "Blues")
+    }
+
+    "RegistryFxProjection bucketKeyOrdering PK tiebreak retains both equal-sort keys" {
+        // case-insensitive comparator: 'rock' and 'Rock' compare equal
+        trackRepo.create(1, "Track A", "rock")
+        trackRepo.create(2, "Track B", "Rock")
+        trackRepo.create(3, "Track C", "Jazz")
+
+        val projection =
+            RegistryFxProjection(
+                trackRepo,
+                AudioItem::albumName,
+                dispatchToFxThread = false,
+                bucketKeyOrdering = Comparator { a, b -> a.lowercase().compareTo(b.lowercase()) }
+            )
+        projection.addListener(MapChangeListener { })
+
+        // Both 'rock' and 'Rock' must be retained; PK tiebreak distinguishes them
+        projection.keys.size shouldBe 3
+        projection.containsKey("rock") shouldBe true
+        projection.containsKey("Rock") shouldBe true
+        projection.containsKey("Jazz") shouldBe true
+    }
+
+    "RegistryFxProjection bucketKeyOrdering MapChangeListener observes ordered iteration" {
+        trackRepo.create(1, "Track A", "Rock")
+        trackRepo.create(2, "Track B", "Jazz")
+
+        val projection =
+            RegistryFxProjection(
+                trackRepo,
+                AudioItem::albumName,
+                dispatchToFxThread = false,
+                bucketKeyOrdering = compareBy { it }
+            )
+        projection.addListener(MapChangeListener { })
+
+        val listenerCapturedKeys = mutableListOf<String>()
+        projection.addListener(MapChangeListener { listenerCapturedKeys.addAll(projection.keys) })
+
+        // Add a new bucket — the listener should see the already-ordered map
+        trackRepo.create(3, "Track C", "Blues")
+        reactive.advance()
+
+        // The listener captured keys should already be in sorted order (ordered backing proof)
+        listenerCapturedKeys shouldBe listOf("Blues", "Jazz", "Rock")
+    }
+
+    "TransformedRegistryFxProjection with bucketValueOrdering iterates in value-primary order" {
+        trackRepo.create(1, "Track A", "Rock")
+        trackRepo.create(2, "Track B", "Jazz")
+        trackRepo.create(3, "Track C", "Blues")
+
+        val projection =
+            TransformedRegistryFxProjection(
+                trackRepo,
+                AudioItem::albumName,
+                valueTransform = { pk, _ -> RegistryAlbumBucket(pk, listOf(pk)) },
+                dispatchToFxThread = false,
+                bucketValueOrdering = compareBy { it.key }
+            )
+        projection.addListener(MapChangeListener { })
+
+        // value-primary ordering by key field of RegistryAlbumBucket: Blues < Jazz < Rock
+        projection.keys.toList() shouldBe listOf("Blues", "Jazz", "Rock")
+    }
+
+    "TransformedRegistryFxProjection with null comparators iterates in PK natural order" {
+        trackRepo.create(3, "Track C", "Rock")
+        trackRepo.create(1, "Track A", "Jazz")
+        trackRepo.create(2, "Track B", "Blues")
+
+        val projection =
+            TransformedRegistryFxProjection(
+                trackRepo,
+                AudioItem::albumName,
+                valueTransform = { pk, _ -> RegistryAlbumBucket(pk, listOf(pk)) },
+                dispatchToFxThread = false
+            )
+        projection.addListener(MapChangeListener { })
+
+        // Default PK natural order
+        projection.keys.toList() shouldBe listOf("Blues", "Jazz", "Rock")
+    }
+
+    "TransformedRegistryFxProjection bucketValueOrdering PK tiebreak retains equal-sort-value buckets" {
+        // Both albumNames produce same RegistryAlbumBucket key field length -> compare equal on custom order
+        trackRepo.create(1, "Track A", "Jazz")
+        trackRepo.create(2, "Track B", "Rock")
+
+        // Compare by title-list size (both have 1 entry) — equal sort value, distinct PKs
+        val projection =
+            TransformedRegistryFxProjection(
+                trackRepo,
+                AudioItem::albumName,
+                valueTransform = { pk, items -> RegistryAlbumBucket(pk, items.map { it.title }) },
+                dispatchToFxThread = false,
+                bucketValueOrdering = compareBy { it.titles.size }
+            )
+        projection.addListener(MapChangeListener { })
+
+        // Both buckets retained despite equal sort value (PK tiebreak)
+        projection.keys.size shouldBe 2
+        projection.containsKey("Jazz") shouldBe true
+        projection.containsKey("Rock") shouldBe true
+    }
+
+    "TransformedRegistryFxProjection bucketValueOrdering MapChangeListener observes ordered observable map" {
+        trackRepo.create(1, "Track A", "Rock")
+        trackRepo.create(2, "Track B", "Jazz")
+
+        val projection =
+            TransformedRegistryFxProjection(
+                trackRepo,
+                AudioItem::albumName,
+                valueTransform = { pk, _ -> RegistryAlbumBucket(pk, listOf(pk)) },
+                dispatchToFxThread = false,
+                bucketValueOrdering = compareBy { it.key }
+            )
+        projection.addListener(MapChangeListener { })
+
+        val listenerCapturedKeys = mutableListOf<String>()
+        projection.addListener(MapChangeListener { listenerCapturedKeys.addAll(projection.keys) })
+
+        trackRepo.create(3, "Track C", "Blues")
+        reactive.advance()
+
+        // Listener observes already-ordered map (ordered backing proof)
+        listenerCapturedKeys shouldBe listOf("Blues", "Jazz", "Rock")
+    }
+
+    "TransformedRegistryFxProjection with both bucketKeyOrdering and bucketValueOrdering applies value-primary then key order" {
+        trackRepo.create(1, "Track A", "Rock")
+        trackRepo.create(2, "Track B", "Jazz")
+        trackRepo.create(3, "Track C", "Blues")
+
+        // value = length of genre string: Blues=5, Jazz=4, Rock=4
+        // value-primary ascending, then key tiebreak ascending: Jazz < Rock (both length 4) < Blues (length 5)
+        val projection =
+            TransformedRegistryFxProjection(
+                trackRepo,
+                AudioItem::albumName,
+                valueTransform = { pk, _ -> pk.length },
+                dispatchToFxThread = false,
+                bucketKeyOrdering = compareBy { it },
+                bucketValueOrdering = compareBy { it }
+            )
+        projection.addListener(MapChangeListener { })
+
+        projection.keys.toList() shouldBe listOf("Jazz", "Rock", "Blues")
+    }
 })

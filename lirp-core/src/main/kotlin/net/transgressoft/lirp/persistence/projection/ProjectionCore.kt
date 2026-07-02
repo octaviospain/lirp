@@ -43,10 +43,17 @@ import java.util.concurrent.CopyOnWriteArrayList
  * arriving equal element is inserted after the existing equal run). When [entryOrdering] is null,
  * buckets keep insertion order and every existing code path is unchanged.
  *
- * The [entryOrdering] comparator must obey the `Comparator` contract (total order, transitivity).
- * A non-transitive or throwing comparator will, at worst, misplace an element or propagate the
- * exception on the event-delivery thread; it will not raise "Comparison method violates its general
- * contract" because the single-element upper-bound insert never invokes `Collections.sort`.
+ * When [bucketKeyOrdering] is non-null, buckets (map entries) are maintained in the order defined
+ * by that comparator. A `Comparator.naturalOrder<PK>()` tiebreak is always composed in as the final
+ * level so a coarse comparator (e.g. case-insensitive) never collapses two distinct keys that compare
+ * equal under the supplied comparator. When [bucketKeyOrdering] is null, buckets iterate in PK
+ * natural order via the default [ConcurrentSkipListMap] ordering.
+ *
+ * The [entryOrdering] and [bucketKeyOrdering] comparators must obey the `Comparator` contract
+ * (total order, transitivity). A non-transitive or throwing comparator will, at worst, misplace an
+ * element or propagate the exception on the event-delivery thread; it will not raise "Comparison
+ * method violates its general contract" because the single-element upper-bound insert never invokes
+ * `Collections.sort`.
  *
  * @param K the entity ID type, must be [Comparable]
  * @param PK the projection key type, must be [Comparable]
@@ -54,12 +61,20 @@ import java.util.concurrent.CopyOnWriteArrayList
  * @param keyExtractor grouping function that extracts the projection key from an entity
  * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
  *   `null` (the default) preserves insertion order
+ * @param bucketKeyOrdering optional comparator that orders buckets (map entries) by their projection
+ *   key; `null` (the default) preserves PK natural order. A mandatory `Comparator.naturalOrder<PK>()`
+ *   tiebreak is always composed in to guarantee a stable total order over distinct keys.
  */
 internal class ProjectionCore<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
     private val keyExtractor: (E) -> PK,
-    private val entryOrdering: Comparator<E>? = null
+    private val entryOrdering: Comparator<E>? = null,
+    bucketKeyOrdering: Comparator<PK>? = null
 ) {
-    val backingMap = ConcurrentSkipListMap<PK, List<E>>()
+    val backingMap =
+        if (bucketKeyOrdering != null)
+            ConcurrentSkipListMap<PK, List<E>>(bucketKeyOrdering.thenComparing(Comparator.naturalOrder<PK>()))
+        else
+            ConcurrentSkipListMap<PK, List<E>>()
     val readOnlyView: Map<PK, List<E>> = Collections.unmodifiableMap(backingMap)
 
     private val onChangeListeners = CopyOnWriteArrayList<(Map<PK, List<E>>) -> Unit>()

@@ -1244,6 +1244,301 @@ internal class RegistryProjectionTest : StringSpec({
         projection["Rock"]!!.map { it.title } shouldContainExactly listOf("Zeppelin", "Aerosmith", "Beatles")
     }
 
+    // -------------------------------------------------------------------------
+    // Bucket-level ordering (bucketKeyOrdering) — single-key and multi-key
+    // -------------------------------------------------------------------------
+
+    "RegistryProjection with bucketKeyOrdering exposes keys in comparator order on seed" {
+        trackRepo.create(1, "Track A", "Rock")
+        trackRepo.create(2, "Track B", "Jazz")
+        trackRepo.create(3, "Track C", "Classical")
+
+        // Reverse alphabetical order: Rock, Jazz, Classical
+        val projection = registryProjection(trackRepo, { it.albumName }, bucketKeyOrdering = reverseOrder())
+
+        projection.keys.toList() shouldContainExactly listOf("Rock", "Jazz", "Classical")
+    }
+
+    "RegistryProjection without bucketKeyOrdering exposes keys in PK natural order" {
+        trackRepo.create(1, "Track A", "Rock")
+        trackRepo.create(2, "Track B", "Jazz")
+        trackRepo.create(3, "Track C", "Classical")
+
+        val projection = registryProjection(trackRepo, { it.albumName })
+
+        projection.keys.toList() shouldContainExactly listOf("Classical", "Jazz", "Rock")
+    }
+
+    "RegistryProjection with bucketKeyOrdering repositions bucket key after incremental create" {
+        trackRepo.create(1, "Track A", "Rock")
+        trackRepo.create(2, "Track B", "Jazz")
+
+        val projection = registryProjection(trackRepo, { it.albumName }, bucketKeyOrdering = reverseOrder())
+        projection.keys.toList() shouldContainExactly listOf("Rock", "Jazz")
+
+        trackRepo.create(3, "Track C", "Classical")
+        reactive.advance()
+
+        // Classical sorts first in natural order but last in reverse order
+        projection.keys.toList() shouldContainExactly listOf("Rock", "Jazz", "Classical")
+    }
+
+    "RegistryProjection with bucketKeyOrdering repositions bucket key after incremental remove empties bucket" {
+        trackRepo.create(1, "Track A", "Rock")
+        val jazz = trackRepo.create(2, "Track B", "Jazz")
+        trackRepo.create(3, "Track C", "Classical")
+
+        val projection = registryProjection(trackRepo, { it.albumName }, bucketKeyOrdering = reverseOrder())
+        projection.keys.toList() shouldContainExactly listOf("Rock", "Jazz", "Classical")
+
+        trackRepo.remove(jazz)
+        reactive.advance()
+
+        projection.keys.toList() shouldContainExactly listOf("Rock", "Classical")
+    }
+
+    "RegistryProjection with bucketKeyOrdering repositions bucket key after entity re-keys to new album" {
+        val item = trackRepo.create(1, "Track A", "Rock")
+        trackRepo.create(2, "Track B", "Rock") // Keep Rock bucket non-empty after re-key
+        trackRepo.create(3, "Track C", "Jazz")
+
+        val projection = registryProjection(trackRepo, { it.albumName }, bucketKeyOrdering = reverseOrder())
+        projection.keys.toList() shouldContainExactly listOf("Rock", "Jazz")
+
+        // Re-key entity 1 from "Rock" to "Blues"; entity 2 keeps Rock alive (reverse: Rock, Jazz, Blues)
+        val oldSnapshot = MutableAudioItem(item.id, item.title, "Rock")
+        val updated = MutableAudioItem(item.id, item.title, "Blues")
+        trackRepo.emitAsync(StandardCrudEvent.Update(updated, oldSnapshot))
+        reactive.advance()
+
+        projection.keys.toList() shouldContainExactly listOf("Rock", "Jazz", "Blues")
+    }
+
+    "RegistryProjection with bucketKeyOrdering retains both buckets when keys compare equal under comparator" {
+        // Case-insensitive comparator: "rock" and "Rock" compare equal; distinct PKs, both must survive
+        trackRepo.create(1, "Track A", "rock")
+        trackRepo.create(2, "Track B", "Rock")
+
+        val caseInsensitive = Comparator<String> { a, b -> a.lowercase().compareTo(b.lowercase()) }
+        val projection = registryProjection(trackRepo, { it.albumName }, bucketKeyOrdering = caseInsensitive)
+
+        // Both "rock" and "Rock" must be retained — PK tiebreak prevents collapsing equal-comparing keys
+        projection.keys.size shouldBe 2
+        projection.keys shouldContainExactly setOf("rock", "Rock")
+    }
+
+    "MultiKeyRegistryProjection with bucketKeyOrdering exposes keys in comparator order on seed" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        multiKeyRepo.create(1, "Zeppelin", setOf("Rock"))
+        multiKeyRepo.create(2, "Aerosmith", setOf("Jazz"))
+        multiKeyRepo.create(3, "Beatles", setOf("Classical"))
+
+        val projection = registryMultiKeyProjection(multiKeyRepo, { it.genres }, bucketKeyOrdering = reverseOrder())
+
+        projection.keys.toList() shouldContainExactly listOf("Rock", "Jazz", "Classical")
+    }
+
+    "MultiKeyRegistryProjection without bucketKeyOrdering exposes keys in PK natural order" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        multiKeyRepo.create(1, "Zeppelin", setOf("Rock"))
+        multiKeyRepo.create(2, "Aerosmith", setOf("Jazz"))
+        multiKeyRepo.create(3, "Beatles", setOf("Classical"))
+
+        val projection = registryMultiKeyProjection(multiKeyRepo, { it.genres })
+
+        projection.keys.toList() shouldContainExactly listOf("Classical", "Jazz", "Rock")
+    }
+
+    "MultiKeyRegistryProjection with bucketKeyOrdering retains both buckets when keys compare equal under comparator" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        // "rock" and "Rock" compare equal case-insensitively; both must survive as distinct buckets
+        multiKeyRepo.create(1, "Zeppelin", setOf("rock"))
+        multiKeyRepo.create(2, "Aerosmith", setOf("Rock"))
+
+        val caseInsensitive = Comparator<String> { a, b -> a.lowercase().compareTo(b.lowercase()) }
+        val projection = registryMultiKeyProjection(multiKeyRepo, { it.genres }, bucketKeyOrdering = caseInsensitive)
+
+        // PK tiebreak prevents collapsing equal-comparing keys — both must be retained
+        projection.keys.size shouldBe 2
+        projection.keys shouldContainExactly setOf("rock", "Rock")
+    }
+
+    "MultiKeyRegistryProjection with bucketKeyOrdering repositions bucket key after incremental key-set create" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        multiKeyRepo.create(1, "Zeppelin", setOf("Rock"))
+        multiKeyRepo.create(2, "Aerosmith", setOf("Jazz"))
+
+        val projection = registryMultiKeyProjection(multiKeyRepo, { it.genres }, bucketKeyOrdering = reverseOrder())
+        projection.keys.toList() shouldContainExactly listOf("Rock", "Jazz")
+
+        multiKeyRepo.create(3, "Beatles", setOf("Classical"))
+        reactive.advance()
+
+        projection.keys.toList() shouldContainExactly listOf("Rock", "Jazz", "Classical")
+    }
+
+    // -------------------------------------------------------------------------
+    // Transformed projections: value ordering, both-comparator composition,
+    // D-04 equal-value non-collapse, D-05 PK-default-not-hash
+    // -------------------------------------------------------------------------
+
+    "TransformedRegistryProjection without bucket comparator exposes keys in PK natural order" {
+        // Albums inserted out of alphabetical order: "Rock", "Jazz", "Classical"
+        trackRepo.create(1, "Track 1", "Rock")
+        trackRepo.create(2, "Track 2", "Jazz")
+        trackRepo.create(3, "Track 3", "Classical")
+
+        val projection =
+            registryProjection<Int, String, AudioItem, String>(trackRepo, { it.albumName }) { _, items ->
+                "${items.size}"
+            }
+
+        // PK natural order = String natural order = alphabetical
+        projection.keys.toList() shouldContainExactly listOf("Classical", "Jazz", "Rock")
+    }
+
+    "TransformedRegistryProjection with bucketValueOrdering exposes keys by transformed value order (value-only branch)" {
+        trackRepo.create(1, "Track A", "C-Album")
+        trackRepo.create(2, "Track B", "A-Album")
+        trackRepo.create(3, "Track C", "B-Album")
+
+        // Transform: produce the album name reversed (so "C-Album"->"mublA-C", "A-Album"->"mublA-A", "B-Album"->"mublA-B")
+        // Reversed: "A-Album"->"mublA-A", "B-Album"->"mublA-B", "C-Album"->"mublA-C"
+        // Natural order on reversed values: A < B < C, so keys come out A-Album, B-Album, C-Album
+        val projection =
+            registryProjection<Int, String, AudioItem, String>(
+                trackRepo, { it.albumName },
+                bucketValueOrdering = compareBy { it }
+            ) { pk, _ ->
+                pk.reversed()
+            }
+
+        // Reversed album names sorted: "mublA-A" < "mublA-B" < "mublA-C"
+        // Original keys in that order: "A-Album", "B-Album", "C-Album"
+        projection.keys.toList() shouldContainExactly listOf("A-Album", "B-Album", "C-Album")
+    }
+
+    "TransformedRegistryProjection with both comparators applies value-primary then key tiebreak then PK" {
+        // Transform: bucket count as a string, so all single-entity buckets tie on "1"
+        // With equal transformed values, key comparator (reverse String order) decides
+        trackRepo.create(1, "Track A", "Zephyr")
+        trackRepo.create(2, "Track B", "Alpha")
+        trackRepo.create(3, "Track C", "Mango")
+        // Fourth bucket with 2 entities — will sort first because "2" > "1" alphabetically? No: "2" > "1", so descending value comparator needed.
+        // Use compareByDescending: buckets with count "2" sort before "1"
+        trackRepo.create(4, "Track D", "Alpha") // Alpha now has 2 entities
+
+        // Transform: stringify entity count per bucket
+        // Alpha -> "2", Mango -> "1", Zephyr -> "1"
+        // bucketValueOrdering = compareByDescending { it } -> "2" first, then "1"s
+        // For ties on "1": bucketKeyOrdering = reverseOrder() -> Zephyr before Mango
+        val projection =
+            registryProjection<Int, String, AudioItem, String>(
+                trackRepo, { it.albumName },
+                bucketValueOrdering = compareByDescending { it },
+                bucketKeyOrdering = reverseOrder()
+            ) { _, items ->
+                "${items.size}"
+            }
+
+        // Alpha has 2 entities -> "2" (first); Zephyr and Mango both "1", reverseOrder -> Zephyr, Mango
+        projection.keys.toList() shouldContainExactly listOf("Alpha", "Zephyr", "Mango")
+    }
+
+    "TransformedRegistryProjection retains both keys when transformed values compare equal (D-04 equal-value non-collapse)" {
+        trackRepo.create(1, "Track A", "Rock")
+        trackRepo.create(2, "Track B", "Jazz")
+
+        // Transform always returns the same constant — both buckets produce equal transformed values.
+        // Without PK tiebreak this would collapse both into one slot; PK tiebreak prevents that.
+        val projection =
+            registryProjection<Int, String, AudioItem, String>(
+                trackRepo, { it.albumName },
+                bucketValueOrdering = compareBy { it }
+            ) { _, _ ->
+                "same-value"
+            }
+
+        // Both buckets must survive despite equal transformed values
+        projection.keys.size shouldBe 2
+        projection.keys shouldContainExactly setOf("Jazz", "Rock")
+    }
+
+    "TransformedMultiKeyRegistryProjection without bucket comparator exposes keys in PK natural order" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        // Genres inserted out of alphabetical order across entities
+        multiKeyRepo.create(1, "Artist 1", setOf("Rock"))
+        multiKeyRepo.create(2, "Artist 2", setOf("Jazz"))
+        multiKeyRepo.create(3, "Artist 3", setOf("Classical"))
+
+        val projection =
+            registryMultiKeyProjection<Int, String, MutableMultiKeyAudioItem, String>(multiKeyRepo, { it.genres }) { _, items ->
+                "${items.size}"
+            }
+
+        // PK natural order = alphabetical String order
+        projection.keys.toList() shouldContainExactly listOf("Classical", "Jazz", "Rock")
+    }
+
+    "TransformedMultiKeyRegistryProjection with bucketValueOrdering exposes keys by transformed value (value-only branch)" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        multiKeyRepo.create(1, "Artist A", setOf("C-Genre"))
+        multiKeyRepo.create(2, "Artist B", setOf("A-Genre"))
+        multiKeyRepo.create(3, "Artist C", setOf("B-Genre"))
+
+        // Transform: produce the genre name reversed; order by reversed value ascending
+        val projection =
+            registryMultiKeyProjection<Int, String, MutableMultiKeyAudioItem, String>(
+                multiKeyRepo, { it.genres },
+                bucketValueOrdering = compareBy { it }
+            ) { pk, _ ->
+                pk.reversed()
+            }
+
+        // Reversed: "C-Genre"->"erneG-C", "A-Genre"->"erneG-A", "B-Genre"->"erneG-B"
+        // Natural order: A < B < C -> A-Genre, B-Genre, C-Genre
+        projection.keys.toList() shouldContainExactly listOf("A-Genre", "B-Genre", "C-Genre")
+    }
+
+    "TransformedMultiKeyRegistryProjection retains both keys when transformed values compare equal (D-04 equal-value non-collapse)" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        multiKeyRepo.create(1, "Artist A", setOf("Rock"))
+        multiKeyRepo.create(2, "Artist B", setOf("Jazz"))
+
+        // Transform always returns the same constant value — PK tiebreak must prevent key collapse
+        val projection =
+            registryMultiKeyProjection<Int, String, MutableMultiKeyAudioItem, String>(
+                multiKeyRepo, { it.genres },
+                bucketValueOrdering = compareBy { it }
+            ) { _, _ ->
+                "same-value"
+            }
+
+        projection.keys.size shouldBe 2
+        projection.keys shouldContainExactly setOf("Jazz", "Rock")
+    }
+
+    "TransformedMultiKeyRegistryProjection with both comparators applies value-primary then key tiebreak then PK" {
+        val multiKeyRepo = MultiKeyAudioItemVolatileRepository(ctx)
+        // Create buckets: "Rock" with 2 artists (transform -> "2"), "Jazz" and "Classical" with 1 each (-> "1")
+        multiKeyRepo.create(1, "Artist 1", setOf("Rock"))
+        multiKeyRepo.create(2, "Artist 2", setOf("Rock", "Jazz"))
+        multiKeyRepo.create(3, "Artist 3", setOf("Classical"))
+
+        // descending value order: "2" before "1"; for ties on "1": reverseOrder -> Jazz before Classical
+        val projection =
+            registryMultiKeyProjection<Int, String, MutableMultiKeyAudioItem, String>(
+                multiKeyRepo, { it.genres },
+                bucketValueOrdering = compareByDescending { it },
+                bucketKeyOrdering = reverseOrder()
+            ) { _, items ->
+                "${items.size}"
+            }
+
+        // Rock has 2 -> first; Jazz and Classical both "1", reverseOrder -> Jazz, Classical
+        projection.keys.toList() shouldContainExactly listOf("Rock", "Jazz", "Classical")
+    }
+
     "MultiKeyRegistryProjection iterates without ConcurrentModificationException under concurrent key-set churn stress"
         .config(tags = setOf(Stress)) {
             extension(ReactiveScopeSerialization)

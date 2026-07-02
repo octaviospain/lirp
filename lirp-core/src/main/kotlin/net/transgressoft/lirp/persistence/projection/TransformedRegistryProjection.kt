@@ -19,6 +19,7 @@ package net.transgressoft.lirp.persistence.projection
 
 import net.transgressoft.lirp.entity.IdentifiableEntity
 import io.github.oshai.kotlinlogging.KotlinLogging
+import java.util.TreeMap
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -28,9 +29,15 @@ import java.util.concurrent.CopyOnWriteArrayList
  * only for buckets whose contents actually changed in a given delta, not for the entire map.
  *
  * This decorator wraps a [RegistryProjection] and registers on its `addOnBucketsChangedListener` signal to
- * maintain an internal `ConcurrentHashMap<PK, V>` transform cache. When a bucket is emptied
- * and its key is removed from the backing map, the corresponding key is also removed from this
- * view — the transform is never called over an empty list.
+ * maintain an internal transform cache. When a bucket is emptied and its key is removed from the
+ * backing map, the corresponding key is also removed from this view — the transform is never called
+ * over an empty list.
+ *
+ * By default, [entries], [keys], and [values] iterate in PK natural order. When [bucketValueOrdering]
+ * is supplied, buckets are ordered value-primary (reading the cached transformed value — the transform
+ * is never re-invoked inside the comparator), then by [bucketKeyOrdering] as a tiebreak, and finally
+ * by PK natural order as the mandatory deterministic final tiebreak (preventing two distinct keys
+ * whose values compare equal from being collapsed).
  *
  * Because the cache holds the previous transformed value per key, this decorator can report both the
  * old and the new value for every changed key. It therefore implements [ObservableProjection]:
@@ -40,9 +47,9 @@ import java.util.concurrent.CopyOnWriteArrayList
  *
  * **Weak cross-key consistency:** Two consecutive `get()` calls for different keys are NOT
  * a single snapshot — they may observe different states of an ongoing delta. Iteration via
- * [entries], [keys], or [values] is CME-free (backed by [ConcurrentHashMap]) but each call to
- * the underlying iterator represents a weakly consistent view. This inherits the same
- * weakly-consistent contract of the backing map's [java.util.concurrent.ConcurrentSkipListMap] iteration.
+ * [entries], [keys], or [values] is CME-free (snapshot-based from the ordered index) but each
+ * call represents a weakly consistent view. This inherits the same weakly-consistent contract of
+ * the backing map's [java.util.concurrent.ConcurrentSkipListMap] iteration.
  *
  * **Multi-subscriber:** This decorator registers one listener via `addOnBucketsChangedListener` on
  * the backing [RegistryProjection]. Additional listeners registered on the same backing map are
@@ -58,17 +65,32 @@ import java.util.concurrent.CopyOnWriteArrayList
  * @param E the entity type
  * @param V the value type produced by [valueTransform]
  * @param backing the underlying [RegistryProjection] whose buckets are transformed
+ * @param bucketKeyOrdering optional comparator that orders buckets by their projection key; used as a
+ *   tiebreak after [bucketValueOrdering] (when supplied) and before the mandatory PK natural-order
+ *   final tiebreak. `null` skips key-level ordering beyond the PK tiebreak.
+ * @param bucketValueOrdering optional comparator that orders buckets by their cached transformed value;
+ *   the comparator reads the pre-computed `V` — it never re-invokes [valueTransform]. `null` skips
+ *   value-primary ordering.
  * @param valueTransform function applied to each `(PK, List<E>)` bucket to produce a `V` value;
  *   invoked only for buckets whose contents changed in a given delta
  */
 internal class TransformedRegistryProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>(
     private val backing: RegistryProjection<K, PK, E>,
+    bucketKeyOrdering: Comparator<PK>? = null,
+    bucketValueOrdering: Comparator<V>? = null,
     private val valueTransform: (PK, List<E>) -> V
 ) : AbstractMap<PK, V>(), AutoCloseable by backing, ObservableProjection<PK, V> {
 
     private val log = KotlinLogging.logger {}
 
+    // By-key O(1) lookup cache — keyed on PK, never on V.
     private val transformCache = ConcurrentHashMap<PK, V>()
+
+    // Ordered read surface: a TreeMap whose comparator determines iteration order.
+    // Protected by cacheLock for all structural mutations (insert / remove to reposition keys).
+    // The comparator reads cached values from transformCache; it must only be consulted while
+    // transformCache holds a stable value for every key present in orderedIndex.
+    private val orderedIndex: TreeMap<PK, Unit> = TreeMap(bucketComparator(bucketValueOrdering, bucketKeyOrdering) { transformCache[it]!! })
 
     private val cacheLock = Any()
 
@@ -102,12 +124,20 @@ internal class TransformedRegistryProjection<K : Comparable<K>, PK : Comparable<
                                     val oldValue = transformCache[key]
                                     if (bucket == null) {
                                         if (oldValue != null) {
+                                            // Remove from ordered index BEFORE cache update so the
+                                            // comparator can still find the old position.
+                                            orderedIndex.remove(key)
                                             transformCache.remove(key)
                                             add(ProjectionEntryChange(key, oldValue, null))
                                         }
                                     } else {
                                         val newValue = valueTransform(key, bucket)
+                                        // Reposition in orderedIndex: remove at old position (while
+                                        // cache still holds old value), update cache, re-insert at
+                                        // new position (comparator now sees the new value).
+                                        orderedIndex.remove(key)
                                         transformCache[key] = newValue
+                                        orderedIndex[key] = Unit
                                         if (newValue != oldValue) add(ProjectionEntryChange(key, oldValue, newValue))
                                     }
                                 }
@@ -129,7 +159,8 @@ internal class TransformedRegistryProjection<K : Comparable<K>, PK : Comparable<
             synchronized(cacheLock) {
                 initializeCache()
                 entriesChangedListeners.add(listener)
-                transformCache.map { (key, value) -> ProjectionEntryChange(key, null, value) }
+                // Snapshot ordered entries for the replay batch.
+                orderedIndex.keys.mapNotNull { key -> transformCache[key]?.let { value -> ProjectionEntryChange(key, null, value) } }
             }
         if (initial.isNotEmpty()) notifyListeners(listOf(listener), initial)
         return AutoCloseable { entriesChangedListeners.remove(listener) }
@@ -155,7 +186,9 @@ internal class TransformedRegistryProjection<K : Comparable<K>, PK : Comparable<
             seedingThread = Thread.currentThread()
             try {
                 for ((key, bucket) in backing) {
-                    transformCache[key] = valueTransform(key, bucket)
+                    val value = valueTransform(key, bucket)
+                    transformCache[key] = value
+                    orderedIndex[key] = Unit
                 }
             } finally {
                 seedingThread = null
@@ -164,10 +197,15 @@ internal class TransformedRegistryProjection<K : Comparable<K>, PK : Comparable<
         }
     }
 
+    // Snapshot the ordered keys under cacheLock to produce a stable, ordered set of entries.
     override val entries: Set<Map.Entry<PK, V>>
         get() {
             initializeCache()
-            return transformCache.entries
+            return synchronized(cacheLock) {
+                orderedIndex.keys.mapNotNull { key ->
+                    transformCache[key]?.let { value -> java.util.AbstractMap.SimpleImmutableEntry(key, value) }
+                }.toLinkedHashSet()
+            }
         }
 
     override val size: Int
@@ -179,13 +217,15 @@ internal class TransformedRegistryProjection<K : Comparable<K>, PK : Comparable<
     override val keys: Set<PK>
         get() {
             initializeCache()
-            return transformCache.keys
+            return synchronized(cacheLock) { LinkedHashSet(orderedIndex.keys) }
         }
 
     override val values: Collection<V>
         get() {
             initializeCache()
-            return transformCache.values
+            return synchronized(cacheLock) {
+                orderedIndex.keys.mapNotNull { transformCache[it] }
+            }
         }
 
     override fun get(key: PK): V? {
@@ -208,3 +248,5 @@ internal class TransformedRegistryProjection<K : Comparable<K>, PK : Comparable<
         return transformCache.isEmpty()
     }
 }
+
+private fun <T> List<T>.toLinkedHashSet(): LinkedHashSet<T> = LinkedHashSet(this)

@@ -32,6 +32,7 @@ import javafx.beans.InvalidationListener
 import javafx.collections.FXCollections
 import javafx.collections.MapChangeListener
 import javafx.collections.ObservableMap
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentSkipListMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CopyOnWriteArraySet
@@ -100,6 +101,14 @@ import kotlinx.coroutines.launch
  * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
  *   ordering is applied on the background thread (inside [dataTransform]'s input) before the
  *   FX-thread dispatch. When `null` (default), buckets retain insertion order.
+ * @param bucketKeyOrdering optional comparator that orders buckets by the bucket key itself. When
+ *   non-null (and [bucketValueOrdering] is null), the observable map iterates keys in this order
+ *   with a mandatory PK natural-order tiebreak. When `null` (default), key-level ordering is skipped.
+ * @param bucketValueOrdering optional comparator that orders buckets by their transformed value `V`.
+ *   When non-null, the observable collection iterates in value-primary order (then key, then PK
+ *   natural order as the mandatory tiebreak), applied before the FX-thread pulse. The comparator
+ *   reads the already-staged `V`; it never invokes [dataTransform] or [fxFactory].
+ *   When `null` (default), value-primary ordering is skipped.
  */
 class TransformedRegistryFxProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>(
     private val registry: Registry<K, E>,
@@ -108,13 +117,35 @@ class TransformedRegistryFxProjection<K : Comparable<K>, PK : Comparable<PK>, E 
     @Suppress("UNCHECKED_CAST")
     private val fxFactory: (PK, Any?) -> V,
     val dispatchToFxThread: Boolean = true,
-    val entryOrdering: Comparator<E>? = null
+    val entryOrdering: Comparator<E>? = null,
+    val bucketKeyOrdering: Comparator<PK>? = null,
+    val bucketValueOrdering: Comparator<V>? = null
 ) : FxObservableProjection<PK, V> {
 
     private val log = KotlinLogging.logger {}
 
+    // When bucketValueOrdering is active, the observable map is backed by a ConcurrentSkipListMap
+    // whose comparator reads from stagedValues — so entries iterate in value-primary order. The
+    // comparator reads only already-staged V; it never invokes dataTransform or fxFactory (Pitfall 3).
+    // For key-only ordering, the skip-list comparator uses bucketKeyOrdering + naturalOrder tiebreak.
+    // stagedValues tracks the current V for each bucket so the comparator has a fast, cached lookup.
+    private val stagedValues: ConcurrentHashMap<PK, V>? =
+        if (bucketValueOrdering != null) ConcurrentHashMap() else null
+
     private val innerObservableMap: ObservableMap<PK, V> =
-        FXCollections.observableMap(ConcurrentSkipListMap<PK, V>())
+        FXCollections.observableMap(
+            when {
+                bucketValueOrdering != null -> {
+                    val sv = stagedValues!!
+                    val cmp = buildBucketComparator<PK, V>(bucketValueOrdering, bucketKeyOrdering) { sv[it] }
+                    ConcurrentSkipListMap<PK, V>(cmp)
+                }
+                bucketKeyOrdering != null ->
+                    ConcurrentSkipListMap<PK, V>(bucketKeyOrdering.thenComparing(Comparator.naturalOrder<PK>()))
+                else ->
+                    ConcurrentSkipListMap<PK, V>()
+            }
+        )
 
     private val entriesChangedListeners = CopyOnWriteArrayList<(List<ProjectionEntryChange<PK, V>>) -> Unit>()
 
@@ -161,6 +192,10 @@ class TransformedRegistryFxProjection<K : Comparable<K>, PK : Comparable<PK>, E 
      * @param dispatchToFxThread whether to dispatch listener notifications to the FX Application Thread
      * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted
      *   order before [valueTransform] receives it. When `null` (default), insertion order is kept.
+     * @param bucketKeyOrdering optional comparator that orders buckets by their projection key.
+     *   When `null` (default), key-level ordering is skipped.
+     * @param bucketValueOrdering optional comparator that orders buckets by their transformed value `V`,
+     *   applied before the FX-thread pulse. When `null` (default), value-primary ordering is skipped.
      */
     @Suppress("UNCHECKED_CAST")
     constructor(
@@ -168,14 +203,18 @@ class TransformedRegistryFxProjection<K : Comparable<K>, PK : Comparable<PK>, E 
         keyExtractor: (E) -> PK,
         valueTransform: (PK, List<E>) -> V,
         dispatchToFxThread: Boolean = true,
-        entryOrdering: Comparator<E>? = null
+        entryOrdering: Comparator<E>? = null,
+        bucketKeyOrdering: Comparator<PK>? = null,
+        bucketValueOrdering: Comparator<V>? = null
     ) : this(
         registry = registry,
         keyExtractor = keyExtractor,
         dataTransform = valueTransform,
         fxFactory = { _, staged -> staged as V },
         dispatchToFxThread = dispatchToFxThread,
-        entryOrdering = entryOrdering
+        entryOrdering = entryOrdering,
+        bucketKeyOrdering = bucketKeyOrdering,
+        bucketValueOrdering = bucketValueOrdering
     )
 
     init {
@@ -229,7 +268,11 @@ class TransformedRegistryFxProjection<K : Comparable<K>, PK : Comparable<PK>, E 
         runSeedOnFxThread(dispatchToFxThread) {
             for ((key, d) in staged) {
                 try {
-                    innerObservableMap[key] = fxFactory(key, d)
+                    val v = fxFactory(key, d)
+                    // Update stagedValues before inserting so the ConcurrentSkipListMap comparator
+                    // can read the cached V when positioning this entry in value-primary order.
+                    stagedValues?.set(key, v)
+                    innerObservableMap[key] = v
                 } catch (t: Throwable) {
                     log.error(t) { "fxFactory failed for bucket key=$key during seed; skipping this bucket" }
                 }
@@ -372,12 +415,25 @@ class TransformedRegistryFxProjection<K : Comparable<K>, PK : Comparable<PK>, E 
 
     // Applies drained removals and updates to innerObservableMap, invoking fxFactory per updated
     // bucket and skipping any bucket whose fxFactory throws. Returns the recomputed values by key.
+    // When bucketValueOrdering is active, stagedValues is updated before the observable map is mutated
+    // so that the skip-list comparator reads the correct staged V during the insert operation — this
+    // positions the new entry in value-primary order within the observable backing before listeners fire.
     private fun applyMutations(removals: Set<PK>, updates: Map<PK, Any?>): Map<PK, V> {
-        for (key in removals) innerObservableMap.remove(key)
+        for (key in removals) {
+            stagedValues?.remove(key)
+            innerObservableMap.remove(key)
+        }
         val newValues = mutableMapOf<PK, V>()
         for ((key, d) in updates) {
             try {
                 val v = fxFactory(key, d)
+                // For value-primary ordering: update stagedValues first so the comparator in
+                // the ConcurrentSkipListMap sees the new V when determining the insert position.
+                // Remove-then-insert guarantees repositioning when the value (and thus order) changes.
+                if (stagedValues != null) {
+                    stagedValues[key] = v
+                    innerObservableMap.remove(key)
+                }
                 innerObservableMap[key] = v
                 newValues[key] = v
             } catch (t: Throwable) {

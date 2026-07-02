@@ -66,14 +66,18 @@ import kotlin.reflect.KProperty
  * @param keyExtractor grouping function that extracts the projection key from an entity
  * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
  *   `null` (the default) preserves insertion order. Equal elements retain arrival order.
+ * @param bucketKeyOrdering optional comparator that orders buckets (map entries) by their projection
+ *   key; `null` (the default) preserves PK natural order. A mandatory `Comparator.naturalOrder<PK>()`
+ *   tiebreak is always composed in to guarantee a stable total order over distinct keys.
  */
 class RegistryProjection<K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>>(
     private val registry: Registry<K, E>,
     private val keyExtractor: (E) -> PK,
-    private val entryOrdering: Comparator<E>? = null
+    private val entryOrdering: Comparator<E>? = null,
+    bucketKeyOrdering: Comparator<PK>? = null
 ) : AbstractMap<PK, List<E>>(), AutoCloseable {
 
-    private val core = ProjectionCore<K, PK, E>(keyExtractor, entryOrdering)
+    private val core = ProjectionCore<K, PK, E>(keyExtractor, entryOrdering, bucketKeyOrdering)
 
     /** Reverse index: entity id → current bucket key. Enables O(1) old-key lookup on Update. */
     private val reverseIndex = ConcurrentHashMap<K, PK>()

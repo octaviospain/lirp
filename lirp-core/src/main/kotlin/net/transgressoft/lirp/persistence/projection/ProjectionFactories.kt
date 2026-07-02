@@ -79,13 +79,17 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> projecti
  * @param keyExtractor grouping function that extracts the projection key from an entity
  * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
  *   `null` (the default) preserves insertion order. Equal elements retain arrival order.
+ * @param bucketKeyOrdering optional comparator that orders buckets by their projection key; buckets
+ *   that compare equal under this comparator are further resolved by PK natural order so that distinct
+ *   keys are never collapsed. `null` (the default) preserves PK natural order.
  * @return a [RegistryProjection] delegate grouping registry entities by [keyExtractor]
  */
 fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> PK,
-    entryOrdering: Comparator<E>? = null
-): RegistryProjection<K, PK, E> = RegistryProjection(registry, keyExtractor, entryOrdering)
+    entryOrdering: Comparator<E>? = null,
+    bucketKeyOrdering: Comparator<PK>? = null
+): RegistryProjection<K, PK, E> = RegistryProjection(registry, keyExtractor, entryOrdering, bucketKeyOrdering)
 
 /**
  * Creates a read-only value-transformed projection that groups entities from a source collection
@@ -141,14 +145,21 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  * When [entryOrdering] is non-null, each per-key bucket's `List<E>` is maintained sorted and
  * [valueTransform] receives an already-ordered list. Equal elements retain arrival order.
  *
+ * By default, buckets are exposed in PK natural order. When [bucketValueOrdering] is supplied,
+ * buckets are ordered value-primary (by the cached transformed value, never re-invoking the transform),
+ * then by [bucketKeyOrdering] as a tiebreak, and finally by PK natural order as the mandatory
+ * deterministic final tiebreak. Omitting either comparator is binary compatible.
+ *
  * Usage:
  * ```kotlin
  * val summaryByAlbum = registryProjection(trackRepo) { it.albumName } { pk, items -> AlbumSummary(pk, items.size) }
  * val orderedSummary = registryProjection(trackRepo, { it.albumName }, entryOrdering = compareBy { it.title }) { pk, items -> AlbumSummary(pk, items) }
+ * val bucketOrdered = registryProjection(trackRepo, { it.albumName }, bucketValueOrdering = compareBy { it.displayTitle }) { pk, items -> AlbumSummary(pk, items) }
  * ```
  *
  * **Weak cross-key consistency:** Two consecutive reads on different keys are NOT a single
- * snapshot. Iteration is CME-free via [java.util.concurrent.ConcurrentHashMap].
+ * snapshot. Iteration is CME-free (snapshot-based from the ordered index) but each call
+ * represents a weakly consistent view.
  *
  * @param K the entity ID type, must be [Comparable]
  * @param PK the projection key type, must be [Comparable]
@@ -159,6 +170,14 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order
  *   before [valueTransform] is invoked; `null` (the default) preserves insertion order.
  *   Equal elements retain arrival order.
+ * @param bucketKeyOrdering optional comparator that orders buckets by their projection key; buckets
+ *   that compare equal under this comparator are further resolved by PK natural order so that distinct
+ *   keys are never collapsed. Used as a tiebreak after [bucketValueOrdering] when both are supplied.
+ *   `null` (the default) skips key-level ordering beyond the mandatory PK final tiebreak.
+ * @param bucketValueOrdering optional comparator that orders buckets by their cached transformed value;
+ *   the comparator reads the pre-computed `V` — it never re-invokes [valueTransform]. Buckets that
+ *   compare equal under this comparator are further resolved by [bucketKeyOrdering] (when supplied)
+ *   and then by PK natural order. `null` (the default) skips value-primary ordering.
  * @param valueTransform trailing-lambda applied to each `(PK, List<E>)` bucket to produce a non-null `V`
  *   value; invoked only for buckets affected by the latest delta. `V` is constrained to be non-null so
  *   the add/replace/remove encoding of [ProjectionEntryChange] stays sound (a null value cannot be
@@ -171,8 +190,16 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
     registry: Registry<K, E>,
     keyExtractor: (E) -> PK,
     entryOrdering: Comparator<E>? = null,
+    bucketKeyOrdering: Comparator<PK>? = null,
+    bucketValueOrdering: Comparator<V>? = null,
     valueTransform: (PK, List<E>) -> V
-): ObservableProjection<PK, V> = TransformedRegistryProjection(RegistryProjection(registry, keyExtractor, entryOrdering), valueTransform)
+): ObservableProjection<PK, V> =
+    TransformedRegistryProjection(
+        RegistryProjection(registry, keyExtractor, entryOrdering, bucketKeyOrdering),
+        bucketKeyOrdering,
+        bucketValueOrdering,
+        valueTransform
+    )
 
 /**
  * Creates a read-only multi-key projection that groups entities from a source collection by every
@@ -261,13 +288,17 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
  * @param keyExtractor grouping function that extracts a collection of projection keys from an entity
  * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order;
  *   `null` (the default) preserves insertion order. Equal elements retain arrival order.
+ * @param bucketKeyOrdering optional comparator that orders buckets by their projection key; buckets
+ *   that compare equal under this comparator are further resolved by PK natural order so that distinct
+ *   keys are never collapsed. `null` (the default) preserves PK natural order.
  * @return a [MultiKeyRegistryProjection] delegate grouping registry entities by every key in [keyExtractor]
  */
 fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registryMultiKeyProjection(
     registry: Registry<K, E>,
     keyExtractor: (E) -> Collection<PK>,
-    entryOrdering: Comparator<E>? = null
-): MultiKeyRegistryProjection<K, PK, E> = MultiKeyRegistryProjection(registry, keyExtractor, entryOrdering)
+    entryOrdering: Comparator<E>? = null,
+    bucketKeyOrdering: Comparator<PK>? = null
+): MultiKeyRegistryProjection<K, PK, E> = MultiKeyRegistryProjection(registry, keyExtractor, entryOrdering, bucketKeyOrdering)
 
 /**
  * Creates a read-only value-transformed multi-key projection that groups all entities from a
@@ -281,8 +312,14 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registry
  * When [entryOrdering] is non-null, each per-key bucket's `List<E>` is maintained sorted and
  * [valueTransform] receives an already-ordered list. Equal elements retain arrival order.
  *
+ * By default, buckets are exposed in PK natural order. When [bucketValueOrdering] is supplied,
+ * buckets are ordered value-primary (by the cached transformed value, never re-invoking the transform),
+ * then by [bucketKeyOrdering] as a tiebreak, and finally by PK natural order as the mandatory
+ * deterministic final tiebreak. Omitting either comparator is binary compatible.
+ *
  * **Weak cross-key consistency:** Two consecutive reads on different keys are NOT a single
- * snapshot. Iteration is CME-free via [java.util.concurrent.ConcurrentHashMap].
+ * snapshot. Iteration is CME-free (snapshot-based from the ordered index) but each call
+ * represents a weakly consistent view.
  *
  * @param K the entity ID type, must be [Comparable]
  * @param PK the projection key type, must be [Comparable]
@@ -293,6 +330,14 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>> registry
  * @param entryOrdering optional comparator that maintains each bucket's `List<E>` in sorted order
  *   before [valueTransform] is invoked; `null` (the default) preserves insertion order.
  *   Equal elements retain arrival order.
+ * @param bucketKeyOrdering optional comparator that orders buckets by their projection key; buckets
+ *   that compare equal under this comparator are further resolved by PK natural order so that distinct
+ *   keys are never collapsed. Used as a tiebreak after [bucketValueOrdering] when both are supplied.
+ *   `null` (the default) skips key-level ordering beyond the mandatory PK final tiebreak.
+ * @param bucketValueOrdering optional comparator that orders buckets by their cached transformed value;
+ *   the comparator reads the pre-computed `V` — it never re-invokes [valueTransform]. Buckets that
+ *   compare equal under this comparator are further resolved by [bucketKeyOrdering] (when supplied)
+ *   and then by PK natural order. `null` (the default) skips value-primary ordering.
  * @param valueTransform trailing-lambda applied to each `(PK, List<E>)` bucket to produce a non-null `V`
  *   value; invoked only for buckets affected by the latest delta. `V` is constrained to be non-null so
  *   the add/replace/remove encoding of [ProjectionEntryChange] stays sound (a null value cannot be
@@ -306,5 +351,13 @@ fun <K : Comparable<K>, PK : Comparable<PK>, E : IdentifiableEntity<K>, V : Any>
     registry: Registry<K, E>,
     keyExtractor: (E) -> Collection<PK>,
     entryOrdering: Comparator<E>? = null,
+    bucketKeyOrdering: Comparator<PK>? = null,
+    bucketValueOrdering: Comparator<V>? = null,
     valueTransform: (PK, List<E>) -> V
-): ObservableProjection<PK, V> = TransformedMultiKeyRegistryProjection(MultiKeyRegistryProjection(registry, keyExtractor, entryOrdering), valueTransform)
+): ObservableProjection<PK, V> =
+    TransformedMultiKeyRegistryProjection(
+        MultiKeyRegistryProjection(registry, keyExtractor, entryOrdering, bucketKeyOrdering),
+        bucketKeyOrdering,
+        bucketValueOrdering,
+        valueTransform
+    )
