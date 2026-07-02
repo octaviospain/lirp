@@ -415,24 +415,27 @@ class TransformedRegistryFxProjection<K : Comparable<K>, PK : Comparable<PK>, E 
 
     // Applies drained removals and updates to innerObservableMap, invoking fxFactory per updated
     // bucket and skipping any bucket whose fxFactory throws. Returns the recomputed values by key.
-    // When bucketValueOrdering is active, stagedValues is updated before the observable map is mutated
-    // so that the skip-list comparator reads the correct staged V during the insert operation — this
-    // positions the new entry in value-primary order within the observable backing before listeners fire.
+    // When bucketValueOrdering is active, innerObservableMap is a ConcurrentSkipListMap whose
+    // comparator reads stagedValues to locate a key. Every removal of an existing node must therefore
+    // run while stagedValues still holds that key's old value, otherwise the comparator walks to the
+    // wrong position and the node is missed — leaving a stale entry or inserting a duplicate. So the
+    // map removal always precedes the stagedValues mutation.
     private fun applyMutations(removals: Set<PK>, updates: Map<PK, Any?>): Map<PK, V> {
         for (key in removals) {
-            stagedValues?.remove(key)
             innerObservableMap.remove(key)
+            stagedValues?.remove(key)
         }
         val newValues = mutableMapOf<PK, V>()
         for ((key, d) in updates) {
             try {
                 val v = fxFactory(key, d)
-                // For value-primary ordering: update stagedValues first so the comparator in
-                // the ConcurrentSkipListMap sees the new V when determining the insert position.
-                // Remove-then-insert guarantees repositioning when the value (and thus order) changes.
+                // Remove the node at its OLD position first (comparator still reads the old staged
+                // value), then stage the new value so the re-insert below lands at the new
+                // value-ordered position. Remove-then-insert guarantees repositioning when the value
+                // (and thus order) changes.
                 if (stagedValues != null) {
-                    stagedValues[key] = v
                     innerObservableMap.remove(key)
+                    stagedValues[key] = v
                 }
                 innerObservableMap[key] = v
                 newValues[key] = v
