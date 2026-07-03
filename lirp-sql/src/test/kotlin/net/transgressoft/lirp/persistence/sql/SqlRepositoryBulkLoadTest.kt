@@ -36,7 +36,6 @@ import java.sql.Statement
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 import javax.sql.DataSource
-import kotlin.time.Duration.Companion.seconds
 
 /**
  * Bulk-load and junction-sync unit tests for [SqlRepository], exercising the H2-backed end-to-end
@@ -56,6 +55,23 @@ class SqlRepositoryBulkLoadTest : StringSpec({
             }
         return HikariDataSource(config)
     }
+
+    // Reads the junction table as (parent_id, item_id, position) triples ordered by position, so the
+    // persisted junction state can be polled and asserted from a single place.
+    fun readJunctionRows(ds: DataSource): List<Triple<Int, Int, Int>> =
+        ds.connection.use { conn ->
+            val rows = mutableListOf<Triple<Int, Int, Int>>()
+            conn.createStatement().use { st ->
+                st.executeQuery(
+                    "SELECT parent_id, item_id, \"position\" FROM test_playlist_tracks ORDER BY \"position\""
+                ).use { rs ->
+                    while (rs.next()) {
+                        rows.add(Triple(rs.getInt(1), rs.getInt(2), rs.getInt(3)))
+                    }
+                }
+            }
+            rows
+        }
 
     "loadFromStore returns playlists with track IDs in position order" {
         val ds = newDataSource(freshJdbcUrl())
@@ -157,50 +173,28 @@ class SqlRepositoryBulkLoadTest : StringSpec({
                         trackIds = listOf(10, 20, 30)
                     }
                 repo.add(playlist)
-                repo.close() // synchronous flush
 
-                // Reload and verify three rows at positions 0, 1, 2.
-                ds.connection.use { conn ->
-                    val rows = mutableListOf<Triple<Int, Int, Int>>()
-                    conn.createStatement().use { st ->
-                        st.executeQuery(
-                            "SELECT parent_id, item_id, \"position\" FROM test_playlist_tracks ORDER BY \"position\""
-                        ).use { rs ->
-                            while (rs.next()) {
-                                rows.add(Triple(rs.getInt(1), rs.getInt(2), rs.getInt(3)))
-                            }
-                        }
-                    }
-                    rows shouldContainExactly
+                // Poll the persisted junction rows while the repo is open (the add reaches the write
+                // pipeline asynchronously); assert three rows at positions 0, 1, 2.
+                eventually(DatabaseTestSupport.PERSISTED_ROW_POLL) {
+                    readJunctionRows(ds) shouldContainExactly
                         listOf(Triple(1, 10, 0), Triple(1, 20, 1), Triple(1, 30, 2))
                 }
+                repo.close()
 
-                // Re-open, mutate to a shorter list, flush, and verify the wholesale replace.
+                // Re-open, mutate to a shorter list, and verify the wholesale junction replace persists.
                 val repo2 = SqlRepository(ds, TestPlaylistTableDef)
                 try {
                     val reloaded = repo2.findById(1).get()
                     reloaded.trackIds shouldContainExactly listOf(10, 20, 30)
                     reloaded.trackIds = listOf(20, 30)
-                    // The PendingUpdate is enqueued via the mutateAndPublish pipeline; force flush.
-                    eventually(2.seconds) {
-                        repo2.findById(1).get().trackIds shouldContainExactly listOf(20, 30)
+                    // The PendingUpdate is enqueued via the mutateAndPublish pipeline; poll the durable
+                    // junction state until the wholesale replace lands.
+                    eventually(DatabaseTestSupport.PERSISTED_ROW_POLL) {
+                        readJunctionRows(ds) shouldContainExactly listOf(Triple(1, 20, 0), Triple(1, 30, 1))
                     }
                 } finally {
                     repo2.close()
-                }
-
-                ds.connection.use { conn ->
-                    val rows = mutableListOf<Triple<Int, Int, Int>>()
-                    conn.createStatement().use { st ->
-                        st.executeQuery(
-                            "SELECT parent_id, item_id, \"position\" FROM test_playlist_tracks ORDER BY \"position\""
-                        ).use { rs ->
-                            while (rs.next()) {
-                                rows.add(Triple(rs.getInt(1), rs.getInt(2), rs.getInt(3)))
-                            }
-                        }
-                    }
-                    rows shouldContainExactly listOf(Triple(1, 20, 0), Triple(1, 30, 1))
                 }
             } finally {
                 runCatching { repo.close() }
