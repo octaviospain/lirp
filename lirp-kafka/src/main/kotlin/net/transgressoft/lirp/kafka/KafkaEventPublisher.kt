@@ -17,13 +17,11 @@
 
 package net.transgressoft.lirp.kafka
 
-import net.transgressoft.lirp.entity.LirpEntity
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.EventType
 import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.LirpEvent
 import net.transgressoft.lirp.event.LirpEventPublisher
-import net.transgressoft.lirp.event.LirpEventSubscription
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.kafka.outbox.OutboxEvent
 import net.transgressoft.lirp.kafka.outbox.OutboxStore
@@ -39,9 +37,7 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.util.Properties
 import java.util.UUID
 import java.util.concurrent.ExecutionException
-import java.util.concurrent.Flow
 import kotlin.time.Clock
-import kotlinx.coroutines.flow.SharedFlow
 
 /**
  * A full [LirpEventPublisher] implementation that publishes domain events to Kafka.
@@ -82,8 +78,9 @@ class KafkaEventPublisher<ET : EventType, E : LirpEvent<ET>>
         bootstrapServers: String,
         private val db: Database,
         private val outboxStore: OutboxStore,
-        producerConfig: Map<String, String> = emptyMap()
-    ) : LirpEventPublisher<ET, E> {
+        producerConfig: Map<String, String> = emptyMap(),
+        private val delegate: FlowEventPublisher<ET, E> = FlowEventPublisher(id)
+    ) : LirpEventPublisher<ET, E> by delegate {
 
         /**
          * Creates a [KafkaEventPublisher] connected to the given [bootstrapServers] and [db].
@@ -109,8 +106,6 @@ class KafkaEventPublisher<ET : EventType, E : LirpEvent<ET>>
 
         private val log = KotlinLogging.logger(javaClass.name)
 
-        private val delegate: FlowEventPublisher<ET, E> = FlowEventPublisher(id)
-
         private val producer: KafkaProducer<String, ByteArray> =
             KafkaProducer(
                 Properties().apply {
@@ -126,32 +121,6 @@ class KafkaEventPublisher<ET : EventType, E : LirpEvent<ET>>
                     putAll(producerConfig)
                 }
             )
-
-        override val changes: SharedFlow<E> get() = delegate.changes
-
-        override val isClosed: Boolean get() = delegate.isClosed
-
-        override val subscriberCount: Int get() = delegate.subscriberCount
-
-        override fun subscribe(callback: (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, E> = delegate.subscribe(callback)
-
-        override fun subscribe(vararg eventTypes: ET, callback: (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, E> =
-            delegate.subscribe(*eventTypes, callback = callback)
-
-        override fun subscribeAsync(action: suspend (E) -> Unit): LirpEventSubscription<in LirpEntity, ET, E> = delegate.subscribeAsync(action)
-
-        override fun subscribeAsync(
-            vararg eventTypes: ET,
-            action: suspend (E) -> Unit
-        ): LirpEventSubscription<in LirpEntity, ET, E> = delegate.subscribeAsync(*eventTypes, action = action)
-
-        override fun activateEvents(vararg types: ET) = delegate.activateEvents(*types)
-
-        override fun disableEvents(vararg types: ET) = delegate.disableEvents(*types)
-
-        override fun isEventActive(type: ET): Boolean = delegate.isEventActive(type)
-
-        override fun subscribe(subscriber: Flow.Subscriber<in E>) = delegate.subscribe(subscriber)
 
         /**
          * Emits [event] to local in-process subscribers and, when the event is not a framework-owned

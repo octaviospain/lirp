@@ -90,7 +90,7 @@ internal class TransformedRegistryProjection<K : Comparable<K>, PK : Comparable<
     // Protected by cacheLock for all structural mutations (insert / remove to reposition keys).
     // The comparator reads cached values from transformCache; it must only be consulted while
     // transformCache holds a stable value for every key present in orderedIndex.
-    private val orderedIndex: TreeMap<PK, Unit> = TreeMap(bucketComparator(bucketValueOrdering, bucketKeyOrdering) { transformCache[it]!! })
+    private val orderedIndex: TreeMap<PK, Unit> = TreeMap(bucketComparator(bucketValueOrdering, bucketKeyOrdering) { transformCache.getValue(it) })
 
     private val cacheLock = Any()
 

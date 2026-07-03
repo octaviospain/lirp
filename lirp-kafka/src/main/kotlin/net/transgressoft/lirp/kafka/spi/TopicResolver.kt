@@ -52,6 +52,4 @@ fun interface TopicResolver {
  * Consumers that need per-event-type or per-aggregate-instance routing can supply a custom
  * [TopicResolver] lambda at relay startup.
  */
-internal object DefaultTopicResolver : TopicResolver {
-    override fun resolve(envelope: LirpEventEnvelope): String = "${envelope.aggregateType}.events"
-}
+internal val DefaultTopicResolver = TopicResolver { envelope -> "${envelope.aggregateType}.events" }
