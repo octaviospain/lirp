@@ -199,6 +199,29 @@ class FxAggregateListTest : StringSpec({
         change.next() shouldBe false
     }
 
+    "FxAggregateList removeAll with duplicate input elements removes each once and keeps the cache consistent" {
+        val proxy = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
+        val item1 = MutableAudioItem(1, "A")
+        val item2 = MutableAudioItem(2, "B")
+        proxy.addAll(listOf(item1, item2))
+
+        val changes = mutableListOf<ListChangeListener.Change<out AudioItem>>()
+        proxy.addListener(ListChangeListener(changes::add))
+
+        // A duplicated input element must not resolve the same cache index twice; otherwise the
+        // descending-order removal would remove index 0 twice and drop item2 by mistake.
+        proxy.removeAll(listOf(item1, item1)) shouldBe true
+
+        proxy.toList() shouldBe listOf(item2)
+        proxy.size shouldBe 1
+        changes.size shouldBe 1
+        val change = changes[0]
+        change.next() shouldBe true
+        change.wasRemoved() shouldBe true
+        change.removed shouldBe listOf(item1)
+        change.next() shouldBe false
+    }
+
     "FxAggregateList MultiRemoveChange supports reset" {
         val proxy = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
         val items = listOf(MutableAudioItem(1, "A"), MutableAudioItem(2, "B"), MutableAudioItem(3, "C"))

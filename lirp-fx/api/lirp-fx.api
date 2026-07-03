@@ -23,6 +23,7 @@ public final class net/transgressoft/lirp/persistence/fx/FxAggregateList : kotli
 	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lnet/transgressoft/lirp/persistence/fx/FxAggregateList;
 	public final fun indexOf (Ljava/lang/Object;)I
 	public fun indexOf (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)I
+	public fun iterator ()Ljava/util/Iterator;
 	public final fun lastIndexOf (Ljava/lang/Object;)I
 	public fun lastIndexOf (Lnet/transgressoft/lirp/entity/IdentifiableEntity;)I
 	public final fun remove (I)Lnet/transgressoft/lirp/entity/IdentifiableEntity;
