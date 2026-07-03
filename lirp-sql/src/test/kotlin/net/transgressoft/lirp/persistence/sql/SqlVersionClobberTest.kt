@@ -26,7 +26,6 @@ import io.kotest.matchers.shouldBe
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.util.UUID
-import kotlin.time.Duration.Companion.seconds
 
 /**
  * Regression tests for the `executeUpdate` version-clobber fix in [SqlWritePipeline].
@@ -67,7 +66,7 @@ internal class SqlVersionClobberTest : StringSpec({
                 }
             // Insert the entity so there is a row to update.
             repo.add(person)
-            eventually(5.seconds) { repo.findById(1).shouldBePresent { it shouldBe person } }
+            eventually(DatabaseTestSupport.PERSISTED_ROW_POLL) { repo.findById(1).shouldBePresent { it shouldBe person } }
 
             // Drive executeUpdate directly with null expectedVersion — the caller-bug path
             // that must be rejected with error() rather than silently clobbering the version column.
@@ -105,7 +104,7 @@ internal class SqlVersionClobberTest : StringSpec({
 
             // Wait for the INSERT to reach the DB before mutating, so the subsequent mutation
             // is enqueued as an UPDATE rather than merged into the pending INSERT.
-            eventually(5.seconds) {
+            eventually(DatabaseTestSupport.PERSISTED_ROW_POLL) {
                 val count =
                     transaction(db = db) {
                         exec("SELECT COUNT(*) FROM ${TestVersionedPersonTableDef.tableName} WHERE id = 2") { rs ->
@@ -119,7 +118,7 @@ internal class SqlVersionClobberTest : StringSpec({
             // Pipeline must persist version = 1L and bump the in-memory version to match.
             person.firstName = "Robert"
 
-            eventually(5.seconds) {
+            eventually(DatabaseTestSupport.PERSISTED_ROW_POLL) {
                 // person is the live registry entity; bumpVersion sets person.version directly after flush.
                 person.version shouldBe 1L
             }

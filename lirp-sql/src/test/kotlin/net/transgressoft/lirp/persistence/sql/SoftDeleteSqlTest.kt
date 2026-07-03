@@ -18,14 +18,12 @@
 package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.persistence.query.query
-import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.optional.shouldNotBePresent
 import io.kotest.matchers.shouldBe
-import kotlin.time.Duration.Companion.seconds
 
 /**
  * H2-backed unit tests verifying the soft-delete persistence contract for [SoftDeletableVersionedTrack]:
@@ -76,14 +74,11 @@ internal class SoftDeleteSqlTest : StringSpec({
             val versionBeforeSoftDelete = loaded.version
             repo2.softDelete(loaded)
             // The deletedAt mutation propagates to the SQL write pipeline asynchronously and is
-            // persisted by the debounced background writer. Poll for the persisted version bump
-            // instead of racing a fixed sleep against async event delivery. The window is generous
-            // because the debounced writer (max ~1s) plus container/JVM warmup can exceed a tight
-            // 2s budget under CI load; eventually returns as soon as the bump is observed, so the
-            // larger ceiling only affects the rare slow case.
-            eventually(5.seconds) {
-                val row = DatabaseTestSupport.readRow(dataSource, tableDef.tableName, 2, "version", "deleted_at")
-                row.shouldNotBeNull()
+            // persisted by the debounced background writer. Poll for the persisted version bump via
+            // the shared helper (bounded by PERSISTED_ROW_POLL) instead of a fixed sleep or a
+            // hand-rolled window, so this assertion shares the same generous CI-safe budget as every
+            // other persistence poll.
+            DatabaseTestSupport.awaitRow(dataSource, tableDef.tableName, 2, "version", "deleted_at") { row ->
                 val dbVersion = (row["version"] as? Long) ?: (row["version"] as? Number)?.toLong()
                 dbVersion.shouldNotBeNull()
                 dbVersion shouldBe (versionBeforeSoftDelete + 1L)

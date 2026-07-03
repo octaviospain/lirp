@@ -35,7 +35,6 @@ import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.Table
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
-import kotlin.time.Duration.Companion.seconds
 
 /**
  * Verifies that [SqlRepository.installEntityForeignKeys] actually applies the constraints
@@ -211,7 +210,7 @@ private fun freshDataSource(): HikariDataSource {
 // Polls the DB directly until a row with the given primary key appears, with a generous timeout.
 // Replaces fixed `delay(...)` sleeps so the suite stays deterministic under CI jitter.
 private suspend fun awaitRowPresent(ds: HikariDataSource, tableName: String, id: Int) {
-    eventually(5.seconds) {
+    eventually(DatabaseTestSupport.PERSISTED_ROW_POLL) {
         ds.connection.use { conn ->
             conn.createStatement().use { stmt ->
                 val rs = stmt.executeQuery("SELECT COUNT(*) FROM $tableName WHERE id = $id")
