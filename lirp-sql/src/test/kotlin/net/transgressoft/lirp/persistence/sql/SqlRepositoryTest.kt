@@ -214,7 +214,7 @@ internal class SqlRepositoryTest : StringSpec({
         // Mutate the entity — triggers the subscription callback and synchronous flush
         person.firstName = "Franklin"
 
-        eventually(5.seconds) {
+        eventually(DatabaseTestSupport.PERSISTED_ROW_POLL) {
             val repo2 = SqlRepository(jdbcUrl, TestPersonTableDef)
             repo2.findById(5).shouldBePresent { it.firstName shouldBe "Franklin" }
             repo2.close()

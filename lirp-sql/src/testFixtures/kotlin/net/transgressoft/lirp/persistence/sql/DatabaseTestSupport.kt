@@ -105,8 +105,14 @@ object DatabaseTestSupport {
      * reads the persisted row or reloads the entity immediately can race that delivery, especially under
      * CI load. Poll within this window instead of asserting once; the poll returns as soon as the write
      * is observed, so the ceiling only affects the rare slow case.
+     *
+     * The window is deliberately generous: the debounced writer alone can take up to ~1s, and under a
+     * loaded CI runner the isolated single-thread ioScope that flushes the write can be starved for
+     * several seconds. A tighter ceiling (the earlier 5s) intermittently expired before a slow flush
+     * landed; because `eventually` short-circuits on success, the larger value costs nothing on the
+     * happy path and only widens the safety margin for the rare contended case.
      */
-    val PERSISTED_ROW_POLL: Duration = 5.seconds
+    val PERSISTED_ROW_POLL: Duration = 15.seconds
 
     /**
      * Polls [readRow] for ([table], [id]) until [assert] passes or [timeout] elapses, absorbing the
