@@ -74,50 +74,104 @@ class FxAggregateList<K : Comparable<K>, E : IdentifiableEntity<K>>(
     // When lazySnapshot is true, this is never populated (zero allocation placeholder).
     private val localElements = if (lazySnapshot) ArrayList(0) else ArrayList<E>()
 
+    // Guards every read and write of localElements. The listener cascade may read this list
+    // on the FX thread while a mutation runs on flowScope (see fireChange's mixed dispatch), so
+    // a defensive copy such as ArrayList(localElements) must be atomic with respect to structural
+    // modification — otherwise the array construction races the mutation and throws
+    // ArrayIndexOutOfBoundsException. fireChange is invoked outside this lock so reentrant listener
+    // cascades and cross-thread notification never block on it.
+    private val cacheLock = Any()
+
     override fun syncLocalCache() {
         if (lazySnapshot) return
-        localElements.clear()
-        for (i in 0 until innerProxy.size) {
-            localElements.add(innerProxy[i])
+        synchronized(cacheLock) {
+            localElements.clear()
+            for (i in 0 until innerProxy.size) {
+                localElements.add(innerProxy[i])
+            }
         }
     }
 
-    override fun get(index: Int): E = if (lazySnapshot) innerProxy[index] else localElements[index]
+    override fun get(index: Int): E =
+        if (lazySnapshot) innerProxy[index] else synchronized(cacheLock) { localElements[index] }
 
-    override val size: Int get() = if (lazySnapshot) innerProxy.size else localElements.size
+    override val size: Int get() = if (lazySnapshot) innerProxy.size else synchronized(cacheLock) { localElements.size }
+
+    /**
+     * Returns an iterator over a stable snapshot of the current elements.
+     *
+     * The default [AbstractMutableList] iterator resolves elements lazily through `get(index)`
+     * against the live size, so a concurrent structural modification during iteration can throw
+     * [IndexOutOfBoundsException]. Snapshotting under [cacheLock] makes iteration atomic with
+     * respect to mutation, mirroring the guarantee provided by the sibling observable set.
+     */
+    override fun iterator(): MutableIterator<E> {
+        val snapshot =
+            if (lazySnapshot) ArrayList(innerProxy.resolveAll()) else synchronized(cacheLock) { ArrayList(localElements) }
+        return object : MutableIterator<E> {
+            private val delegate = snapshot.iterator()
+            private var lastReturned: E? = null
+
+            override fun hasNext() = delegate.hasNext()
+
+            override fun next(): E = delegate.next().also { lastReturned = it }
+
+            override fun remove() {
+                val element = lastReturned ?: throw IllegalStateException("next() not yet called or already removed")
+                this@FxAggregateList.remove(element)
+                lastReturned = null
+            }
+        }
+    }
 
     override fun add(index: Int, element: E) {
         innerProxy.add(index, element)
-        if (!lazySnapshot) localElements.add(index, element)
+        if (!lazySnapshot) synchronized(cacheLock) { localElements.add(index, element) }
         modCount++
         fireChange(AddChange(this, index, index + 1))
     }
 
     override fun set(index: Int, element: E): E {
         // Resolve old element BEFORE any inner proxy mutation to ensure it is still accessible
-        val old = if (lazySnapshot) innerProxy[index] else localElements[index]
+        val old = if (lazySnapshot) innerProxy[index] else synchronized(cacheLock) { localElements[index] }
         innerProxy.removeAll(listOf(old))
         innerProxy.add(index, element)
-        if (!lazySnapshot) localElements[index] = element
+        if (!lazySnapshot) synchronized(cacheLock) { localElements[index] = element }
         fireChange(SetChange(this, index, old))
         return old
     }
 
     override fun removeAt(index: Int): E {
         // In lazy mode, resolve element BEFORE removal; in eager mode, remove from local cache first
-        val removed = if (lazySnapshot) innerProxy[index] else localElements.removeAt(index)
+        val removed = if (lazySnapshot) innerProxy[index] else synchronized(cacheLock) { localElements.removeAt(index) }
         innerProxy.removeAll(listOf(removed))
         modCount++
         fireChange(RemoveChange(this, index, listOf(removed)))
         return removed
     }
 
+    // Explicit single-element removal. The default AbstractMutableCollection.remove drives removal
+    // through iterator().remove(); because iterator() is overridden to return a detached snapshot,
+    // that path cannot mutate the backing cache and would recurse into this method. Resolving the
+    // index and delegating to removeAt keeps removal correct and snapshot-safe.
+    override fun remove(element: E): Boolean {
+        val index =
+            if (lazySnapshot) {
+                innerProxy.referenceIds.indexOf(element.id)
+            } else {
+                synchronized(cacheLock) { localElements.indexOf(element) }
+            }
+        if (index < 0) return false
+        removeAt(index)
+        return true
+    }
+
     override fun addAll(elements: Collection<E>): Boolean {
         if (elements.isEmpty()) return false
-        val from = if (lazySnapshot) innerProxy.size else localElements.size
+        val from = if (lazySnapshot) innerProxy.size else synchronized(cacheLock) { localElements.size }
         val changed = innerProxy.addAll(elements)
         if (changed) {
-            if (!lazySnapshot) localElements.addAll(elements)
+            if (!lazySnapshot) synchronized(cacheLock) { localElements.addAll(elements) }
             modCount++
             fireChange(AddChange(this, from, from + elements.size))
         }
@@ -128,7 +182,7 @@ class FxAggregateList<K : Comparable<K>, E : IdentifiableEntity<K>>(
         if (elements.isEmpty()) return false
         val changed = innerProxy.addAll(index, elements)
         if (changed) {
-            if (!lazySnapshot) localElements.addAll(index, elements)
+            if (!lazySnapshot) synchronized(cacheLock) { localElements.addAll(index, elements) }
             modCount++
             fireChange(AddChange(this, index, index + elements.size))
         }
@@ -156,19 +210,24 @@ class FxAggregateList<K : Comparable<K>, E : IdentifiableEntity<K>>(
             }
             return changed
         }
-        val toRemove = elements.filter { localElements.contains(it) }
-        if (toRemove.isEmpty()) return false
-
+        // Build removals from localElements, not from the input collection: iterating the cache once
+        // yields each cached index exactly once (in ascending order), so a duplicated input element
+        // cannot map the same index twice and corrupt the descending-order removal below.
+        val elementsSet = elements.toSet()
         val removedEntries =
-            toRemove.mapNotNull { element ->
-                val idx = localElements.indexOf(element)
-                if (idx >= 0) idx to element else null
-            }.sortedBy { it.first }
+            synchronized(cacheLock) {
+                localElements.withIndex()
+                    .filter { (_, element) -> element in elementsSet }
+                    .map { (idx, element) -> idx to element }
+            }
+        if (removedEntries.isEmpty()) return false
 
         val changed = innerProxy.removeAll(elements)
         if (changed) {
             // Remove from localElements in descending order to preserve indices during removal
-            removedEntries.sortedByDescending { it.first }.forEach { (idx, _) -> localElements.removeAt(idx) }
+            synchronized(cacheLock) {
+                removedEntries.sortedByDescending { it.first }.forEach { (idx, _) -> localElements.removeAt(idx) }
+            }
             modCount++
             // Adjust indices for Change: each removal at position i shifts subsequent positions down by 1
             val adjustedRemovals =
@@ -182,7 +241,12 @@ class FxAggregateList<K : Comparable<K>, E : IdentifiableEntity<K>>(
 
     override fun retainAll(elements: Collection<E>): Boolean {
         val elementsSet = elements.toSet()
-        val toRemove = if (lazySnapshot) innerProxy.resolveAll().filter { it !in elementsSet } else localElements.filter { it !in elementsSet }
+        val toRemove =
+            if (lazySnapshot) {
+                innerProxy.resolveAll().filter { it !in elementsSet }
+            } else {
+                synchronized(cacheLock) { localElements.filter { it !in elementsSet } }
+            }
         if (toRemove.isEmpty()) return false
         return removeAll(toRemove)
     }
@@ -195,10 +259,12 @@ class FxAggregateList<K : Comparable<K>, E : IdentifiableEntity<K>>(
             modCount++
             fireChange(RemoveChange(this, 0, snapshot))
         } else {
-            if (localElements.isEmpty()) return
-            val snapshot = ArrayList(localElements)
+            val snapshot =
+                synchronized(cacheLock) {
+                    if (localElements.isEmpty()) return
+                    ArrayList(localElements).also { localElements.clear() }
+                }
             innerProxy.clear()
-            localElements.clear()
             modCount++
             fireChange(RemoveChange(this, 0, snapshot))
         }
@@ -218,14 +284,17 @@ class FxAggregateList<K : Comparable<K>, E : IdentifiableEntity<K>>(
             }
             return false
         }
-        val snapshot = ArrayList(localElements)
+        val snapshot = synchronized(cacheLock) { ArrayList(localElements).also { localElements.clear() } }
         innerProxy.clear()
-        localElements.clear()
         val added = innerProxy.addAll(col)
-        if (added) localElements.addAll(col)
+        val newSize =
+            synchronized(cacheLock) {
+                if (added) localElements.addAll(col)
+                localElements.size
+            }
         if (added || snapshot.isNotEmpty()) {
             modCount++
-            fireChange(ReplaceAllChange(this, snapshot, localElements.size))
+            fireChange(ReplaceAllChange(this, snapshot, newSize))
             return true
         }
         return false
@@ -244,9 +313,11 @@ class FxAggregateList<K : Comparable<K>, E : IdentifiableEntity<K>>(
             modCount++
             fireChange(RemoveChange(this, from, removed))
         } else {
-            val removed = ArrayList(localElements.subList(from, to))
+            val removed =
+                synchronized(cacheLock) {
+                    ArrayList(localElements.subList(from, to)).also { localElements.subList(from, to).clear() }
+                }
             innerProxy.removeAll(removed)
-            localElements.subList(from, to).clear()
             modCount++
             fireChange(RemoveChange(this, from, removed))
         }

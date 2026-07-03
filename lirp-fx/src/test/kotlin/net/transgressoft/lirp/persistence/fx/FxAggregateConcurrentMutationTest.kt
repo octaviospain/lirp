@@ -23,9 +23,11 @@ import net.transgressoft.lirp.testing.Stress
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Tests for [FxAggregateList] and [FxAggregateSet] verifying that serialized (single-thread)
@@ -117,5 +119,101 @@ class FxAggregateConcurrentMutationTest : StringSpec({
         } finally {
             executor.shutdownNow()
         }
+    }
+
+    "FxAggregateSet iteration during concurrent mutation does not throw" {
+        val set = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
+        for (i in 0 until 100) set.add(MutableAudioItem(i, "Item-$i"))
+
+        val errors = CopyOnWriteArrayList<Throwable>()
+        val running = AtomicBoolean(true)
+
+        // Single writer mutating the backing cache while readers snapshot it. Before the fix,
+        // ArrayList(localElements) in iterator() raced the writer's structural modification and
+        // threw ArrayIndexOutOfBoundsException from HashSet.toArray (issue #310).
+        val writer =
+            Thread {
+                try {
+                    for (i in 100 until 2100) {
+                        val item = MutableAudioItem(i, "Item-$i")
+                        set.add(item)
+                        set.remove(item)
+                    }
+                } catch (t: Throwable) {
+                    errors.add(t)
+                } finally {
+                    // Always release the readers, even if a mutation throws, so a writer failure is
+                    // reported as the root cause instead of hanging the test on readers.forEach { join() }.
+                    running.set(false)
+                }
+            }
+        val readers =
+            (1..3).map {
+                Thread {
+                    while (running.get()) {
+                        try {
+                            set.toList()
+                        } catch (t: Throwable) {
+                            errors.add(t)
+                        }
+                    }
+                }
+            }
+
+        writer.start()
+        readers.forEach { it.start() }
+        writer.join()
+        readers.forEach { it.join() }
+
+        errors.firstOrNull()?.let { throw AssertionError("Concurrent iteration raced mutation", it) }
+        set.size shouldBe 100
+    }
+
+    "FxAggregateList iteration during concurrent mutation does not throw" {
+        val list = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
+        for (i in 0 until 100) list.add(list.size, MutableAudioItem(i, "Item-$i"))
+
+        val errors = CopyOnWriteArrayList<Throwable>()
+        val running = AtomicBoolean(true)
+
+        // Single writer appending/removing at the tail while readers iterate. Before the fix, the
+        // inherited index-based iterator resolved get(index) against a live, shrinking size and the
+        // ArrayList(localElements) snapshots raced structural modification.
+        val writer =
+            Thread {
+                try {
+                    for (i in 100 until 2100) {
+                        val item = MutableAudioItem(i, "Item-$i")
+                        list.add(list.size, item)
+                        list.remove(item)
+                    }
+                } catch (t: Throwable) {
+                    errors.add(t)
+                } finally {
+                    // Always release the readers, even if a mutation throws, so a writer failure is
+                    // reported as the root cause instead of hanging the test on readers.forEach { join() }.
+                    running.set(false)
+                }
+            }
+        val readers =
+            (1..3).map {
+                Thread {
+                    while (running.get()) {
+                        try {
+                            list.toList()
+                        } catch (t: Throwable) {
+                            errors.add(t)
+                        }
+                    }
+                }
+            }
+
+        writer.start()
+        readers.forEach { it.start() }
+        writer.join()
+        readers.forEach { it.join() }
+
+        errors.firstOrNull()?.let { throw AssertionError("Concurrent iteration raced mutation", it) }
+        list.size shouldBe 100
     }
 })
