@@ -111,6 +111,8 @@ dependencies {
     testFixturesImplementation libs.testcontainers.mariadb
     testFixturesImplementation libs.sqlite
     testFixturesImplementation libs.kotest.runner.junit6
+    // Assertions + nondeterministic (eventually) for the shared persistence-polling helpers
+    testFixturesImplementation libs.bundles.kotest
 
     // Consume testFixtures from both test and integrationTest
     testImplementation testFixtures(project(':lirp-sql'))

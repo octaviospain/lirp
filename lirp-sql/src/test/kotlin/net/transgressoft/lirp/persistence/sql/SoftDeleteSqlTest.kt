@@ -48,12 +48,14 @@ internal class SoftDeleteSqlTest : StringSpec({
                 }
             repo.add(track)
             repo.softDelete(track)
-            repo.close() // synchronous flush
 
-            // Raw DB check: row still exists with non-null deleted_at
-            val row = DatabaseTestSupport.readRow(dataSource, tableDef.tableName, 1, "deleted_at", "version")
-            row.shouldNotBeNull()
-            row["deleted_at"].shouldNotBeNull()
+            // Poll for the persisted row while the repo is still open: softDelete propagates to the
+            // SQL write pipeline asynchronously, so a raw read right after close() would race delivery.
+            DatabaseTestSupport.awaitRow(dataSource, tableDef.tableName, 1, "deleted_at", "version") { row ->
+                // Raw DB check: row still exists with non-null deleted_at (not hard-deleted)
+                row["deleted_at"].shouldNotBeNull()
+            }
+            repo.close()
         }
     }
 
@@ -143,15 +145,17 @@ internal class SoftDeleteSqlTest : StringSpec({
             softDeleted.shouldNotBeNull()
             val versionAfterSoftDelete = softDeleted.version
             repoAfterSoftDelete.restore(softDeleted)
-            repoAfterSoftDelete.close()
 
-            // Row in DB: deleted_at is NULL and version was bumped
-            val row = DatabaseTestSupport.readRow(dataSource, tableDef.tableName, 5, "deleted_at", "version")
-            row.shouldNotBeNull()
-            row["deleted_at"].shouldBeNull()
-            val dbVersion = (row["version"] as? Long) ?: (row["version"] as? Number)?.toLong()
-            dbVersion.shouldNotBeNull()
-            dbVersion shouldBe (versionAfterSoftDelete + 1L)
+            // Poll for the restore to land while the repo is still open: restore() propagates to the
+            // SQL write pipeline asynchronously, so a raw read right after close() would race delivery.
+            DatabaseTestSupport.awaitRow(dataSource, tableDef.tableName, 5, "deleted_at", "version") { row ->
+                // Row in DB: deleted_at is NULL and version was bumped
+                row["deleted_at"].shouldBeNull()
+                val dbVersion = (row["version"] as? Long) ?: (row["version"] as? Number)?.toLong()
+                dbVersion.shouldNotBeNull()
+                dbVersion shouldBe (versionAfterSoftDelete + 1L)
+            }
+            repoAfterSoftDelete.close()
 
             // And the entity is visible via default reads again
             val finalRepo = SqlRepository<Int, SoftDeletableVersionedTrack>(dataSource, tableDef)

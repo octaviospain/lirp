@@ -202,17 +202,13 @@ internal class FxSqlRepositoryTest : StringSpec({
         entityRepo.close()
         itemRepo.close()
 
-        itemRepo = FxSqlTestItemRepository(jdbcUrl)
-        entityRepo = FxSqlTestEntityRepository(jdbcUrl)
-
-        eventually(1.seconds) {
-            entityRepo.findById(1).shouldBePresent {
+        // Reopen on each poll so a late async write becomes visible — a repository opened once caches
+        // its in-memory snapshot at load time and would never observe the persisted mutation.
+        DatabaseTestSupport.awaitReloaded(reader = { FxSqlTestEntityRepository(jdbcUrl) }) { reloadedRepo ->
+            reloadedRepo.findById(1).shouldBePresent {
                 it.items.referenceIds shouldBe listOf(2, 3)
             }
         }
-
-        entityRepo.close()
-        itemRepo.close()
     }
 
     "FxSqlRepository clear on fx aggregate persists empty state" {

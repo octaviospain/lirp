@@ -19,11 +19,15 @@ package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.event.ReactiveScope
 import com.zaxxer.hikari.HikariDataSource
+import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.engine.names.WithDataTestName
+import io.kotest.matchers.nulls.shouldNotBeNull
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.sql.SQLException
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -92,6 +96,54 @@ object DatabaseTestSupport {
      */
     fun readRow(dataSource: HikariDataSource, table: String, id: Int, vararg columns: String): Map<String, Any?>? =
         readRowById(dataSource, table, id, columns)
+
+    /**
+     * Standard bounded-retry window for asserting durably-persisted state after a repository mutation.
+     *
+     * A mutation reaches the SQL write pipeline asynchronously — the reactive event is delivered on a
+     * background scope and the row is written by the debounced writer (max ~1s) — so an assertion that
+     * reads the persisted row or reloads the entity immediately can race that delivery, especially under
+     * CI load. Poll within this window instead of asserting once; the poll returns as soon as the write
+     * is observed, so the ceiling only affects the rare slow case.
+     */
+    val PERSISTED_ROW_POLL: Duration = 5.seconds
+
+    /**
+     * Polls [readRow] for ([table], [id]) until [assert] passes or [timeout] elapses, absorbing the
+     * asynchronous debounced-write delay between a repository mutation and its durable persistence.
+     *
+     * Prefer this over a bare [readRow] immediately after a mutation (or after `close()`, which races
+     * async event delivery against subscription cancellation). Poll while the writing repository is
+     * still open so the event is delivered and flushed within the window.
+     */
+    suspend fun awaitRow(
+        dataSource: HikariDataSource,
+        table: String,
+        id: Int,
+        vararg columns: String,
+        timeout: Duration = PERSISTED_ROW_POLL,
+        assert: (Map<String, Any?>) -> Unit
+    ) = eventually(timeout) {
+        val row = readRow(dataSource, table, id, *columns)
+        row.shouldNotBeNull()
+        assert(row)
+    }
+
+    /**
+     * Polls a freshly-[reader]-opened reader until [assert] passes or [timeout] elapses, re-creating
+     * the reader on each attempt so a late async write becomes visible.
+     *
+     * A repository opened once caches an in-memory snapshot at load time and never observes a
+     * subsequent write, so polling a single reopened reader is ineffective; this reopens per attempt.
+     * Each attempt's reader is closed via [AutoCloseable.use].
+     */
+    suspend fun <R : AutoCloseable> awaitReloaded(
+        timeout: Duration = PERSISTED_ROW_POLL,
+        reader: () -> R,
+        assert: (R) -> Unit
+    ) = eventually(timeout) {
+        reader().use { assert(it) }
+    }
 
     private fun readRowById(dataSource: HikariDataSource, table: String, id: Any, columns: Array<out String>): Map<String, Any?>? =
         dataSource.connection.use { conn ->

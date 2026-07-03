@@ -444,17 +444,13 @@ internal class SqlRepositoryTest : StringSpec({
         playlistRepo2.close()
         trackRepo2.close()
 
-        val trackRepo3 = SqlTestTrackRepository(jdbcUrl)
-        val playlistRepo3 = MutablePlaylistSqlRepository(jdbcUrl)
-
-        eventually(1.seconds) {
+        // Reopen on each poll so a late async write becomes visible — a repository opened once caches
+        // its in-memory snapshot at load time and would never observe the persisted mutation.
+        DatabaseTestSupport.awaitReloaded(reader = { MutablePlaylistSqlRepository(jdbcUrl) }) { playlistRepo3 ->
             playlistRepo3.findById(1L).shouldBePresent {
                 it.trackIds shouldContainExactly listOf(2, 3)
             }
         }
-
-        playlistRepo3.close()
-        trackRepo3.close()
     }
 
     "SqlRepository addAll on mutable aggregate persists all added trackIds" {
