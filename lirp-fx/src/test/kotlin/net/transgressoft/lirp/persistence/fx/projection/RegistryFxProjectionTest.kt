@@ -23,7 +23,6 @@ import net.transgressoft.lirp.persistence.AudioItemVolatileRepository
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.SoftDeletableMutableAudioItem
-import net.transgressoft.lirp.persistence.fx.FxToolkitInit
 import net.transgressoft.lirp.persistence.projection.ProjectionEntryChange
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldThrow
@@ -64,10 +63,6 @@ data class RegistryAlbumBucket(val key: String, val titles: List<String>)
 class RegistryFxProjectionTest : StringSpec({
 
     val reactive = reactiveScope()
-
-    beforeSpec {
-        FxToolkitInit.ensureInitialized()
-    }
 
     lateinit var trackRepo: AudioItemVolatileRepository
 

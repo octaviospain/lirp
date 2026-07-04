@@ -24,6 +24,7 @@ import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
+import io.kotest.datatest.withData
 import io.kotest.matchers.shouldBe
 
 /**
@@ -40,10 +41,6 @@ class FxScalarRegistryIntegrationTest : StringSpec({
 
     val reactive = reactiveScope()
 
-    beforeSpec {
-        FxToolkitInit.ensureInitialized()
-    }
-
     lateinit var trackRepo: AudioItemVolatileRepository
     lateinit var fxPlaylistRepo: FxAudioPlaylistVolatileRepository
 
@@ -56,19 +53,44 @@ class FxScalarRegistryIntegrationTest : StringSpec({
         LirpContext.default.close()
     }
 
-    "RegistryBase binds fx string property and emits PropertyChanged event on set" {
-        val entity = fxPlaylistRepo.create(1, "playlist", tag = "initial")
+    data class ScalarCase(
+        val name: String,
+        val create: (FxAudioPlaylistVolatileRepository) -> FxAudioPlaylistEntity,
+        val mutate: (FxAudioPlaylistEntity) -> Unit,
+        val expectedOld: Any?,
+        val expectedNew: Any?
+    )
+
+    withData(
+        nameFn = ScalarCase::name,
+        ScalarCase(
+            "RegistryBase binds fx string property and emits PropertyChanged event on set",
+            { it.create(1, "playlist", tag = "initial") }, { it.tagProperty.set("updated") }, "initial", "updated"
+        ),
+        ScalarCase(
+            "fx integer property emits PropertyChanged event on set",
+            { it.create(2, "playlist", year = 0) }, { it.yearProperty.set(2025) }, 0, 2025
+        ),
+        ScalarCase(
+            "fx boolean property emits PropertyChanged event on set",
+            { it.create(3, "playlist", active = false) }, { it.activeProperty.set(true) }, false, true
+        ),
+        ScalarCase(
+            "fx object property emits PropertyChanged event on set",
+            { it.create(4, "playlist", description = null) }, { it.descriptionProperty.set("vip") }, null, "vip"
+        )
+    ) { case ->
+        val entity = case.create(fxPlaylistRepo)
 
         val received = mutableListOf<MutationEvent<Int, FxAudioPlaylistEntity>>()
-
         entity.subscribe { event -> received.add(event) }
 
-        entity.tagProperty.set("updated")
+        case.mutate(entity)
 
         received.size shouldBe 1
-        val pc = received[0] as PropertyChanged<Int, FxAudioPlaylistEntity, String>
-        pc.oldValue shouldBe "initial"
-        pc.newValue shouldBe "updated"
+        val pc = received[0] as PropertyChanged<Int, FxAudioPlaylistEntity, *>
+        pc.oldValue shouldBe case.expectedOld
+        pc.newValue shouldBe case.expectedNew
     }
 
     "fx string property fires JavaFX ChangeListener after RegistryBase binding" {
@@ -85,51 +107,6 @@ class FxScalarRegistryIntegrationTest : StringSpec({
 
         observedOld shouldBe "old"
         observedNew shouldBe "new"
-    }
-
-    "fx integer property emits PropertyChanged event on set" {
-        val entity = fxPlaylistRepo.create(2, "playlist", year = 0)
-
-        val received = mutableListOf<MutationEvent<Int, FxAudioPlaylistEntity>>()
-
-        entity.subscribe { event -> received.add(event) }
-
-        entity.yearProperty.set(2025)
-
-        received.size shouldBe 1
-        val pc = received[0] as PropertyChanged<Int, FxAudioPlaylistEntity, Int>
-        pc.oldValue shouldBe 0
-        pc.newValue shouldBe 2025
-    }
-
-    "fx boolean property emits PropertyChanged event on set" {
-        val entity = fxPlaylistRepo.create(3, "playlist", active = false)
-
-        val received = mutableListOf<MutationEvent<Int, FxAudioPlaylistEntity>>()
-
-        entity.subscribe { event -> received.add(event) }
-
-        entity.activeProperty.set(true)
-
-        received.size shouldBe 1
-        val pc = received[0] as PropertyChanged<Int, FxAudioPlaylistEntity, Boolean>
-        pc.oldValue shouldBe false
-        pc.newValue shouldBe true
-    }
-
-    "fx object property emits PropertyChanged event on set" {
-        val entity = fxPlaylistRepo.create(4, "playlist", description = null)
-
-        val received = mutableListOf<MutationEvent<Int, FxAudioPlaylistEntity>>()
-
-        entity.subscribe { event -> received.add(event) }
-
-        entity.descriptionProperty.set("vip")
-
-        received.size shouldBe 1
-        val pc = received[0] as PropertyChanged<Int, FxAudioPlaylistEntity, String>
-        pc.oldValue shouldBe null
-        pc.newValue shouldBe "vip"
     }
 
     "withEventsDisabled suppresses MutationEvent for fx scalar property" {

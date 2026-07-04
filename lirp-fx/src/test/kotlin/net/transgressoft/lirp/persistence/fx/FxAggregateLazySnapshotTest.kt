@@ -89,10 +89,6 @@ class FxAggregateLazySnapshotTest : StringSpec({
     val audioItemRepo = FxAudioItemVolatileRepository()
     val playlistRepo = LazyFxPlaylistRepo()
 
-    beforeSpec {
-        FxToolkitInit.ensureInitialized()
-    }
-
     afterSpec {
         audioItemRepo.close()
         playlistRepo.close()
@@ -123,11 +119,7 @@ class FxAggregateLazySnapshotTest : StringSpec({
         playlist.audioItems.add(0, item)
 
         changes.size shouldBe 1
-        val change = changes[0]
-        change.next() shouldBe true
-        change.wasAdded() shouldBe true
-        change.from shouldBe 0
-        change.to shouldBe 1
+        changes[0].shouldBeSingleAdd(0, 1)
     }
 
     "FxAggregateList lazy-snapshot fires RemoveChange on removeAt" {
@@ -142,10 +134,7 @@ class FxAggregateLazySnapshotTest : StringSpec({
         playlist.audioItems.removeAt(0)
 
         changes.size shouldBe 1
-        val change = changes[0]
-        change.next() shouldBe true
-        change.wasRemoved() shouldBe true
-        change.removed.size shouldBe 1
+        changes[0].shouldBeSingleRemove(1)
     }
 
     "FxAggregateList lazy-snapshot fires SetChange on set" {
@@ -160,9 +149,7 @@ class FxAggregateLazySnapshotTest : StringSpec({
         playlist.audioItems[0] = item2
 
         changes.size shouldBe 1
-        val change = changes[0]
-        change.next() shouldBe true
-        change.wasReplaced() shouldBe true
+        changes[0].shouldBeSingleReplace()
     }
 
     "FxAggregateList lazy-snapshot fires single AddChange on addAll" {
@@ -180,11 +167,7 @@ class FxAggregateLazySnapshotTest : StringSpec({
         playlist.audioItems.addAll(items)
 
         changes.size shouldBe 1
-        val change = changes[0]
-        change.next() shouldBe true
-        change.wasAdded() shouldBe true
-        change.from shouldBe 0
-        change.to shouldBe 3
+        changes[0].shouldBeSingleAdd(0, 3)
     }
 
     "FxAggregateList lazy-snapshot fires RemoveChange on clear" {
@@ -199,10 +182,7 @@ class FxAggregateLazySnapshotTest : StringSpec({
         playlist.audioItems.clear()
 
         changes.size shouldBe 1
-        val change = changes[0]
-        change.next() shouldBe true
-        change.wasRemoved() shouldBe true
-        change.removed.size shouldBe 2
+        changes[0].shouldBeSingleRemove(2)
     }
 
     "FxAggregateList lazy-snapshot fires ReplaceAllChange on setAll" {
@@ -217,9 +197,7 @@ class FxAggregateLazySnapshotTest : StringSpec({
         playlist.audioItems.setAll(item2)
 
         changes.size shouldBe 1
-        val change = changes[0]
-        change.next() shouldBe true
-        change.wasReplaced() shouldBe true
+        changes[0].shouldBeSingleReplace()
     }
 
     "FxAggregateList lazy-snapshot fires MultiRemoveChange on removeAll" {

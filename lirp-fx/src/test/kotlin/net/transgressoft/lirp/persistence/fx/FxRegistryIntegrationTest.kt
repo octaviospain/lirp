@@ -44,10 +44,6 @@ class FxRegistryIntegrationTest : StringSpec({
 
     reactiveScope()
 
-    beforeSpec {
-        FxToolkitInit.ensureInitialized()
-    }
-
     lateinit var trackRepo: AudioItemVolatileRepository
     lateinit var fxPlaylistRepo: FxAudioPlaylistVolatileRepository
 
@@ -149,8 +145,7 @@ class FxRegistryIntegrationTest : StringSpec({
         latch.await(2, TimeUnit.SECONDS) shouldBe true
 
         fxChanges.size shouldBe 1
-        fxChanges[0].wasAdded() shouldBe true
-        fxChanges[0].elementAdded shouldBe playlist2
+        fxChanges[0].shouldBeAddOf(playlist2)
 
         val collectionEvent = lirpEvent.get()
         collectionEvent.type shouldBe CollectionChangeEvent.Type.ADD

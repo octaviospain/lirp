@@ -46,6 +46,7 @@ dependencies {
     testImplementation libs.coroutines.test
     testImplementation libs.serialization.json
 
+    testFixturesImplementation libs.bundles.kotest
     testFixturesImplementation "org.openjfx:javafx-base:21:${fxPlatform}"
     testFixturesImplementation "org.openjfx:javafx-graphics:21:${fxPlatform}"
     testFixturesImplementation 'org.testfx:openjfx-monocle:21.0.2'

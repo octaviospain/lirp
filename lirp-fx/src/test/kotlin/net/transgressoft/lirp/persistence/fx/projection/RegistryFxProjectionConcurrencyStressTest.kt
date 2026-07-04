@@ -19,7 +19,6 @@ package net.transgressoft.lirp.persistence.fx.projection
 
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.MultiKeyAudioItemVolatileRepository
-import net.transgressoft.lirp.persistence.fx.FxToolkitInit
 import net.transgressoft.lirp.testing.ReactiveScopeSerialization
 import net.transgressoft.lirp.testing.Stress
 import io.kotest.assertions.throwables.shouldNotThrowAny
@@ -52,7 +51,6 @@ import java.util.concurrent.atomic.AtomicInteger
 class RegistryFxProjectionConcurrencyStressTest : StringSpec({
     extension(ReactiveScopeSerialization)
 
-    beforeSpec { FxToolkitInit.ensureInitialized() }
     afterEach { LirpContext.default.close() }
 
     val itemCount = 1200

@@ -19,7 +19,6 @@ package net.transgressoft.lirp.persistence.fx.projection
 
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.fx.FxAudioItem
-import net.transgressoft.lirp.persistence.fx.FxToolkitInit
 import net.transgressoft.lirp.persistence.fx.fxAggregateList
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.spec.style.StringSpec
@@ -36,10 +35,6 @@ import io.kotest.matchers.shouldBe
 class FxProjectionKeyChangeTest : StringSpec({
 
     reactiveScope()
-
-    beforeSpec {
-        FxToolkitInit.ensureInitialized()
-    }
 
     "FxProjection reflects new bucket after entity key changes and is removed then re-added" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
