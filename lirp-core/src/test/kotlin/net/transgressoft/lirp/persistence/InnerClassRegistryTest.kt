@@ -22,6 +22,7 @@ import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldNotThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
+import io.kotest.datatest.withData
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 
@@ -63,16 +64,23 @@ internal class InnerClassRegistryTest : StringSpec({
         }
     }
 
-    "RegistryBase stores anonymous entity after add" {
-        val anonymousEntity =
+    withData<Pair<String, () -> SimpleTestEntity>>(
+        nameFn = { (label, _) -> "RegistryBase stores and retrieves $label after add" },
+        "anonymous entity" to {
             object : SimpleTestEntity(2) {
                 override val uniqueId = "anon-2"
             }
+        },
+        "single-level inner class entity" to { OuterEntity.InnerEntity(11) },
+        "two-level nested inner class entity" to { OuterEntity.MiddleEntity.DeepEntity(21) },
+        "three-level nested inner class entity" to { OuterEntity.MiddleEntity.DeepEntity.DeeperEntity(31) }
+    ) { (_, entityFactory) ->
+        val entity = entityFactory()
 
-        repo.add(anonymousEntity)
+        repo.add(entity)
 
         repo.size() shouldBe 1
-        repo.findById(2).get() shouldBe anonymousEntity
+        repo.findById(entity.id).get() shouldBe entity
     }
 
     // --- Local class entity tests ---
@@ -107,15 +115,6 @@ internal class InnerClassRegistryTest : StringSpec({
         }
     }
 
-    "RegistryBase stores and retrieves single-level inner class entity" {
-        val entity = OuterEntity.InnerEntity(11)
-
-        repo.add(entity)
-
-        repo.size() shouldBe 1
-        repo.findById(11).get() shouldBe entity
-    }
-
     // --- Two-level nested inner class entity tests ---
 
     "RegistryBase adds two-level nested inner class entity without throwing" {
@@ -126,15 +125,6 @@ internal class InnerClassRegistryTest : StringSpec({
         }
     }
 
-    "RegistryBase stores and retrieves two-level nested inner class entity" {
-        val entity = OuterEntity.MiddleEntity.DeepEntity(21)
-
-        repo.add(entity)
-
-        repo.size() shouldBe 1
-        repo.findById(21).get() shouldBe entity
-    }
-
     // --- Three-level nested inner class entity tests ---
 
     "RegistryBase adds three-level nested inner class entity without throwing" {
@@ -143,15 +133,6 @@ internal class InnerClassRegistryTest : StringSpec({
         shouldNotThrow<Exception> {
             repo.add(entity)
         }
-    }
-
-    "RegistryBase stores and retrieves three-level nested inner class entity" {
-        val entity = OuterEntity.MiddleEntity.DeepEntity.DeeperEntity(31)
-
-        repo.add(entity)
-
-        repo.size() shouldBe 1
-        repo.findById(31).get() shouldBe entity
     }
 
     // --- Mixed entity types in a single repository ---

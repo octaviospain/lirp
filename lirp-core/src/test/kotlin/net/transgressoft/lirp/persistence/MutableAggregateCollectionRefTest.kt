@@ -19,6 +19,7 @@ package net.transgressoft.lirp.persistence
 
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.testing.reactiveScope
+import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
@@ -30,6 +31,7 @@ import io.kotest.matchers.comparables.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import java.time.LocalDateTime
 import java.util.Collections
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
@@ -159,12 +161,9 @@ internal class MutableAggregateCollectionRefTest : StringSpec({
         playlist.subscribeAsync { events.add(it) }
         val beforeModified = playlist.lastDateModified
 
-        // Bounded spin-wait until system clock advances past the captured timestamp.
+        // Wait until the system clock advances past the captured timestamp.
         // LocalDateTime.now() reads wall-clock time, not virtual time, so advanceTimeBy cannot be used.
-        val deadline = System.currentTimeMillis() + 500
-        while (LocalDateTime.now() <= beforeModified && System.currentTimeMillis() < deadline) {
-            Thread.sleep(1)
-        }
+        eventually(500.milliseconds) { LocalDateTime.now() shouldBeGreaterThan beforeModified }
 
         playlist.audioItems.add(t1)
 

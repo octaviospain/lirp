@@ -34,6 +34,7 @@ import net.transgressoft.lirp.persistence.DefaultAudioPlaylist
 import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.testing.reactiveScope
+import net.transgressoft.lirp.testing.recordAsync
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
@@ -189,21 +190,15 @@ class SubscriptionExtensionsTest : StringSpec({
         val t1 = trackRepo.create(1, "Track 1")
         val playlist = DefaultAudioPlaylist(1, "Original Name").also(playlistRepo::add)
 
-        val receivedEvents = mutableListOf<Any>()
-        val latch = CountDownLatch(2)
-
-        playlist.subscribeAsync { event ->
-            receivedEvents.add(event)
-            latch.countDown()
-        }
+        val recorder = playlist.recordAsync()
 
         playlist.name = "New Name"
         playlist.audioItems.add(t1)
 
-        latch.await(2, TimeUnit.SECONDS) shouldBe true
-        receivedEvents.size shouldBe 2
-        receivedEvents.any { it is PropertyChanged<*, *, *> } shouldBe true
-        receivedEvents.any { it is AggregateMutationEvent<*, *> } shouldBe true
+        recorder.awaitCount(2) shouldBe true
+        recorder.count shouldBe 2
+        recorder.events.any { it is PropertyChanged<*, *, *> } shouldBe true
+        recorder.events.any { it is AggregateMutationEvent<*, *> } shouldBe true
     }
 
     "subscribeToProperty delivers typed old and new values on property change" {
@@ -288,21 +283,13 @@ class SubscriptionExtensionsTest : StringSpec({
         val item = trackRepo.create(1, "Original Title", "Original Album")
         require(item is MutableAudioItem)
 
-        val receivedBatch = AtomicReference<Any?>(null)
-        val latch = CountDownLatch(1)
-
-        item.subscribeAsync { event ->
-            if (event is BatchChanged<*, *>) {
-                receivedBatch.set(event)
-                latch.countDown()
-            }
-        }
+        val recorder = item.recordAsync()
 
         item.bulkUpdate("New Title")
 
-        latch.await(2, TimeUnit.SECONDS) shouldBe true
-        @Suppress("UNCHECKED_CAST")
-        val batch = receivedBatch.get() as BatchChanged<Int, AudioItem>
+        recorder.awaitCount(1) shouldBe true
+        val batch = recorder.last
+        batch.shouldBeInstanceOf<BatchChanged<Int, AudioItem>>()
         val titleChanges: List<FieldChange<AudioItem, String>> = batch.changesOf(AudioItem::title)
         titleChanges.size shouldBe 1
         titleChanges[0].oldValue shouldBe "Original Title"
@@ -313,21 +300,13 @@ class SubscriptionExtensionsTest : StringSpec({
         val item = trackRepo.create(1, "Original Title", "Original Album")
         require(item is MutableAudioItem)
 
-        val receivedBatch = AtomicReference<Any?>(null)
-        val latch = CountDownLatch(1)
-
-        item.subscribeAsync { event ->
-            if (event is BatchChanged<*, *>) {
-                receivedBatch.set(event)
-                latch.countDown()
-            }
-        }
+        val recorder = item.recordAsync()
 
         item.bulkAlbumUpdate("New Album")
 
-        latch.await(2, TimeUnit.SECONDS) shouldBe true
-        @Suppress("UNCHECKED_CAST")
-        val batch = receivedBatch.get() as BatchChanged<Int, AudioItem>
+        recorder.awaitCount(1) shouldBe true
+        val batch = recorder.last
+        batch.shouldBeInstanceOf<BatchChanged<Int, AudioItem>>()
         val titleChanges: List<FieldChange<AudioItem, String>> = batch.changesOf(AudioItem::title)
         titleChanges shouldBe emptyList()
     }
@@ -336,21 +315,13 @@ class SubscriptionExtensionsTest : StringSpec({
         val track = bubbleTrackRepo.create(1, "Original Name")
         val playlist = bubblePlaylistRepo.create(1, track.id)
 
-        val receivedAggEvent = AtomicReference<Any?>(null)
-        val latch = CountDownLatch(1)
-
-        playlist.subscribeAsync { event ->
-            if (event is AggregateMutationEvent<*, *>) {
-                receivedAggEvent.set(event)
-                latch.countDown()
-            }
-        }
+        val recorder = playlist.recordAsync()
 
         track.updateTrackName("New Name")
 
-        latch.await(2, TimeUnit.SECONDS) shouldBe true
-        @Suppress("UNCHECKED_CAST")
-        val aggEvent = receivedAggEvent.get() as AggregateMutationEvent<Int, BubbleAudioPlaylist>
+        recorder.awaitCount(1) shouldBe true
+        val aggEvent = recorder.last
+        aggEvent.shouldBeInstanceOf<AggregateMutationEvent<Int, BubbleAudioPlaylist>>()
         val childChanged = aggEvent.childPropertyChanged(BubbleAudioTrack::trackName)
         childChanged shouldNotBe null
         childChanged!!.oldValue shouldBe "Original Name"
@@ -361,21 +332,13 @@ class SubscriptionExtensionsTest : StringSpec({
         val track = bubbleTrackRepo.create(1, "Original Name")
         val playlist = bubblePlaylistRepo.create(1, track.id)
 
-        val receivedAggEvent = AtomicReference<Any?>(null)
-        val latch = CountDownLatch(1)
-
-        playlist.subscribeAsync { event ->
-            if (event is AggregateMutationEvent<*, *>) {
-                receivedAggEvent.set(event)
-                latch.countDown()
-            }
-        }
+        val recorder = playlist.recordAsync()
 
         track.updateTrackName("New Name")
 
-        latch.await(2, TimeUnit.SECONDS) shouldBe true
-        @Suppress("UNCHECKED_CAST")
-        val aggEvent = receivedAggEvent.get() as AggregateMutationEvent<Int, BubbleAudioPlaylist>
+        recorder.awaitCount(1) shouldBe true
+        val aggEvent = recorder.last
+        aggEvent.shouldBeInstanceOf<AggregateMutationEvent<Int, BubbleAudioPlaylist>>()
         // AudioItem::title has name "title", BubbleAudioTrack has "trackName" — no match
         val result = aggEvent.childPropertyChanged(AudioItem::title)
         result shouldBe null

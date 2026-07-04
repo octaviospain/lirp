@@ -34,6 +34,7 @@ import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.types.shouldBeInstanceOf
 import java.time.Instant
 
 /**
@@ -114,8 +115,7 @@ internal class SoftDeleteRepositoryTest : StringSpec({
 
         recorder.count shouldBe 1
         val emitted = recorder.last
-        emitted.shouldNotBeNull()
-        (emitted is StandardCrudEvent.SoftDelete).shouldBeTrue()
+        emitted.shouldBeInstanceOf<StandardCrudEvent.SoftDelete<Int, AudioItem>>()
         emitted.entities shouldBe mapOf(entity.id to entity)
     }
 

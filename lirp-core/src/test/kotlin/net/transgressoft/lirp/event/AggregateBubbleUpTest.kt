@@ -29,15 +29,13 @@ import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.MutableRefPlaylistRepo
 import net.transgressoft.lirp.testing.reactiveScope
+import net.transgressoft.lirp.testing.recordAsync
 import io.kotest.assertions.nondeterministic.continually
 import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
@@ -70,18 +68,12 @@ internal class AggregateBubbleUpTest : FunSpec({
         val playlistRepo = BubbleUpAudioPlaylistRepo(ctx)
         val playlist = playlistRepo.create(id = 100, audioItemId = 1)
 
-        val receivedEvent = AtomicReference<MutationEvent<*, *>>(null)
-        val latch = CountDownLatch(1)
-
-        playlist.subscribeAsync { event ->
-            receivedEvent.set(event)
-            latch.countDown()
-        }
+        val recorder = playlist.recordAsync()
 
         audioItem.title = "Track A Updated"
 
-        latch.await(2, TimeUnit.SECONDS) shouldBe true
-        receivedEvent.get().shouldBeInstanceOf<AggregateMutationEvent<*, *>>()
+        recorder.awaitCount(1) shouldBe true
+        recorder.last.shouldBeInstanceOf<AggregateMutationEvent<*, *>>()
     }
 
     test("AggregateMutationEvent refName matches the declared reference property name") {
@@ -91,20 +83,14 @@ internal class AggregateBubbleUpTest : FunSpec({
         val playlistRepo = BubbleUpAudioPlaylistRepo(ctx)
         val playlist = playlistRepo.create(id = 100, audioItemId = 1)
 
-        val receivedEvent = AtomicReference<AggregateMutationEvent<*, *>>(null)
-        val latch = CountDownLatch(1)
-
-        playlist.subscribeAsync { event ->
-            if (event is AggregateMutationEvent<*, *>) {
-                receivedEvent.set(event)
-                latch.countDown()
-            }
-        }
+        val recorder = playlist.recordAsync()
 
         audioItem.title = "Track A Updated"
 
-        latch.await(2, TimeUnit.SECONDS) shouldBe true
-        receivedEvent.get().refName shouldBe "audioItem"
+        recorder.awaitCount(1) shouldBe true
+        val event = recorder.last
+        event.shouldBeInstanceOf<AggregateMutationEvent<*, *>>()
+        event.refName shouldBe "audioItem"
     }
 
     test("AggregateMutationEvent childEvent contains the original MutationEvent from the referenced audio item") {
@@ -114,20 +100,13 @@ internal class AggregateBubbleUpTest : FunSpec({
         val playlistRepo = BubbleUpAudioPlaylistRepo(ctx)
         val playlist = playlistRepo.create(id = 100, audioItemId = 1)
 
-        val receivedEvent = AtomicReference<AggregateMutationEvent<*, *>>(null)
-        val latch = CountDownLatch(1)
-
-        playlist.subscribeAsync { event ->
-            if (event is AggregateMutationEvent<*, *>) {
-                receivedEvent.set(event)
-                latch.countDown()
-            }
-        }
+        val recorder = playlist.recordAsync()
 
         audioItem.title = "Track A Updated"
 
-        latch.await(2, TimeUnit.SECONDS) shouldBe true
-        val aggregateEvent = receivedEvent.get()
+        recorder.awaitCount(1) shouldBe true
+        val aggregateEvent = recorder.last
+        aggregateEvent.shouldBeInstanceOf<AggregateMutationEvent<*, *>>()
         aggregateEvent.childEvent.shouldBeInstanceOf<PropertyChanged<Int, AudioItem, String>>()
         val childMutation = aggregateEvent.childEvent as PropertyChanged<Int, AudioItem, String>
         childMutation.newValue shouldBe "Track A Updated"
@@ -160,41 +139,26 @@ internal class AggregateBubbleUpTest : FunSpec({
         val playlistRepo = MutableRefPlaylistRepo(ctx)
         val playlist = playlistRepo.create(id = 100, audioItemId = 1)
 
-        val latch1 = CountDownLatch(1)
-        val receivedCount = java.util.concurrent.atomic.AtomicInteger(0)
-
-        playlist.subscribeAsync { event ->
-            if (event is AggregateMutationEvent<*, *>) {
-                receivedCount.incrementAndGet()
-                latch1.countDown()
-            }
-        }
+        val recorder = playlist.recordAsync()
 
         // Verify initial wiring: audioItem1 mutation arrives
         audioItem1.title = "Track A Updated"
-        latch1.await(2, TimeUnit.SECONDS) shouldBe true
-        receivedCount.get() shouldBe 1
+        recorder.awaitCount(1) shouldBe true
+        recorder.count shouldBe 1
 
         // Change reference to audioItem2, then trigger re-wire via resolve()
         playlist.changeItem(2)
         playlist.audioItem.resolve()
 
-        val latch2 = CountDownLatch(1)
-        playlist.subscribeAsync { event ->
-            if (event is AggregateMutationEvent<*, *>) {
-                latch2.countDown()
-            }
-        }
-
         // Mutate audioItem2 — should arrive (re-wired)
         audioItem2.title = "Track B Updated"
-        latch2.await(2, TimeUnit.SECONDS) shouldBe true
+        recorder.awaitCount(2) shouldBe true
 
         // Mutate audioItem1 — should NOT produce further aggregate events
-        val countBeforeOldMutation = receivedCount.get()
+        val countBeforeOldMutation = recorder.count
         audioItem1.title = "Track A Again"
         // No additional events from old audioItem1 subscription
-        continually(300.milliseconds) { receivedCount.get() shouldBe countBeforeOldMutation }
+        continually(300.milliseconds) { recorder.count shouldBe countBeforeOldMutation }
     }
 
     test("Bubble-up stays on old audio item when new reference ID does not resolve") {
@@ -204,28 +168,20 @@ internal class AggregateBubbleUpTest : FunSpec({
         val playlistRepo = MutableRefPlaylistRepo(ctx)
         val playlist = playlistRepo.create(id = 100, audioItemId = 1)
 
-        val eventCount = java.util.concurrent.atomic.AtomicInteger(0)
-        val latch = CountDownLatch(1)
-
-        playlist.subscribeAsync { event ->
-            if (event is AggregateMutationEvent<*, *>) {
-                eventCount.incrementAndGet()
-                latch.countDown()
-            }
-        }
+        val recorder = playlist.recordAsync()
 
         // Verify initial wiring
         audioItem1.title = "Track A Updated"
-        latch.await(2, TimeUnit.SECONDS) shouldBe true
+        recorder.awaitCount(1) shouldBe true
 
         // Change to non-existent ID — re-wire should fail, old subscription preserved
         playlist.changeItem(999)
         playlist.audioItem.resolve() // triggers re-wire attempt — should fail
 
         // Old subscription to audioItem1 still active
-        val countBefore = eventCount.get()
+        val countBefore = recorder.count
         audioItem1.title = "Track A Again"
-        eventually(5.seconds) { eventCount.get() shouldBe countBefore + 1 }
+        eventually(5.seconds) { recorder.count shouldBe countBefore + 1 }
     }
 
     test("Bubble-up re-wires after initially unresolvable new ID becomes available") {
@@ -245,20 +201,12 @@ internal class AggregateBubbleUpTest : FunSpec({
         // Trigger re-wire again — now succeeds
         playlist.audioItem.resolve()
 
-        val eventCount = java.util.concurrent.atomic.AtomicInteger(0)
-        val latch = CountDownLatch(1)
-
-        playlist.subscribeAsync { event ->
-            if (event is AggregateMutationEvent<*, *>) {
-                eventCount.incrementAndGet()
-                latch.countDown()
-            }
-        }
+        val recorder = playlist.recordAsync()
 
         // Mutate audioItem2 — should arrive after successful re-wire
         audioItem2.title = "Track B Updated"
-        latch.await(2, TimeUnit.SECONDS) shouldBe true
-        eventCount.get() shouldBe 1
+        recorder.awaitCount(1) shouldBe true
+        recorder.count shouldBe 1
     }
 
     test("Bubble-up propagation is single-level only: BubbleAudioTrack mutation notifies BubbleAudioPlaylist but NOT BubbleAudioLibrary") {
@@ -270,22 +218,17 @@ internal class AggregateBubbleUpTest : FunSpec({
         val audioPlaylist = repoB.create(id = 10, trackId = 1)
         val audioLibrary = repoC.create(id = 100, playlistId = 10)
 
-        val bReceivedLatch = CountDownLatch(1)
+        val bRecorder = audioPlaylist.recordAsync()
         val cReceivedCount = java.util.concurrent.atomic.AtomicInteger(0)
-
-        // BubbleAudioPlaylist should receive bubble-up from BubbleAudioTrack
-        audioPlaylist.subscribeAsync { event ->
-            if (event is AggregateMutationEvent<*, *>) {
-                bReceivedLatch.countDown()
-            }
-        }
 
         // BubbleAudioLibrary should NOT receive any events — bubble-up is single-level
         audioLibrary.subscribeAsync { cReceivedCount.incrementAndGet() }
 
         track.updateTrackName("mutated")
 
-        bReceivedLatch.await(2, TimeUnit.SECONDS) shouldBe true
+        // BubbleAudioPlaylist should receive bubble-up from BubbleAudioTrack
+        bRecorder.awaitCount(1) shouldBe true
+        bRecorder.last.shouldBeInstanceOf<AggregateMutationEvent<*, *>>()
         continually(300.milliseconds) { cReceivedCount.get() shouldBe 0 }
     }
 

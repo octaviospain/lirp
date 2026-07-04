@@ -272,8 +272,8 @@ internal class ToOneAggregateExtAccessorTest : StringSpec({
     "TestAlbumEntry.catalog accessor throws IllegalStateException when entity is not in a repository" {
         val album = TestAlbumEntry(400, "Orphaned", catalogId = 5)
 
-        val ex = runCatching { album.catalog }.exceptionOrNull()
-        ex?.message?.contains("Ensure the entity is added to its repository") shouldBe true
+        shouldThrow<IllegalStateException> { album.catalog }
+            .message shouldContain "Ensure the entity is added to its repository"
     }
 
     "TestRestrictAlbum RESTRICT delete does not throw when another album has a null optional FK scalar" {
@@ -332,7 +332,7 @@ internal class ToOneAggregateExtAccessorTest : StringSpec({
         // Close before adding to any repository — must not throw and must not create a delegate
         shouldNotThrowAny { album.close() }
         // After close, getToOneRef must still throw (no delegate was created during teardown)
-        val ex = runCatching { album.catalog }.exceptionOrNull()
-        ex?.message?.contains("Ensure the entity is added to its repository") shouldBe true
+        shouldThrow<IllegalStateException> { album.catalog }
+            .message shouldContain "Ensure the entity is added to its repository"
     }
 })
