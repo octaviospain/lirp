@@ -36,6 +36,8 @@ import kotlin.time.Duration.Companion.seconds
  */
 internal class FxSqlRepositoryTest : StringSpec({
 
+    extension(IsolatedReactiveScope)
+
     fun freshJdbcUrl() = "jdbc:h2:mem:${UUID.randomUUID()};DB_CLOSE_DELAY=-1"
 
     beforeSpec {

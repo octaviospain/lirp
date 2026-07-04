@@ -343,10 +343,9 @@ internal class TransactionTest : StringSpec() {
             // A flush that never releases the lock (a stuck backing-store write, or a lock leaked by an
             // earlier transaction) must surface as a bounded, diagnosable failure rather than an
             // indefinite hang. Holding the lock on a foreign thread simulates that stuck state; the
-            // transaction must abort within the shrunk acquisition window. withTimeout is the safety net
-            // that turns a regression (unbounded wait) into a fast test failure.
-            val previousTimeout = flushLockAcquireTimeout
-            flushLockAcquireTimeout = 200.milliseconds
+            // per-call FlushLockTimeoutOverride shrinks the acquisition window so the test does not wait
+            // the full production timeout, and is coroutine-scoped so it cannot leak into other specs.
+            // withTimeout is the safety net that turns a regression (unbounded wait) into a fast failure.
             val repo = InMemoryAudioItemRepo()
             repo.create(40, "Fat Bottomed Girls", "Jazz")
             repo.lockFlush()
@@ -354,8 +353,10 @@ internal class TransactionTest : StringSpec() {
                 withTimeout(5_000) {
                     val failure =
                         shouldThrow<LirpTransactionException> {
-                            transaction(repo) { r ->
-                                (r.findById(40).get() as MutableAudioItem).title = "Bicycle Race"
+                            withContext(FlushLockTimeoutOverride(200.milliseconds)) {
+                                transaction(repo) { r ->
+                                    (r.findById(40).get() as MutableAudioItem).title = "Bicycle Race"
+                                }
                             }
                         }
                     failure.message shouldContain "Could not acquire the transaction flush lock"
@@ -364,7 +365,6 @@ internal class TransactionTest : StringSpec() {
                 repo shouldHaveItemWithTitle (40 to "Fat Bottomed Girls")
             } finally {
                 repo.unlockFlush()
-                flushLockAcquireTimeout = previousTimeout
                 repo.close()
             }
         }

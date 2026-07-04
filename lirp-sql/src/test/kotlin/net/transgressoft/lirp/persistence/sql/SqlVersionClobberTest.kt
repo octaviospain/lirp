@@ -38,6 +38,8 @@ import java.util.UUID
 @io.kotest.core.annotation.DisplayName("SqlWritePipeline version-clobber regression")
 internal class SqlVersionClobberTest : StringSpec({
 
+    extension(IsolatedReactiveScope)
+
     fun freshJdbcUrl() = "jdbc:h2:mem:${UUID.randomUUID()};DB_CLOSE_DELAY=-1"
 
     /** Reflectively reads the `db` field of a [SqlRepository] for direct DDL in tests. */

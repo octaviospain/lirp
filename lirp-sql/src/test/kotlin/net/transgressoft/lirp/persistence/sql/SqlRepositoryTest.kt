@@ -42,6 +42,8 @@ import kotlinx.coroutines.delay
  */
 internal class SqlRepositoryTest : StringSpec({
 
+    extension(IsolatedReactiveScope)
+
     /** Returns a unique JDBC URL for an isolated H2 in-memory database per test. */
     fun freshJdbcUrl() = "jdbc:h2:mem:${UUID.randomUUID()};DB_CLOSE_DELAY=-1"
 

@@ -20,8 +20,10 @@ package net.transgressoft.lirp.persistence.sql
 import net.transgressoft.lirp.event.ReactiveScope
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.nondeterministic.eventually
+import io.kotest.assertions.withClue
 import io.kotest.engine.names.WithDataTestName
 import io.kotest.matchers.nulls.shouldNotBeNull
+import io.kotest.matchers.shouldBe
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
@@ -178,7 +180,10 @@ object DatabaseTestSupport {
             conn.createStatement().use { stmt ->
                 val rs = stmt.executeQuery("SELECT COUNT(*) FROM $table WHERE id = $id")
                 rs.next()
-                require(rs.getInt(1) == 1) { "row id=$id not yet visible in $table" }
+                // Assert with a Kotest matcher, not require(): eventually only retries on AssertionError,
+                // so an IllegalArgumentException from require() would abort the poll on the first miss
+                // instead of waiting for the row to land.
+                withClue("row id=$id not yet visible in $table") { rs.getInt(1) shouldBe 1 }
             }
         }
     }
@@ -232,38 +237,48 @@ object DatabaseTestSupport {
         }
 
     /**
-     * Runs [block] with a fresh [HikariDataSource] from [db], dropping [tableDef] beforehand
-     * for isolation. The data source is always closed in a finally block, even if the test fails.
+     * Runs [block] with [ReactiveScope]'s flow and I/O scopes swapped for fresh, per-test isolated
+     * scopes, restoring the previous scopes afterwards.
+     *
+     * The production ioScope is JVM-global and single-threaded; a slow or contended flush would
+     * otherwise queue every other repository's flush behind it on that one shared thread, starving
+     * the async write a test is verifying (reproducible on any dialect, including in-memory H2, and
+     * most visible under a loaded CI runner). A fresh scope per test keeps one test's flush from
+     * blocking another. The scopes mirror production parallelism exactly — ioScope stays
+     * single-threaded so the global write-serialization guarantee is preserved — they are merely
+     * isolated, not widened. This relies on the consuming specs running sequentially, so the global
+     * swap is never concurrent.
      */
-    inline fun withDatabaseTest(db: DbConfig, tableDef: SqlTableDef<*>, block: (HikariDataSource) -> Unit) {
-        // Isolate the reactive scopes per test. The production ioScope is JVM-global and
-        // single-threaded; under the integration suite a slow dialect's blocking flush would
-        // otherwise queue every other repository's flush behind it on that one shared thread,
-        // starving the async write under verification (reproducible on any dialect, including
-        // in-memory H2, and on master). A fresh scope per test keeps one test's flush from blocking
-        // another. The scopes mirror the production parallelism exactly — ioScope stays
-        // single-threaded so the global write-serialization guarantee that
-        // SqlRepositoryConcurrencyIntegrationTest relies on is preserved — they are merely isolated,
-        // not widened. The scope is cancelled and the defaults restored afterwards; this relies on
-        // the integration specs running sequentially, so the global swap is never concurrent.
+    inline fun <T> withIsolatedReactiveScope(block: () -> T): T {
         val isolatedFlowScope = CoroutineScope(Dispatchers.Default.limitedParallelism(4) + SupervisorJob())
         val isolatedIoScope = CoroutineScope(Dispatchers.IO.limitedParallelism(1) + SupervisorJob())
         val previousFlowScope = ReactiveScope.flowScope
         val previousIoScope = ReactiveScope.ioScope
         ReactiveScope.flowScope = isolatedFlowScope
         ReactiveScope.ioScope = isolatedIoScope
-        val dataSource = db.buildDataSource()
         try {
-            dropTable(dataSource, tableDef)
-            block(dataSource)
+            return block()
         } finally {
+            isolatedFlowScope.cancel()
+            isolatedIoScope.cancel()
+            ReactiveScope.flowScope = previousFlowScope
+            ReactiveScope.ioScope = previousIoScope
+        }
+    }
+
+    /**
+     * Runs [block] with a fresh [HikariDataSource] from [db], dropping [tableDef] beforehand
+     * for isolation and running under [withIsolatedReactiveScope]. The data source is always closed
+     * in a finally block, even if the test fails.
+     */
+    inline fun withDatabaseTest(db: DbConfig, tableDef: SqlTableDef<*>, block: (HikariDataSource) -> Unit) {
+        withIsolatedReactiveScope {
+            val dataSource = db.buildDataSource()
             try {
-                dataSource.close()
+                dropTable(dataSource, tableDef)
+                block(dataSource)
             } finally {
-                isolatedFlowScope.cancel()
-                isolatedIoScope.cancel()
-                ReactiveScope.flowScope = previousFlowScope
-                ReactiveScope.ioScope = previousIoScope
+                dataSource.close()
             }
         }
     }
