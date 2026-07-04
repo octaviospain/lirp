@@ -18,6 +18,8 @@
 package net.transgressoft.lirp.persistence
 
 import io.kotest.core.spec.style.StringSpec
+import io.kotest.datatest.withData
+import io.kotest.engine.names.WithDataTestName
 import io.kotest.matchers.shouldBe
 import java.math.BigInteger
 import java.net.URI
@@ -29,10 +31,34 @@ import java.time.ZoneOffset
 
 /**
  * Round-trip and `sqlType` assertions for the built-in default [ColumnConverter] singletons. Each
- * test verifies that a domain value survives `toSql` followed by `fromSql` and that the declared
+ * case verifies that a domain value survives `toSql` followed by `fromSql` and that the declared
  * persistence scalar matches the documented column shape.
  */
 class DefaultColumnConvertersTest : StringSpec({
+
+    // Converters whose contract is the uniform "TextType, symmetric fromSql(toSql(x)) == x" shape.
+    // The converters with a distinct contract (asymmetric expected value, exact encoding, or a
+    // double round-trip) keep their own named tests below.
+    withData(
+        SymmetricRoundTrip(
+            "InstantColumnConverter round-trips an instant through its ISO-8601 form on a TextType column",
+            InstantColumnConverter, Instant.parse("2026-06-23T10:15:30.250Z")
+        ),
+        SymmetricRoundTrip(
+            "OffsetDateTimeColumnConverter preserves the offset across a round-trip on a TextType column",
+            OffsetDateTimeColumnConverter, OffsetDateTime.of(2026, 6, 23, 10, 15, 30, 0, ZoneOffset.ofHours(2))
+        ),
+        SymmetricRoundTrip(
+            "UriColumnConverter round-trips a URI through its string form on a TextType column",
+            UriColumnConverter, URI("https://example.com/path?query=1#frag")
+        ),
+        SymmetricRoundTrip(
+            "BigIntegerColumnConverter round-trips an arbitrary-precision integer on a TextType column",
+            BigIntegerColumnConverter, BigInteger("123456789012345678901234567890")
+        )
+    ) { case ->
+        case.verify()
+    }
 
     "PathColumnConverter round-trips a path through its URI form on a Long-free TextType column" {
         PathColumnConverter.sqlType shouldBe ColumnType.TextType
@@ -47,33 +73,26 @@ class DefaultColumnConvertersTest : StringSpec({
         DurationColumnConverter.fromSql(DurationColumnConverter.toSql(duration)) shouldBe duration
     }
 
-    "InstantColumnConverter round-trips an instant through its ISO-8601 form on a TextType column" {
-        InstantColumnConverter.sqlType shouldBe ColumnType.TextType
-        val instant = Instant.parse("2026-06-23T10:15:30.250Z")
-        InstantColumnConverter.fromSql(InstantColumnConverter.toSql(instant)) shouldBe instant
-    }
-
-    "OffsetDateTimeColumnConverter preserves the offset across a round-trip on a TextType column" {
-        OffsetDateTimeColumnConverter.sqlType shouldBe ColumnType.TextType
-        val offsetDateTime = OffsetDateTime.of(2026, 6, 23, 10, 15, 30, 0, ZoneOffset.ofHours(2))
-        OffsetDateTimeColumnConverter.fromSql(OffsetDateTimeColumnConverter.toSql(offsetDateTime)) shouldBe offsetDateTime
-    }
-
-    "UriColumnConverter round-trips a URI through its string form on a TextType column" {
-        UriColumnConverter.sqlType shouldBe ColumnType.TextType
-        val uri = URI("https://example.com/path?query=1#frag")
-        UriColumnConverter.fromSql(UriColumnConverter.toSql(uri)) shouldBe uri
-    }
-
     "UrlColumnConverter round-trips a URL through its string form on a TextType column" {
         UrlColumnConverter.sqlType shouldBe ColumnType.TextType
         val url = URI("https://example.com/path").toURL()
         UrlColumnConverter.toSql(UrlColumnConverter.fromSql(UrlColumnConverter.toSql(url))) shouldBe url.toString()
     }
-
-    "BigIntegerColumnConverter round-trips an arbitrary-precision integer on a TextType column" {
-        BigIntegerColumnConverter.sqlType shouldBe ColumnType.TextType
-        val bigInteger = BigInteger("123456789012345678901234567890")
-        BigIntegerColumnConverter.fromSql(BigIntegerColumnConverter.toSql(bigInteger)) shouldBe bigInteger
-    }
 })
+
+/**
+ * A converter whose round-trip is symmetric and text-backed: `sqlType == TextType` and
+ * `fromSql(toSql(value)) == value`. Generics are captured at construction so [verify] needs no cast.
+ */
+private class SymmetricRoundTrip<T : Any>(
+    val name: String,
+    val converter: ColumnConverter<T, String>,
+    val value: T
+) : WithDataTestName {
+    override fun dataTestName() = name
+
+    fun verify() {
+        converter.sqlType shouldBe ColumnType.TextType
+        converter.fromSql(converter.toSql(value)) shouldBe value
+    }
+}
