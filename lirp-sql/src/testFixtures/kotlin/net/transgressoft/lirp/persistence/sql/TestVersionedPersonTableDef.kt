@@ -76,6 +76,8 @@ object TestVersionedPersonTableDef : SqlTableDef<TestVersionedPerson>, Versioned
         entity.version = newVersion
     }
 
+    override fun versionOf(entity: TestVersionedPerson): Long = entity.version
+
     override fun applyScalarRow(entity: TestVersionedPerson, row: ResultRow, table: Table, rawInit: LirpRawInitializer<TestVersionedPerson>) {
         // No-op: entity state is fully populated by fromRow.
     }

@@ -214,6 +214,8 @@ object FkParentTableDef : SqlTableDef<FkParent>, VersionedTableDef<FkParent>, Ju
         entity.withEventsDisabled { entity.version = newVersion }
     }
 
+    override fun versionOf(entity: FkParent): Long = entity.version
+
     /**
      * Reconciles [FkParent.childIds] from junction rows during bulk load. Mirrors what KSP would
      * generate for an `aggregateList` collection ref.

@@ -114,6 +114,39 @@ internal class QueryDslIntegrationTest : FunSpec({
         results.map { it.name } shouldBe listOf("Gadget", "Book B")
     }
 
+    test("query with orderBy and limit matches full-sort truncation when ordering keys tie") {
+        // Duplicate prices force the tie-break path in the bounded top-K selection; the retained
+        // window must equal the full stable sort truncated at the same offset/limit, regardless of
+        // the registry's candidate iteration order.
+        productRepo.create(1, "books", 10.0, 5, "A")
+        productRepo.create(2, "books", 10.0, 5, "B")
+        productRepo.create(3, "books", 10.0, 5, "C")
+        productRepo.create(4, "books", 20.0, 5, "D")
+        productRepo.create(5, "books", 20.0, 5, "E")
+
+        val fullSort = productRepo.query { orderBy(Product::price) }.toList()
+        val bounded =
+            productRepo.query {
+                orderBy(Product::price)
+                offset(1)
+                limit(3)
+            }.toList()
+
+        bounded shouldBe fullSort.drop(1).take(3)
+    }
+
+    test("query with orderBy and limit of zero returns empty") {
+        productRepo.create(1, "books", 10.0, 5, "A")
+        productRepo.create(2, "books", 20.0, 5, "B")
+
+        val results =
+            productRepo.query {
+                orderBy(Product::price)
+                limit(0)
+            }.toList()
+        results shouldBe emptyList()
+    }
+
     test("query with offset and limit returns correct page") {
         productRepo.create(1, "books", 10.0, 5, "A")
         productRepo.create(2, "books", 20.0, 5, "B")

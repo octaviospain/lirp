@@ -1031,6 +1031,8 @@ internal class TableDefProcessorTest : FunSpec({
         val content = result.generatedFileContent("BumpCheck_LirpTableDef.kt")
         content shouldContain "override fun bumpVersion(entity: BumpCheck, newVersion: Long)"
         content shouldContain "entity.version = newVersion"
+        content shouldContain "override fun versionOf(entity: BumpCheck): Long"
+        content shouldContain "return entity.version"
     }
 
     test("does NOT generate bumpVersion override for entity without @Version") {
@@ -1057,6 +1059,7 @@ internal class TableDefProcessorTest : FunSpec({
         result.exitCode shouldBe KotlinCompilation.ExitCode.OK
         val content = result.generatedFileContent("NoBump_LirpTableDef.kt")
         content shouldNotContain "override fun bumpVersion"
+        content shouldNotContain "override fun versionOf"
     }
 
     // ---- Junction tables and FK constraints (#144) ----

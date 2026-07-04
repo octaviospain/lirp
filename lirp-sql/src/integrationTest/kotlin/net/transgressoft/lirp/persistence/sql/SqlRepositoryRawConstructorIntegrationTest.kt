@@ -204,6 +204,8 @@ object VersionedRawCtorTableDef :
         entity.version = newVersion
     }
 
+    override fun versionOf(entity: VersionedRawCtorEntity): Long = entity.version
+
     @Suppress("UNCHECKED_CAST")
     override fun applyScalarRow(
         entity: VersionedRawCtorEntity,

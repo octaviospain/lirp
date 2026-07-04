@@ -145,6 +145,7 @@ internal object TableDefSourceEmitter {
             appendLine()
             appendApplyScalarRow(selfType, columns, params.setterSlots)
             appendBumpVersion(className, selfType, columns)
+            appendVersionOf(className, selfType, columns)
             appendForeignKeys(foreignKeys)
             appendJunctionOverrides(className, selfType, junctionRefs)
         }
@@ -453,6 +454,18 @@ internal object TableDefSourceEmitter {
         appendLine("    override fun bumpVersion(${receiverName(className, selfType)}: $selfType, newVersion: Long) {")
         if (className != selfType) appendCastToConcrete(className)
         appendLine("        entity.${versionCol.propertyName} = newVersion")
+        appendLine(METHOD_CLOSE)
+    }
+
+    fun StringBuilder.appendVersionOf(className: String, selfType: String, columns: List<ColumnMeta>) {
+        // Emit a non-default versionOf override only when the entity declares a @Version column.
+        // Reading the property directly avoids the O(columns) toParams map allocation on every
+        // versioned mutation. Unversioned entities do not implement VersionedTableDef, so no emission.
+        val versionCol = columns.singleOrNull { it.isVersion } ?: return
+        appendLine()
+        appendLine("    override fun versionOf(${receiverName(className, selfType)}: $selfType): Long {")
+        if (className != selfType) appendCastToConcrete(className)
+        appendLine("        return entity.${versionCol.propertyName}")
         appendLine(METHOD_CLOSE)
     }
 
