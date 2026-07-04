@@ -18,6 +18,7 @@
 package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.persistence.query.query
+import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.awaitSubscriptionReady
 import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.databases
 import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.assertions.nondeterministic.eventuallyConfig
@@ -30,7 +31,6 @@ import io.kotest.matchers.optional.shouldNotBePresent
 import io.kotest.matchers.shouldBe
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
-import kotlinx.coroutines.delay
 
 /**
  * Polling config for soft-delete persistence assertions. Reactive mutation events are dispatched
@@ -42,16 +42,6 @@ private val persistedRowPoll =
         duration = 30.seconds
         interval = 200.milliseconds
     }
-
-/**
- * Pause that lets a freshly constructed or freshly populated repository's per-entity
- * persistence subscription start collecting before the first reactive mutation.
- *
- * Each entity is subscribed on a launched collector coroutine; until that coroutine reaches its
- * `collect`, a mutation emitted in that window is dropped (replay = 0, no live collector).
- * Pausing before the first mutation closes the window.
- */
-private suspend fun awaitSubscriptionReady() = delay(50.milliseconds)
 
 /**
  * Cross-dialect integration tests verifying the soft-delete persistence contract for

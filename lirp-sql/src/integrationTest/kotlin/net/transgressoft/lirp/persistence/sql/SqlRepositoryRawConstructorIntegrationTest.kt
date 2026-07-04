@@ -26,6 +26,7 @@ import net.transgressoft.lirp.persistence.LirpRawInitializer
 import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.databases
 import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.withDatabaseTest
 import com.zaxxer.hikari.HikariDataSource
+import io.kotest.assertions.assertSoftly
 import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.datatest.withTests
@@ -319,9 +320,11 @@ internal class SqlRepositoryRawConstructorIntegrationTest : FunSpec({
                     // LirpRawInitializer rather than re-inserting a partially hydrated instance.
                     eventually(5.seconds) {
                         val recovered = repo.findById(7).orElseThrow()
-                        recovered.tag shouldBe "tag-7"
-                        recovered.version shouldBe 1L
-                        recovered.note shouldBe "note-7"
+                        assertSoftly {
+                            recovered.tag shouldBe "tag-7"
+                            recovered.version shouldBe 1L
+                            recovered.note shouldBe "note-7"
+                        }
                     }
                 } finally {
                     repo.close()

@@ -19,6 +19,7 @@ package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
+import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.awaitSubscriptionReady
 import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.databases
 import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.withDatabaseTest
 import io.kotest.assertions.nondeterministic.eventually
@@ -30,9 +31,7 @@ import org.junit.jupiter.api.DisplayName
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
-import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
-import kotlinx.coroutines.delay
 
 /**
  * Integration tests for [SqlRepository] event emission against PostgreSQL, MySQL 8.0, and MariaDB 11.
@@ -50,7 +49,7 @@ internal class SqlRepositoryEventIntegrationTest : FunSpec({
                 val repo = SqlRepository(dataSource, TestPersonTableDef)
                 val received = AtomicReference<CrudEvent.Type?>()
                 repo.subscribe { event -> received.set(event.type) }
-                delay(50.milliseconds) // let SharedFlow collector coroutine start
+                awaitSubscriptionReady()
 
                 repo.add(TestPerson(1).apply { firstName = "Alice" })
 
@@ -70,7 +69,7 @@ internal class SqlRepositoryEventIntegrationTest : FunSpec({
                 val received = AtomicReference<CrudEvent.Type?>()
                 // Subscribe before add so the collector coroutine is running when DELETE fires
                 repo.subscribe { event -> received.set(event.type) }
-                delay(50.milliseconds) // let SharedFlow collector coroutine start
+                awaitSubscriptionReady()
 
                 val person = TestPerson(2).apply { firstName = "Bob" }
                 repo.add(person)
@@ -92,7 +91,7 @@ internal class SqlRepositoryEventIntegrationTest : FunSpec({
                 val eventTypes = Collections.synchronizedList(mutableListOf<CrudEvent.Type>())
                 // Subscribe before add so the collector coroutine is running when DELETE fires
                 repo.subscribe { event -> eventTypes.add(event.type) }
-                delay(50.milliseconds) // let SharedFlow collector coroutine start
+                awaitSubscriptionReady()
 
                 repo.add(TestPerson(3).apply { firstName = "Carol" })
                 repo.clear()
@@ -115,7 +114,7 @@ internal class SqlRepositoryEventIntegrationTest : FunSpec({
                 val mutationReceived = AtomicBoolean(false)
                 val person = repo.findById(4).get()
                 person.subscribe { mutationReceived.set(true) }
-                delay(50.milliseconds) // let SharedFlow collector coroutine start
+                awaitSubscriptionReady()
 
                 person.firstName = "Changed"
 
@@ -140,7 +139,7 @@ internal class SqlRepositoryEventIntegrationTest : FunSpec({
                 val mutationReceived = AtomicBoolean(false)
                 val person = repo.findById(5).get()
                 person.subscribe { mutationReceived.set(true) }
-                delay(50.milliseconds) // let SharedFlow collector coroutine start
+                awaitSubscriptionReady()
 
                 person.firstName = "Evelyn"
 

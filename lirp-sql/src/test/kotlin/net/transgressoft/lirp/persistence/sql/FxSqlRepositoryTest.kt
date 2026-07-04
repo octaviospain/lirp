@@ -20,15 +20,14 @@ package net.transgressoft.lirp.persistence.sql
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.persistence.RegistryBase
 import net.transgressoft.lirp.persistence.fx.FxToolkitInit
+import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.awaitSubscriptionReady
 import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
-import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
-import kotlinx.coroutines.delay
 
 /**
  * SQL persistence tests for entities combining fx scalar delegates ([fxString], [fxInteger],
@@ -246,7 +245,7 @@ internal class FxSqlRepositoryTest : StringSpec({
         entityRepo.add(entity)
 
         entityRepo.subscribe { event -> received.set(event.type) }
-        delay(50.milliseconds)
+        awaitSubscriptionReady()
 
         entity.nameProperty.set("Updated")
 

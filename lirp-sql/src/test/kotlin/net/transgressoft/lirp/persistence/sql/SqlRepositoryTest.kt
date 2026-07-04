@@ -19,6 +19,7 @@ package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.persistence.RegistryBase
+import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.awaitSubscriptionReady
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.nondeterministic.eventually
@@ -88,7 +89,7 @@ internal class SqlRepositoryTest : StringSpec({
         val repo = SqlRepository(freshJdbcUrl(), TestPersonTableDef)
         val received = AtomicReference<CrudEvent.Type?>()
         repo.subscribe { event -> received.set(event.type) }
-        delay(50.milliseconds) // let SharedFlow collector coroutine start
+        awaitSubscriptionReady()
 
         repo.add(TestPerson(1).apply { firstName = "Bob" })
 
@@ -128,7 +129,7 @@ internal class SqlRepositoryTest : StringSpec({
         val received = AtomicReference<CrudEvent.Type?>()
         // Subscribe before add so the subscriber coroutine is active before events are emitted
         repo.subscribe { event -> received.set(event.type) }
-        delay(50.milliseconds) // let SharedFlow collector coroutine start
+        awaitSubscriptionReady()
 
         repo.add(person)
         repo.remove(person)

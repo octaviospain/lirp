@@ -22,16 +22,19 @@ import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.engine.names.WithDataTestName
 import io.kotest.matchers.nulls.shouldNotBeNull
+import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.sql.SQLException
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 
 /**
  * Database configuration for data-driven integration tests.
@@ -149,6 +152,59 @@ object DatabaseTestSupport {
         assert: (R) -> Unit
     ) = eventually(timeout) {
         reader().use { assert(it) }
+    }
+
+    /**
+     * Waits a short warm-up window for a freshly-registered `SharedFlow` collector coroutine to begin
+     * collecting before the test emits the mutation it wants observed.
+     *
+     * A subscription registered immediately before a mutation can miss it because the collector
+     * coroutine has not started; this brief settle absorbs that handoff. It is deliberately NOT
+     * [awaitRow]: it waits on in-JVM collector readiness, not on a durable write.
+     */
+    suspend fun awaitSubscriptionReady(warmup: Duration = 50.milliseconds) = delay(warmup)
+
+    /**
+     * Polls until a row with [id] is present in [table], or [timeout] elapses. A presence-only
+     * companion to [awaitRow] for tests that assert a durable write landed without inspecting columns.
+     */
+    suspend fun awaitRowPresent(
+        dataSource: HikariDataSource,
+        table: String,
+        id: Int,
+        timeout: Duration = PERSISTED_ROW_POLL
+    ) = eventually(timeout) {
+        dataSource.connection.use { conn ->
+            conn.createStatement().use { stmt ->
+                val rs = stmt.executeQuery("SELECT COUNT(*) FROM $table WHERE id = $id")
+                rs.next()
+                require(rs.getInt(1) == 1) { "row id=$id not yet visible in $table" }
+            }
+        }
+    }
+
+    /**
+     * Drops each table in [tableNames] with `DROP TABLE IF EXISTS`, isolating a test's schema from
+     * leftovers of a previous run. Order matters for FK-linked tables: pass children/junctions before
+     * parents. A propagated [SQLException] is a real setup failure and is intentionally not swallowed.
+     */
+    fun dropTables(dataSource: HikariDataSource, vararg tableNames: String) {
+        for (name in tableNames) {
+            dataSource.connection.use { conn ->
+                conn.createStatement().use { stmt -> stmt.execute("DROP TABLE IF EXISTS $name") }
+            }
+        }
+    }
+
+    /**
+     * Runs [block] as an Exposed transaction bound to [tableDef]'s interpreted table, returning its
+     * result. Lets a test read or mutate persisted rows directly via the Exposed DSL without standing
+     * up a full [SqlRepository].
+     */
+    fun <T> rawTransaction(dataSource: HikariDataSource, tableDef: SqlTableDef<*>, block: Table.() -> T): T {
+        val db = Database.connect(dataSource)
+        val exposed = ExposedTableInterpreter().interpret(tableDef)
+        return transaction(db) { exposed.table.block() }
     }
 
     private fun readRowById(dataSource: HikariDataSource, table: String, id: Any, columns: Array<out String>): Map<String, Any?>? =

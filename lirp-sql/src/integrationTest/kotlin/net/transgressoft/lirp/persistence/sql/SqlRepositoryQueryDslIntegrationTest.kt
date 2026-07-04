@@ -28,6 +28,7 @@ import net.transgressoft.lirp.persistence.query.lte
 import net.transgressoft.lirp.persistence.query.not
 import net.transgressoft.lirp.persistence.query.or
 import net.transgressoft.lirp.persistence.query.query
+import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.awaitSubscriptionReady
 import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.FunSpec
@@ -40,9 +41,7 @@ import io.kotest.matchers.ints.shouldBeExactly
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.DisplayName as JunitDisplayName
 import java.util.concurrent.atomic.AtomicInteger
-import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
-import kotlinx.coroutines.delay
 
 /**
  * Integration tests for the Query DSL against [SqlRepository] on PostgreSQL, MySQL, MariaDB, and SQLite.
@@ -758,7 +757,7 @@ internal class SqlRepositoryQueryDslIntegrationTest : FunSpec({
                     repo.activateEvents(CrudEvent.Type.READ)
                     val readCount = AtomicInteger(0)
                     repo.subscribe(CrudEvent.Type.READ) { readCount.incrementAndGet() }
-                    delay(50.milliseconds) // let SharedFlow collector coroutine start
+                    awaitSubscriptionReady()
 
                     val sequence = repo.query { where { TestPerson::firstName eq "A" } }
 

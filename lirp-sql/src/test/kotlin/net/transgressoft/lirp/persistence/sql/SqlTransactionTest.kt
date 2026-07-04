@@ -30,7 +30,6 @@ import net.transgressoft.lirp.persistence.RegistryBase
 import net.transgressoft.lirp.persistence.TransactionBuffer
 import net.transgressoft.lirp.persistence.TransactionConflictException
 import net.transgressoft.lirp.persistence.transaction
-import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
@@ -74,16 +73,6 @@ private fun Table.audioItemTitleColumn(): Column<String> = columns.first { it.na
 @DisplayName("SqlRepository transaction commit contract (H2)")
 internal class SqlTransactionTest : StringSpec() {
 
-    /**
-     * Opens a short-lived Exposed transaction against [dataSource] to simulate a third-party writer
-     * that bumps a row's version independently of the repository's debounce pipeline.
-     */
-    fun <T> rawTransaction(dataSource: HikariDataSource, tableDef: SqlTableDef<*>, block: Table.() -> T): T {
-        val db = Database.connect(dataSource)
-        val exposed = ExposedTableInterpreter().interpret(tableDef)
-        return transaction(db) { exposed.table.block() }
-    }
-
     init {
 
         afterEach {
@@ -111,7 +100,7 @@ internal class SqlTransactionTest : StringSpec() {
 
                 // DB-level assertion via rawTransaction (bypasses the in-memory cache).
                 val titleInDb =
-                    rawTransaction(dataSource, AudioItemSqlTableDef) {
+                    DatabaseTestSupport.rawTransaction(dataSource, AudioItemSqlTableDef) {
                         selectAll()
                             .where { audioItemIdColumn() eq 1 }
                             .singleOrNull()
@@ -137,7 +126,7 @@ internal class SqlTransactionTest : StringSpec() {
 
                 // DB-level: raw query confirms the row was committed.
                 val titleInDb =
-                    rawTransaction(dataSource, AudioItemSqlTableDef) {
+                    DatabaseTestSupport.rawTransaction(dataSource, AudioItemSqlTableDef) {
                         selectAll()
                             .where { audioItemIdColumn() eq 50 }
                             .singleOrNull()
@@ -167,7 +156,7 @@ internal class SqlTransactionTest : StringSpec() {
 
                 // DB-level: raw query confirms the row is gone.
                 val rowInDb =
-                    rawTransaction(dataSource, AudioItemSqlTableDef) {
+                    DatabaseTestSupport.rawTransaction(dataSource, AudioItemSqlTableDef) {
                         selectAll()
                             .where { audioItemIdColumn() eq 51 }
                             .singleOrNull()
@@ -194,7 +183,7 @@ internal class SqlTransactionTest : StringSpec() {
             val repo = SqlRepository<Int, TestVersionedPerson>(dataSource, TestVersionedPersonTableDef)
             try {
                 // Third-party writer bumps Alice's DB version to 1. The in-memory entity keeps version=0.
-                rawTransaction(dataSource, TestVersionedPersonTableDef) {
+                DatabaseTestSupport.rawTransaction(dataSource, TestVersionedPersonTableDef) {
                     @Suppress("UNCHECKED_CAST")
                     update({ (columns.first { it.name == "id" } as Column<Int>) eq 10 }) { row ->
                         @Suppress("UNCHECKED_CAST")
@@ -280,7 +269,7 @@ internal class SqlTransactionTest : StringSpec() {
                 transaction(repo) { _ -> }
 
                 // Bump the DB row's version externally. The in-memory entity keeps version=0.
-                rawTransaction(dataSource, TestVersionedPersonTableDef) {
+                DatabaseTestSupport.rawTransaction(dataSource, TestVersionedPersonTableDef) {
                     @Suppress("UNCHECKED_CAST")
                     update({ (columns.first { it.name == "id" } as Column<Int>) eq 1 }) { row ->
                         @Suppress("UNCHECKED_CAST")
@@ -495,7 +484,7 @@ internal class SqlTransactionTest : StringSpec() {
                 transaction(repo) { _ -> }
 
                 // Bump the DB row's version externally. In-memory entity keeps version=0.
-                rawTransaction(dataSource, TestVersionedPersonTableDef) {
+                DatabaseTestSupport.rawTransaction(dataSource, TestVersionedPersonTableDef) {
                     @Suppress("UNCHECKED_CAST")
                     update({ (columns.first { it.name == "id" } as Column<Int>) eq 99 }) { row ->
                         @Suppress("UNCHECKED_CAST")
@@ -545,7 +534,7 @@ internal class SqlTransactionTest : StringSpec() {
 
                 // DB-level: exactly one row with the updated title.
                 val titleInDb =
-                    rawTransaction(dataSource, AudioItemSqlTableDef) {
+                    DatabaseTestSupport.rawTransaction(dataSource, AudioItemSqlTableDef) {
                         selectAll().where { audioItemIdColumn() eq 60 }.singleOrNull()
                             ?.let { it[audioItemTitleColumn()] }
                     }
@@ -570,7 +559,7 @@ internal class SqlTransactionTest : StringSpec() {
 
                 // DB-level: no row written.
                 val rowInDb =
-                    rawTransaction(dataSource, AudioItemSqlTableDef) {
+                    DatabaseTestSupport.rawTransaction(dataSource, AudioItemSqlTableDef) {
                         selectAll().where { audioItemIdColumn() eq 61 }.singleOrNull()
                     }
                 rowInDb shouldBe null
