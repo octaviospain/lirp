@@ -17,7 +17,6 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
@@ -121,14 +120,15 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("ProductEntity_LirpFxScalarAccessor.kt")
-        content shouldContain "class ProductEntity_LirpFxScalarAccessor : LirpFxScalarAccessor<ProductEntity>"
-        content shouldContain "override val entries: List<FxScalarEntry<ProductEntity>>"
-        content shouldContain "name = \"title\""
-        content shouldContain "getter = { it.title.get() }"
-        content shouldContain "setter = { entity, value -> entity.title.set(value as String?) }"
-        content shouldContain "serializer<String?>()"
+        val content = result.shouldSucceed().generatedFileContent("ProductEntity_LirpFxScalarAccessor.kt")
+        content.shouldContainEach(
+            "class ProductEntity_LirpFxScalarAccessor : LirpFxScalarAccessor<ProductEntity>",
+            "override val entries: List<FxScalarEntry<ProductEntity>>",
+            "name = \"title\"",
+            "getter = { it.title.get() }",
+            "setter = { entity, value -> entity.title.set(value as String?) }",
+            "serializer<String?>()"
+        )
     }
 
     "generates entries with correct serializer types for all six scalar property types" {
@@ -162,20 +162,21 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("AllScalarsEntity_LirpFxScalarAccessor.kt")
-        content shouldContain "serializer<String?>()"
-        content shouldContain "serializer<Int>()"
-        content shouldContain "serializer<Double>()"
-        content shouldContain "serializer<Float>()"
-        content shouldContain "serializer<Long>()"
-        content shouldContain "serializer<Boolean>()"
-        content shouldContain "name = \"name\""
-        content shouldContain "name = \"count\""
-        content shouldContain "name = \"ratio\""
-        content shouldContain "name = \"weight\""
-        content shouldContain "name = \"size\""
-        content shouldContain "name = \"active\""
+        val content = result.shouldSucceed().generatedFileContent("AllScalarsEntity_LirpFxScalarAccessor.kt")
+        content.shouldContainEach(
+            "serializer<String?>()",
+            "serializer<Int>()",
+            "serializer<Double>()",
+            "serializer<Float>()",
+            "serializer<Long>()",
+            "serializer<Boolean>()",
+            "name = \"name\"",
+            "name = \"count\"",
+            "name = \"ratio\"",
+            "name = \"weight\"",
+            "name = \"size\"",
+            "name = \"active\""
+        )
     }
 
     "generates entry with typed serializer for entity with ObjectProperty type argument" {
@@ -203,12 +204,13 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("TaggedEntity_LirpFxScalarAccessor.kt")
-        content shouldContain "name = \"tag\""
-        content shouldContain "serializer<test.Tag?>()"
-        content shouldContain "getter = { it.tag.get() }"
-        content shouldContain "setter = { entity, value -> entity.tag.set(value as test.Tag?) }"
+        val content = result.shouldSucceed().generatedFileContent("TaggedEntity_LirpFxScalarAccessor.kt")
+        content.shouldContainEach(
+            "name = \"tag\"",
+            "serializer<test.Tag?>()",
+            "getter = { it.tag.get() }",
+            "setter = { entity, value -> entity.tag.set(value as test.Tag?) }"
+        )
     }
 
     "does not generate accessor file for entity with no FxScalar delegate properties" {
@@ -229,7 +231,7 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val generatedFiles = result.generatedNames()
         generatedFiles.contains("PlainEntity_LirpFxScalarAccessor.kt") shouldBe false
     }
@@ -255,8 +257,7 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("InternalFxEntity_LirpFxScalarAccessor.kt")
+        val content = result.shouldSucceed().generatedFileContent("InternalFxEntity_LirpFxScalarAccessor.kt")
         content shouldContain "internal class InternalFxEntity_LirpFxScalarAccessor"
     }
 
@@ -283,8 +284,7 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("InternalOuterFx\$InnerFx_LirpFxScalarAccessor.kt")
+        val content = result.shouldSucceed().generatedFileContent("InternalOuterFx\$InnerFx_LirpFxScalarAccessor.kt")
         content shouldContain "internal class"
     }
 
@@ -311,7 +311,7 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         // Structural processors silently skip private/protected entities
         val generatedNames = result.generatedNames()
         generatedNames.contains("PrivateOuterFx\$HiddenFx_LirpFxScalarAccessor.kt") shouldBe false
@@ -340,11 +340,13 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val generatedFiles = result.generatedNames()
         generatedFiles.contains("OuterContainer\$InnerEntity_LirpFxScalarAccessor.kt") shouldBe true
         val content = result.generatedFileContent("OuterContainer\$InnerEntity_LirpFxScalarAccessor.kt")
-        content shouldContain "class `OuterContainer\$InnerEntity_LirpFxScalarAccessor` : LirpFxScalarAccessor<OuterContainer.InnerEntity>"
-        content shouldContain "name = \"label\""
+        content.shouldContainEach(
+            "class `OuterContainer\$InnerEntity_LirpFxScalarAccessor` : LirpFxScalarAccessor<OuterContainer.InnerEntity>",
+            "name = \"label\""
+        )
     }
 })

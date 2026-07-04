@@ -17,7 +17,6 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
@@ -56,12 +55,13 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("MinimalEntity_LirpTableDef.kt")
-        content shouldContain "tableName: String = \"minimal_entity\""
-        content shouldContain "ColumnType.IntType"
-        content shouldContain "primaryKey = true"
-        content shouldContain "object MinimalEntity_LirpTableDef : SqlTableDef<MinimalEntity>"
+        val content = result.shouldSucceed().generatedFileContent("MinimalEntity_LirpTableDef.kt")
+        content.shouldContainEach(
+            "tableName: String = \"minimal_entity\"",
+            "ColumnType.IntType",
+            "primaryKey = true",
+            "object MinimalEntity_LirpTableDef : SqlTableDef<MinimalEntity>"
+        )
     }
 
     test("generates _LirpTableDef with annotation overrides for table name and column config") {
@@ -89,14 +89,15 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("ProductEntity_LirpTableDef.kt")
-        content shouldContain "tableName: String = \"products\""
-        content shouldContain "name = \"full_name\""
-        content shouldContain "ColumnType.VarcharType(100)"
-        content shouldContain "name = \"description\""
-        content shouldContain "ColumnType.TextType"
-        content shouldContain "ColumnType.LongType"
+        val content = result.shouldSucceed().generatedFileContent("ProductEntity_LirpTableDef.kt")
+        content.shouldContainEach(
+            "tableName: String = \"products\"",
+            "name = \"full_name\"",
+            "ColumnType.VarcharType(100)",
+            "name = \"description\"",
+            "ColumnType.TextType",
+            "ColumnType.LongType"
+        )
     }
 
     test("maps reactiveProperty delegate to declared type") {
@@ -123,10 +124,11 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("ReactiveEntity_LirpTableDef.kt")
-        content shouldContain "name = \"mutable_label\""
-        content shouldContain "ColumnType.TextType"
+        val content = result.shouldSucceed().generatedFileContent("ReactiveEntity_LirpTableDef.kt")
+        content.shouldContainEach(
+            "name = \"mutable_label\"",
+            "ColumnType.TextType"
+        )
     }
 
     test("excludes @PersistenceIgnore properties from generated descriptor") {
@@ -154,11 +156,11 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("EntityWithIgnored_LirpTableDef.kt")
-        content shouldContain "name = \"name\""
-        content shouldNotContain "transient_data"
-        content shouldNotContain "transientData"
+        val content = result.shouldSucceed().generatedFileContent("EntityWithIgnored_LirpTableDef.kt")
+        content.shouldContainEachAndNone(
+            present = listOf("name = \"name\""),
+            absent = listOf("transient_data", "transientData")
+        )
     }
 
     test("triggers on @PersistenceProperty without class-level @PersistenceMapping") {
@@ -183,10 +185,11 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("ImplicitEntity_LirpTableDef.kt")
-        content shouldContain "tableName: String = \"implicit_entity\""
-        content shouldContain "name = \"label\""
+        val content = result.shouldSucceed().generatedFileContent("ImplicitEntity_LirpTableDef.kt")
+        content.shouldContainEach(
+            "tableName: String = \"implicit_entity\"",
+            "name = \"label\""
+        )
     }
 
     test("generates SqlTableDef implementation for entity with all-mutable non-PK properties") {
@@ -208,12 +211,13 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("MutableEntity_LirpTableDef.kt")
-        content shouldContain "object MutableEntity_LirpTableDef : SqlTableDef<MutableEntity>"
-        content shouldContain "import net.transgressoft.lirp.persistence.sql.SqlTableDef"
-        content shouldContain "import org.jetbrains.exposed.v1.core.ResultRow"
-        content shouldContain "import org.jetbrains.exposed.v1.core.Table"
+        val content = result.shouldSucceed().generatedFileContent("MutableEntity_LirpTableDef.kt")
+        content.shouldContainEach(
+            "object MutableEntity_LirpTableDef : SqlTableDef<MutableEntity>",
+            "import net.transgressoft.lirp.persistence.sql.SqlTableDef",
+            "import org.jetbrains.exposed.v1.core.ResultRow",
+            "import org.jetbrains.exposed.v1.core.Table"
+        )
     }
 
     test("generates fromRow that constructs entity with id and sets mutable properties") {
@@ -235,15 +239,19 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("EntityWithFromRow_LirpTableDef.kt")
-        content shouldContain "override fun fromRow(row: ResultRow, table: Table): EntityWithFromRow"
-        content shouldContain "val entity = EntityWithFromRow("
-        content shouldContain "entity.name ="
-        content shouldContain "entity.active ="
-        content shouldContain "return entity"
-        // Non-reactive @PersistenceMapping classes have no withEventsDisabled — must not be wrapped.
-        content shouldNotContain "withEventsDisabled"
+        val content = result.shouldSucceed().generatedFileContent("EntityWithFromRow_LirpTableDef.kt")
+        content.shouldContainEachAndNone(
+            present =
+                listOf(
+                    "override fun fromRow(row: ResultRow, table: Table): EntityWithFromRow",
+                    "val entity = EntityWithFromRow(",
+                    "entity.name =",
+                    "entity.active =",
+                    "return entity"
+                ),
+            // Non-reactive @PersistenceMapping classes have no withEventsDisabled — must not be wrapped.
+            absent = listOf("withEventsDisabled")
+        )
     }
 
     test("generates fromRow that hydrates a reactive entity inside withEventsDisabled") {
@@ -268,15 +276,16 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("ReactiveFromRowEntity_LirpTableDef.kt")
+        val content = result.shouldSucceed().generatedFileContent("ReactiveFromRowEntity_LirpTableDef.kt")
         // Hydration of a reactive entity must not emit mutation events — emitting during load would
         // schedule a stray write-back of the just-loaded values that races the repository's mutation
         // subscription (observed as an intermittently-lost update). The body-declared reactive
         // setters are therefore wrapped in withEventsDisabled.
-        content shouldContain "entity.withEventsDisabled {"
-        content shouldContain "entity.name ="
-        content shouldContain "entity.score ="
+        content.shouldContainEach(
+            "entity.withEventsDisabled {",
+            "entity.name =",
+            "entity.score ="
+        )
     }
 
     test("generates toParams that returns all column-value pairs including PK") {
@@ -298,12 +307,13 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("EntityWithToParams_LirpTableDef.kt")
-        content shouldContain "override fun toParams(entity: EntityWithToParams, table: Table): Map<Column<*>, Any?>"
-        content shouldContain "cols[\"id\"]!! to entity.id"
-        content shouldContain "cols[\"description\"]!! to entity.description"
-        content shouldContain "cols[\"count\"]!! to entity.count"
+        val content = result.shouldSucceed().generatedFileContent("EntityWithToParams_LirpTableDef.kt")
+        content.shouldContainEach(
+            "override fun toParams(entity: EntityWithToParams, table: Table): Map<Column<*>, Any?>",
+            "cols[\"id\"]!! to entity.id",
+            "cols[\"description\"]!! to entity.description",
+            "cols[\"count\"]!! to entity.count"
+        )
     }
 
     test("generates SqlTableDef when every non-PK column is a primary-constructor val") {
@@ -322,13 +332,14 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("ImmutableEntity_LirpTableDef.kt")
-        content shouldContain "object ImmutableEntity_LirpTableDef : SqlTableDef<ImmutableEntity>"
-        // fromRow rebuilds the entity through the primary constructor (both args are ctor params).
-        content shouldContain "val entity = ImmutableEntity("
-        // applyRow has no mutable non-PK columns to reassign — emits the documented no-op branch.
-        content shouldContain "No mutable non-PK columns"
+        val content = result.shouldSucceed().generatedFileContent("ImmutableEntity_LirpTableDef.kt")
+        content.shouldContainEach(
+            "object ImmutableEntity_LirpTableDef : SqlTableDef<ImmutableEntity>",
+            // fromRow rebuilds the entity through the primary constructor (both args are ctor params).
+            "val entity = ImmutableEntity(",
+            // applyRow has no mutable non-PK columns to reassign — emits the documented no-op branch.
+            "No mutable non-PK columns"
+        )
         // Critically: applyRow MUST NOT attempt `entity.name =` reassignment on the val column.
         val applyRowBlock = content.substringAfter("override fun applyRow").substringBefore("override fun ")
         applyRowBlock shouldNotContain "entity.name ="
@@ -352,12 +363,13 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("ImportCheckEntity_LirpTableDef.kt")
-        content shouldContain "import net.transgressoft.lirp.persistence.sql.SqlTableDef"
-        content shouldContain "import org.jetbrains.exposed.v1.core.Column"
-        content shouldContain "import org.jetbrains.exposed.v1.core.ResultRow"
-        content shouldContain "import org.jetbrains.exposed.v1.core.Table"
+        val content = result.shouldSucceed().generatedFileContent("ImportCheckEntity_LirpTableDef.kt")
+        content.shouldContainEach(
+            "import net.transgressoft.lirp.persistence.sql.SqlTableDef",
+            "import org.jetbrains.exposed.v1.core.Column",
+            "import org.jetbrains.exposed.v1.core.ResultRow",
+            "import org.jetbrains.exposed.v1.core.Table"
+        )
     }
 
     test("generates correct enum handling as String in fromRow and toParams") {
@@ -380,11 +392,12 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("EntityWithEnum_LirpTableDef.kt")
-        content shouldContain "ColumnType.EnumType"
-        content shouldContain "enumValueOf<Status>"
-        content shouldContain "entity.status.name"
+        val content = result.shouldSucceed().generatedFileContent("EntityWithEnum_LirpTableDef.kt")
+        content.shouldContainEach(
+            "ColumnType.EnumType",
+            "enumValueOf<Status>",
+            "entity.status.name"
+        )
     }
 
     test("reports KSP error for unsupported property type") {
@@ -411,8 +424,7 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "Unsupported column type"
+        result.shouldFailWith("Unsupported column type")
     }
 
     test("generates UUID primary key column for entity with UUID id") {
@@ -437,13 +449,14 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("UuidKeyEntity_LirpTableDef.kt")
-        content shouldContain "ColumnType.UuidType"
-        content shouldContain "primaryKey = true"
-        content shouldContain "tableName: String = \"uuid_key_entity\""
-        content shouldContain "SqlTableDef<UuidKeyEntity>"
-        content shouldContain "toJavaUuid()"
+        val content = result.shouldSucceed().generatedFileContent("UuidKeyEntity_LirpTableDef.kt")
+        content.shouldContainEach(
+            "ColumnType.UuidType",
+            "primaryKey = true",
+            "tableName: String = \"uuid_key_entity\"",
+            "SqlTableDef<UuidKeyEntity>",
+            "toJavaUuid()"
+        )
     }
 
     test("generates nullable columns for entity with all nullable non-PK properties") {
@@ -466,12 +479,13 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("NullableEntity_LirpTableDef.kt")
-        content shouldContain "name = \"name\""
-        content shouldContain "nullable = true"
-        content shouldContain "name = \"score\""
-        content shouldContain "name = \"active\""
+        val content = result.shouldSucceed().generatedFileContent("NullableEntity_LirpTableDef.kt")
+        content.shouldContainEach(
+            "name = \"name\"",
+            "nullable = true",
+            "name = \"score\"",
+            "name = \"active\""
+        )
     }
 
     test("generates SqlTableDef for entity mixing ctor-param val and body-level var properties") {
@@ -492,13 +506,14 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("MixedEntity_LirpTableDef.kt")
-        content shouldContain "object MixedEntity_LirpTableDef : SqlTableDef<MixedEntity>"
-        content shouldContain "name = \"read_only\""
-        content shouldContain "name = \"mutable\""
-        // fromRow constructs the entity passing readOnly through the primary constructor.
-        content shouldContain "val entity = MixedEntity("
+        val content = result.shouldSucceed().generatedFileContent("MixedEntity_LirpTableDef.kt")
+        content.shouldContainEach(
+            "object MixedEntity_LirpTableDef : SqlTableDef<MixedEntity>",
+            "name = \"read_only\"",
+            "name = \"mutable\"",
+            // fromRow constructs the entity passing readOnly through the primary constructor.
+            "val entity = MixedEntity("
+        )
         // applyRow reassigns only the mutable body-level var; the immutable ctor-val is skipped.
         val applyRowBlock = content.substringAfter("override fun applyRow").substringBefore("override fun ")
         applyRowBlock shouldContain "entity.mutable ="
@@ -529,18 +544,20 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("CtorValReactive_LirpTableDef.kt")
+        val content = result.shouldSucceed().generatedFileContent("CtorValReactive_LirpTableDef.kt")
         content shouldContain "object CtorValReactive_LirpTableDef : SqlTableDef<CtorValReactive>"
         val fromRowBlock = content.substringAfter("override fun fromRow").substringBefore("override fun ")
-        // Both id and label are ctor params, so fromRow passes them positionally to the constructor.
-        fromRowBlock shouldContain "val entity = CtorValReactive("
-        fromRowBlock shouldContain "entity.notes ="
-        // The ctor-val `label` must never appear on the left-hand side of an assignment.
-        fromRowBlock shouldNotContain "entity.label ="
+        fromRowBlock.shouldContainEachAndNone(
+            // Both id and label are ctor params, so fromRow passes them positionally to the constructor.
+            present = listOf("val entity = CtorValReactive(", "entity.notes ="),
+            // The ctor-val `label` must never appear on the left-hand side of an assignment.
+            absent = listOf("entity.label =")
+        )
         val applyRowBlock = content.substringAfter("override fun applyRow").substringBefore("override fun ")
-        applyRowBlock shouldContain "entity.notes ="
-        applyRowBlock shouldNotContain "entity.label ="
+        applyRowBlock.shouldContainEachAndNone(
+            present = listOf("entity.notes ="),
+            absent = listOf("entity.label =")
+        )
     }
 
     test("still falls back to LirpTableDef when a non-ctor non-PK property is immutable") {
@@ -563,10 +580,11 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("BodyValEntity_LirpTableDef.kt")
-        content shouldContain "object BodyValEntity_LirpTableDef : LirpTableDef<BodyValEntity>"
-        content shouldNotContain "SqlTableDef"
+        val content = result.shouldSucceed().generatedFileContent("BodyValEntity_LirpTableDef.kt")
+        content.shouldContainEachAndNone(
+            present = listOf("object BodyValEntity_LirpTableDef : LirpTableDef<BodyValEntity>"),
+            absent = listOf("SqlTableDef")
+        )
     }
 
     test("generates correct descriptor for UUID PK entity with @PersistenceIgnore field") {
@@ -593,13 +611,11 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("UuidIgnoreEntity_LirpTableDef.kt")
-        content shouldContain "ColumnType.UuidType"
-        content shouldContain "primaryKey = true"
-        content shouldContain "name = \"name\""
-        content shouldNotContain "transient_field"
-        content shouldNotContain "transientField"
+        val content = result.shouldSucceed().generatedFileContent("UuidIgnoreEntity_LirpTableDef.kt")
+        content.shouldContainEachAndNone(
+            present = listOf("ColumnType.UuidType", "primaryKey = true", "name = \"name\""),
+            absent = listOf("transient_field", "transientField")
+        )
     }
 
     test("generates SqlTableDef via resolver detection without KSP options") {
@@ -624,11 +640,12 @@ internal class TableDefProcessorTest : FunSpec({
         // No options passed — resolver-only detection
         val result = KspTestSupport.compile(TableDefProcessorProvider(), source)
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("ResolverDetectedEntity_LirpTableDef.kt")
-        content shouldContain "SqlTableDef<ResolverDetectedEntity>"
-        content shouldContain "override fun fromRow(row: ResultRow, table: Table): ResolverDetectedEntity"
-        content shouldContain "override fun toParams(entity: ResolverDetectedEntity, table: Table)"
+        val content = result.shouldSucceed().generatedFileContent("ResolverDetectedEntity_LirpTableDef.kt")
+        content.shouldContainEach(
+            "SqlTableDef<ResolverDetectedEntity>",
+            "override fun fromRow(row: ResultRow, table: Table): ResolverDetectedEntity",
+            "override fun toParams(entity: ResolverDetectedEntity, table: Table)"
+        )
     }
 
     test("documents monorepo behavior: resolver still generates SqlTableDef without options") {
@@ -653,7 +670,7 @@ internal class TableDefProcessorTest : FunSpec({
             )
         val result = KspTestSupport.compile(TableDefProcessorProvider(), source, options = emptyMap())
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         // In monorepo, resolver finds SqlTableDef — so SqlTableDef is still generated
         val content = result.generatedFileContent("FallbackEntity_LirpTableDef.kt")
         content shouldContain "SqlTableDef<FallbackEntity>"
@@ -689,27 +706,28 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("NullableTypesEntity_LirpTableDef.kt")
-        content shouldContain "SqlTableDef<NullableTypesEntity>"
-        content shouldContain "@OptIn(ExperimentalUuidApi::class)"
-        // Nullable UUID conversions
-        content shouldContain "as? kotlin.uuid.Uuid)?.toJavaUuid()"
-        content shouldContain "entity.parentId?.toKotlinUuid()"
-        // Non-null UUID PK conversion
-        content shouldContain "as kotlin.uuid.Uuid).toJavaUuid()"
-        content shouldContain "entity.id.toKotlinUuid()"
-        // Nullable LocalDate conversions
-        content shouldContain "as? kotlinx.datetime.LocalDate)?.toJavaLocalDate()"
-        content shouldContain "entity.startDate?.toKotlinLocalDate()"
-        // Nullable LocalDateTime conversions
-        content shouldContain "as? kotlinx.datetime.LocalDateTime)?.toJavaLocalDateTime()"
-        content shouldContain "entity.modifiedAt?.toKotlinLocalDateTime()"
-        // Nullable enum conversions
-        content shouldContain """as? String)?.let { enumValueOf<Status>(it) }"""
-        content shouldContain "entity.status?.name"
-        // Nullable String
-        content shouldContain "as? String"
+        val content = result.shouldSucceed().generatedFileContent("NullableTypesEntity_LirpTableDef.kt")
+        content.shouldContainEach(
+            "SqlTableDef<NullableTypesEntity>",
+            "@OptIn(ExperimentalUuidApi::class)",
+            // Nullable UUID conversions
+            "as? kotlin.uuid.Uuid)?.toJavaUuid()",
+            "entity.parentId?.toKotlinUuid()",
+            // Non-null UUID PK conversion
+            "as kotlin.uuid.Uuid).toJavaUuid()",
+            "entity.id.toKotlinUuid()",
+            // Nullable LocalDate conversions
+            "as? kotlinx.datetime.LocalDate)?.toJavaLocalDate()",
+            "entity.startDate?.toKotlinLocalDate()",
+            // Nullable LocalDateTime conversions
+            "as? kotlinx.datetime.LocalDateTime)?.toJavaLocalDateTime()",
+            "entity.modifiedAt?.toKotlinLocalDateTime()",
+            // Nullable enum conversions
+            """as? String)?.let { enumValueOf<Status>(it) }""",
+            "entity.status?.name",
+            // Nullable String
+            "as? String"
+        )
     }
 
     test("generates BigDecimal import and correct column type for DecimalType properties") {
@@ -736,14 +754,15 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("DecimalEntity_LirpTableDef.kt")
-        content shouldContain "SqlTableDef<DecimalEntity>"
-        content shouldContain "import java.math.BigDecimal"
-        content shouldContain "ColumnType.DecimalType(10, 2)"
-        content shouldContain "ColumnType.DecimalType(14, 4)"
-        content shouldContain "as BigDecimal"
-        content shouldContain "as? BigDecimal"
+        val content = result.shouldSucceed().generatedFileContent("DecimalEntity_LirpTableDef.kt")
+        content.shouldContainEach(
+            "SqlTableDef<DecimalEntity>",
+            "import java.math.BigDecimal",
+            "ColumnType.DecimalType(10, 2)",
+            "ColumnType.DecimalType(14, 4)",
+            "as BigDecimal",
+            "as? BigDecimal"
+        )
     }
 
     test("generates correct ordered multi-param constructor call in fromRow") {
@@ -772,12 +791,13 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("MultiParamEntity_LirpTableDef.kt")
-        content shouldContain "SqlTableDef<MultiParamEntity>"
-        // Constructor args in declaration order: id first, tenantId second
-        content shouldContain "val entity = MultiParamEntity("
-        content shouldContain "entity.name ="
+        val content = result.shouldSucceed().generatedFileContent("MultiParamEntity_LirpTableDef.kt")
+        content.shouldContainEach(
+            "SqlTableDef<MultiParamEntity>",
+            // Constructor args in declaration order: id first, tenantId second
+            "val entity = MultiParamEntity(",
+            "entity.name ="
+        )
         // In fromRow, tenantId must be in the constructor call (not a setter) since it's a ctor param.
         val fromRowBlock = content.substringAfter("override fun fromRow").substringBefore("override fun ")
         fromRowBlock shouldNotContain "entity.tenantId ="
@@ -802,12 +822,12 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("UnmappedCtorEntity_LirpTableDef.kt")
-        // Should fall back to LirpTableDef since transientParam is excluded from columns
-        content shouldContain "LirpTableDef<UnmappedCtorEntity>"
-        content shouldNotContain "SqlTableDef"
-        content shouldNotContain "fromRow"
+        val content = result.shouldSucceed().generatedFileContent("UnmappedCtorEntity_LirpTableDef.kt")
+        content.shouldContainEachAndNone(
+            // Should fall back to LirpTableDef since transientParam is excluded from columns
+            present = listOf("LirpTableDef<UnmappedCtorEntity>"),
+            absent = listOf("SqlTableDef", "fromRow")
+        )
     }
 
     test("generates isVersion = true in ColumnDef for a valid @Version property") {
@@ -832,8 +852,7 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("VersionedEntity_LirpTableDef.kt")
+        val content = result.shouldSucceed().generatedFileContent("VersionedEntity_LirpTableDef.kt")
         content shouldContain "isVersion = true"
         // The id column should still carry isVersion = false
         val idColumnLine = content.lines().first { it.contains("name = \"id\"") }
@@ -863,11 +882,12 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("VersionedEntity2_LirpTableDef.kt")
-        content shouldContain "override fun applyRow(entity: VersionedEntity2, row: ResultRow, table: Table)"
-        content shouldContain "entity.name ="
-        content shouldContain "entity.version ="
+        val content = result.shouldSucceed().generatedFileContent("VersionedEntity2_LirpTableDef.kt")
+        content.shouldContainEach(
+            "override fun applyRow(entity: VersionedEntity2, row: ResultRow, table: Table)",
+            "entity.name =",
+            "entity.version ="
+        )
         // The id (PK) should NOT appear in applyRow assignments
         val applyRowBlock = content.substringAfter("override fun applyRow").substringBefore("\n    }")
         applyRowBlock shouldNotContain "entity.id ="
@@ -895,8 +915,7 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "must be of type 'Long'"
+        result.shouldFailWith("must be of type 'Long'")
     }
 
     test("rejects @Version on a val property") {
@@ -921,8 +940,7 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "must be declared with 'var'"
+        result.shouldFailWith("must be declared with 'var'")
     }
 
     test("rejects multiple @Version properties on one class") {
@@ -948,8 +966,7 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "multiple @Version properties"
+        result.shouldFailWith("multiple @Version properties")
     }
 
     test("rejects @Version on a non-delegated property") {
@@ -974,8 +991,7 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "must use the 'reactiveProperty' delegate"
+        result.shouldFailWith("must use the 'reactiveProperty' delegate")
     }
 
     test("entity without @Version has isVersion = false on all columns") {
@@ -999,10 +1015,11 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("Unversioned_LirpTableDef.kt")
-        content shouldNotContain "isVersion = true"
-        content shouldContain "isVersion = false"
+        val content = result.shouldSucceed().generatedFileContent("Unversioned_LirpTableDef.kt")
+        content.shouldContainEachAndNone(
+            present = listOf("isVersion = false"),
+            absent = listOf("isVersion = true")
+        )
     }
 
     test("generates bumpVersion override for entity with @Version") {
@@ -1027,12 +1044,13 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("BumpCheck_LirpTableDef.kt")
-        content shouldContain "override fun bumpVersion(entity: BumpCheck, newVersion: Long)"
-        content shouldContain "entity.version = newVersion"
-        content shouldContain "override fun versionOf(entity: BumpCheck): Long"
-        content shouldContain "return entity.version"
+        val content = result.shouldSucceed().generatedFileContent("BumpCheck_LirpTableDef.kt")
+        content.shouldContainEach(
+            "override fun bumpVersion(entity: BumpCheck, newVersion: Long)",
+            "entity.version = newVersion",
+            "override fun versionOf(entity: BumpCheck): Long",
+            "return entity.version"
+        )
     }
 
     test("does NOT generate bumpVersion override for entity without @Version") {
@@ -1056,10 +1074,11 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("NoBump_LirpTableDef.kt")
-        content shouldNotContain "override fun bumpVersion"
-        content shouldNotContain "override fun versionOf"
+        val content = result.shouldSucceed().generatedFileContent("NoBump_LirpTableDef.kt")
+        content.shouldContainEachAndNone(
+            present = emptyList(),
+            absent = listOf("override fun bumpVersion", "override fun versionOf")
+        )
     }
 
     // ---- Junction tables and FK constraints (#144) ----
@@ -1097,18 +1116,19 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val junction = result.generatedFileContent("Playlist_Tracks_LirpJunctionTableDef.kt")
-        junction shouldContain "object Playlist_Tracks_LirpJunctionTableDef : JunctionTableDef"
-        junction shouldContain "tableName: String = \"playlist_tracks\""
-        junction shouldContain "parentTableName: String = \"playlist\""
-        junction shouldContain "itemTableName: String = \"track\""
-        junction shouldContain "isOrdered: Boolean = true"
-        junction shouldContain "JunctionColumnDef(name = \"parent_id\""
-        junction shouldContain "JunctionColumnDef(name = \"item_id\""
-        junction shouldContain "JunctionColumnDef(name = \"position\""
-        junction shouldContain "parentFkOnDelete: CascadeAction = CascadeAction.CASCADE"
-        junction shouldContain "itemFkOnDelete: CascadeAction = CascadeAction.DETACH"
+        val junction = result.shouldSucceed().generatedFileContent("Playlist_Tracks_LirpJunctionTableDef.kt")
+        junction.shouldContainEach(
+            "object Playlist_Tracks_LirpJunctionTableDef : JunctionTableDef",
+            "tableName: String = \"playlist_tracks\"",
+            "parentTableName: String = \"playlist\"",
+            "itemTableName: String = \"track\"",
+            "isOrdered: Boolean = true",
+            "JunctionColumnDef(name = \"parent_id\"",
+            "JunctionColumnDef(name = \"item_id\"",
+            "JunctionColumnDef(name = \"position\"",
+            "parentFkOnDelete: CascadeAction = CascadeAction.CASCADE",
+            "itemFkOnDelete: CascadeAction = CascadeAction.DETACH"
+        )
     }
 
     test("emits unordered junction descriptor without position column for aggregateSet") {
@@ -1143,10 +1163,11 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val junction = result.generatedFileContent("Album_Tags_LirpJunctionTableDef.kt")
-        junction shouldContain "isOrdered: Boolean = false"
-        junction shouldNotContain "position"
+        val junction = result.shouldSucceed().generatedFileContent("Album_Tags_LirpJunctionTableDef.kt")
+        junction.shouldContainEachAndNone(
+            present = listOf("isOrdered: Boolean = false"),
+            absent = listOf("position")
+        )
     }
 
     test("attaches RESTRICT foreign key to @ToOneAggregate scalar") {
@@ -1180,13 +1201,14 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("Order_LirpTableDef.kt")
-        content shouldContain "override fun foreignKeys(): List<ForeignKeyDef>"
-        content shouldContain "ForeignKeyDef(columnName = \"customer_id\""
-        content shouldContain "referencedTable = \"customer\""
-        content shouldContain "referencedColumn = \"id\""
-        content shouldContain "onDelete = CascadeAction.RESTRICT"
+        val content = result.shouldSucceed().generatedFileContent("Order_LirpTableDef.kt")
+        content.shouldContainEach(
+            "override fun foreignKeys(): List<ForeignKeyDef>",
+            "ForeignKeyDef(columnName = \"customer_id\"",
+            "referencedTable = \"customer\"",
+            "referencedColumn = \"id\"",
+            "onDelete = CascadeAction.RESTRICT"
+        )
     }
 
     test("rejects DETACH on non-nullable @ToOneAggregate scalar at compile time") {
@@ -1220,8 +1242,7 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "requires a nullable backing scalar"
+        result.shouldFailWith("requires a nullable backing scalar")
     }
 
     test("allows DETACH on nullable @ToOneAggregate scalar and emits SET_NULL semantics") {
@@ -1255,10 +1276,11 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("Site_LirpTableDef.kt")
-        content shouldContain "ForeignKeyDef(columnName = \"region_id\""
-        content shouldContain "onDelete = CascadeAction.DETACH"
+        val content = result.shouldSucceed().generatedFileContent("Site_LirpTableDef.kt")
+        content.shouldContainEach(
+            "ForeignKeyDef(columnName = \"region_id\"",
+            "onDelete = CascadeAction.DETACH"
+        )
     }
 
     test("emits SET_NULL FK for nullable @ToOneAggregate scalar with DETACH action") {
@@ -1286,10 +1308,11 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("Tenant_LirpTableDef.kt")
-        content shouldContain "ForeignKeyDef(columnName = \"parent_tenant_id\""
-        content shouldContain "onDelete = CascadeAction.DETACH"
+        val content = result.shouldSucceed().generatedFileContent("Tenant_LirpTableDef.kt")
+        content.shouldContainEach(
+            "ForeignKeyDef(columnName = \"parent_tenant_id\"",
+            "onDelete = CascadeAction.DETACH"
+        )
     }
 
     // ---- Junction accessor wiring on _LirpTableDef (#144 / FK-04, plan 53-03a) ----
@@ -1326,12 +1349,13 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("Playlist_LirpTableDef.kt")
-        content shouldContain "import net.transgressoft.lirp.persistence.sql.JunctionAccessor"
-        content shouldContain "import net.transgressoft.lirp.persistence.sql.JunctionTableDef"
-        content shouldContain "override val junctionTableDefs: List<JunctionTableDef>"
-        content shouldContain "Playlist_Tracks_LirpJunctionTableDef"
+        val content = result.shouldSucceed().generatedFileContent("Playlist_LirpTableDef.kt")
+        content.shouldContainEach(
+            "import net.transgressoft.lirp.persistence.sql.JunctionAccessor",
+            "import net.transgressoft.lirp.persistence.sql.JunctionTableDef",
+            "override val junctionTableDefs: List<JunctionTableDef>",
+            "Playlist_Tracks_LirpJunctionTableDef"
+        )
     }
 
     test("_LirpTableDef overrides junctionAccessors with idsOf returning the backing field") {
@@ -1366,12 +1390,13 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("Playlist_LirpTableDef.kt")
-        content shouldContain "override val junctionAccessors: List<JunctionAccessor<Playlist>>"
-        content shouldContain "object : JunctionAccessor<Playlist>"
-        content shouldContain "override val descriptor: JunctionTableDef = Playlist_Tracks_LirpJunctionTableDef"
-        content shouldContain "override fun idsOf(entity: Playlist): Collection<Any> = entity.trackIds"
+        val content = result.shouldSucceed().generatedFileContent("Playlist_LirpTableDef.kt")
+        content.shouldContainEach(
+            "override val junctionAccessors: List<JunctionAccessor<Playlist>>",
+            "object : JunctionAccessor<Playlist>",
+            "override val descriptor: JunctionTableDef = Playlist_Tracks_LirpJunctionTableDef",
+            "override fun idsOf(entity: Playlist): Collection<Any> = entity.trackIds"
+        )
     }
 
     test("_LirpTableDef overrides applyJunctionRows wrapping mutation in withEventsDisabled") {
@@ -1406,12 +1431,13 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("Playlist_LirpTableDef.kt")
-        content shouldContain "override fun applyJunctionRows("
-        content shouldContain "entity.withEventsDisabled"
-        content shouldContain "Playlist_Tracks_LirpJunctionTableDef ->"
-        content shouldContain "entity.trackIds = ids.filterIsInstance<Int>()"
+        val content = result.shouldSucceed().generatedFileContent("Playlist_LirpTableDef.kt")
+        content.shouldContainEach(
+            "override fun applyJunctionRows(",
+            "entity.withEventsDisabled",
+            "Playlist_Tracks_LirpJunctionTableDef ->",
+            "entity.trackIds = ids.filterIsInstance<Int>()"
+        )
     }
 
     test("_LirpTableDef does NOT override junction members when entity has no collection aggregates") {
@@ -1434,11 +1460,11 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("Plain_LirpTableDef.kt")
-        content shouldNotContain "junctionTableDefs"
-        content shouldNotContain "junctionAccessors"
-        content shouldNotContain "applyJunctionRows"
+        val content = result.shouldSucceed().generatedFileContent("Plain_LirpTableDef.kt")
+        content.shouldContainEachAndNone(
+            present = emptyList(),
+            absent = listOf("junctionTableDefs", "junctionAccessors", "applyJunctionRows")
+        )
     }
 
     test("KSP-emitted _LirpTableDef applies junction rows at runtime without firing MutationEvents") {
@@ -1473,7 +1499,7 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
 
         val cl = result.classLoader
         val playlistClass = cl.loadClass("test.RuntimePlaylist")
@@ -1563,9 +1589,7 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "KSP[FK-04]"
-        result.messages shouldContain "must be a 'var List<K>'"
+        result.shouldFailWith("KSP[FK-04]", "must be a 'var List<K>'")
     }
 
     // ---- Short / Byte column-type inference (#207-B2) ----
@@ -1590,8 +1614,7 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("InternalPersisted_LirpTableDef.kt")
+        val content = result.shouldSucceed().generatedFileContent("InternalPersisted_LirpTableDef.kt")
         content shouldContain "internal object InternalPersisted_LirpTableDef"
     }
 
@@ -1617,11 +1640,12 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("InternalMultiProp_LirpTableDef.kt")
-        content shouldContain "internal object InternalMultiProp_LirpTableDef"
-        content shouldContain "name = \"name\""
-        content shouldContain "name = \"score\""
+        val content = result.shouldSucceed().generatedFileContent("InternalMultiProp_LirpTableDef.kt")
+        content.shouldContainEach(
+            "internal object InternalMultiProp_LirpTableDef",
+            "name = \"name\"",
+            "name = \"score\""
+        )
     }
 
     test("TableDefProcessor fails compilation for private-nested entity with @PersistenceMapping") {
@@ -1646,9 +1670,10 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "must be public or internal"
-        result.messages shouldContain "Private and protected entities cannot have accessible generated code"
+        result.shouldFailWith(
+            "must be public or internal",
+            "Private and protected entities cannot have accessible generated code"
+        )
     }
 
     test("TableDefProcessor maps kotlin.Short to ColumnType.IntType and emits .toShort() narrowing in fromRow") {
@@ -1672,11 +1697,12 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("ShortEntity_LirpTableDef.kt")
-        content shouldContain "name = \"year\", type = ColumnType.IntType"
-        content shouldContain "as Number).toShort()"
-        content shouldContain "entity.year.toInt()"
+        val content = result.shouldSucceed().generatedFileContent("ShortEntity_LirpTableDef.kt")
+        content.shouldContainEach(
+            "name = \"year\", type = ColumnType.IntType",
+            "as Number).toShort()",
+            "entity.year.toInt()"
+        )
     }
 
     test("TableDefProcessor maps kotlin.Byte to ColumnType.IntType and emits .toByte() narrowing in fromRow") {
@@ -1700,11 +1726,12 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("ByteEntity_LirpTableDef.kt")
-        content shouldContain "name = \"flag\", type = ColumnType.IntType"
-        content shouldContain "as Number).toByte()"
-        content shouldContain "entity.flag.toInt()"
+        val content = result.shouldSucceed().generatedFileContent("ByteEntity_LirpTableDef.kt")
+        content.shouldContainEach(
+            "name = \"flag\", type = ColumnType.IntType",
+            "as Number).toByte()",
+            "entity.flag.toInt()"
+        )
     }
 
     test("TableDefProcessor maps nullable kotlin.Short to nullable ColumnType.IntType with safe narrowing") {
@@ -1728,11 +1755,12 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("NullableShortEntity_LirpTableDef.kt")
-        content shouldContain "name = \"year\", type = ColumnType.IntType, nullable = true"
-        content shouldContain "as? Number)?.toShort()"
-        content shouldContain "entity.year?.toInt()"
+        val content = result.shouldSucceed().generatedFileContent("NullableShortEntity_LirpTableDef.kt")
+        content.shouldContainEach(
+            "name = \"year\", type = ColumnType.IntType, nullable = true",
+            "as? Number)?.toShort()",
+            "entity.year?.toInt()"
+        )
     }
 
     test("TableDefProcessor maps nullable kotlin.Byte to nullable ColumnType.IntType with safe narrowing") {
@@ -1756,11 +1784,12 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("NullableByteEntity_LirpTableDef.kt")
-        content shouldContain "name = \"flag\", type = ColumnType.IntType, nullable = true"
-        content shouldContain "as? Number)?.toByte()"
-        content shouldContain "entity.flag?.toInt()"
+        val content = result.shouldSucceed().generatedFileContent("NullableByteEntity_LirpTableDef.kt")
+        content.shouldContainEach(
+            "name = \"flag\", type = ColumnType.IntType, nullable = true",
+            "as? Number)?.toByte()",
+            "entity.flag?.toInt()"
+        )
     }
 
     test("TableDefProcessor excludes @kotlinx.serialization.Transient mirror and generates delegate-backed column for lirp+kotlinx+reactive-delegate entity") {
@@ -1793,12 +1822,11 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("AudioItem_LirpTableDef.kt")
-        content shouldContain "\"title\""
-        content shouldContain "\"display_name\""
-        content shouldNotContain "titleProperty"
-        content shouldNotContain "title_property"
+        val content = result.shouldSucceed().generatedFileContent("AudioItem_LirpTableDef.kt")
+        content.shouldContainEachAndNone(
+            present = listOf("\"title\"", "\"display_name\""),
+            absent = listOf("titleProperty", "title_property")
+        )
         result.messages shouldNotContain "Unsupported column type"
     }
 
@@ -1827,20 +1855,21 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("MixedIntegersEntity_LirpTableDef.kt")
-        // All three columns resolve to IntType.
-        content shouldContain "name = \"a\", type = ColumnType.IntType"
-        content shouldContain "name = \"b\", type = ColumnType.IntType"
-        content shouldContain "name = \"c\", type = ColumnType.IntType"
-        // The Int branch must NOT pick up Short/Byte narrowing.
-        content shouldContain "entity.a = row[table.columns.first { it.name == \"a\" }] as Int"
-        content shouldContain "cols[\"a\"]!! to entity.a"
-        // Short/Byte still get the narrowing/widening treatment.
-        content shouldContain "as Number).toShort()"
-        content shouldContain "as Number).toByte()"
-        content shouldContain "entity.b.toInt()"
-        content shouldContain "entity.c.toInt()"
+        val content = result.shouldSucceed().generatedFileContent("MixedIntegersEntity_LirpTableDef.kt")
+        content.shouldContainEach(
+            // All three columns resolve to IntType.
+            "name = \"a\", type = ColumnType.IntType",
+            "name = \"b\", type = ColumnType.IntType",
+            "name = \"c\", type = ColumnType.IntType",
+            // The Int branch must NOT pick up Short/Byte narrowing.
+            "entity.a = row[table.columns.first { it.name == \"a\" }] as Int",
+            "cols[\"a\"]!! to entity.a",
+            // Short/Byte still get the narrowing/widening treatment.
+            "as Number).toShort()",
+            "as Number).toByte()",
+            "entity.b.toInt()",
+            "entity.c.toInt()"
+        )
     }
 
     // ---- Deferral — terminal diagnostic for permanently-unresolved types (#219) ----
@@ -1887,7 +1916,7 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         result.messages shouldNotContain "still unresolved after final round"
     }
 
@@ -1919,11 +1948,12 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("MutableAudioItem_LirpTableDef.kt")
-        content shouldContain "object MutableAudioItem_LirpTableDef : SqlTableDef<test.AudioItem>"
-        content shouldContain "override fun fromRow(row: ResultRow, table: Table): test.AudioItem"
-        content shouldContain "entityRef as MutableAudioItem"
+        val content = result.shouldSucceed().generatedFileContent("MutableAudioItem_LirpTableDef.kt")
+        content.shouldContainEach(
+            "object MutableAudioItem_LirpTableDef : SqlTableDef<test.AudioItem>",
+            "override fun fromRow(row: ResultRow, table: Table): test.AudioItem",
+            "entityRef as MutableAudioItem"
+        )
     }
 
     test("TableDefProcessor resolves R through an intermediate reactive base class") {
@@ -1954,11 +1984,12 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("ConcreteMedia_LirpTableDef.kt")
-        content shouldContain "object ConcreteMedia_LirpTableDef : SqlTableDef<test.MediaItem>"
-        content shouldContain "override fun fromRow(row: ResultRow, table: Table): test.MediaItem"
-        content shouldContain "entityRef as ConcreteMedia"
+        val content = result.shouldSucceed().generatedFileContent("ConcreteMedia_LirpTableDef.kt")
+        content.shouldContainEach(
+            "object ConcreteMedia_LirpTableDef : SqlTableDef<test.MediaItem>",
+            "override fun fromRow(row: ResultRow, table: Table): test.MediaItem",
+            "entityRef as ConcreteMedia"
+        )
     }
 
     test("TableDefProcessor falls back to concrete class typing when R is not resolvable") {
@@ -1979,10 +2010,11 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("PlainMapped_LirpTableDef.kt")
-        content shouldContain "object PlainMapped_LirpTableDef : SqlTableDef<PlainMapped>"
-        content shouldNotContain "entityRef as"
+        val content = result.shouldSucceed().generatedFileContent("PlainMapped_LirpTableDef.kt")
+        content.shouldContainEachAndNone(
+            present = listOf("object PlainMapped_LirpTableDef : SqlTableDef<PlainMapped>"),
+            absent = listOf("entityRef as")
+        )
     }
 
     test("TableDefProcessor types the descriptor on the class itself for a self-referential reactive entity") {
@@ -2006,12 +2038,16 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("SelfReactive_LirpTableDef.kt")
-        content shouldContain "object SelfReactive_LirpTableDef : SqlTableDef<SelfReactive>"
-        content shouldContain "override fun fromRow(row: ResultRow, table: Table): SelfReactive"
-        // R == class: no downcast alias is emitted, preserving the original byte-identical layout.
-        content shouldNotContain "entityRef as"
+        val content = result.shouldSucceed().generatedFileContent("SelfReactive_LirpTableDef.kt")
+        content.shouldContainEachAndNone(
+            present =
+                listOf(
+                    "object SelfReactive_LirpTableDef : SqlTableDef<SelfReactive>",
+                    "override fun fromRow(row: ResultRow, table: Table): SelfReactive"
+                ),
+            // R == class: no downcast alias is emitted, preserving the original byte-identical layout.
+            absent = listOf("entityRef as")
+        )
     }
 
     test("TableDefProcessor skips generation when R stays an unsubstituted type parameter on a generic entity") {
@@ -2067,10 +2103,11 @@ internal class TableDefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("StringTagged_LirpTableDef.kt")
-        content shouldContain "object StringTagged_LirpTableDef : SqlTableDef<test.Tagged<kotlin.String>>"
-        content shouldContain "override fun fromRow(row: ResultRow, table: Table): test.Tagged<kotlin.String>"
-        content shouldContain "entityRef as StringTagged"
+        val content = result.shouldSucceed().generatedFileContent("StringTagged_LirpTableDef.kt")
+        content.shouldContainEach(
+            "object StringTagged_LirpTableDef : SqlTableDef<test.Tagged<kotlin.String>>",
+            "override fun fromRow(row: ResultRow, table: Table): test.Tagged<kotlin.String>",
+            "entityRef as StringTagged"
+        )
     }
 })

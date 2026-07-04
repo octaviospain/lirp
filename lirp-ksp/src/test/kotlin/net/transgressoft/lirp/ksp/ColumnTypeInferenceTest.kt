@@ -17,11 +17,9 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
 import io.kotest.core.spec.style.StringSpec
-import io.kotest.matchers.shouldBe
-import io.kotest.matchers.string.shouldContain
+import io.kotest.datatest.withData
 import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 
 /**
@@ -37,190 +35,91 @@ import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 @OptIn(ExperimentalCompilerApi::class)
 class ColumnTypeInferenceTest : StringSpec({
 
-    "TableDefProcessor maps Short property to IntType with narrowing on read and widening on write" {
-        val result =
-            KspTestSupport.compile(
-                TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "ShortPropEntity.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-
-                    @PersistenceMapping
-                    data class ShortPropEntity(
-                        override val id: Int,
-                        val priority: Short
-                    ) : ReactiveEntityBase<Int, ShortPropEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = ShortPropEntity(id, priority)
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("ShortPropEntity_LirpTableDef.kt")
-        content shouldContain "ColumnType.IntType"
-        // Narrowing on read: (row[...] as Int).toShort()
-        content shouldContain ".toShort()"
-        // Widening on write: entity.priority.toInt()
-        content shouldContain ".toInt()"
+    data class InferenceCase(
+        val name: String,
+        val entityName: String,
+        val annotation: String,
+        val fieldName: String,
+        val fieldType: String,
+        val expected: List<String>
+    ) {
+        override fun toString() = name
     }
 
-    "TableDefProcessor maps Byte property to IntType with narrowing on read and widening on write" {
+    withData(
+        InferenceCase(
+            name = "TableDefProcessor maps Short property to IntType with narrowing on read and widening on write",
+            entityName = "ShortPropEntity",
+            annotation = "",
+            fieldName = "priority",
+            fieldType = "Short",
+            // Narrowing on read: (row[...] as Int).toShort(); widening on write: entity.priority.toInt()
+            expected = listOf("ColumnType.IntType", ".toShort()", ".toInt()")
+        ),
+        InferenceCase(
+            name = "TableDefProcessor maps Byte property to IntType with narrowing on read and widening on write",
+            entityName = "BytePropEntity",
+            annotation = "",
+            fieldName = "flags",
+            fieldType = "Byte",
+            expected = listOf("ColumnType.IntType", ".toByte()", ".toInt()")
+        ),
+        InferenceCase(
+            name = "TableDefProcessor maps nullable Short property with narrowing and safe-cast",
+            entityName = "NullableShortEntity",
+            annotation = "",
+            fieldName = "rank",
+            fieldType = "Short?",
+            // Nullable narrowing: (rawAccess as? Number)?.toShort(); nullable widening: entity.rank?.toInt()
+            expected = listOf("ColumnType.IntType", "as? Number", ".toShort()", "?.toInt()")
+        ),
+        InferenceCase(
+            name = "TableDefProcessor maps Float property to FloatType",
+            entityName = "FloatPropEntity",
+            annotation = "",
+            fieldName = "ratio",
+            fieldType = "Float",
+            expected = listOf("ColumnType.FloatType")
+        ),
+        InferenceCase(
+            name = "TableDefProcessor maps Double property to DoubleType",
+            entityName = "DoublePropEntity",
+            annotation = "",
+            fieldName = "score",
+            fieldType = "Double",
+            expected = listOf("ColumnType.DoubleType")
+        ),
+        InferenceCase(
+            name = "TableDefProcessor maps BigDecimal property to DecimalType with default precision and scale",
+            entityName = "BigDecimalDefaultEntity",
+            annotation = "",
+            fieldName = "amount",
+            fieldType = "BigDecimal",
+            // Default: precision=19, scale=2
+            expected = listOf("ColumnType.DecimalType(19, 2)")
+        ),
+        InferenceCase(
+            name = "TableDefProcessor maps BigDecimal property with explicit length hint to DecimalType",
+            entityName = "BigDecimalPrecisionEntity",
+            annotation = "@PersistenceProperty(precision = 12, scale = 4) ",
+            fieldName = "price",
+            fieldType = "BigDecimal",
+            expected = listOf("ColumnType.DecimalType(12, 4)")
+        ),
+        InferenceCase(
+            name = "TableDefProcessor maps String property with length annotation to VarcharType",
+            entityName = "VarcharStringEntity",
+            annotation = "@PersistenceProperty(length = 255) ",
+            fieldName = "name",
+            fieldType = "String",
+            expected = listOf("ColumnType.VarcharType(255)")
+        )
+    ) { case ->
         val result =
             KspTestSupport.compile(
                 TableDefProcessorProvider(),
                 SourceFile.kotlin(
-                    "BytePropEntity.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-
-                    @PersistenceMapping
-                    data class BytePropEntity(
-                        override val id: Int,
-                        val flags: Byte
-                    ) : ReactiveEntityBase<Int, BytePropEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = BytePropEntity(id, flags)
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("BytePropEntity_LirpTableDef.kt")
-        content shouldContain "ColumnType.IntType"
-        content shouldContain ".toByte()"
-        content shouldContain ".toInt()"
-    }
-
-    "TableDefProcessor maps nullable Short property with narrowing and safe-cast" {
-        val result =
-            KspTestSupport.compile(
-                TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "NullableShortEntity.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-
-                    @PersistenceMapping
-                    data class NullableShortEntity(
-                        override val id: Int,
-                        val rank: Short?
-                    ) : ReactiveEntityBase<Int, NullableShortEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = NullableShortEntity(id, rank)
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("NullableShortEntity_LirpTableDef.kt")
-        content shouldContain "ColumnType.IntType"
-        // Nullable narrowing: (rawAccess as? Number)?.toShort()
-        content shouldContain "as? Number"
-        content shouldContain ".toShort()"
-        // Nullable widening: entity.rank?.toInt()
-        content shouldContain "?.toInt()"
-    }
-
-    "TableDefProcessor maps Float property to FloatType" {
-        val result =
-            KspTestSupport.compile(
-                TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "FloatPropEntity.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-
-                    @PersistenceMapping
-                    data class FloatPropEntity(
-                        override val id: Int,
-                        val ratio: Float
-                    ) : ReactiveEntityBase<Int, FloatPropEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = FloatPropEntity(id, ratio)
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedFileContent("FloatPropEntity_LirpTableDef.kt") shouldContain "ColumnType.FloatType"
-    }
-
-    "TableDefProcessor maps Double property to DoubleType" {
-        val result =
-            KspTestSupport.compile(
-                TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "DoublePropEntity.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-
-                    @PersistenceMapping
-                    data class DoublePropEntity(
-                        override val id: Int,
-                        val score: Double
-                    ) : ReactiveEntityBase<Int, DoublePropEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = DoublePropEntity(id, score)
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedFileContent("DoublePropEntity_LirpTableDef.kt") shouldContain "ColumnType.DoubleType"
-    }
-
-    "TableDefProcessor maps BigDecimal property to DecimalType with default precision and scale" {
-        val result =
-            KspTestSupport.compile(
-                TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "BigDecimalDefaultEntity.kt",
-                    """
-                    package test
-                    import java.math.BigDecimal
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-
-                    @PersistenceMapping
-                    data class BigDecimalDefaultEntity(
-                        override val id: Int,
-                        val amount: BigDecimal
-                    ) : ReactiveEntityBase<Int, BigDecimalDefaultEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = BigDecimalDefaultEntity(id, amount)
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        // Default: precision=19, scale=2
-        result.generatedFileContent("BigDecimalDefaultEntity_LirpTableDef.kt") shouldContain "ColumnType.DecimalType(19, 2)"
-    }
-
-    "TableDefProcessor maps BigDecimal property with explicit length hint to DecimalType" {
-        val result =
-            KspTestSupport.compile(
-                TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "BigDecimalPrecisionEntity.kt",
+                    "${case.entityName}.kt",
                     """
                     package test
                     import java.math.BigDecimal
@@ -229,19 +128,19 @@ class ColumnTypeInferenceTest : StringSpec({
                     import net.transgressoft.lirp.persistence.PersistenceProperty
 
                     @PersistenceMapping
-                    data class BigDecimalPrecisionEntity(
+                    data class ${case.entityName}(
                         override val id: Int,
-                        @PersistenceProperty(precision = 12, scale = 4) val price: BigDecimal
-                    ) : ReactiveEntityBase<Int, BigDecimalPrecisionEntity>() {
+                        ${case.annotation}val ${case.fieldName}: ${case.fieldType}
+                    ) : ReactiveEntityBase<Int, ${case.entityName}>() {
                         override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = BigDecimalPrecisionEntity(id, price)
+                        override fun clone() = ${case.entityName}(id, ${case.fieldName})
                     }
                     """
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedFileContent("BigDecimalPrecisionEntity_LirpTableDef.kt") shouldContain "ColumnType.DecimalType(12, 4)"
+        result.shouldSucceed()
+        result.generatedFileContent("${case.entityName}_LirpTableDef.kt").shouldContainEach(*case.expected.toTypedArray())
     }
 
     "TableDefProcessor rejects unsupported column type with error diagnostic" {
@@ -268,37 +167,7 @@ class ColumnTypeInferenceTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "Unsupported column type"
-        result.messages shouldContain "tags"
-    }
-
-    "TableDefProcessor maps String property with length annotation to VarcharType" {
-        val result =
-            KspTestSupport.compile(
-                TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "VarcharStringEntity.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-                    import net.transgressoft.lirp.persistence.PersistenceProperty
-
-                    @PersistenceMapping
-                    data class VarcharStringEntity(
-                        override val id: Int,
-                        @PersistenceProperty(length = 255) val name: String
-                    ) : ReactiveEntityBase<Int, VarcharStringEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = VarcharStringEntity(id, name)
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedFileContent("VarcharStringEntity_LirpTableDef.kt") shouldContain "ColumnType.VarcharType(255)"
+        result.shouldFailWith("Unsupported column type", "tags")
     }
 
     "TableDefProcessor emits Short/Byte widening for converter with Short S type" {
@@ -335,14 +204,16 @@ class ColumnTypeInferenceTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("ShortConverterWideningEntity_LirpTableDef.kt")
-        // Converter read-side: (row[...] as Int).toShort() routed into fromSql
-        content shouldContain "test.LevelConverter.fromSql("
-        content shouldContain ".toShort()"
-        // Converter write-side: toSql(entity.level).toInt()
-        content shouldContain "test.LevelConverter.toSql("
-        content shouldContain ".toInt()"
+        content.shouldContainEach(
+            // Converter read-side: (row[...] as Int).toShort() routed into fromSql
+            "test.LevelConverter.fromSql(",
+            ".toShort()",
+            // Converter write-side: toSql(entity.level).toInt()
+            "test.LevelConverter.toSql(",
+            ".toInt()"
+        )
     }
 
     "TableDefProcessor emits Byte widening for converter with Byte S type on nullable column" {
@@ -379,12 +250,14 @@ class ColumnTypeInferenceTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("ByteConverterNullableEntity_LirpTableDef.kt")
-        // Nullable converter read-side: (raw as? Int)?.toByte() routed into fromSql via ?.let
-        content shouldContain ".toByte()"
-        content shouldContain "?.let { test.FlagConverter.fromSql(it) }"
-        // Nullable write-side: entity.flag?.let { ... }?.toInt()
-        content shouldContain "?.toInt()"
+        content.shouldContainEach(
+            // Nullable converter read-side: (raw as? Int)?.toByte() routed into fromSql via ?.let
+            ".toByte()",
+            "?.let { test.FlagConverter.fromSql(it) }",
+            // Nullable write-side: entity.flag?.let { ... }?.toInt()
+            "?.toInt()"
+        )
     }
 })

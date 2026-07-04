@@ -17,15 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.JvmCompilationResult
-import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
-import com.tschuchort.compiletesting.configureKsp
-import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.FunSpec
-import io.kotest.matchers.shouldBe
-import io.kotest.matchers.string.shouldContain
-import io.kotest.matchers.string.shouldNotContain
 import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 import org.junit.jupiter.api.DisplayName
 
@@ -150,41 +143,39 @@ internal class PolymorphicSealedUnionGeneratorTest : FunSpec({
             """
         )
 
-    fun compileWithTableDefProcessor(vararg sources: SourceFile): JvmCompilationResult {
-        val compilation =
-            KotlinCompilation().apply {
-                this.sources = sources.toList()
-                inheritClassPath = true
-                jvmTarget = "21"
-            }
-        compilation.configureKsp { this.withCompilation = true }
-        compilation.symbolProcessorProviders += TableDefProcessorProvider()
-        return compilation.compile()
-    }
+    fun compileWithTableDefProcessor(vararg sources: SourceFile) =
+        KspTestSupport.compile(TableDefProcessorProvider(), *sources, jvmTarget = "21")
 
     test("generates sealed class with one data-class subtype per arm for a two-arm entity") {
         val result = compileWithTableDefProcessor(twoArmEntitySource)
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("AudioContributionTargetArm.kt")
-        content shouldContain "sealed class AudioContributionTargetArm"
-        content shouldContain "data class Item(val entity: AudioItem) : AudioContributionTargetArm()"
-        content shouldContain "data class Playlist(val entity: MutableAudioPlaylist) : AudioContributionTargetArm()"
-        content shouldContain "fun PolymorphicResolution<AudioContributionTargetArm>.activeArm(): AudioContributionTargetArm"
+        content.shouldContainEach(
+            "sealed class AudioContributionTargetArm",
+            "data class Item(val entity: AudioItem) : AudioContributionTargetArm()",
+            "data class Playlist(val entity: MutableAudioPlaylist) : AudioContributionTargetArm()",
+            "fun PolymorphicResolution<AudioContributionTargetArm>.activeArm(): AudioContributionTargetArm"
+        )
     }
 
     test("generated activeArm() resolves label and entity in one scan and returns exact subtype") {
         val result = compileWithTableDefProcessor(twoArmEntitySource)
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("AudioContributionTargetArm.kt")
         // A single resolveActive() scan feeds both dispatch and the typed cast — no second
         // resolveArm() scan that could observe a different active arm (TOCTOU).
-        content shouldContain "val (label, entity) = this.resolveActive()"
-        content shouldContain """"item" -> AudioContributionTargetArm.Item(entity as AudioItem)"""
-        content shouldContain """"playlist" -> AudioContributionTargetArm.Playlist(entity as MutableAudioPlaylist)"""
-        content shouldNotContain "resolveArm("
-        content shouldContain "else -> error("
+        content.shouldContainEachAndNone(
+            present =
+                listOf(
+                    "val (label, entity) = this.resolveActive()",
+                    """"item" -> AudioContributionTargetArm.Item(entity as AudioItem)""",
+                    """"playlist" -> AudioContributionTargetArm.Playlist(entity as MutableAudioPlaylist)""",
+                    "else -> error("
+                ),
+            absent = listOf("resolveArm(")
+        )
     }
 
     test("exhaustive when over activeArm() compiles without else branch") {
@@ -252,19 +243,23 @@ internal class PolymorphicSealedUnionGeneratorTest : FunSpec({
             )
 
         val result = compileWithTableDefProcessor(consumerSource)
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
     }
 
     test("two polymorphicAggregate properties on one entity produce two distinct sealed files") {
         val result = compileWithTableDefProcessor(twoPropertiesEntitySource)
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val primaryContent = result.generatedFileContent("DualPolymorphicEntityPrimaryArm.kt")
         val secondaryContent = result.generatedFileContent("DualPolymorphicEntitySecondaryArm.kt")
-        primaryContent shouldContain "sealed class DualPolymorphicEntityPrimaryArm"
-        primaryContent shouldContain "fun PolymorphicResolution<DualPolymorphicEntityPrimaryArm>.activeArm()"
-        secondaryContent shouldContain "sealed class DualPolymorphicEntitySecondaryArm"
-        secondaryContent shouldContain "fun PolymorphicResolution<DualPolymorphicEntitySecondaryArm>.activeArm()"
+        primaryContent.shouldContainEach(
+            "sealed class DualPolymorphicEntityPrimaryArm",
+            "fun PolymorphicResolution<DualPolymorphicEntityPrimaryArm>.activeArm()"
+        )
+        secondaryContent.shouldContainEach(
+            "sealed class DualPolymorphicEntitySecondaryArm",
+            "fun PolymorphicResolution<DualPolymorphicEntitySecondaryArm>.activeArm()"
+        )
     }
 
     test("two distinct activeArm() extensions compile without conflict on a dual-property entity") {
@@ -349,6 +344,6 @@ internal class PolymorphicSealedUnionGeneratorTest : FunSpec({
             )
 
         val result = compileWithTableDefProcessor(consumerSource)
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
     }
 })
