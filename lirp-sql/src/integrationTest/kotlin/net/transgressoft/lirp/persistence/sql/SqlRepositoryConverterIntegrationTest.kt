@@ -18,7 +18,8 @@
 package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.databases
-import io.kotest.core.spec.style.StringSpec
+import io.kotest.core.spec.style.FunSpec
+import io.kotest.datatest.withData
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 import java.nio.file.Paths
@@ -32,10 +33,10 @@ import java.time.Duration
  * Each dialect runs two scenarios: a non-null round-trip exercising both [PathConverter] and
  * [DurationConverter], and a nullable round-trip preserving `null` through write and read.
  */
-internal class SqlRepositoryConverterIntegrationTest : StringSpec({
+internal class SqlRepositoryConverterIntegrationTest : FunSpec({
 
-    databases.forEach { db ->
-        "SqlRepository round-trips ConverterFixtureEntity with non-null converter-routed fields on ${db.name}" {
+    withData(databases) { db ->
+        test("SqlRepository round-trips ConverterFixtureEntity with non-null converter-routed fields") {
             DatabaseTestSupport.withDatabaseTest(db, ConverterFixtureEntity_LirpTableDef) { ds ->
                 val originalPath = Paths.get("/tmp/song.mp3")
                 val originalCover = Paths.get("/tmp/cover.png")
@@ -65,7 +66,7 @@ internal class SqlRepositoryConverterIntegrationTest : StringSpec({
             }
         }
 
-        "SqlRepository preserves null in a nullable converter-routed column on ${db.name}" {
+        test("SqlRepository preserves null in a nullable converter-routed column") {
             DatabaseTestSupport.withDatabaseTest(db, ConverterFixtureEntity_LirpTableDef) { ds ->
                 val originalPath = Paths.get("/tmp/song.mp3")
                 val originalLength = Duration.ofSeconds(60)

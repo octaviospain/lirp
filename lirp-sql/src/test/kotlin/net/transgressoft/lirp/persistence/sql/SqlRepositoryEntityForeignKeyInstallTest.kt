@@ -24,7 +24,6 @@ import net.transgressoft.lirp.persistence.ColumnType
 import net.transgressoft.lirp.persistence.LirpRawInitializer
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
-import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.nulls.shouldBeNull
@@ -47,8 +46,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * via direct JDBC. `Int` keys avoid `java.util.UUID` vs `kotlin.uuid.Uuid` plumbing noise that
  * is orthogonal to the FK install contract under test.
  *
- * Persistence waits use kotest's [eventually] to poll the DB rather than fixed `delay(...)` sleeps,
- * keeping the suite deterministic under CI jitter.
+ * Persistence waits poll the DB via [DatabaseTestSupport.awaitRowPresent] rather than fixed
+ * `delay(...)` sleeps, keeping the suite deterministic under CI jitter.
  */
 class SqlRepositoryEntityForeignKeyInstallTest : StringSpec({
 
@@ -63,11 +62,11 @@ class SqlRepositoryEntityForeignKeyInstallTest : StringSpec({
 
             val childId = nextId.incrementAndGet()
             childRepo.add(ScalarFkChild(childId).apply { name = "linked" })
-            awaitRowPresent(ds, "fk_scalar_children", childId)
+            DatabaseTestSupport.awaitRowPresent(ds, "fk_scalar_children", childId)
 
             val parentId = nextId.incrementAndGet()
             parentRepo.add(ScalarFkParent(parentId).apply { this.childId = childId })
-            awaitRowPresent(ds, "fk_scalar_parents", parentId)
+            DatabaseTestSupport.awaitRowPresent(ds, "fk_scalar_parents", parentId)
 
             shouldThrow<java.sql.SQLException> {
                 ds.connection.use { conn ->
@@ -92,11 +91,11 @@ class SqlRepositoryEntityForeignKeyInstallTest : StringSpec({
 
             val childId = nextId.incrementAndGet()
             childRepo.add(ScalarFkChild(childId).apply { name = "doomed" })
-            awaitRowPresent(ds, "fk_scalar_children", childId)
+            DatabaseTestSupport.awaitRowPresent(ds, "fk_scalar_children", childId)
 
             val parentId = nextId.incrementAndGet()
             parentRepo.add(ScalarFkParent(parentId).apply { this.childId = childId })
-            awaitRowPresent(ds, "fk_scalar_parents", parentId)
+            DatabaseTestSupport.awaitRowPresent(ds, "fk_scalar_parents", parentId)
 
             ds.connection.use { conn ->
                 conn.createStatement().use { stmt ->
@@ -125,11 +124,11 @@ class SqlRepositoryEntityForeignKeyInstallTest : StringSpec({
 
             val childId = nextId.incrementAndGet()
             childRepo.add(ScalarFkChild(childId).apply { name = "to-be-orphaned" })
-            awaitRowPresent(ds, "fk_scalar_children", childId)
+            DatabaseTestSupport.awaitRowPresent(ds, "fk_scalar_children", childId)
 
             val parentId = nextId.incrementAndGet()
             parentRepo.add(ScalarFkParent(parentId).apply { this.childId = childId })
-            awaitRowPresent(ds, "fk_scalar_parents", parentId)
+            DatabaseTestSupport.awaitRowPresent(ds, "fk_scalar_parents", parentId)
 
             ds.connection.use { conn ->
                 conn.createStatement().use { stmt ->
@@ -163,11 +162,11 @@ class SqlRepositoryEntityForeignKeyInstallTest : StringSpec({
 
             val childId = nextId.incrementAndGet()
             childRepo.add(ScalarFkChild(childId).apply { name = "still-linked" })
-            awaitRowPresent(ds, "fk_scalar_children", childId)
+            DatabaseTestSupport.awaitRowPresent(ds, "fk_scalar_children", childId)
 
             val parentId = nextId.incrementAndGet()
             parentRepo.add(ScalarFkParent(parentId).apply { this.childId = childId })
-            awaitRowPresent(ds, "fk_scalar_parents", parentId)
+            DatabaseTestSupport.awaitRowPresent(ds, "fk_scalar_parents", parentId)
 
             shouldThrow<java.sql.SQLException> {
                 ds.connection.use { conn ->
@@ -189,7 +188,7 @@ class SqlRepositoryEntityForeignKeyInstallTest : StringSpec({
 
             val childId = nextId.incrementAndGet()
             childRepo.add(ScalarFkChild(childId).apply { name = "standalone" })
-            awaitRowPresent(ds, "fk_scalar_children", childId)
+            DatabaseTestSupport.awaitRowPresent(ds, "fk_scalar_children", childId)
 
             childRepo.findById(childId).shouldBePresent { it.name shouldBe "standalone" }
         } finally {
@@ -205,20 +204,6 @@ private fun freshDataSource(): HikariDataSource {
             maximumPoolSize = 4
         }
     return HikariDataSource(cfg)
-}
-
-// Polls the DB directly until a row with the given primary key appears, with a generous timeout.
-// Replaces fixed `delay(...)` sleeps so the suite stays deterministic under CI jitter.
-private suspend fun awaitRowPresent(ds: HikariDataSource, tableName: String, id: Int) {
-    eventually(DatabaseTestSupport.PERSISTED_ROW_POLL) {
-        ds.connection.use { conn ->
-            conn.createStatement().use { stmt ->
-                val rs = stmt.executeQuery("SELECT COUNT(*) FROM $tableName WHERE id = $id")
-                rs.next()
-                require(rs.getInt(1) == 1) { "row id=$id not yet visible in $tableName" }
-            }
-        }
-    }
 }
 
 // Closes resources in reverse-of-acquisition order, swallowing per-resource failures so a leak

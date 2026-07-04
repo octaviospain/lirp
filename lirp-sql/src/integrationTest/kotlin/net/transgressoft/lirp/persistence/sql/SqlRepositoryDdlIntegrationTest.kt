@@ -19,6 +19,7 @@ package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.databases
 import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.withDatabaseTest
+import io.kotest.assertions.assertSoftly
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.datatest.withTests
 import io.kotest.matchers.optional.shouldBePresent
@@ -71,17 +72,19 @@ internal class SqlRepositoryDdlIntegrationTest : FunSpec({
                 repo.add(entity)
 
                 repo.findById(1).shouldBePresent {
-                    it.longVal shouldBe 123456789L
-                    it.textVal shouldBe "hello text"
-                    it.boolVal shouldBe true
-                    it.doubleVal shouldBe 3.14
-                    it.floatVal shouldBe 2.71f
-                    it.uuidVal shouldBe uuid
-                    it.dateVal shouldBe date
-                    it.dateTimeVal shouldBe dateTime
-                    it.varcharVal shouldBe "varchar value"
-                    it.decimalVal shouldBe BigDecimal("99.99")
-                    it.enumVal shouldBe "ACTIVE"
+                    assertSoftly {
+                        it.longVal shouldBe 123456789L
+                        it.textVal shouldBe "hello text"
+                        it.boolVal shouldBe true
+                        it.doubleVal shouldBe 3.14
+                        it.floatVal shouldBe 2.71f
+                        it.uuidVal shouldBe uuid
+                        it.dateVal shouldBe date
+                        it.dateTimeVal shouldBe dateTime
+                        it.varcharVal shouldBe "varchar value"
+                        it.decimalVal shouldBe BigDecimal("99.99")
+                        it.enumVal shouldBe "ACTIVE"
+                    }
                 }
 
                 repo.close()

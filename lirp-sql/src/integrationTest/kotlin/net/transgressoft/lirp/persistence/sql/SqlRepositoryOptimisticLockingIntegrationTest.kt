@@ -27,12 +27,9 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.datatest.withTests
 import io.kotest.matchers.shouldBe
 import org.jetbrains.exposed.v1.core.Column
-import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.selectAll
-import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.jetbrains.exposed.v1.jdbc.update
 import org.junit.jupiter.api.DisplayName
 import java.util.Collections
@@ -53,20 +50,12 @@ import kotlin.time.Duration.Companion.seconds
 @DisplayName("SqlRepository Optimistic Locking Integration")
 internal class SqlRepositoryOptimisticLockingIntegrationTest : FunSpec({
 
-    // Helper — opens a short-lived Exposed transaction against [dataSource] using the same
-    // [tableDef] the repo uses, so a "third writer" can bump a row's version independently.
-    fun <T> rawTransaction(dataSource: HikariDataSource, tableDef: SqlTableDef<*>, block: Table.() -> T): T {
-        val db = Database.connect(dataSource)
-        val exposed = ExposedTableInterpreter().interpret(tableDef)
-        return transaction(db) { exposed.table.block() }
-    }
-
     // Polls the DB directly until the row with [id] has [minVersion] or higher. Used to
     // synchronize against repo debounce flushes before racing / third-party writes.
     suspend fun awaitVersionedInDb(dataSource: HikariDataSource, id: Int, minVersion: Long = 0L) {
         eventually(10.seconds) {
             val version =
-                rawTransaction(dataSource, TestVersionedPersonTableDef) {
+                DatabaseTestSupport.rawTransaction(dataSource, TestVersionedPersonTableDef) {
                     @Suppress("UNCHECKED_CAST")
                     selectAll()
                         .where { (columns.first { it.name == "id" } as Column<Int>) eq id }
@@ -84,7 +73,7 @@ internal class SqlRepositoryOptimisticLockingIntegrationTest : FunSpec({
     suspend fun awaitUnversionedInDb(dataSource: HikariDataSource, id: Int) {
         eventually(10.seconds) {
             val count =
-                rawTransaction(dataSource, TestPersonTableDef) {
+                DatabaseTestSupport.rawTransaction(dataSource, TestPersonTableDef) {
                     @Suppress("UNCHECKED_CAST")
                     selectAll()
                         .where { (columns.first { it.name == "id" } as Column<Int>) eq id }
@@ -120,7 +109,7 @@ internal class SqlRepositoryOptimisticLockingIntegrationTest : FunSpec({
                 awaitVersionedInDb(dataSource, 1)
 
                 // Third-party writer commits its UPDATE and bumps version to 1.
-                rawTransaction(dataSource, TestVersionedPersonTableDef) {
+                DatabaseTestSupport.rawTransaction(dataSource, TestVersionedPersonTableDef) {
                     @Suppress("UNCHECKED_CAST")
                     update({ (columns.first { it.name == "id" } as Column<Int>) eq 1 }) { row ->
                         @Suppress("UNCHECKED_CAST")
@@ -175,7 +164,7 @@ internal class SqlRepositoryOptimisticLockingIntegrationTest : FunSpec({
 
                 // Third-party writer commits a concurrent change and bumps version to 1 BEFORE our
                 // local mutations' debounce fires.
-                rawTransaction(dataSource, TestVersionedPersonTableDef) {
+                DatabaseTestSupport.rawTransaction(dataSource, TestVersionedPersonTableDef) {
                     @Suppress("UNCHECKED_CAST")
                     update({ (columns.first { it.name == "id" } as Column<Int>) eq 2 }) { row ->
                         @Suppress("UNCHECKED_CAST")
@@ -221,7 +210,7 @@ internal class SqlRepositoryOptimisticLockingIntegrationTest : FunSpec({
                 awaitVersionedInDb(dataSource, 3)
 
                 // Third-party writer bumps the version BEFORE our delete fires.
-                rawTransaction(dataSource, TestVersionedPersonTableDef) {
+                DatabaseTestSupport.rawTransaction(dataSource, TestVersionedPersonTableDef) {
                     @Suppress("UNCHECKED_CAST")
                     update({ (columns.first { it.name == "id" } as Column<Int>) eq 3 }) { row ->
                         @Suppress("UNCHECKED_CAST")
@@ -265,7 +254,7 @@ internal class SqlRepositoryOptimisticLockingIntegrationTest : FunSpec({
                     // Seed versioned repo then force a conflict via third-party writer.
                     versioned.add(TestVersionedPerson(1).apply { firstName = "V" })
                     awaitVersionedInDb(versionedDs, 1)
-                    rawTransaction(versionedDs, TestVersionedPersonTableDef) {
+                    DatabaseTestSupport.rawTransaction(versionedDs, TestVersionedPersonTableDef) {
                         @Suppress("UNCHECKED_CAST")
                         update({ (columns.first { it.name == "id" } as Column<Int>) eq 1 }) { row ->
                             @Suppress("UNCHECKED_CAST")
@@ -287,7 +276,7 @@ internal class SqlRepositoryOptimisticLockingIntegrationTest : FunSpec({
 
                     // Overwrite the unversioned row externally, then mutate locally — no conflict
                     // ever fires because the unversioned repo does not check AND version=?.
-                    rawTransaction(unversionedDs, TestPersonTableDef) {
+                    DatabaseTestSupport.rawTransaction(unversionedDs, TestPersonTableDef) {
                         @Suppress("UNCHECKED_CAST")
                         update({ (columns.first { it.name == "id" } as Column<Int>) eq 9 }) { row ->
                             @Suppress("UNCHECKED_CAST")
@@ -330,7 +319,7 @@ internal class SqlRepositoryOptimisticLockingIntegrationTest : FunSpec({
                 (1..5).forEach { id -> awaitVersionedInDb(dataSource, id) }
 
                 // Bump id=3's version externally so its versioned DELETE will fail.
-                rawTransaction(dataSource, TestVersionedPersonTableDef) {
+                DatabaseTestSupport.rawTransaction(dataSource, TestVersionedPersonTableDef) {
                     @Suppress("UNCHECKED_CAST")
                     update({ (columns.first { it.name == "id" } as Column<Int>) eq 3 }) { row ->
                         @Suppress("UNCHECKED_CAST")
@@ -430,7 +419,7 @@ internal class SqlRepositoryOptimisticLockingIntegrationTest : FunSpec({
                 awaitVersionedInDb(dataSource, 11)
 
                 // Third-party writer bumps id=10's version so our local update will conflict.
-                rawTransaction(dataSource, TestVersionedPersonTableDef) {
+                DatabaseTestSupport.rawTransaction(dataSource, TestVersionedPersonTableDef) {
                     @Suppress("UNCHECKED_CAST")
                     update({ (columns.first { it.name == "id" } as Column<Int>) eq 10 }) { row ->
                         @Suppress("UNCHECKED_CAST")
@@ -456,7 +445,7 @@ internal class SqlRepositoryOptimisticLockingIntegrationTest : FunSpec({
                     repo.findById(11).isPresent shouldBe false
                 }
                 // Raw DB check — id=11 row really was deleted; id=10 reflects third-party state.
-                rawTransaction(dataSource, TestVersionedPersonTableDef) {
+                DatabaseTestSupport.rawTransaction(dataSource, TestVersionedPersonTableDef) {
                     @Suppress("UNCHECKED_CAST")
                     val row11Count = selectAll().where { (columns.first { it.name == "id" } as Column<Int>) eq 11 }.count()
                     row11Count shouldBe 0L
@@ -488,7 +477,7 @@ internal class SqlRepositoryOptimisticLockingIntegrationTest : FunSpec({
                 awaitVersionedInDb(dataSource, 20)
 
                 // Third-party DELETE — our local UPDATE will hit canonicalRow == null (Case 1).
-                rawTransaction(dataSource, TestVersionedPersonTableDef) {
+                DatabaseTestSupport.rawTransaction(dataSource, TestVersionedPersonTableDef) {
                     deleteWhere {
                         @Suppress("UNCHECKED_CAST")
                         (columns.first { it.name == "id" } as Column<Int>) eq 20

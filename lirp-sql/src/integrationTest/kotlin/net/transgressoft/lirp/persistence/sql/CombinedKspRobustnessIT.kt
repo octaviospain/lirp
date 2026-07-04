@@ -17,6 +17,7 @@
 
 package net.transgressoft.lirp.persistence.sql
 
+import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.awaitSubscriptionReady
 import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.databases
 import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.assertions.nondeterministic.eventuallyConfig
@@ -26,7 +27,6 @@ import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
-import kotlinx.coroutines.delay
 
 /**
  * Polling config for cross-dialect persistence assertions. A mutation is persisted asynchronously
@@ -39,19 +39,6 @@ private val persistedRowPoll =
         duration = 30.seconds
         interval = 200.milliseconds
     }
-
-/**
- * Warm-up pause that lets a freshly constructed or freshly populated repository's per-entity
- * persistence subscription start collecting before the first reactive mutation.
- *
- * Each entity is subscribed on a launched collector coroutine; until that coroutine reaches its
- * `collect`, the entity's event publisher has a registered subscriber count but no active collector.
- * A mutation emitted in that window is delivered to a `replay = 0` flow with no live collector and is
- * dropped — the update never reaches the debounced SQL flush, so a later read polls forever and the
- * assertion times out. Pausing before the first mutation closes the window. Mirrors the SharedFlow
- * collector-warmup convention documented in CONTRIBUTING.md.
- */
-private suspend fun awaitSubscriptionReady() = delay(50.milliseconds)
 
 /**
  * Joint cross-dialect canary asserting that the three KSP robustness fixes from issue #207

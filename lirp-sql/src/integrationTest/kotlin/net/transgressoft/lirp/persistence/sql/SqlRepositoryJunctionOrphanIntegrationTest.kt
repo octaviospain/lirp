@@ -41,22 +41,6 @@ import org.junit.jupiter.api.DisplayName
 @DisplayName("SqlRepository Junction Orphan Integration")
 class SqlRepositoryJunctionOrphanIntegrationTest : StringSpec({
 
-    fun resetSchema(dataSource: HikariDataSource) {
-        // DROP TABLE IF EXISTS already handles the "table missing" case across PostgreSQL, MySQL,
-        // MariaDB and SQLite, so any propagated SQLException is a real setup failure that must
-        // surface — silently swallowing it would mask schema corruption and let regression tests
-        // pass for the wrong reason.
-        for (sql in listOf(
-            "DROP TABLE IF EXISTS fk_parent_children",
-            "DROP TABLE IF EXISTS fk_parents",
-            "DROP TABLE IF EXISTS fk_children"
-        )) {
-            dataSource.connection.use { conn ->
-                conn.createStatement().use { stmt -> stmt.execute(sql) }
-            }
-        }
-    }
-
     fun junctionRowCount(dataSource: HikariDataSource, parentIdFilter: Int? = null): Long {
         val where = if (parentIdFilter != null) " WHERE parent_id = $parentIdFilter" else ""
         return dataSource.connection.use { conn ->
@@ -72,7 +56,7 @@ class SqlRepositoryJunctionOrphanIntegrationTest : StringSpec({
     "[SqlRepositoryJunctionOrphan] clear path removes junction rows before parent table when FKs not yet installed" {
         val dataSource = PostgresContainerSupport.buildDataSource()
         try {
-            resetSchema(dataSource)
+            DatabaseTestSupport.dropTables(dataSource, "fk_parent_children", "fk_parents", "fk_children")
             // No FK install on the scalar column either — keep the scenario focused on junction.
             FkScalarFkInstaller.setupNone(dataSource)
 
@@ -120,7 +104,7 @@ class SqlRepositoryJunctionOrphanIntegrationTest : StringSpec({
     "[SqlRepositoryJunctionOrphan] remove path removes junction rows for the deleted id only" {
         val dataSource = PostgresContainerSupport.buildDataSource()
         try {
-            resetSchema(dataSource)
+            DatabaseTestSupport.dropTables(dataSource, "fk_parent_children", "fk_parents", "fk_children")
             FkScalarFkInstaller.setupNone(dataSource)
 
             val childRepo = SqlRepository(dataSource, FkChildTableDef)
@@ -156,7 +140,7 @@ class SqlRepositoryJunctionOrphanIntegrationTest : StringSpec({
     "[SqlRepositoryJunctionOrphan] installJunctionForeignKeys succeeds after clear and remove" {
         val dataSource = PostgresContainerSupport.buildDataSource()
         try {
-            resetSchema(dataSource)
+            DatabaseTestSupport.dropTables(dataSource, "fk_parent_children", "fk_parents", "fk_children")
             FkScalarFkInstaller.setupNone(dataSource)
 
             val childRepo = SqlRepository(dataSource, FkChildTableDef)

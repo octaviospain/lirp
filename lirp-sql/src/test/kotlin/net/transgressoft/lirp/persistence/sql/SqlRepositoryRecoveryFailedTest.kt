@@ -19,6 +19,7 @@ package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.event.CrudEvent
 import net.transgressoft.lirp.event.StandardCrudEvent
+import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.awaitSubscriptionReady
 import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
@@ -28,9 +29,7 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
-import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
-import kotlinx.coroutines.delay
 
 /**
  * Regression tests for #201: `SqlRepository.writePending` must not silently swallow
@@ -79,7 +78,7 @@ class SqlRepositoryRecoveryFailedTest : StringSpec({
         val repo = SqlRepository(freshJdbcUrl(), TestVersionedPersonTableDef)
         val received = CopyOnWriteArrayList<CrudEvent<*, *>>()
         repo.subscribe { event -> received.add(event) }
-        delay(50.milliseconds)
+        awaitSubscriptionReady()
 
         // Seed the retry queue at the escalation threshold so a single failed retry escalates.
         staleIdsOf(repo)[999] = newStaleEntry(expectedVersion = 5L, attempts = SqlRepository.MAX_RECOVERY_ATTEMPTS)

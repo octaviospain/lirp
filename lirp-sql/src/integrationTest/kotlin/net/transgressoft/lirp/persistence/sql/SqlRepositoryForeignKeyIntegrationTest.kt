@@ -18,7 +18,6 @@
 package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.databases
-import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.datatest.withTests
@@ -42,30 +41,6 @@ import java.sql.SQLException
  */
 @DisplayName("SqlRepository Foreign Keys Integration")
 internal class SqlRepositoryForeignKeyIntegrationTest : FunSpec({
-
-    /**
-     * Drops all FK-related tables in dependency order so the next iteration starts clean. Errors
-     * for tables that don't exist yet are swallowed — tests run against fresh databases on every
-     * dialect except SQLite (which gets a fresh tempfile per [HikariDataSource]) so the drops are
-     * mostly defensive.
-     */
-    fun resetSchema(dataSource: HikariDataSource) {
-        // Drop child tables before parents to avoid FK violations during teardown. Junction first,
-        // then parents (the FK lives on the junction → parent edge), then children.
-        for (sql in listOf(
-            "DROP TABLE IF EXISTS fk_parent_children",
-            "DROP TABLE IF EXISTS fk_parents",
-            "DROP TABLE IF EXISTS fk_children"
-        )) {
-            try {
-                dataSource.connection.use { conn ->
-                    conn.createStatement().use { stmt -> stmt.execute(sql) }
-                }
-            } catch (_: SQLException) {
-                // ignore — table may not exist on a fresh database
-            }
-        }
-    }
 
     /**
      * Asserts that [block] throws a SQL foreign-key violation. The dialect-specific error codes
@@ -103,7 +78,7 @@ internal class SqlRepositoryForeignKeyIntegrationTest : FunSpec({
         withTests(databases) { db ->
             val dataSource = db.buildDataSource()
             try {
-                resetSchema(dataSource)
+                DatabaseTestSupport.dropTables(dataSource, "fk_parent_children", "fk_parents", "fk_children")
                 FkScalarFkInstaller.setupRestrict(dataSource)
 
                 val childRepo = SqlRepository(dataSource, FkChildTableDef)
@@ -145,7 +120,7 @@ internal class SqlRepositoryForeignKeyIntegrationTest : FunSpec({
         withTests(databases) { db ->
             val dataSource = db.buildDataSource()
             try {
-                resetSchema(dataSource)
+                DatabaseTestSupport.dropTables(dataSource, "fk_parent_children", "fk_parents", "fk_children")
                 FkScalarFkInstaller.setupCascade(dataSource)
 
                 val childRepo = SqlRepository(dataSource, FkChildTableDef)
@@ -184,7 +159,7 @@ internal class SqlRepositoryForeignKeyIntegrationTest : FunSpec({
         withTests(databases) { db ->
             val dataSource = db.buildDataSource()
             try {
-                resetSchema(dataSource)
+                DatabaseTestSupport.dropTables(dataSource, "fk_parent_children", "fk_parents", "fk_children")
                 FkScalarFkInstaller.setupDetach(dataSource)
 
                 val childRepo = SqlRepository(dataSource, FkChildTableDef)
@@ -224,7 +199,7 @@ internal class SqlRepositoryForeignKeyIntegrationTest : FunSpec({
         withTests(databases) { db ->
             val dataSource = db.buildDataSource()
             try {
-                resetSchema(dataSource)
+                DatabaseTestSupport.dropTables(dataSource, "fk_parent_children", "fk_parents", "fk_children")
                 FkScalarFkInstaller.setupNone(dataSource)
 
                 val parentRepo = SqlRepository(dataSource, FkParentTableDef)
@@ -253,7 +228,7 @@ internal class SqlRepositoryForeignKeyIntegrationTest : FunSpec({
         withTests(databases) { db ->
             val dataSource = db.buildDataSource()
             try {
-                resetSchema(dataSource)
+                DatabaseTestSupport.dropTables(dataSource, "fk_parent_children", "fk_parents", "fk_children")
                 // Use the NONE schema to keep the scalar FK out of the way — we only care about
                 // junction CASCADE here.
                 FkScalarFkInstaller.setupNone(dataSource)
@@ -305,7 +280,7 @@ internal class SqlRepositoryForeignKeyIntegrationTest : FunSpec({
         withTests(databases) { db ->
             val dataSource = db.buildDataSource()
             try {
-                resetSchema(dataSource)
+                DatabaseTestSupport.dropTables(dataSource, "fk_parent_children", "fk_parents", "fk_children")
                 FkScalarFkInstaller.setupNone(dataSource)
 
                 val childRepo = SqlRepository(dataSource, FkChildTableDef)

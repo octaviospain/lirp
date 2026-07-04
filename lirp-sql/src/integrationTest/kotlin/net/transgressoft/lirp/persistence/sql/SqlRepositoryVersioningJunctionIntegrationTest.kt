@@ -25,7 +25,6 @@ import io.kotest.datatest.withTests
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.DisplayName
-import java.sql.SQLException
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -37,22 +36,6 @@ import kotlin.time.Duration.Companion.seconds
  */
 @DisplayName("SqlRepository Versioning x Junction Integration")
 internal class SqlRepositoryVersioningJunctionIntegrationTest : FunSpec({
-
-    fun resetSchema(dataSource: HikariDataSource) {
-        for (sql in listOf(
-            "DROP TABLE IF EXISTS fk_parent_children",
-            "DROP TABLE IF EXISTS fk_parents",
-            "DROP TABLE IF EXISTS fk_children"
-        )) {
-            try {
-                dataSource.connection.use { conn ->
-                    conn.createStatement().use { stmt -> stmt.execute(sql) }
-                }
-            } catch (_: SQLException) {
-                // ignore — table may not exist on a fresh database
-            }
-        }
-    }
 
     fun queryParentVersion(dataSource: HikariDataSource, parentId: Int): Long =
         dataSource.connection.use { conn ->
@@ -76,7 +59,7 @@ internal class SqlRepositoryVersioningJunctionIntegrationTest : FunSpec({
         parentName: String,
         childIds: List<Int>
     ) {
-        resetSchema(dataSource)
+        DatabaseTestSupport.dropTables(dataSource, "fk_parent_children", "fk_parents", "fk_children")
         FkScalarFkInstaller.setupNone(dataSource)
 
         val childRepo = SqlRepository(dataSource, FkChildTableDef)
