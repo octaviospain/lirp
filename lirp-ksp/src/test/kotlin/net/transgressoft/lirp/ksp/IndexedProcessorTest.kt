@@ -17,14 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.JvmCompilationResult
-import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
-import com.tschuchort.compiletesting.configureKsp
-import com.tschuchort.compiletesting.sourcesGeneratedBySymbolProcessor
-import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.StringSpec
-import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 
@@ -40,24 +34,10 @@ import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 @OptIn(ExperimentalCompilerApi::class)
 internal class IndexedProcessorTest : StringSpec({
 
-    fun compileWithIndexedProcessor(vararg sources: SourceFile): JvmCompilationResult {
-        val compilation =
-            KotlinCompilation().apply {
-                this.sources = sources.toList()
-                inheritClassPath = true
-            }
-        compilation.configureKsp { withCompilation = true }
-        compilation.symbolProcessorProviders += IndexedProcessorProvider()
-        compilation.symbolProcessorProviders += RawInitializerProcessorProvider()
-        return compilation.compile()
-    }
+    val processors = listOf(IndexedProcessorProvider(), RawInitializerProcessorProvider())
 
-    fun JvmCompilationResult.generatedFileContent(name: String): String {
-        val file =
-            sourcesGeneratedBySymbolProcessor.firstOrNull { it.name == name }
-                ?: error("Generated file '$name' not found among: ${sourcesGeneratedBySymbolProcessor.map { it.name }.toList()}")
-        return file.readText()
-    }
+    fun compileWithIndexedProcessor(vararg sources: SourceFile) =
+        KspTestSupport.compile(providers = processors, sources = sources.toList())
 
     "IndexedProcessor generates accessor with default sorted=false for plain @Indexed property" {
         val result =
@@ -78,7 +58,7 @@ internal class IndexedProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("LabelEntity_LirpIndexAccessor.kt")
         content shouldContain """IndexEntry("label") { it.label }"""
     }
@@ -102,7 +82,7 @@ internal class IndexedProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("AgeEntity_LirpIndexAccessor.kt")
         content shouldContain """IndexEntry("age", "age", sorted = true) { it.age }"""
     }
@@ -126,7 +106,7 @@ internal class IndexedProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("RankEntity_LirpIndexAccessor.kt")
         content shouldContain """IndexEntry("score", "rank", sorted = true) { it.rank }"""
     }
@@ -150,7 +130,7 @@ internal class IndexedProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
     }
 
     "IndexedProcessor fails compilation when @Indexed(sorted = true) property is not Comparable" {
@@ -172,9 +152,7 @@ internal class IndexedProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "payload"
-        result.messages shouldContain "Comparable"
+        result.shouldFailWith("payload", "Comparable")
     }
 
     "IndexedProcessor emits internal class declaration for top-level internal entity" {
@@ -196,7 +174,7 @@ internal class IndexedProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("InternalLabelEntity_LirpIndexAccessor.kt")
         content shouldContain "internal class InternalLabelEntity_LirpIndexAccessor"
     }
@@ -222,11 +200,13 @@ internal class IndexedProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("InternalMultiIndexed_LirpIndexAccessor.kt")
-        content shouldContain "internal class InternalMultiIndexed_LirpIndexAccessor"
-        content shouldContain "code"
-        content shouldContain "rank"
+        content.shouldContainEach(
+            "internal class InternalMultiIndexed_LirpIndexAccessor",
+            "code",
+            "rank"
+        )
     }
 
     "IndexedProcessor fails compilation for private-nested entity with @Indexed property" {
@@ -250,9 +230,10 @@ internal class IndexedProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "must be public or internal"
-        result.messages shouldContain "Private and protected entities cannot have accessible generated code"
+        result.shouldFailWith(
+            "must be public or internal",
+            "Private and protected entities cannot have accessible generated code"
+        )
     }
 
     "IndexedProcessor does not require Comparable for default @Indexed (sorted=false)" {
@@ -274,6 +255,6 @@ internal class IndexedProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
     }
 })

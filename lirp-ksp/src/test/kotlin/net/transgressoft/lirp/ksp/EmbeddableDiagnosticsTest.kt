@@ -17,11 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
 import io.kotest.core.spec.style.StringSpec
-import io.kotest.matchers.shouldBe
-import io.kotest.matchers.string.shouldContain
 import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 
 /**
@@ -65,7 +62,7 @@ class EmbeddableDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
     }
 
     "rejects @Embedded on body-declared read-only val" {
@@ -95,9 +92,10 @@ class EmbeddableDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "requires a mutable `var`"
-        result.messages shouldContain "test.BodyValEmbeddedEntity.addr"
+        result.shouldFailWith(
+            "requires a mutable `var`",
+            "test.BodyValEmbeddedEntity.addr"
+        )
     }
 
     "rejects @Embedded on body-declared var with custom getter" {
@@ -129,9 +127,10 @@ class EmbeddableDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "must not have a custom getter"
-        result.messages shouldContain "test.BodyVarCustomGetterEmbeddedEntity.addr"
+        result.shouldFailWith(
+            "must not have a custom getter",
+            "test.BodyVarCustomGetterEmbeddedEntity.addr"
+        )
     }
 
     "rejects @Embedded referencing a non-@Embeddable type" {
@@ -160,10 +159,11 @@ class EmbeddableDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "must reference an @Embeddable type"
-        result.messages shouldContain "test.NonEmbeddableTargetEntity.addr"
-        result.messages shouldContain "test.PlainDataClass"
+        result.shouldFailWith(
+            "must reference an @Embeddable type",
+            "test.NonEmbeddableTargetEntity.addr",
+            "test.PlainDataClass"
+        )
     }
 
     "rejects @Embedded referencing a non-class typealias" {
@@ -197,8 +197,7 @@ class EmbeddableDiagnosticsTest : StringSpec({
         // either ("must reference a class type") or ("must reference an
         // @Embeddable type") is acceptable — the structural error condition (typealias is not
         // a permissible @Embedded target) is what we lock in.
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "test.TypeAliasTargetEntity.addr"
+        result.shouldFailWith("test.TypeAliasTargetEntity.addr")
     }
 
     "rejects @Embeddable on non-data class" {
@@ -229,9 +228,10 @@ class EmbeddableDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "@Embeddable must be a concrete data class"
-        result.messages shouldContain "test.NotData"
+        result.shouldFailWith(
+            "@Embeddable must be a concrete data class",
+            "test.NotData"
+        )
     }
 
     "rejects @Embeddable on abstract class" {
@@ -262,9 +262,10 @@ class EmbeddableDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "@Embeddable must be a concrete data class"
-        result.messages shouldContain "test.AbsEmbeddable"
+        result.shouldFailWith(
+            "@Embeddable must be a concrete data class",
+            "test.AbsEmbeddable"
+        )
     }
 
     "rejects @Embeddable on sealed class" {
@@ -295,9 +296,10 @@ class EmbeddableDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "@Embeddable must be a concrete data class"
-        result.messages shouldContain "test.SealedEmbeddable"
+        result.shouldFailWith(
+            "@Embeddable must be a concrete data class",
+            "test.SealedEmbeddable"
+        )
     }
 
     "rejects @Embeddable on object declaration" {
@@ -330,9 +332,10 @@ class EmbeddableDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "@Embeddable must be a concrete data class"
-        result.messages shouldContain "test.ObjEmbeddable"
+        result.shouldFailWith(
+            "@Embeddable must be a concrete data class",
+            "test.ObjEmbeddable"
+        )
     }
 
     "rejects column collision across two @Embedded siblings with identical explicit prefix" {
@@ -364,11 +367,12 @@ class EmbeddableDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "Column name collision"
-        result.messages shouldContain "X_name"
-        result.messages shouldContain "test.SiblingCollisionEntity.left.name"
-        result.messages shouldContain "test.SiblingCollisionEntity.right.name"
+        result.shouldFailWith(
+            "Column name collision",
+            "X_name",
+            "test.SiblingCollisionEntity.left.name",
+            "test.SiblingCollisionEntity.right.name"
+        )
     }
 
     "rejects @Embeddable data class with zero-parameter primary constructor" {
@@ -399,9 +403,10 @@ class EmbeddableDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "@Embeddable must be a concrete data class"
-        result.messages shouldContain "test.ZeroParamEmbeddable"
+        result.shouldFailWith(
+            "@Embeddable must be a concrete data class",
+            "test.ZeroParamEmbeddable"
+        )
     }
 
     "rejects nullable @Embedded property with clear diagnostic" {
@@ -432,9 +437,10 @@ class EmbeddableDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "`@Embedded` nullable properties are not supported yet"
-        result.messages shouldContain "test.NullableEmbeddedEntity.address"
+        result.shouldFailWith(
+            "`@Embedded` nullable properties are not supported yet",
+            "test.NullableEmbeddedEntity.address"
+        )
     }
 
     "rejects @Embeddable with unsupported scalar leaf type causing whole entity to fail" {
@@ -469,8 +475,7 @@ class EmbeddableDiagnosticsTest : StringSpec({
 
         // The unsupported leaf type causes buildEmbeddedSlot to return null, which causes the
         // whole entity to be treated as unmapped rather than emitting partial codegen.
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "Unsupported column type"
+        result.shouldFailWith("Unsupported column type")
     }
 
     "rejects column collision between @Embedded grandchild and a sibling scalar with matching name" {
@@ -508,12 +513,13 @@ class EmbeddableDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "Column name collision"
-        result.messages shouldContain "inner_deep_value"
         // Both the entity-rooted path through the grandchild AND the sibling scalar path are
         // named, proving the full transitive walk surfaces every contributor.
-        result.messages shouldContain "test.GrandchildCollisionEntity.inner.grandchild.value"
-        result.messages shouldContain "test.GrandchildCollisionEntity.sibling"
+        result.shouldFailWith(
+            "Column name collision",
+            "inner_deep_value",
+            "test.GrandchildCollisionEntity.inner.grandchild.value",
+            "test.GrandchildCollisionEntity.sibling"
+        )
     }
 })

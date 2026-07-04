@@ -17,11 +17,9 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
 import io.kotest.core.spec.style.FunSpec
-import io.kotest.matchers.shouldBe
-import io.kotest.matchers.string.shouldContain
+import io.kotest.datatest.withData
 import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 import org.junit.jupiter.api.DisplayName
 
@@ -37,117 +35,127 @@ import org.junit.jupiter.api.DisplayName
 @DisplayName("ToOneAggregateTableDef")
 internal class ToOneAggregateTableDefTest : FunSpec({
 
-    test("TableDefProcessor emits ForeignKeyDef for entity with @ToOneAggregate scalar") {
-        val result =
-            KspTestSupport.compile(
-                TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "VehicleOrder.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.CascadeAction
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-                    import net.transgressoft.lirp.persistence.ToOneAggregate
-
-                    @PersistenceMapping
-                    class Company(override val id: Int) : ReactiveEntityBase<Int, Company>() {
-                        var name: String by reactiveProperty("")
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = Company(id)
-                    }
-
-                    @PersistenceMapping
-                    class VehicleOrder(override val id: Long, companyId: Int) : ReactiveEntityBase<Long, VehicleOrder>() {
-                        @ToOneAggregate(target = Company::class, onDelete = CascadeAction.RESTRICT)
-                        var companyId: Int by reactiveProperty(companyId)
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = VehicleOrder(id, companyId)
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("VehicleOrder_LirpTableDef.kt")
-        content shouldContain "override fun foreignKeys(): List<ForeignKeyDef>"
-        content shouldContain "ForeignKeyDef(columnName = \"company_id\""
-        content shouldContain "referencedTable = \"company\""
-        content shouldContain "referencedColumn = \"id\""
+    data class FkActionCase(
+        val name: String,
+        val fileName: String,
+        val source: String,
+        val generatedFile: String,
+        val expected: List<String>
+    ) {
+        override fun toString() = name
     }
 
-    test("TableDefProcessor emits ForeignKeyDef with correct onDelete action for @ToOneAggregate") {
+    withData(
+        FkActionCase(
+            name = "TableDefProcessor emits ForeignKeyDef for entity with @ToOneAggregate scalar",
+            fileName = "VehicleOrder.kt",
+            source =
+                """
+                package test
+                import net.transgressoft.lirp.entity.CascadeAction
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.ToOneAggregate
+
+                @PersistenceMapping
+                class Company(override val id: Int) : ReactiveEntityBase<Int, Company>() {
+                    var name: String by reactiveProperty("")
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Company(id)
+                }
+
+                @PersistenceMapping
+                class VehicleOrder(override val id: Long, companyId: Int) : ReactiveEntityBase<Long, VehicleOrder>() {
+                    @ToOneAggregate(target = Company::class, onDelete = CascadeAction.RESTRICT)
+                    var companyId: Int by reactiveProperty(companyId)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = VehicleOrder(id, companyId)
+                }
+                """,
+            generatedFile = "VehicleOrder_LirpTableDef.kt",
+            expected =
+                listOf(
+                    "override fun foreignKeys(): List<ForeignKeyDef>",
+                    "ForeignKeyDef(columnName = \"company_id\"",
+                    "referencedTable = \"company\"",
+                    "referencedColumn = \"id\""
+                )
+        ),
+        FkActionCase(
+            name = "TableDefProcessor emits ForeignKeyDef with correct onDelete action for @ToOneAggregate",
+            fileName = "AlbumTrack.kt",
+            source =
+                """
+                package test
+                import net.transgressoft.lirp.entity.CascadeAction
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.ToOneAggregate
+
+                @PersistenceMapping
+                class AudioAlbum(override val id: Int) : ReactiveEntityBase<Int, AudioAlbum>() {
+                    var title: String by reactiveProperty("")
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = AudioAlbum(id)
+                }
+
+                @PersistenceMapping
+                class AlbumTrack(override val id: Long, albumId: Int) : ReactiveEntityBase<Long, AlbumTrack>() {
+                    @ToOneAggregate(target = AudioAlbum::class, onDelete = CascadeAction.CASCADE)
+                    var albumId: Int by reactiveProperty(albumId)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = AlbumTrack(id, albumId)
+                }
+                """,
+            generatedFile = "AlbumTrack_LirpTableDef.kt",
+            expected =
+                listOf(
+                    "ForeignKeyDef(columnName = \"album_id\"",
+                    "onDelete = CascadeAction.CASCADE"
+                )
+        ),
+        FkActionCase(
+            name = "TableDefProcessor emits ForeignKeyDef with SET_NULL semantics for nullable @ToOneAggregate scalar",
+            fileName = "OptionalRef.kt",
+            source =
+                """
+                package test
+                import net.transgressoft.lirp.entity.CascadeAction
+                import net.transgressoft.lirp.entity.ReactiveEntityBase
+                import net.transgressoft.lirp.persistence.PersistenceMapping
+                import net.transgressoft.lirp.persistence.ToOneAggregate
+                import java.util.UUID
+
+                @PersistenceMapping
+                class Distributor(override val id: UUID) : ReactiveEntityBase<UUID, Distributor>() {
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = Distributor(id)
+                }
+
+                @PersistenceMapping
+                class AudioItem(override val id: UUID, distributorId: UUID?) : ReactiveEntityBase<UUID, AudioItem>() {
+                    @ToOneAggregate(target = Distributor::class, onDelete = CascadeAction.DETACH)
+                    var distributorId: UUID? by reactiveProperty(distributorId)
+                    override val uniqueId: String get() = "${'$'}id"
+                    override fun clone() = AudioItem(id, distributorId)
+                }
+                """,
+            generatedFile = "AudioItem_LirpTableDef.kt",
+            expected =
+                listOf(
+                    "ForeignKeyDef(columnName = \"distributor_id\"",
+                    "onDelete = CascadeAction.DETACH"
+                )
+        )
+    ) { case ->
         val result =
             KspTestSupport.compile(
                 TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "AlbumTrack.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.CascadeAction
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-                    import net.transgressoft.lirp.persistence.ToOneAggregate
-
-                    @PersistenceMapping
-                    class AudioAlbum(override val id: Int) : ReactiveEntityBase<Int, AudioAlbum>() {
-                        var title: String by reactiveProperty("")
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = AudioAlbum(id)
-                    }
-
-                    @PersistenceMapping
-                    class AlbumTrack(override val id: Long, albumId: Int) : ReactiveEntityBase<Long, AlbumTrack>() {
-                        @ToOneAggregate(target = AudioAlbum::class, onDelete = CascadeAction.CASCADE)
-                        var albumId: Int by reactiveProperty(albumId)
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = AlbumTrack(id, albumId)
-                    }
-                    """
-                )
+                SourceFile.kotlin(case.fileName, case.source)
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("AlbumTrack_LirpTableDef.kt")
-        content shouldContain "ForeignKeyDef(columnName = \"album_id\""
-        content shouldContain "onDelete = CascadeAction.CASCADE"
-    }
-
-    test("TableDefProcessor emits ForeignKeyDef with SET_NULL semantics for nullable @ToOneAggregate scalar") {
-        val result =
-            KspTestSupport.compile(
-                TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "OptionalRef.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.CascadeAction
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-                    import net.transgressoft.lirp.persistence.ToOneAggregate
-                    import java.util.UUID
-
-                    @PersistenceMapping
-                    class Distributor(override val id: UUID) : ReactiveEntityBase<UUID, Distributor>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = Distributor(id)
-                    }
-
-                    @PersistenceMapping
-                    class AudioItem(override val id: UUID, distributorId: UUID?) : ReactiveEntityBase<UUID, AudioItem>() {
-                        @ToOneAggregate(target = Distributor::class, onDelete = CascadeAction.DETACH)
-                        var distributorId: UUID? by reactiveProperty(distributorId)
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = AudioItem(id, distributorId)
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("AudioItem_LirpTableDef.kt")
-        content shouldContain "ForeignKeyDef(columnName = \"distributor_id\""
-        content shouldContain "onDelete = CascadeAction.DETACH"
+        result.shouldSucceed()
+        result.generatedFileContent(case.generatedFile).shouldContainEach(*case.expected.toTypedArray())
     }
 
     test("TableDefProcessor emits ForeignKeyDef targeting the lambda scalar for delegate-val @ToOneAggregate") {
@@ -187,10 +195,12 @@ internal class ToOneAggregateTableDefTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("AudioRelease_LirpTableDef.kt")
         // FK column must reference the backing scalar `label_id`, not the delegate name `label`.
-        content shouldContain "ForeignKeyDef(columnName = \"label_id\""
-        content shouldContain "referencedTable = \"audio_label\""
+        content.shouldContainEach(
+            "ForeignKeyDef(columnName = \"label_id\"",
+            "referencedTable = \"audio_label\""
+        )
     }
 })

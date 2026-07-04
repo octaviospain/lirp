@@ -17,10 +17,9 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
 import io.kotest.core.spec.style.StringSpec
-import io.kotest.matchers.shouldBe
+import io.kotest.datatest.withData
 import io.kotest.matchers.string.shouldContain
 import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 
@@ -34,40 +33,72 @@ import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 @OptIn(ExperimentalCompilerApi::class)
 class PersistencePropertyTypeHintTest : StringSpec({
 
-    "TableDefProcessor maps type=TEXT hint to ColumnType.TextType" {
-        val result =
-            KspTestSupport.compile(
-                TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "TextHintEntity.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-                    import net.transgressoft.lirp.persistence.PersistenceProperty
-
-                    @PersistenceMapping
-                    data class TextHintEntity(
-                        override val id: Int,
-                        @PersistenceProperty(type = "TEXT") val notes: String
-                    ) : ReactiveEntityBase<Int, TextHintEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = TextHintEntity(id, notes)
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedFileContent("TextHintEntity_LirpTableDef.kt") shouldContain "ColumnType.TextType"
+    data class TypeHintCase(
+        val name: String,
+        val entityName: String,
+        val annotationArgs: String,
+        val fieldName: String,
+        val fieldType: String,
+        val expectedColumnType: String
+    ) {
+        override fun toString() = name
     }
 
-    "TableDefProcessor maps type=INT hint to ColumnType.IntType" {
+    withData(
+        TypeHintCase(
+            "TableDefProcessor maps type=TEXT hint to ColumnType.TextType",
+            "TextHintEntity", """type = "TEXT"""", "notes", "String", "ColumnType.TextType"
+        ),
+        TypeHintCase(
+            "TableDefProcessor maps type=INT hint to ColumnType.IntType",
+            "IntHintEntity", """type = "INT"""", "count", "Long", "ColumnType.IntType"
+        ),
+        TypeHintCase(
+            "TableDefProcessor maps type=BIGINT hint to ColumnType.LongType",
+            "BigintHintEntity", """type = "BIGINT"""", "counter", "Int", "ColumnType.LongType"
+        ),
+        TypeHintCase(
+            "TableDefProcessor maps type=BOOLEAN hint to ColumnType.BooleanType",
+            "BoolHintEntity", """type = "BOOLEAN"""", "active", "Int", "ColumnType.BooleanType"
+        ),
+        TypeHintCase(
+            "TableDefProcessor maps type=DOUBLE hint to ColumnType.DoubleType",
+            "DoubleHintEntity", """type = "DOUBLE"""", "score", "String", "ColumnType.DoubleType"
+        ),
+        TypeHintCase(
+            "TableDefProcessor maps type=FLOAT hint to ColumnType.FloatType",
+            "FloatHintEntity", """type = "FLOAT"""", "ratio", "String", "ColumnType.FloatType"
+        ),
+        TypeHintCase(
+            "TableDefProcessor maps type=UUID hint to ColumnType.UuidType",
+            "UuidHintEntity", """type = "UUID"""", "externalRef", "String", "ColumnType.UuidType"
+        ),
+        TypeHintCase(
+            "TableDefProcessor maps type=DATE hint to ColumnType.DateType",
+            "DateHintEntity", """type = "DATE"""", "createdOn", "String", "ColumnType.DateType"
+        ),
+        TypeHintCase(
+            "TableDefProcessor maps type=DATETIME hint to ColumnType.DateTimeType",
+            "DatetimeHintEntity", """type = "DATETIME"""", "updatedAt", "String", "ColumnType.DateTimeType"
+        ),
+        TypeHintCase(
+            "TableDefProcessor maps type=DECIMAL hint to ColumnType.DecimalType with default precision and scale",
+            "DecimalDefaultHintEntity", """type = "DECIMAL"""", "amount", "String", "ColumnType.DecimalType(19, 2)"
+        ),
+        TypeHintCase(
+            "TableDefProcessor maps type=DECIMAL hint with explicit precision and scale",
+            "DecimalPrecisionHintEntity", """type = "DECIMAL", precision = 10, scale = 3""", "rate", "String", "ColumnType.DecimalType(10, 3)"
+        ),
+        TypeHintCase(
+            "TableDefProcessor maps type=VARCHAR with length to ColumnType.VarcharType",
+            "VarcharHintEntity", """type = "VARCHAR", length = 128""", "code", "String", "ColumnType.VarcharType(128)"
+        )
+    ) { case ->
         val result =
             KspTestSupport.compile(
                 TableDefProcessorProvider(),
                 SourceFile.kotlin(
-                    "IntHintEntity.kt",
+                    "${case.entityName}.kt",
                     """
                     package test
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
@@ -75,300 +106,19 @@ class PersistencePropertyTypeHintTest : StringSpec({
                     import net.transgressoft.lirp.persistence.PersistenceProperty
 
                     @PersistenceMapping
-                    data class IntHintEntity(
+                    data class ${case.entityName}(
                         override val id: Int,
-                        @PersistenceProperty(type = "INT") val count: Long
-                    ) : ReactiveEntityBase<Int, IntHintEntity>() {
+                        @PersistenceProperty(${case.annotationArgs}) val ${case.fieldName}: ${case.fieldType}
+                    ) : ReactiveEntityBase<Int, ${case.entityName}>() {
                         override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = IntHintEntity(id, count)
+                        override fun clone() = ${case.entityName}(id, ${case.fieldName})
                     }
                     """
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedFileContent("IntHintEntity_LirpTableDef.kt") shouldContain "ColumnType.IntType"
-    }
-
-    "TableDefProcessor maps type=BIGINT hint to ColumnType.LongType" {
-        val result =
-            KspTestSupport.compile(
-                TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "BigintHintEntity.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-                    import net.transgressoft.lirp.persistence.PersistenceProperty
-
-                    @PersistenceMapping
-                    data class BigintHintEntity(
-                        override val id: Int,
-                        @PersistenceProperty(type = "BIGINT") val counter: Int
-                    ) : ReactiveEntityBase<Int, BigintHintEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = BigintHintEntity(id, counter)
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedFileContent("BigintHintEntity_LirpTableDef.kt") shouldContain "ColumnType.LongType"
-    }
-
-    "TableDefProcessor maps type=BOOLEAN hint to ColumnType.BooleanType" {
-        val result =
-            KspTestSupport.compile(
-                TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "BoolHintEntity.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-                    import net.transgressoft.lirp.persistence.PersistenceProperty
-
-                    @PersistenceMapping
-                    data class BoolHintEntity(
-                        override val id: Int,
-                        @PersistenceProperty(type = "BOOLEAN") val active: Int
-                    ) : ReactiveEntityBase<Int, BoolHintEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = BoolHintEntity(id, active)
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedFileContent("BoolHintEntity_LirpTableDef.kt") shouldContain "ColumnType.BooleanType"
-    }
-
-    "TableDefProcessor maps type=DOUBLE hint to ColumnType.DoubleType" {
-        val result =
-            KspTestSupport.compile(
-                TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "DoubleHintEntity.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-                    import net.transgressoft.lirp.persistence.PersistenceProperty
-
-                    @PersistenceMapping
-                    data class DoubleHintEntity(
-                        override val id: Int,
-                        @PersistenceProperty(type = "DOUBLE") val score: String
-                    ) : ReactiveEntityBase<Int, DoubleHintEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = DoubleHintEntity(id, score)
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedFileContent("DoubleHintEntity_LirpTableDef.kt") shouldContain "ColumnType.DoubleType"
-    }
-
-    "TableDefProcessor maps type=FLOAT hint to ColumnType.FloatType" {
-        val result =
-            KspTestSupport.compile(
-                TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "FloatHintEntity.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-                    import net.transgressoft.lirp.persistence.PersistenceProperty
-
-                    @PersistenceMapping
-                    data class FloatHintEntity(
-                        override val id: Int,
-                        @PersistenceProperty(type = "FLOAT") val ratio: String
-                    ) : ReactiveEntityBase<Int, FloatHintEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = FloatHintEntity(id, ratio)
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedFileContent("FloatHintEntity_LirpTableDef.kt") shouldContain "ColumnType.FloatType"
-    }
-
-    "TableDefProcessor maps type=UUID hint to ColumnType.UuidType" {
-        val result =
-            KspTestSupport.compile(
-                TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "UuidHintEntity.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-                    import net.transgressoft.lirp.persistence.PersistenceProperty
-
-                    @PersistenceMapping
-                    data class UuidHintEntity(
-                        override val id: Int,
-                        @PersistenceProperty(type = "UUID") val externalRef: String
-                    ) : ReactiveEntityBase<Int, UuidHintEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = UuidHintEntity(id, externalRef)
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedFileContent("UuidHintEntity_LirpTableDef.kt") shouldContain "ColumnType.UuidType"
-    }
-
-    "TableDefProcessor maps type=DATE hint to ColumnType.DateType" {
-        val result =
-            KspTestSupport.compile(
-                TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "DateHintEntity.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-                    import net.transgressoft.lirp.persistence.PersistenceProperty
-
-                    @PersistenceMapping
-                    data class DateHintEntity(
-                        override val id: Int,
-                        @PersistenceProperty(type = "DATE") val createdOn: String
-                    ) : ReactiveEntityBase<Int, DateHintEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = DateHintEntity(id, createdOn)
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedFileContent("DateHintEntity_LirpTableDef.kt") shouldContain "ColumnType.DateType"
-    }
-
-    "TableDefProcessor maps type=DATETIME hint to ColumnType.DateTimeType" {
-        val result =
-            KspTestSupport.compile(
-                TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "DatetimeHintEntity.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-                    import net.transgressoft.lirp.persistence.PersistenceProperty
-
-                    @PersistenceMapping
-                    data class DatetimeHintEntity(
-                        override val id: Int,
-                        @PersistenceProperty(type = "DATETIME") val updatedAt: String
-                    ) : ReactiveEntityBase<Int, DatetimeHintEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = DatetimeHintEntity(id, updatedAt)
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedFileContent("DatetimeHintEntity_LirpTableDef.kt") shouldContain "ColumnType.DateTimeType"
-    }
-
-    "TableDefProcessor maps type=DECIMAL hint to ColumnType.DecimalType with default precision and scale" {
-        val result =
-            KspTestSupport.compile(
-                TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "DecimalDefaultHintEntity.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-                    import net.transgressoft.lirp.persistence.PersistenceProperty
-
-                    @PersistenceMapping
-                    data class DecimalDefaultHintEntity(
-                        override val id: Int,
-                        @PersistenceProperty(type = "DECIMAL") val amount: String
-                    ) : ReactiveEntityBase<Int, DecimalDefaultHintEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = DecimalDefaultHintEntity(id, amount)
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        // Default precision=19, scale=2 when not specified
-        result.generatedFileContent("DecimalDefaultHintEntity_LirpTableDef.kt") shouldContain "ColumnType.DecimalType(19, 2)"
-    }
-
-    "TableDefProcessor maps type=DECIMAL hint with explicit precision and scale" {
-        val result =
-            KspTestSupport.compile(
-                TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "DecimalPrecisionHintEntity.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-                    import net.transgressoft.lirp.persistence.PersistenceProperty
-
-                    @PersistenceMapping
-                    data class DecimalPrecisionHintEntity(
-                        override val id: Int,
-                        @PersistenceProperty(type = "DECIMAL", precision = 10, scale = 3) val rate: String
-                    ) : ReactiveEntityBase<Int, DecimalPrecisionHintEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = DecimalPrecisionHintEntity(id, rate)
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedFileContent("DecimalPrecisionHintEntity_LirpTableDef.kt") shouldContain "ColumnType.DecimalType(10, 3)"
-    }
-
-    "TableDefProcessor maps type=VARCHAR with length to ColumnType.VarcharType" {
-        val result =
-            KspTestSupport.compile(
-                TableDefProcessorProvider(),
-                SourceFile.kotlin(
-                    "VarcharHintEntity.kt",
-                    """
-                    package test
-                    import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.PersistenceMapping
-                    import net.transgressoft.lirp.persistence.PersistenceProperty
-
-                    @PersistenceMapping
-                    data class VarcharHintEntity(
-                        override val id: Int,
-                        @PersistenceProperty(type = "VARCHAR", length = 128) val code: String
-                    ) : ReactiveEntityBase<Int, VarcharHintEntity>() {
-                        override val uniqueId: String get() = "${'$'}id"
-                        override fun clone() = VarcharHintEntity(id, code)
-                    }
-                    """
-                )
-            )
-
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        result.generatedFileContent("VarcharHintEntity_LirpTableDef.kt") shouldContain "ColumnType.VarcharType(128)"
+        result.shouldSucceed()
+        result.generatedFileContent("${case.entityName}_LirpTableDef.kt") shouldContain case.expectedColumnType
     }
 
     "TableDefProcessor rejects type=VARCHAR without length" {
@@ -395,9 +145,7 @@ class PersistencePropertyTypeHintTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "requires length > 0"
-        result.messages shouldContain "code"
+        result.shouldFailWith("requires length > 0", "code")
     }
 
     "TableDefProcessor rejects unknown type hint" {
@@ -424,9 +172,7 @@ class PersistencePropertyTypeHintTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "Unknown @PersistenceProperty type hint"
-        result.messages shouldContain "CLOB"
+        result.shouldFailWith("Unknown @PersistenceProperty type hint", "CLOB")
     }
 
     "TableDefProcessor rejects precision/scale hint on String-based converter" {
@@ -461,9 +207,7 @@ class PersistencePropertyTypeHintTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "incompatible with converter"
-        result.messages shouldContain "precision/scale"
+        result.shouldFailWith("incompatible with converter", "precision/scale")
     }
 
     "TableDefProcessor rejects length hint on numeric-based converter" {
@@ -500,9 +244,7 @@ class PersistencePropertyTypeHintTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "incompatible with converter"
-        result.messages shouldContain "length"
+        result.shouldFailWith("incompatible with converter", "length")
     }
 
     "TableDefProcessor accepts type hint on converter column overriding the converter sqlType" {
@@ -537,11 +279,13 @@ class PersistencePropertyTypeHintTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         // type hint overrides converter's sqlType expression
         val content = result.generatedFileContent("ConverterWithTypeHintEntity_LirpTableDef.kt")
-        content shouldContain "ColumnType.VarcharType(10)"
-        content shouldContain "test.CodeConverter.fromSql("
-        content shouldContain "test.CodeConverter.toSql("
+        content.shouldContainEach(
+            "ColumnType.VarcharType(10)",
+            "test.CodeConverter.fromSql(",
+            "test.CodeConverter.toSql("
+        )
     }
 })

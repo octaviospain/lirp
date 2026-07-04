@@ -17,14 +17,11 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.datatest.withTests
 import io.kotest.engine.names.WithDataTestName
-import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
-import io.kotest.matchers.string.shouldNotContain
 import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 import org.junit.jupiter.api.DisplayName
 
@@ -149,12 +146,13 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("InvoiceEntity_LirpRefAccessor.kt")
-        content shouldContain "override val entries: List<RefEntry<*, InvoiceEntity>>"
-        content shouldContain "refName = \"order\""
-        content shouldContain "idGetter = { it.orderId as Comparable<Any> }"
-        content shouldContain "override val collectionEntries: List<CollectionRefEntry<*, InvoiceEntity>> = emptyList()"
+        val content = result.shouldSucceed().generatedFileContent("InvoiceEntity_LirpRefAccessor.kt")
+        content.shouldContainEach(
+            "override val entries: List<RefEntry<*, InvoiceEntity>>",
+            "refName = \"order\"",
+            "idGetter = { it.orderId as Comparable<Any> }",
+            "override val collectionEntries: List<CollectionRefEntry<*, InvoiceEntity>> = emptyList()"
+        )
     }
 
     test("generates collectionEntries for entity with aggregateList property") {
@@ -187,14 +185,15 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("PlaylistEntity_LirpRefAccessor.kt")
-        content shouldContain "override val collectionEntries: List<CollectionRefEntry<*, PlaylistEntity>>"
-        content shouldContain "refName = \"items\""
-        content shouldContain "idsGetter = { (it.items as AggregateCollectionRef<*, *>).referenceIds }"
-        content shouldContain "cascadeAction = CascadeAction.CASCADE"
-        content shouldContain "isOrdered = true"
-        content shouldContain "override val entries: List<RefEntry<*, PlaylistEntity>> = emptyList()"
+        val content = result.shouldSucceed().generatedFileContent("PlaylistEntity_LirpRefAccessor.kt")
+        content.shouldContainEach(
+            "override val collectionEntries: List<CollectionRefEntry<*, PlaylistEntity>>",
+            "refName = \"items\"",
+            "idsGetter = { (it.items as AggregateCollectionRef<*, *>).referenceIds }",
+            "cascadeAction = CascadeAction.CASCADE",
+            "isOrdered = true",
+            "override val entries: List<RefEntry<*, PlaylistEntity>> = emptyList()"
+        )
     }
 
     test("generates collectionEntries for entity with aggregateSet property") {
@@ -226,13 +225,14 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("PlaylistGroupEntity_LirpRefAccessor.kt")
-        content shouldContain "override val collectionEntries: List<CollectionRefEntry<*, PlaylistGroupEntity>>"
-        content shouldContain "refName = \"playlists\""
-        content shouldContain "idsGetter = { (it.playlists as AggregateCollectionRef<*, *>).referenceIds }"
-        content shouldContain "isOrdered = false"
-        content shouldContain "cascadeAction = CascadeAction.NONE"
+        val content = result.shouldSucceed().generatedFileContent("PlaylistGroupEntity_LirpRefAccessor.kt")
+        content.shouldContainEach(
+            "override val collectionEntries: List<CollectionRefEntry<*, PlaylistGroupEntity>>",
+            "refName = \"playlists\"",
+            "idsGetter = { (it.playlists as AggregateCollectionRef<*, *>).referenceIds }",
+            "isOrdered = false",
+            "cascadeAction = CascadeAction.NONE"
+        )
     }
 
     test("generates both entries and collectionEntries for entity with mixed @ToOneAggregate and @ToManyAggregates refs") {
@@ -281,19 +281,20 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("AlbumEntity_LirpRefAccessor.kt")
+        val content = result.shouldSucceed().generatedFileContent("AlbumEntity_LirpRefAccessor.kt")
         // To-one ref entry
-        content shouldContain "override val entries: List<RefEntry<*, AlbumEntity>>"
-        content shouldContain "refName = \"artist\""
-        content shouldContain "idGetter = { it.artistId as Comparable<Any> }"
-        content shouldContain "bubbleUp = true"
         // Collection ref entry
-        content shouldContain "override val collectionEntries: List<CollectionRefEntry<*, AlbumEntity>>"
-        content shouldContain "refName = \"tracks\""
-        content shouldContain "idsGetter = { (it.tracks as AggregateCollectionRef<*, *>).referenceIds }"
-        content shouldContain "isOrdered = true"
-        content shouldContain "cascadeAction = CascadeAction.CASCADE"
+        content.shouldContainEach(
+            "override val entries: List<RefEntry<*, AlbumEntity>>",
+            "refName = \"artist\"",
+            "idGetter = { it.artistId as Comparable<Any> }",
+            "bubbleUp = true",
+            "override val collectionEntries: List<CollectionRefEntry<*, AlbumEntity>>",
+            "refName = \"tracks\"",
+            "idsGetter = { (it.tracks as AggregateCollectionRef<*, *>).referenceIds }",
+            "isOrdered = true",
+            "cascadeAction = CascadeAction.CASCADE"
+        )
     }
 
     data class BubbleUpCase(
@@ -338,9 +339,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                     )
                 )
 
-            result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-            result.messages shouldContain "bubbleUp"
-            result.messages shouldContain "not supported"
+            result.shouldFailWith("bubbleUp", "not supported")
         }
     }
 
@@ -381,8 +380,7 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("MixedCollectionEntity_LirpRefAccessor.kt")
+        val content = result.shouldSucceed().generatedFileContent("MixedCollectionEntity_LirpRefAccessor.kt")
         // Split by CollectionRefEntry blocks and verify each refName is paired with its isOrdered
         val entryBlocks = content.split("CollectionRefEntry(").drop(1)
         val orderedBlock = entryBlocks.first { it.contains("refName = \"orderedRefs\"") }
@@ -428,10 +426,11 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("PartialAnnotationEntity_LirpRefAccessor.kt")
-        content shouldContain "refName = \"annotatedRefs\""
-        content shouldNotContain "ignoredRefs"
+        val content = result.shouldSucceed().generatedFileContent("PartialAnnotationEntity_LirpRefAccessor.kt")
+        content.shouldContainEachAndNone(
+            present = listOf("refName = \"annotatedRefs\""),
+            absent = listOf("ignoredRefs")
+        )
     }
 
     test("generates \$-separated accessor name for 1-level inner class entity") {
@@ -466,11 +465,12 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("Outer\$RefEntity_LirpRefAccessor.kt")
-        content shouldContain "`Outer\$RefEntity_LirpRefAccessor`"
-        content shouldContain "LirpRefAccessor<Outer.RefEntity>"
-        content shouldContain "InnerEntity::class.java"
+        val content = result.shouldSucceed().generatedFileContent("Outer\$RefEntity_LirpRefAccessor.kt")
+        content.shouldContainEach(
+            "`Outer\$RefEntity_LirpRefAccessor`",
+            "LirpRefAccessor<Outer.RefEntity>",
+            "InnerEntity::class.java"
+        )
     }
 
     test("generates \$-separated accessor name for 3-level nested entity") {
@@ -506,11 +506,12 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("A\$B\$C_LirpRefAccessor.kt")
-        content shouldContain "`A\$B\$C_LirpRefAccessor`"
-        content shouldContain "LirpRefAccessor<A.B.C>"
-        content shouldContain "RefEntity::class.java"
+        val content = result.shouldSucceed().generatedFileContent("A\$B\$C_LirpRefAccessor.kt")
+        content.shouldContainEach(
+            "`A\$B\$C_LirpRefAccessor`",
+            "LirpRefAccessor<A.B.C>",
+            "RefEntity::class.java"
+        )
     }
 
     test("top-level entity accessor generation unchanged after inner class support") {
@@ -543,11 +544,12 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("TopLevelEntity_LirpRefAccessor.kt")
-        content shouldContain "`TopLevelEntity_LirpRefAccessor`"
-        content shouldContain "LirpRefAccessor<TopLevelEntity>"
-        content shouldContain "TargetEntity::class.java"
+        val content = result.shouldSucceed().generatedFileContent("TopLevelEntity_LirpRefAccessor.kt")
+        content.shouldContainEach(
+            "`TopLevelEntity_LirpRefAccessor`",
+            "LirpRefAccessor<TopLevelEntity>",
+            "TargetEntity::class.java"
+        )
     }
 
     test("generates collectionEntries for entity with mutableAggregateList returning MutableList") {
@@ -580,14 +582,15 @@ internal class ReactiveEntityRefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("MutablePlaylistEntity_LirpRefAccessor.kt")
-        content shouldContain "override val collectionEntries: List<CollectionRefEntry<*, MutablePlaylistEntity>>"
-        content shouldContain "refName = \"items\""
-        content shouldContain "idsGetter = { (it.items as AggregateCollectionRef<*, *>).referenceIds }"
-        content shouldContain "cascadeAction = CascadeAction.CASCADE"
-        content shouldContain "isOrdered = true"
-        content shouldContain "override val entries: List<RefEntry<*, MutablePlaylistEntity>> = emptyList()"
+        val content = result.shouldSucceed().generatedFileContent("MutablePlaylistEntity_LirpRefAccessor.kt")
+        content.shouldContainEach(
+            "override val collectionEntries: List<CollectionRefEntry<*, MutablePlaylistEntity>>",
+            "refName = \"items\"",
+            "idsGetter = { (it.items as AggregateCollectionRef<*, *>).referenceIds }",
+            "cascadeAction = CascadeAction.CASCADE",
+            "isOrdered = true",
+            "override val entries: List<RefEntry<*, MutablePlaylistEntity>> = emptyList()"
+        )
     }
 
     test("ReactiveEntityRefProcessor emits compile error when @ToManyAggregates is placed on aggregate{} delegate val") {

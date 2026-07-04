@@ -17,12 +17,9 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
 import io.kotest.core.spec.style.StringSpec
-import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
-import io.kotest.matchers.string.shouldNotContain
 import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 
 /**
@@ -57,10 +54,12 @@ class ConverterCodegenTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val generated = result.generatedFileContent("SentinelEntity_LirpTableDef.kt")
-        generated shouldNotContain ".fromSql("
-        generated shouldNotContain ".toSql("
+        generated.shouldContainEachAndNone(
+            present = listOf(),
+            absent = listOf(".fromSql(", ".toSql(")
+        )
     }
 
     "TableDefProcessor rejects non-object converter with a diagnostic naming the converter" {
@@ -95,10 +94,7 @@ class ConverterCodegenTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "test.NotAnObjectConverter"
-        result.messages shouldContain "must be a Kotlin"
-        result.messages shouldContain "object"
+        result.shouldFailWith("test.NotAnObjectConverter", "must be a Kotlin", "object")
     }
 
     "TableDefProcessor rejects converter with unsupported S type via a diagnostic" {
@@ -134,10 +130,7 @@ class ConverterCodegenTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "test.BadSConverter"
-        result.messages shouldContain "java.util.Date"
-        result.messages shouldContain "not supported"
+        result.shouldFailWith("test.BadSConverter", "java.util.Date", "not supported")
     }
 
     "TableDefProcessor emits converter-routed fromRow and toParams for non-null scalar" {
@@ -172,12 +165,14 @@ class ConverterCodegenTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val generated = result.generatedFileContent("TagEntity_LirpTableDef.kt")
-        generated shouldContain "test.UpperCaseConverter.sqlType"
-        generated shouldContain "test.UpperCaseConverter.fromSql("
-        generated shouldContain "as kotlin.String"
-        generated shouldContain "test.UpperCaseConverter.toSql(entity.tag)"
+        generated.shouldContainEach(
+            "test.UpperCaseConverter.sqlType",
+            "test.UpperCaseConverter.fromSql(",
+            "as kotlin.String",
+            "test.UpperCaseConverter.toSql(entity.tag)"
+        )
     }
 
     "TableDefProcessor emits nullable converter-routed fromRow and toParams" {
@@ -212,11 +207,13 @@ class ConverterCodegenTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val generated = result.generatedFileContent("NullableTagEntity_LirpTableDef.kt")
-        generated shouldContain "as? kotlin.String"
-        generated shouldContain "?.let { test.NullableConverter.fromSql(it) }"
-        generated shouldContain "entity.nickname?.let { test.NullableConverter.toSql(it) }"
+        generated.shouldContainEach(
+            "as? kotlin.String",
+            "?.let { test.NullableConverter.fromSql(it) }",
+            "entity.nickname?.let { test.NullableConverter.toSql(it) }"
+        )
     }
 
     "TableDefProcessor refines TextType converter sqlType to VarcharType when length hint is set" {
@@ -251,13 +248,15 @@ class ConverterCodegenTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val generated = result.generatedFileContent("VarcharTagEntity_LirpTableDef.kt")
-        generated shouldContain "ColumnType.VarcharType(64)"
         // The base converter sqlType reference must NOT appear for this column — the refinement
         // supersedes it. Search for "PathLikeConverter.sqlType" specifically because the
         // converter is still referenced in fromSql / toSql calls.
-        generated shouldNotContain "PathLikeConverter.sqlType"
+        generated.shouldContainEachAndNone(
+            present = listOf("ColumnType.VarcharType(64)"),
+            absent = listOf("PathLikeConverter.sqlType")
+        )
     }
 
     "TableDefProcessor refines numeric converter sqlType to DecimalType when precision and scale hints are set" {
@@ -294,7 +293,7 @@ class ConverterCodegenTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val generated = result.generatedFileContent("MoneyEntity_LirpTableDef.kt")
         generated shouldContain "ColumnType.DecimalType(19, 4)"
     }
@@ -331,10 +330,7 @@ class ConverterCodegenTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "incompatible with converter"
-        result.messages shouldContain "test.BadHintEntity.flag"
-        result.messages shouldContain "test.FlagConverter"
+        result.shouldFailWith("incompatible with converter", "test.BadHintEntity.flag", "test.FlagConverter")
     }
 
     "TableDefProcessor accepts converter with supported S type kotlin.Short" {
@@ -371,7 +367,7 @@ class ConverterCodegenTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
     }
 
     "TableDefProcessor accepts entity when no converter annotation is declared" {
@@ -404,7 +400,7 @@ class ConverterCodegenTest : StringSpec({
             )
 
         // No converter annotation => no converter validation path is triggered.
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
     }
 
     "TableDefProcessor accepts converter with supported S type kotlin.Byte" {
@@ -441,7 +437,7 @@ class ConverterCodegenTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
     }
 
     "TableDefProcessor accepts converter with supported S type kotlin.Boolean" {
@@ -478,13 +474,15 @@ class ConverterCodegenTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val generated = result.generatedFileContent("BoolConverterEntity_LirpTableDef.kt")
         // The converter's sqlType reference (not the literal ColumnType.BooleanType) is used when
         // no length/precision/scale hint is present — the base expression delegates to the converter.
-        generated shouldContain "test.TriStateConverter.sqlType"
-        generated shouldContain "test.TriStateConverter.fromSql("
-        generated shouldContain "test.TriStateConverter.toSql("
+        generated.shouldContainEach(
+            "test.TriStateConverter.sqlType",
+            "test.TriStateConverter.fromSql(",
+            "test.TriStateConverter.toSql("
+        )
     }
 
     "TableDefProcessor accepts converter with supported S type kotlin.Double" {
@@ -521,7 +519,7 @@ class ConverterCodegenTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
     }
 
     "TableDefProcessor accepts converter with supported S type kotlin.Float" {
@@ -558,7 +556,7 @@ class ConverterCodegenTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
     }
 
     "TableDefProcessor accepts converter with supported S type java.math.BigDecimal" {
@@ -596,6 +594,6 @@ class ConverterCodegenTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
     }
 })

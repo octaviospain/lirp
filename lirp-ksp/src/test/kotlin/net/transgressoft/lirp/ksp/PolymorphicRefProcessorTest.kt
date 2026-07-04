@@ -17,13 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.JvmCompilationResult
-import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
-import com.tschuchort.compiletesting.configureKsp
-import com.tschuchort.compiletesting.symbolProcessorProviders
 import io.kotest.core.spec.style.FunSpec
-import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
@@ -143,55 +138,53 @@ internal class PolymorphicRefProcessorTest : FunSpec({
             """
         )
 
-    fun compileWithBothProcessors(vararg sources: SourceFile): JvmCompilationResult {
-        val compilation =
-            KotlinCompilation().apply {
-                this.sources = sources.toList()
-                inheritClassPath = true
-                // arm<K,E>() is an inline+reified function compiled with JVM target 21 in lirp-core.
-                // The test compilation must target the same version to inline the bytecode.
-                jvmTarget = "21"
-            }
-        compilation.configureKsp { this.withCompilation = true }
-        compilation.symbolProcessorProviders += TableDefProcessorProvider()
-        compilation.symbolProcessorProviders += ReactiveEntityRefProcessorProvider()
-        return compilation.compile()
-    }
+    // arm<K,E>() is an inline+reified function compiled with JVM target 21 in lirp-core.
+    // The test compilation must target the same version to inline the bytecode.
+    fun compileWithBothProcessors(vararg sources: SourceFile) =
+        KspTestSupport.compile(
+            providers = listOf(TableDefProcessorProvider(), ReactiveEntityRefProcessorProvider()),
+            sources = sources.toList(),
+            jvmTarget = "21"
+        )
 
     test("emits per-arm ForeignKeyDef entries in _LirpTableDef for a two-arm polymorphicAggregate") {
         val result = compileWithBothProcessors(twoArmEntitySource)
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("AudioContribution_LirpTableDef.kt")
-        content shouldContain "override fun foreignKeys(): List<ForeignKeyDef>"
-        content shouldContain "ForeignKeyDef(columnName = \"audio_item_id\""
-        content shouldContain "referencedTable = \"audio_item\""
-        content shouldContain "referencedColumn = \"id\""
-        content shouldContain "ForeignKeyDef(columnName = \"audio_playlist_id\""
-        content shouldContain "referencedTable = \"mutable_audio_playlist\""
+        content.shouldContainEach(
+            "override fun foreignKeys(): List<ForeignKeyDef>",
+            "ForeignKeyDef(columnName = \"audio_item_id\"",
+            "referencedTable = \"audio_item\"",
+            "referencedColumn = \"id\"",
+            "ForeignKeyDef(columnName = \"audio_playlist_id\"",
+            "referencedTable = \"mutable_audio_playlist\""
+        )
     }
 
     test("emits per-arm RefEntry in _LirpRefAccessor for a two-arm polymorphicAggregate") {
         val result = compileWithBothProcessors(twoArmEntitySource)
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("AudioContribution_LirpRefAccessor.kt")
-        // Item arm
-        content shouldContain "refName = \"target.item\""
-        content shouldContain """armDelegate("item").referenceId"""
-        content shouldContain """armDelegate("item") as AggregateRefDelegate<*, *>"""
-        // Playlist arm
-        content shouldContain "refName = \"target.playlist\""
-        content shouldContain """armDelegate("playlist").referenceId"""
-        content shouldContain """armDelegate("playlist") as AggregateRefDelegate<*, *>"""
-        // Arms do not bubble up
-        content shouldContain "bubbleUp = false"
+        content.shouldContainEach(
+            // Item arm
+            "refName = \"target.item\"",
+            """armDelegate("item").referenceId""",
+            """armDelegate("item") as AggregateRefDelegate<*, *>""",
+            // Playlist arm
+            "refName = \"target.playlist\"",
+            """armDelegate("playlist").referenceId""",
+            """armDelegate("playlist") as AggregateRefDelegate<*, *>""",
+            // Arms do not bubble up
+            "bubbleUp = false"
+        )
     }
 
     test("arm onDelete defaults to DETACH when not specified") {
         val result = compileWithBothProcessors(twoArmEntitySource)
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val tableDef = result.generatedFileContent("AudioContribution_LirpTableDef.kt")
         tableDef shouldContain "onDelete = CascadeAction.DETACH"
     }
@@ -230,7 +223,7 @@ internal class PolymorphicRefProcessorTest : FunSpec({
             )
         val result = compileWithBothProcessors(noneArmSource)
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("NoConstraintArm_LirpTableDef.kt")
         // NONE arms skip FK emission
         content shouldNotContain "override fun foreignKeys()"
@@ -239,31 +232,37 @@ internal class PolymorphicRefProcessorTest : FunSpec({
     test("three-arm polymorphicAggregate yields three FK entries and three RefEntry entries") {
         val result = compileWithBothProcessors(threeArmEntitySource)
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val tableDef = result.generatedFileContent("ThreeArmContribution_LirpTableDef.kt")
-        tableDef shouldContain "audio_track_id"
-        tableDef shouldContain "audio_album_id"
-        tableDef shouldContain "audio_artist_id"
-        tableDef shouldContain "audio_track"
-        tableDef shouldContain "audio_album"
-        tableDef shouldContain "audio_artist"
+        tableDef.shouldContainEach(
+            "audio_track_id",
+            "audio_album_id",
+            "audio_artist_id",
+            "audio_track",
+            "audio_album",
+            "audio_artist"
+        )
 
         val refAccessor = result.generatedFileContent("ThreeArmContribution_LirpRefAccessor.kt")
-        refAccessor shouldContain "refName = \"ref.alpha\""
-        refAccessor shouldContain "refName = \"ref.beta\""
-        refAccessor shouldContain "refName = \"ref.gamma\""
-        refAccessor shouldContain """armDelegate("alpha")"""
-        refAccessor shouldContain """armDelegate("beta")"""
-        refAccessor shouldContain """armDelegate("gamma")"""
+        refAccessor.shouldContainEach(
+            "refName = \"ref.alpha\"",
+            "refName = \"ref.beta\"",
+            "refName = \"ref.gamma\"",
+            """armDelegate("alpha")""",
+            """armDelegate("beta")""",
+            """armDelegate("gamma")"""
+        )
     }
 
     test("per-arm RefEntry delegateGetter reaches inner delegate via armDelegate") {
         val result = compileWithBothProcessors(twoArmEntitySource)
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("AudioContribution_LirpRefAccessor.kt")
-        content shouldContain "it.target.armDelegate("
-        content shouldContain ") as AggregateRefDelegate<*, *>"
+        content.shouldContainEach(
+            "it.target.armDelegate(",
+            ") as AggregateRefDelegate<*, *>"
+        )
     }
 
     test("positional onDelete cascade argument is honoured and emits the per-arm cascade action") {
@@ -300,13 +299,15 @@ internal class PolymorphicRefProcessorTest : FunSpec({
             )
         val result = compileWithBothProcessors(positionalSource)
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         // The arm is not dropped: it reaches both the FK table-def and the ref-accessor with CASCADE.
         val tableDef = result.generatedFileContent("PositionalArm_LirpTableDef.kt")
         tableDef shouldContain "onDelete = CascadeAction.CASCADE"
         val refAccessor = result.generatedFileContent("PositionalArm_LirpRefAccessor.kt")
-        refAccessor shouldContain "refName = \"ref.track\""
-        refAccessor shouldContain "cascadeAction = CascadeAction.CASCADE"
+        refAccessor.shouldContainEach(
+            "refName = \"ref.track\"",
+            "cascadeAction = CascadeAction.CASCADE"
+        )
     }
 
     test("this-qualified scalar in the arm lambda captures the backing scalar, not 'this'") {
@@ -343,7 +344,7 @@ internal class PolymorphicRefProcessorTest : FunSpec({
         val result = compileWithBothProcessors(qualifiedSource)
 
         // Before the fix this failed with "references unknown scalar 'this'".
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val tableDef = result.generatedFileContent("QualifiedScalar_LirpTableDef.kt")
         tableDef shouldContain "audio_track_id"
     }
@@ -390,8 +391,7 @@ internal class PolymorphicRefProcessorTest : FunSpec({
             )
         val result = compileWithBothProcessors(duplicateSource)
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "duplicate polymorphic arm label"
+        result.shouldFailWith("duplicate polymorphic arm label")
     }
 
     test("non-identifier arm label is rejected with a clear diagnostic") {
@@ -427,8 +427,7 @@ internal class PolymorphicRefProcessorTest : FunSpec({
             )
         val result = compileWithBothProcessors(badLabelSource)
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "not valid Kotlin identifiers"
+        result.shouldFailWith("not valid Kotlin identifiers")
     }
 
     test("six-arm and multiline-formatted declarations are not truncated by the scan window") {
@@ -513,11 +512,13 @@ internal class PolymorphicRefProcessorTest : FunSpec({
             )
         val result = compileWithBothProcessors(sixArmSource)
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         // The trailing arms past the old 12-line window still reach codegen.
         val refAccessor = result.generatedFileContent("SixArmContribution_LirpRefAccessor.kt")
-        refAccessor shouldContain "refName = \"ref.one\""
-        refAccessor shouldContain "refName = \"ref.six\""
+        refAccessor.shouldContainEach(
+            "refName = \"ref.one\"",
+            "refName = \"ref.six\""
+        )
         val sealed = result.generatedFileContent("SixArmContributionRefArm.kt")
         sealed shouldContain "data class Six(val entity: A6)"
     }
@@ -568,8 +569,7 @@ internal class PolymorphicRefProcessorTest : FunSpec({
 
         // The span walk skips the ')' inside the string literal, so the SECOND arm is still seen and
         // the first label is reported as a non-identifier rather than silently swallowing the rest.
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "not valid Kotlin identifiers"
+        result.shouldFailWith("not valid Kotlin identifiers")
     }
 
     test("aliased arm target import resolves to the aliased FQN") {
@@ -616,7 +616,7 @@ internal class PolymorphicRefProcessorTest : FunSpec({
             )
         val result = compileWithBothProcessors(aliasedTargetSource, aliasedConsumerSource)
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         // The arm binds to the aliased FQN's table, not to a wrong same-simple-name import.
         val tableDef = result.generatedFileContent("AliasedConsumer_LirpTableDef.kt")
         tableDef shouldContain "referencedTable = \"remote_track\""

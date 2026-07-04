@@ -17,7 +17,6 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldNotContain
@@ -70,14 +69,15 @@ internal class ToOneAggregateRefProcessorTest : FunSpec({
     test("ReactiveEntityRefProcessor generates RefEntry for entity with @ToOneAggregate scalar") {
         val result = KspTestSupport.compile(ReactiveEntityRefProcessorProvider(), vehicleAndCompanySource)
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("Vehicle_LirpRefAccessor.kt")
-        content shouldContain "refName = \"company\""
-        content shouldContain "idGetter = { it.companyId as Comparable<Any>? }"
-        content shouldContain "referencedClass = Company::class.java"
-        content shouldContain "cascadeAction = CascadeAction.DETACH"
-        content shouldContain "bubbleUp = false"
-        content shouldContain "getOrComputeToOneRef(\"company\""
+        val content = result.shouldSucceed().generatedFileContent("Vehicle_LirpRefAccessor.kt")
+        content.shouldContainEach(
+            "refName = \"company\"",
+            "idGetter = { it.companyId as Comparable<Any>? }",
+            "referencedClass = Company::class.java",
+            "cascadeAction = CascadeAction.DETACH",
+            "bubbleUp = false",
+            "getOrComputeToOneRef(\"company\""
+        )
     }
 
     test("ReactiveEntityRefProcessor generates RefEntry with bubbleUp=true when specified") {
@@ -110,17 +110,17 @@ internal class ToOneAggregateRefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("Album_LirpRefAccessor.kt")
-        content shouldContain "refName = \"artist\""
-        content shouldContain "bubbleUp = true"
+        val content = result.shouldSucceed().generatedFileContent("Album_LirpRefAccessor.kt")
+        content.shouldContainEach(
+            "refName = \"artist\"",
+            "bubbleUp = true"
+        )
     }
 
     test("ReactiveEntityRefProcessor infers optional reference from nullable scalar") {
         val result = KspTestSupport.compile(ReactiveEntityRefProcessorProvider(), vehicleAndCompanySource)
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("Vehicle_LirpRefAccessor.kt")
+        val content = result.shouldSucceed().generatedFileContent("Vehicle_LirpRefAccessor.kt")
         // Nullable scalar UUID? — idGetter uses null-safe cast so null FK returns null (not NPE)
         content shouldContain "idGetter = { it.companyId as Comparable<Any>? }"
     }
@@ -155,10 +155,11 @@ internal class ToOneAggregateRefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("Track_LirpRefAccessor.kt")
-        content shouldContain "refName = \"playlist\""
-        content shouldContain "idGetter = { it.playlistId as Comparable<Any> }"
+        val content = result.shouldSucceed().generatedFileContent("Track_LirpRefAccessor.kt")
+        content.shouldContainEach(
+            "refName = \"playlist\"",
+            "idGetter = { it.playlistId as Comparable<Any> }"
+        )
     }
 
     test("ReactiveEntityRefProcessor emits diagnostic (a) when target lacks @PersistenceMapping") {
@@ -334,8 +335,7 @@ internal class ToOneAggregateRefProcessorTest : FunSpec({
     test("ReactiveEntityRefProcessor emits null-safe idGetter for optional FK scalar") {
         val result = KspTestSupport.compile(ReactiveEntityRefProcessorProvider(), vehicleAndCompanySource)
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("Vehicle_LirpRefAccessor.kt")
+        val content = result.shouldSucceed().generatedFileContent("Vehicle_LirpRefAccessor.kt")
         // Optional scalar UUID? must use null-safe cast so idGetter returns null for null FK
         content shouldContain "idGetter = { it.companyId as Comparable<Any>? }"
     }
@@ -370,8 +370,7 @@ internal class ToOneAggregateRefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("Concert_LirpRefAccessor.kt")
+        val content = result.shouldSucceed().generatedFileContent("Concert_LirpRefAccessor.kt")
         // Non-nullable scalar Int must use non-null cast
         content shouldContain "idGetter = { it.venueId as Comparable<Any> }"
     }
@@ -410,14 +409,15 @@ internal class ToOneAggregateRefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("AudioPlaylist_LirpRefAccessor.kt")
-        content shouldContain "refName = \"audioTrack\""
-        content shouldContain "idGetter = { it.audioTrack.referenceId }"
-        content shouldContain "delegateGetter = { it.audioTrack as AggregateRefDelegate<*, *> }"
-        content shouldContain "referencedClass = AudioTrack::class.java"
-        content shouldContain "bubbleUp = false"
-        content shouldContain "cascadeAction = CascadeAction.DETACH"
+        val content = result.shouldSucceed().generatedFileContent("AudioPlaylist_LirpRefAccessor.kt")
+        content.shouldContainEach(
+            "refName = \"audioTrack\"",
+            "idGetter = { it.audioTrack.referenceId }",
+            "delegateGetter = { it.audioTrack as AggregateRefDelegate<*, *> }",
+            "referencedClass = AudioTrack::class.java",
+            "bubbleUp = false",
+            "cascadeAction = CascadeAction.DETACH"
+        )
     }
 
     test("ReactiveEntityRefProcessor does not generate extension accessor for @ToOneAggregate delegate val") {
@@ -454,7 +454,7 @@ internal class ToOneAggregateRefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         // No _LirpToOneExtAccessor file should be generated for delegate-val form
         val generatedNames = result.generatedNames()
         generatedNames shouldNotContain "TrackPlaylist_LirpToOneExtAccessor.kt"
@@ -496,8 +496,7 @@ internal class ToOneAggregateRefProcessorTest : FunSpec({
             )
 
         // Must compile without error (no Id suffix required for delegate-val form)
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("MusicLibrary_LirpRefAccessor.kt")
+        val content = result.shouldSucceed().generatedFileContent("MusicLibrary_LirpRefAccessor.kt")
         content shouldContain "refName = \"featuredItem\""
     }
 
@@ -535,11 +534,12 @@ internal class ToOneAggregateRefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("BubblePlaylist_LirpRefAccessor.kt")
-        content shouldContain "bubbleUp = true"
-        content shouldContain "refName = \"track\""
-        content shouldContain "idGetter = { it.track.referenceId }"
+        val content = result.shouldSucceed().generatedFileContent("BubblePlaylist_LirpRefAccessor.kt")
+        content.shouldContainEach(
+            "bubbleUp = true",
+            "refName = \"track\"",
+            "idGetter = { it.track.referenceId }"
+        )
     }
 
     test("ReactiveEntityRefProcessor emits error when @ToOneAggregate target mismatches delegate entity type") {
@@ -639,15 +639,16 @@ internal class ToOneAggregateRefProcessorTest : FunSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
-        val content = result.generatedFileContent("Vehicle_LirpRefAccessor.kt")
+        val content = result.shouldSucceed().generatedFileContent("Vehicle_LirpRefAccessor.kt")
         // companyId stays a scalar FK: scalar cast idGetter, not the delegate's `referenceId` form
         // (a misclassification would emit `idGetter = { it.companyId.referenceId }` instead).
-        content shouldContain "refName = \"company\""
-        content shouldContain "idGetter = { it.companyId as Comparable<Any> }"
         // audioTrack is correctly the delegate-val.
-        content shouldContain "refName = \"audioTrack\""
-        content shouldContain "idGetter = { it.audioTrack.referenceId }"
+        content.shouldContainEach(
+            "refName = \"company\"",
+            "idGetter = { it.companyId as Comparable<Any> }",
+            "refName = \"audioTrack\"",
+            "idGetter = { it.audioTrack.referenceId }"
+        )
     }
 
     test("delegate-val detection regex matches every by-delegation form, with or without a space before the brace") {

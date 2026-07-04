@@ -23,7 +23,6 @@ import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
-import io.kotest.matchers.string.shouldNotContain
 import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 
 /**
@@ -71,11 +70,13 @@ class PersistenceCreatorProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("FlyweightArtistEntity_LirpTableDef.kt")
         val fromRowBlock = content.substringAfter("override fun fromRow").substringBefore("override fun ")
-        fromRowBlock shouldContain "Artist.of(name = "
-        fromRowBlock shouldNotContain "Artist(name = "
+        fromRowBlock.shouldContainEachAndNone(
+            present = listOf("Artist.of(name = "),
+            absent = listOf("Artist(name = ")
+        )
     }
 
     // internal entity reconstructed via a public secondary-constructor @PersistenceCreator
@@ -106,15 +107,16 @@ class PersistenceCreatorProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("InternalTrackEntity_LirpTableDef.kt")
         val fromRowBlock = content.substringAfter("override fun fromRow").substringBefore("override fun ")
         // The creator takes only (id, title); the call must be by NAMED args limited to those two so
         // it binds to the secondary @PersistenceCreator (not positionally to the 3-arg primary ctor).
         // durationMs is omitted entirely — it has the default 0L.
-        fromRowBlock shouldContain "InternalTrackEntity(id = "
-        fromRowBlock shouldContain "title = "
-        fromRowBlock shouldNotContain "durationMs"
+        fromRowBlock.shouldContainEachAndNone(
+            present = listOf("InternalTrackEntity(id = ", "title = "),
+            absent = listOf("durationMs")
+        )
     }
 
     // a creator taking a reordered subset of the entity's params binds by name, not positionally
@@ -149,7 +151,7 @@ class PersistenceCreatorProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("ReorderedCreatorEntity_LirpTableDef.kt")
         val fromRowBlock = content.substringAfter("override fun fromRow").substringBefore("override fun ")
         // Args emitted in the creator's declared order (second, id, first), each named.
@@ -188,7 +190,7 @@ class PersistenceCreatorProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         result.messages shouldContain "not public"
     }
 
@@ -261,12 +263,13 @@ class PersistenceCreatorProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("ConfigEmbeddableEntity_LirpTableDef.kt")
         val fromRowBlock = content.substringAfter("override fun fromRow").substringBefore("override fun ")
-        fromRowBlock shouldContain "host = "
-        fromRowBlock shouldNotContain "timeout = "
-        fromRowBlock shouldNotContain "timeout = null"
+        fromRowBlock.shouldContainEachAndNone(
+            present = listOf("host = "),
+            absent = listOf("timeout = ", "timeout = null")
+        )
     }
 
     // @PersistenceCreator wins over a public primary constructor
@@ -304,12 +307,14 @@ class PersistenceCreatorProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("PublicCtorWithCreatorEntity_LirpTableDef.kt")
         val fromRowBlock = content.substringAfter("override fun fromRow").substringBefore("override fun ")
         // The companion factory wins even though the primary ctor is also public.
-        fromRowBlock shouldContain "Label.of("
-        fromRowBlock shouldNotContain "Label(name = "
+        fromRowBlock.shouldContainEachAndNone(
+            present = listOf("Label.of("),
+            absent = listOf("Label(name = ")
+        )
     }
 
     // multiple @PersistenceCreator on the same type produces a compilation error
@@ -406,7 +411,7 @@ class PersistenceCreatorProcessorTest : StringSpec({
             )
 
         // Codegen continues (fallback to primary ctor); the warn path does not abort.
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("NonPublicCtorEntity_LirpTableDef.kt")
         val fromRowBlock = content.substringAfter("override fun fromRow").substringBefore("override fun ")
         // Bare ctor call is used (no creator, so className is the call target).
@@ -446,7 +451,7 @@ class PersistenceCreatorProcessorTest : StringSpec({
             )
 
         // Warn only — codegen proceeds, no error.
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("InternalEntityInternalCreator_LirpTableDef.kt")
         content shouldContain "InternalEntityInternalCreator"
         result.messages shouldContain "not public"
@@ -488,14 +493,15 @@ class PersistenceCreatorProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         val content = result.generatedFileContent("BodyFlyweightEntity_LirpTableDef.kt")
         val fromRowBlock = content.substringAfter("override fun fromRow").substringBefore("override fun ")
         // Gap A: setter reconstruction routes through the factory, not the internal primary ctor.
-        fromRowBlock shouldContain "entity.label = test.FlyLabel.of(name = "
         // Gap B: the factory owner is fully qualified (no bare `FlyLabel.of` that would be unresolved).
-        fromRowBlock shouldNotContain "entity.label = FlyLabel.of"
-        fromRowBlock shouldNotContain "entity.label = test.FlyLabel(name = "
+        fromRowBlock.shouldContainEachAndNone(
+            present = listOf("entity.label = test.FlyLabel.of(name = "),
+            absent = listOf("entity.label = FlyLabel.of", "entity.label = test.FlyLabel(name = ")
+        )
     }
 
     // multiple @PersistenceCreator on a nested @Embeddable produces a compilation error naming both
@@ -613,7 +619,7 @@ class PersistenceCreatorProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         result.messages shouldContain "not public"
         val content = result.generatedFileContent("InternalEmbeddableEntity_LirpTableDef.kt")
         content.substringAfter("override fun fromRow") shouldContain "test.Tag.of(value = "
@@ -648,7 +654,7 @@ class PersistenceCreatorProcessorTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
         result.messages shouldContain "non-public primary constructor and no"
         val content = result.generatedFileContent("NoCreatorEmbeddableEntity_LirpTableDef.kt")
         content.substringAfter("override fun fromRow") shouldContain "test.Ratio(numerator = "

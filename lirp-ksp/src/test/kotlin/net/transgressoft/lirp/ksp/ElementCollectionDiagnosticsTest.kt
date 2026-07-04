@@ -17,11 +17,8 @@
 
 package net.transgressoft.lirp.ksp
 
-import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
 import io.kotest.core.spec.style.StringSpec
-import io.kotest.matchers.shouldBe
-import io.kotest.matchers.string.shouldContain
 import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 
 /**
@@ -70,9 +67,10 @@ class ElementCollectionDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "@ElementCollection requires `List<E>` or `Set<E>`"
-        result.messages shouldContain "test.MapTagEntity.tags"
+        result.shouldFailWith(
+            "@ElementCollection requires `List<E>` or `Set<E>`",
+            "test.MapTagEntity.tags"
+        )
     }
 
     // MutableList property type
@@ -108,9 +106,10 @@ class ElementCollectionDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "@ElementCollection requires the immutable interface"
-        result.messages shouldContain "test.MutableListTagEntity.tags"
+        result.shouldFailWith(
+            "@ElementCollection requires the immutable interface",
+            "test.MutableListTagEntity.tags"
+        )
     }
 
     // MutableSet property type
@@ -146,9 +145,10 @@ class ElementCollectionDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "@ElementCollection requires the immutable interface"
-        result.messages shouldContain "test.MutableSetTagEntity.tags"
+        result.shouldFailWith(
+            "@ElementCollection requires the immutable interface",
+            "test.MutableSetTagEntity.tags"
+        )
     }
 
     // nullable element type
@@ -184,9 +184,10 @@ class ElementCollectionDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "@ElementCollection element type must be non-nullable"
-        result.messages shouldContain "test.NullableElementEntity.tags"
+        result.shouldFailWith(
+            "@ElementCollection element type must be non-nullable",
+            "test.NullableElementEntity.tags"
+        )
     }
 
     // nullable collection type
@@ -222,9 +223,10 @@ class ElementCollectionDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "@ElementCollection property type must be non-nullable"
-        result.messages shouldContain "test.NullableCollectionEntity.tags"
+        result.shouldFailWith(
+            "@ElementCollection property type must be non-nullable",
+            "test.NullableCollectionEntity.tags"
+        )
     }
 
     // @ElementCollection declared inside an @Embeddable
@@ -268,9 +270,10 @@ class ElementCollectionDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "is not supported inside an @Embeddable"
-        result.messages shouldContain "test.Inner.tags"
+        result.shouldFailWith(
+            "is not supported inside an @Embeddable",
+            "test.Inner.tags"
+        )
     }
 
     // missing/sentinel elementConverter
@@ -299,9 +302,10 @@ class ElementCollectionDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "requires an explicit `elementConverter`"
-        result.messages shouldContain "test.MissingConverterEntity.tags"
+        result.shouldFailWith(
+            "requires an explicit `elementConverter`",
+            "test.MissingConverterEntity.tags"
+        )
     }
 
     // co-occurrence with @PersistenceProperty
@@ -340,9 +344,10 @@ class ElementCollectionDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "@ElementCollection and @PersistenceProperty cannot be combined"
-        result.messages shouldContain "test.CompositionConflictEntity.tags"
+        result.shouldFailWith(
+            "@ElementCollection and @PersistenceProperty cannot be combined",
+            "test.CompositionConflictEntity.tags"
+        )
     }
 
     // Positive coverage — both ctor-param and body-declared reactive-property targets compile.
@@ -382,7 +387,7 @@ class ElementCollectionDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.OK
+        result.shouldSucceed()
     }
 
     // body-declared read-only `val` has no setter to populate from a row
@@ -418,9 +423,10 @@ class ElementCollectionDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "@ElementCollection on a body-declared property requires a mutable `var`"
-        result.messages shouldContain "test.BodyValCollectionEntity.tags"
+        result.shouldFailWith(
+            "@ElementCollection on a body-declared property requires a mutable `var`",
+            "test.BodyValCollectionEntity.tags"
+        )
     }
 
     // element-S type outside the 8 Kotlin primitives
@@ -457,8 +463,9 @@ class ElementCollectionDiagnosticsTest : StringSpec({
                 )
             )
 
-        result.exitCode shouldBe KotlinCompilation.ExitCode.COMPILATION_ERROR
-        result.messages shouldContain "@ElementCollection element converter's S type must be one of {String, Int, Long, Short, Byte, Boolean, Double, Float}"
-        result.messages shouldContain "test.UuidConverterCollectionEntity.ids"
+        result.shouldFailWith(
+            "@ElementCollection element converter's S type must be one of {String, Int, Long, Short, Byte, Boolean, Double, Float}",
+            "test.UuidConverterCollectionEntity.ids"
+        )
     }
 })
