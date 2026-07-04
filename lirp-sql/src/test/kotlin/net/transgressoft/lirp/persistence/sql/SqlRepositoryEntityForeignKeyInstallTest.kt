@@ -51,6 +51,8 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class SqlRepositoryEntityForeignKeyInstallTest : StringSpec({
 
+    extension(IsolatedReactiveScope)
+
     val nextId = AtomicInteger(0)
 
     "installEntityForeignKeys with RESTRICT prevents deleting a referenced child row" {

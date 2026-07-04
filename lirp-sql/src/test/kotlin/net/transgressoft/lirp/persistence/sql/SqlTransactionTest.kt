@@ -41,7 +41,6 @@ import io.kotest.matchers.types.shouldBeInstanceOf
 import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.jetbrains.exposed.v1.jdbc.update
@@ -212,17 +211,14 @@ internal class SqlTransactionTest : StringSpec() {
                 }
 
                 // DB-level: the sibling Bob write must NOT be in the DB (full rollback required).
-                val exposedTable = ExposedTableInterpreter().interpret(TestVersionedPersonTableDef)
-                val db = Database.connect(dataSource)
                 val bobFirstNameInDb =
-                    transaction(db) {
-                        exposedTable.table
-                            .selectAll()
-                            .where { (exposedTable.table.columns.first { it.name == "id" } as Column<Int>) eq 11 }
+                    DatabaseTestSupport.rawTransaction(dataSource, TestVersionedPersonTableDef) {
+                        selectAll()
+                            .where { (columns.first { it.name == "id" } as Column<Int>) eq 11 }
                             .singleOrNull()
                             ?.let { row ->
                                 @Suppress("UNCHECKED_CAST")
-                                row[exposedTable.table.columns.first { it.name == "first_name" } as Column<String>]
+                                row[columns.first { it.name == "first_name" } as Column<String>]
                             }
                     }
                 // Bob's DB row must remain "Bob" — the entire DB transaction was rolled back.

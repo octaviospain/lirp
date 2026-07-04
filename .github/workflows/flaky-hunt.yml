@@ -26,6 +26,7 @@ jobs:
             -   uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
                 with:
                     fetch-depth: 0
+                    persist-credentials: false
 
             -   name: Set up JDK 21
                 uses: actions/setup-java@1bcf9fb12cf4aa7d266a90ae39939e61372fe520 # v5.4.0
@@ -45,4 +46,7 @@ jobs:
                         ${{ runner.os }}-gradle-
 
             -   name: Repeatedly run the full test suite
-                run: scripts/flaky-hunt.sh "${{ inputs.iterations }}" "${{ inputs.run_timeout }}"
+                env:
+                    ITERATIONS: ${{ inputs.iterations }}
+                    RUN_TIMEOUT: ${{ inputs.run_timeout }}
+                run: scripts/flaky-hunt.sh "$ITERATIONS" "$RUN_TIMEOUT"

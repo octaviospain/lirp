@@ -20,6 +20,10 @@ package net.transgressoft.lirp.persistence
 import net.transgressoft.lirp.entity.ReactiveEntity
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.event.ReactiveScope
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.coroutineContext
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.asContextElement
 import kotlinx.coroutines.withContext
@@ -39,11 +43,18 @@ private val activeTransactionCount = ThreadLocal.withInitial { 0 }
  * Sized far above any legitimate flush (a debounced write completes in ~1s, a few seconds at worst
  * under load) so it never trips on healthy contention, yet finite so a stuck flush or a lock leaked
  * by an earlier transaction fails fast with a diagnostic instead of hanging indefinitely.
- *
- * Exposed as a mutable seam so tests can shrink it to assert the fail-fast path without waiting the
- * full production window; production code never reassigns it.
  */
-internal var flushLockAcquireTimeout = 60.seconds
+private val DEFAULT_FLUSH_LOCK_ACQUIRE_TIMEOUT = 60.seconds
+
+/**
+ * Coroutine-scoped override for the flush-lock acquisition timeout, read by [transaction] from the
+ * calling coroutine's context. It exists so a test can assert the fail-fast path with a short window
+ * without waiting the full production timeout; because it is carried per-coroutine rather than in a
+ * shared mutable field, concurrent specs cannot affect each other's transactions.
+ */
+internal class FlushLockTimeoutOverride(val timeout: Duration) : AbstractCoroutineContextElement(Key) {
+    companion object Key : CoroutineContext.Key<FlushLockTimeoutOverride>
+}
 
 /**
  * Executes [block] as an atomic unit of work against [repo].
@@ -118,6 +129,10 @@ suspend fun <K : Comparable<K>, R : ReactiveEntity<K, R>> transaction(
     // coroutine from contending for the lock while the transaction holds it.
     repo.cancelDebounce()
 
+    // Read the flush-lock timeout from the calling coroutine's context (tests may shorten it),
+    // captured here because the withContext below installs a fresh context without this element.
+    val flushTimeout = coroutineContext[FlushLockTimeoutOverride]?.timeout ?: DEFAULT_FLUSH_LOCK_ACQUIRE_TIMEOUT
+
     // Run the entire transaction on the dedicated, thread-pinned transaction dispatcher.
     // Because the block is suspend and Kotlin forbids suspending inside withLock { }, the
     // flush lock is managed with explicit lock/unlock under a try/finally. [flushLock] is a
@@ -140,7 +155,7 @@ suspend fun <K : Comparable<K>, R : ReactiveEntity<K, R>> transaction(
         // contention. Acquired outside the try so a failed acquisition does not reach unlockFlush.
         val acquired =
             try {
-                repo.tryLockFlush(flushLockAcquireTimeout)
+                repo.tryLockFlush(flushTimeout)
             } catch (interrupted: InterruptedException) {
                 Thread.currentThread().interrupt()
                 throw LirpTransactionException(
@@ -151,7 +166,7 @@ suspend fun <K : Comparable<K>, R : ReactiveEntity<K, R>> transaction(
         if (!acquired) {
             throw LirpTransactionException(
                 "Could not acquire the transaction flush lock on '${repo.repoName}' within " +
-                    "$flushLockAcquireTimeout — a prior flush or transaction likely did not release it. " +
+                    "$flushTimeout — a prior flush or transaction likely did not release it. " +
                     "Aborting to avoid an indefinite hang."
             )
         }

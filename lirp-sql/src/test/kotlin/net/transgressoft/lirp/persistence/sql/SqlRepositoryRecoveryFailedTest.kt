@@ -45,6 +45,8 @@ import kotlin.time.Duration.Companion.seconds
  */
 class SqlRepositoryRecoveryFailedTest : StringSpec({
 
+    extension(IsolatedReactiveScope)
+
     fun freshJdbcUrl() = "jdbc:h2:mem:${UUID.randomUUID()};DB_CLOSE_DELAY=-1"
 
     /** Reflectively reads the `db` field of a [SqlRepository] for direct DDL execution in tests. */

@@ -42,6 +42,8 @@ import kotlin.time.Duration.Companion.seconds
  */
 internal class ReactiveEmbeddedSqlTest : StringSpec({
 
+    extension(IsolatedReactiveScope)
+
     fun freshJdbcUrl() = "jdbc:h2:mem:${UUID.randomUUID()};DB_CLOSE_DELAY=-1"
 
     "ReactiveEmbeddedFixtureEntity round-trips body-declared @Embedded leaf values on H2" {

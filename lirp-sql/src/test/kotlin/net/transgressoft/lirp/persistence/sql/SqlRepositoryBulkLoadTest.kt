@@ -45,6 +45,8 @@ import javax.sql.DataSource
  */
 class SqlRepositoryBulkLoadTest : StringSpec({
 
+    extension(IsolatedReactiveScope)
+
     fun freshJdbcUrl() = "jdbc:h2:mem:bulkload-${UUID.randomUUID()};DB_CLOSE_DELAY=-1"
 
     fun newDataSource(jdbcUrl: String): HikariDataSource {

@@ -34,6 +34,8 @@ import io.kotest.matchers.shouldBe
  */
 internal class SoftDeleteSqlTest : StringSpec({
 
+    extension(IsolatedReactiveScope)
+
     val tableDef = SoftDeletableVersionedTrack_LirpTableDef
 
     "SoftDeleteSqlTest soft-delete persists deleted_at via UPDATE and does not hard-delete the row" {

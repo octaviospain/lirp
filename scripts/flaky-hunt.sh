@@ -39,7 +39,9 @@ dump_threads() {
 
 for i in $(seq 1 "$ITERATIONS"); do
     echo "===== run $i/$ITERATIONS ($(date '+%H:%M:%S')) ====="
-    timeout "$RUN_TIMEOUT" "$GRADLE" test --rerun-tasks
+    # -k escalates to SIGKILL 30s after the initial SIGTERM so a wedged JVM cannot keep the
+    # run alive past its budget; a hang still yields exit 124 and the thread-dump path below.
+    timeout -k 30 "$RUN_TIMEOUT" "$GRADLE" test --rerun-tasks
     rc=$?
     if [ "$rc" = "124" ]; then
         echo "!!! run $i exceeded ${RUN_TIMEOUT}s — likely a deadlock. Thread dumps follow."
