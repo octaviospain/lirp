@@ -30,8 +30,10 @@ import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -355,6 +357,36 @@ internal class TransactionTest : StringSpec() {
                 } finally {
                     repo.close()
                 }
+            }
+        }
+
+        "transaction fails fast when the flush lock cannot be acquired instead of hanging forever" {
+            // A flush that never releases the lock (a stuck backing-store write, or a lock leaked by an
+            // earlier transaction) must surface as a bounded, diagnosable failure rather than an
+            // indefinite hang. Holding the lock on a foreign thread simulates that stuck state; the
+            // transaction must abort within the shrunk acquisition window. withTimeout is the safety net
+            // that turns a regression (unbounded wait) into a fast test failure.
+            val previousTimeout = flushLockAcquireTimeout
+            flushLockAcquireTimeout = 200.milliseconds
+            val repo = InMemoryAudioItemRepo()
+            repo.create(40, "Fat Bottomed Girls", "Jazz")
+            repo.lockFlush()
+            try {
+                withTimeout(5_000) {
+                    val failure =
+                        shouldThrow<LirpTransactionException> {
+                            transaction(repo) { r ->
+                                (r.findById(40).get() as MutableAudioItem).title = "Bicycle Race"
+                            }
+                        }
+                    failure.message shouldContain "Could not acquire the transaction flush lock"
+                }
+                // The block never ran: the lock was never acquired, so in-memory state is untouched.
+                repo.findById(40).shouldBePresent { it.title shouldBe "Fat Bottomed Girls" }
+            } finally {
+                repo.unlockFlush()
+                flushLockAcquireTimeout = previousTimeout
+                repo.close()
             }
         }
     }
