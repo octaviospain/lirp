@@ -18,12 +18,13 @@
 package net.transgressoft.lirp.ksp
 
 /**
- * Centralizes the generated-name suffixes used by every KSP emitter and consumed by
- * [net.transgressoft.lirp.persistence.RegistryBase] via [net.transgressoft.lirp.persistence.KspAccessorLoader].
+ * Producer-side single source of truth for the generated-name suffixes used by every KSP emitter
+ * in this module.
  *
- * Both the producer side (KSP processors that write class files) and the consumer side
- * (runtime lookup via [Class.forName]) reference these constants so that a suffix change
- * is a single edit and the compiler enforces consistency.
+ * The runtime consumer ([net.transgressoft.lirp.persistence.KspAccessorLoader] in lirp-core)
+ * intentionally maintains a parallel copy of the suffixes it needs, because lirp-core must not
+ * carry a runtime dependency on the compile-only lirp-ksp module. Any suffix change here that
+ * affects a runtime-loaded accessor must therefore also be mirrored in `KspAccessorLoader`.
  */
 internal object LirpGenNames {
     const val INDEX_ACCESSOR_SUFFIX = "_LirpIndexAccessor"
@@ -33,6 +34,7 @@ internal object LirpGenNames {
     const val RAW_INITIALIZER_SUFFIX = "_LirpRawInitializer"
     const val REGISTRY_INFO_SUFFIX = "_LirpRegistryInfo"
     const val TABLE_DEF_SUFFIX = "_LirpTableDef"
+    const val JUNCTION_TABLE_DEF_SUFFIX = "_LirpJunctionTableDef"
     const val FX_SCALAR_ACCESSOR_SUFFIX = "_LirpFxScalarAccessor"
     const val TO_ONE_EXT_ACCESSOR_SUFFIX = "_LirpToOneExtAccessor"
 }

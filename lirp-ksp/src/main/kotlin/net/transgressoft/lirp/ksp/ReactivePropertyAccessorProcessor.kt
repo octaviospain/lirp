@@ -39,9 +39,9 @@ import com.google.devtools.ksp.validate
  * bypassing event emission, lastDateModified bumping, and clone comparison.
  *
  * Detection mirrors [FxScalarAccessorProcessor] but consumes the composite predicate
- * [isReactivePropertyDelegate] from [KspUtils] — KSP exposes no direct delegate-type accessor on
- * [KSPropertyDeclaration], so detection relies on `isDelegated`, `isMutable`, and exclusion of
- * FxScalar / kotlin-collections value types.
+ * `isReactivePropertyDelegate` from [KspEntityPredicates] — KSP exposes no direct delegate-type
+ * accessor on [KSPropertyDeclaration], so detection relies on `isDelegated`, `isMutable`, and
+ * exclusion of FxScalar / kotlin-collections value types.
  */
 class ReactivePropertyAccessorProcessor(private val codeGenerator: CodeGenerator, private val logger: KSPLogger) : SymbolProcessor {
 
@@ -79,7 +79,7 @@ class ReactivePropertyAccessorProcessor(private val codeGenerator: CodeGenerator
         val packageName = classDecl.packageName.asString()
         val jvmName = classDecl.jvmBinaryName()
         val kotlinName = classDecl.kotlinNestedName()
-        val accessorName = "${jvmName}_LirpReactivePropertyAccessor"
+        val accessorName = "$jvmName${LirpGenNames.REACTIVE_PROPERTY_ACCESSOR_SUFFIX}"
         // Backtick-escape the class name in Kotlin source when it contains '$' (nested class separator)
         val accessorSourceName = if ('$' in accessorName) "`$accessorName`" else accessorName
 

@@ -192,7 +192,7 @@ internal class ForeignKeyAnalyzer(
         val parentSimpleName = parentClass.simpleName.asString()
         val itemSimpleName = agg.referencedClass.simpleName.asString()
         val propertyCapitalized = agg.propertyName.replaceFirstChar { it.uppercase() }
-        val descriptorName = "${parentSimpleName}_${propertyCapitalized}_LirpJunctionTableDef"
+        val descriptorName = "${parentSimpleName}_${propertyCapitalized}${LirpGenNames.JUNCTION_TABLE_DEF_SUFFIX}"
 
         val parentTableName = resolveTableName(parentClass, parentSimpleName)
         val itemTableName = resolveTableName(agg.referencedClass, itemSimpleName)
@@ -295,7 +295,7 @@ internal class ForeignKeyAnalyzer(
 
         val itemSimpleName = elementFqnToSimpleName(elementFqn)
         val propertyCapitalized = agg.propertyName.replaceFirstChar { it.uppercase() }
-        val descriptorName = "${parentSimpleName}_${propertyCapitalized}_LirpJunctionTableDef"
+        val descriptorName = "${parentSimpleName}_${propertyCapitalized}${LirpGenNames.JUNCTION_TABLE_DEF_SUFFIX}"
         val isMutableCollection = typeFqn == "kotlin.collections.MutableList" || typeFqn == "kotlin.collections.MutableSet"
 
         return JunctionRefInfo(

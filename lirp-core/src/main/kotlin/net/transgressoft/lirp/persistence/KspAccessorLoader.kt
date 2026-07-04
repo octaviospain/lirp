@@ -28,13 +28,17 @@ import java.util.concurrent.ConcurrentHashMap
  * class is loaded at most once per JVM lifetime. Returns `null` when no generated class exists
  * (KSP not applied, anonymous entity, or no matching annotation on the entity type).
  *
- * The suffix constants mirror those in `LirpGenNames` (lirp-ksp), defined here to avoid
- * introducing a runtime dependency on the compile-only KSP module.
+ * The suffix constants below intentionally mirror their counterparts in `LirpGenNames` (lirp-ksp),
+ * which is the producer-side authority for all generated-name suffixes. They are redeclared here
+ * because lirp-core must not carry a runtime dependency on the compile-only lirp-ksp module.
+ * This consumer only needs the subset of suffixes for accessor types it actually loads; it does
+ * not replicate TABLE_DEF, FX, or junction suffixes, which are never loaded at runtime here.
  */
 internal object KspAccessorLoader {
 
-    // Suffix constants that mirror LirpGenNames in lirp-ksp.
-    // lirp-core must not depend on lirp-ksp at runtime, so these are defined independently here.
+    // Suffix constants that intentionally mirror LirpGenNames in lirp-ksp. lirp-core must not
+    // depend on lirp-ksp at runtime, so these are defined independently for the accessor types
+    // this loader actually needs.
     internal const val INDEX_ACCESSOR_SUFFIX = "_LirpIndexAccessor"
     internal const val REF_ACCESSOR_SUFFIX = "_LirpRefAccessor"
     internal const val VIA_ACCESSOR_SUFFIX = "_LirpViaAccessor"
