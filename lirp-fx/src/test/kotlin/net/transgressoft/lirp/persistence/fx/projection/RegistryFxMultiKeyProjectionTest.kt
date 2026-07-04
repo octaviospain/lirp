@@ -22,7 +22,6 @@ import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.MultiKeyAudioItemVolatileRepository
 import net.transgressoft.lirp.persistence.MutableMultiKeyAudioItem
 import net.transgressoft.lirp.persistence.SoftDeletableMultiKeyAudioItemRepo
-import net.transgressoft.lirp.persistence.fx.FxToolkitInit
 import net.transgressoft.lirp.persistence.projection.ProjectionEntryChange
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.assertions.throwables.shouldThrow
@@ -55,10 +54,6 @@ import java.util.concurrent.atomic.AtomicInteger
 class RegistryFxMultiKeyProjectionTest : StringSpec({
 
     val reactive = reactiveScope()
-
-    beforeSpec {
-        FxToolkitInit.ensureInitialized()
-    }
 
     lateinit var trackRepo: MultiKeyAudioItemVolatileRepository
 

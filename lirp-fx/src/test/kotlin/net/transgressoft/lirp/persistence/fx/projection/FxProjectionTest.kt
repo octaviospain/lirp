@@ -20,7 +20,6 @@ package net.transgressoft.lirp.persistence.fx.projection
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.MutableMultiKeyAudioItem
 import net.transgressoft.lirp.persistence.fx.FxAudioItem
-import net.transgressoft.lirp.persistence.fx.FxToolkitInit
 import net.transgressoft.lirp.persistence.fx.fxAggregateList
 import net.transgressoft.lirp.persistence.fx.fxAggregateSet
 import net.transgressoft.lirp.persistence.projection.ObservableProjection
@@ -59,10 +58,6 @@ data class FxAlbumBucket(val key: String, val titles: List<String>)
 class FxProjectionTest : StringSpec({
 
     reactiveScope()
-
-    beforeSpec {
-        FxToolkitInit.ensureInitialized()
-    }
 
     "FxProjection groups entities by key extractor on add" {
         val source = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)

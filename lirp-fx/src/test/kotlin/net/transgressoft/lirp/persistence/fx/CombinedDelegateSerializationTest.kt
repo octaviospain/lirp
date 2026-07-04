@@ -20,6 +20,7 @@ package net.transgressoft.lirp.persistence.fx
 import net.transgressoft.lirp.persistence.json.lirpSerializer
 import net.transgressoft.lirp.testing.reactiveScope
 import io.kotest.core.spec.style.StringSpec
+import io.kotest.datatest.withData
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import kotlinx.serialization.json.Json
@@ -37,10 +38,6 @@ class CombinedDelegateSerializationTest : StringSpec({
     val json = Json { prettyPrint = true }
     val serializer = lirpSerializer(CombinedDelegateEntity(0, ""))
 
-    beforeSpec {
-        FxToolkitInit.ensureInitialized()
-    }
-
     "serializes entity with reactiveProperty, @Indexed, and FxScalar delegates" {
         val entity = CombinedDelegateEntity(1, "Test", "electronics", 5)
         entity.labelProperty.set("urgent")
@@ -54,48 +51,53 @@ class CombinedDelegateSerializationTest : StringSpec({
         encoded shouldContain "\"labelProperty\": \"urgent\""
     }
 
-    "round-trip preserves all three delegate types" {
-        val entity = CombinedDelegateEntity(1, "Alpha", "books", 10)
-        entity.labelProperty.set("premium")
+    data class RoundTripCase(
+        val name: String,
+        val build: () -> CombinedDelegateEntity,
+        val verify: (CombinedDelegateEntity) -> Unit
+    )
 
-        val encoded = json.encodeToString(serializer, entity)
-        val decoded = json.decodeFromString(serializer, encoded)
-
-        decoded.id shouldBe 1
-        decoded.name shouldBe "Alpha"
-        decoded.category shouldBe "books"
-        decoded.priorityProperty.get() shouldBe 10
-        decoded.labelProperty.get() shouldBe "premium"
-    }
-
-    "round-trip preserves mutated values across all delegate types" {
-        val entity = CombinedDelegateEntity(1, "Original", "old-category", 1)
-        entity.labelProperty.set("old-label")
-
-        entity.name = "Mutated"
-        entity.category = "updated"
-        entity.priorityProperty.set(99)
-        entity.labelProperty.set("changed")
-
-        val encoded = json.encodeToString(serializer, entity)
-        val decoded = json.decodeFromString(serializer, encoded)
-
-        decoded.name shouldBe "Mutated"
-        decoded.category shouldBe "updated"
-        decoded.priorityProperty.get() shouldBe 99
-        decoded.labelProperty.get() shouldBe "changed"
-    }
-
-    "round-trip preserves default values when no explicit values set" {
-        val entity = CombinedDelegateEntity(1, "Defaults")
-
-        val encoded = json.encodeToString(serializer, entity)
-        val decoded = json.decodeFromString(serializer, encoded)
-
-        decoded.id shouldBe 1
-        decoded.name shouldBe "Defaults"
-        decoded.category shouldBe ""
-        decoded.priorityProperty.get() shouldBe 0
-        decoded.labelProperty.get() shouldBe ""
+    withData(
+        nameFn = RoundTripCase::name,
+        RoundTripCase(
+            "round-trip preserves all three delegate types",
+            { CombinedDelegateEntity(1, "Alpha", "books", 10).apply { labelProperty.set("premium") } }
+        ) { decoded ->
+            decoded.id shouldBe 1
+            decoded.name shouldBe "Alpha"
+            decoded.category shouldBe "books"
+            decoded.priorityProperty.get() shouldBe 10
+            decoded.labelProperty.get() shouldBe "premium"
+        },
+        RoundTripCase(
+            "round-trip preserves mutated values across all delegate types",
+            {
+                CombinedDelegateEntity(1, "Original", "old-category", 1).apply {
+                    labelProperty.set("old-label")
+                    name = "Mutated"
+                    category = "updated"
+                    priorityProperty.set(99)
+                    labelProperty.set("changed")
+                }
+            }
+        ) { decoded ->
+            decoded.name shouldBe "Mutated"
+            decoded.category shouldBe "updated"
+            decoded.priorityProperty.get() shouldBe 99
+            decoded.labelProperty.get() shouldBe "changed"
+        },
+        RoundTripCase(
+            "round-trip preserves default values when no explicit values set",
+            { CombinedDelegateEntity(1, "Defaults") }
+        ) { decoded ->
+            decoded.id shouldBe 1
+            decoded.name shouldBe "Defaults"
+            decoded.category shouldBe ""
+            decoded.priorityProperty.get() shouldBe 0
+            decoded.labelProperty.get() shouldBe ""
+        }
+    ) { case ->
+        val encoded = json.encodeToString(serializer, case.build())
+        case.verify(json.decodeFromString(serializer, encoded))
     }
 })

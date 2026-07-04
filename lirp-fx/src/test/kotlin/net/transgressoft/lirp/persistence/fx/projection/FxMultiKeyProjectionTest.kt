@@ -21,7 +21,6 @@ import net.transgressoft.lirp.persistence.LirpContext
 import net.transgressoft.lirp.persistence.MultiKeyAudioItemVolatileRepository
 import net.transgressoft.lirp.persistence.MultiKeyAudioPlaylistRepo
 import net.transgressoft.lirp.persistence.MutableMultiKeyAudioItem
-import net.transgressoft.lirp.persistence.fx.FxToolkitInit
 import net.transgressoft.lirp.persistence.fx.fxAggregateList
 import net.transgressoft.lirp.testing.Stress
 import net.transgressoft.lirp.testing.reactiveScope
@@ -54,10 +53,6 @@ import kotlinx.coroutines.launch
 class FxMultiKeyProjectionTest : StringSpec({
 
     val reactive = reactiveScope()
-
-    beforeSpec {
-        FxToolkitInit.ensureInitialized()
-    }
 
     lateinit var trackRepo: MultiKeyAudioItemVolatileRepository
     lateinit var mkPlaylistRepo: MultiKeyAudioPlaylistRepo

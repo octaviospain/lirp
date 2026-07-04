@@ -42,10 +42,6 @@ class FxAggregateConcurrentMutationTest : StringSpec({
 
     reactiveScope()
 
-    beforeSpec {
-        FxToolkitInit.ensureInitialized()
-    }
-
     "FxAggregateList serialized mutations produce no lost updates" {
         val list = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
         val executor = Executors.newSingleThreadExecutor()

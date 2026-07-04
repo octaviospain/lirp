@@ -41,10 +41,6 @@ class FxAggregateSetTest : StringSpec({
 
     reactiveScope()
 
-    beforeSpec {
-        FxToolkitInit.ensureInitialized()
-    }
-
     "FxAggregateSet returns correct size after add" {
         val proxy = fxAggregateSet<Int, AudioItem>(dispatchToFxThread = false)
         proxy.add(MutableAudioItem(1, "Song A"))
@@ -60,8 +56,7 @@ class FxAggregateSetTest : StringSpec({
         proxy.add(item)
 
         changes.size shouldBe 1
-        changes[0].wasAdded() shouldBe true
-        changes[0].elementAdded shouldBe item
+        changes[0].shouldBeAddOf(item)
     }
 
     "FxAggregateSet fires SetChangeListener per element on remove" {
@@ -75,8 +70,7 @@ class FxAggregateSetTest : StringSpec({
         proxy.remove(item)
 
         changes.size shouldBe 1
-        changes[0].wasRemoved() shouldBe true
-        changes[0].elementRemoved shouldBe item
+        changes[0].shouldBeRemoveOf(item)
     }
 
     "FxAggregateSet fires one Change per element on addAll" {

@@ -20,6 +20,7 @@ package net.transgressoft.lirp.persistence.fx
 import net.transgressoft.lirp.persistence.FxScalarPropertyDelegate
 import net.transgressoft.lirp.persistence.LirpDelegate
 import io.kotest.core.spec.style.StringSpec
+import io.kotest.datatest.withData
 import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.nulls.shouldBeNull
@@ -34,10 +35,6 @@ import javafx.beans.value.ChangeListener
  * interface compliance with [LirpDelegate] and [FxScalarPropertyDelegate].
  */
 class FxScalarPropertyTest : StringSpec({
-
-    beforeSpec {
-        FxToolkitInit.ensureInitialized()
-    }
 
     // --- LirpStringProperty ---
 
@@ -258,62 +255,29 @@ class FxScalarPropertyTest : StringSpec({
 
     // --- Factory functions ---
 
-    "fxString factory creates LirpStringProperty with initial value" {
-        fxString("init").get() shouldBe "init"
-    }
+    data class FactoryCase(val name: String, val actual: Any?, val expected: Any?)
 
-    "fxInteger factory creates LirpIntegerProperty" {
-        fxInteger(7).get() shouldBe 7
-    }
-
-    "fxDouble factory creates LirpDoubleProperty" {
-        fxDouble(3.14).get() shouldBe 3.14
-    }
-
-    "fxFloat factory creates LirpFloatProperty" {
-        fxFloat(1.5f).get() shouldBe 1.5f
-    }
-
-    "fxLong factory creates LirpLongProperty" {
-        fxLong(100L).get() shouldBe 100L
-    }
-
-    "fxBoolean factory creates LirpBooleanProperty" {
-        fxBoolean(true).get().shouldBeTrue()
-    }
-
-    "fxObject factory supports nullable type" {
-        fxObject<String?>(null).get().shouldBeNull()
-    }
+    withData(
+        nameFn = FactoryCase::name,
+        FactoryCase("fxString factory creates LirpStringProperty with initial value", fxString("init").get(), "init"),
+        FactoryCase("fxInteger factory creates LirpIntegerProperty", fxInteger(7).get(), 7),
+        FactoryCase("fxDouble factory creates LirpDoubleProperty", fxDouble(3.14).get(), 3.14),
+        FactoryCase("fxFloat factory creates LirpFloatProperty", fxFloat(1.5f).get(), 1.5f),
+        FactoryCase("fxLong factory creates LirpLongProperty", fxLong(100L).get(), 100L),
+        FactoryCase("fxBoolean factory creates LirpBooleanProperty", fxBoolean(true).get(), true),
+        FactoryCase("fxObject factory supports nullable type", fxObject<String?>(null).get(), null)
+    ) { case -> case.actual shouldBe case.expected }
 
     // --- FxProperties static factories ---
 
-    "FxProperties.fxString creates LirpStringProperty" {
-        FxProperties.fxString("test").get() shouldBe "test"
-    }
-
-    "FxProperties.fxInteger creates LirpIntegerProperty" {
-        FxProperties.fxInteger(42).get() shouldBe 42
-    }
-
-    "FxProperties.fxDouble creates LirpDoubleProperty" {
-        FxProperties.fxDouble(2.72).get() shouldBe 2.72
-    }
-
-    "FxProperties.fxFloat creates LirpFloatProperty" {
-        FxProperties.fxFloat(0.5f).get() shouldBe 0.5f
-    }
-
-    "FxProperties.fxLong creates LirpLongProperty" {
-        FxProperties.fxLong(999L).get() shouldBe 999L
-    }
-
-    "FxProperties.fxBoolean creates LirpBooleanProperty" {
-        FxProperties.fxBoolean(false).get() shouldBe false
-    }
-
-    "FxProperties.fxObject creates LirpObjectProperty" {
-        val prop = FxProperties.fxObject<String>("hello")
-        prop.get() shouldBe "hello"
-    }
+    withData(
+        nameFn = FactoryCase::name,
+        FactoryCase("FxProperties.fxString creates LirpStringProperty", FxProperties.fxString("test").get(), "test"),
+        FactoryCase("FxProperties.fxInteger creates LirpIntegerProperty", FxProperties.fxInteger(42).get(), 42),
+        FactoryCase("FxProperties.fxDouble creates LirpDoubleProperty", FxProperties.fxDouble(2.72).get(), 2.72),
+        FactoryCase("FxProperties.fxFloat creates LirpFloatProperty", FxProperties.fxFloat(0.5f).get(), 0.5f),
+        FactoryCase("FxProperties.fxLong creates LirpLongProperty", FxProperties.fxLong(999L).get(), 999L),
+        FactoryCase("FxProperties.fxBoolean creates LirpBooleanProperty", FxProperties.fxBoolean(false).get(), false),
+        FactoryCase("FxProperties.fxObject creates LirpObjectProperty", FxProperties.fxObject<String>("hello").get(), "hello")
+    ) { case -> case.actual shouldBe case.expected }
 })

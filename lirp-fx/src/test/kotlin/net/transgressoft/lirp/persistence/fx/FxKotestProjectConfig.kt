@@ -25,9 +25,14 @@ import io.kotest.engine.concurrency.TestExecutionMode
  * Kotest project configuration for JavaFX tests.
  *
  * JavaFX toolkit state is process-wide, so FX specs and tests remain serialized even when
- * other modules opt into spec-level parallelism.
+ * other modules opt into spec-level parallelism. The headless toolkit is started once here,
+ * before any spec, so individual FX specs no longer need their own `beforeSpec` init block.
  */
 class FxKotestProjectConfig : AbstractProjectConfig() {
     override val specExecutionMode = SpecExecutionMode.Sequential
     override val testExecutionMode = TestExecutionMode.Sequential
+
+    override suspend fun beforeProject() {
+        FxToolkitInit.ensureInitialized()
+    }
 }

@@ -38,10 +38,6 @@ class FxAggregateListTest : StringSpec({
 
     reactiveScope()
 
-    beforeSpec {
-        FxToolkitInit.ensureInitialized()
-    }
-
     "FxAggregateList returns correct size after add" {
         val proxy = fxAggregateList<Int, AudioItem>(dispatchToFxThread = false)
         proxy.add(0, MutableAudioItem(1, "Song A"))
@@ -56,11 +52,7 @@ class FxAggregateListTest : StringSpec({
         proxy.add(0, MutableAudioItem(1, "Song A"))
 
         changes.size shouldBe 1
-        val change = changes[0]
-        change.next() shouldBe true
-        change.wasAdded() shouldBe true
-        change.from shouldBe 0
-        change.to shouldBe 1
+        changes[0].shouldBeSingleAdd(0, 1)
     }
 
     "FxAggregateList fires ListChangeListener on single remove" {
@@ -74,10 +66,7 @@ class FxAggregateListTest : StringSpec({
         proxy.removeAt(0)
 
         changes.size shouldBe 1
-        val change = changes[0]
-        change.next() shouldBe true
-        change.wasRemoved() shouldBe true
-        change.removed.size shouldBe 1
+        changes[0].shouldBeSingleRemove(1)
     }
 
     "FxAggregateList fires ListChangeListener on set" {
@@ -92,9 +81,7 @@ class FxAggregateListTest : StringSpec({
         proxy[0] = item2
 
         changes.size shouldBe 1
-        val change = changes[0]
-        change.next() shouldBe true
-        change.wasReplaced() shouldBe true
+        changes[0].shouldBeSingleReplace()
     }
 
     "FxAggregateList fires single Change on addAll" {
@@ -106,11 +93,7 @@ class FxAggregateListTest : StringSpec({
         proxy.addAll(testItems)
 
         changes.size shouldBe 1
-        val change = changes[0]
-        change.next() shouldBe true
-        change.wasAdded() shouldBe true
-        change.from shouldBe 0
-        change.to shouldBe 3
+        changes[0].shouldBeSingleAdd(0, 3)
     }
 
     "FxAggregateList fires Change on clear" {
@@ -124,10 +107,7 @@ class FxAggregateListTest : StringSpec({
         proxy.clear()
 
         changes.size shouldBe 1
-        val change = changes[0]
-        change.next() shouldBe true
-        change.wasRemoved() shouldBe true
-        change.removed.size shouldBe 2
+        changes[0].shouldBeSingleRemove(2)
     }
 
     "FxAggregateList fires listeners on flowScope when dispatchToFxThread=false" {
@@ -357,11 +337,7 @@ class FxAggregateListTest : StringSpec({
         proxy[1].id shouldBe 2
         proxy[2].id shouldBe 3
         changes.size shouldBe 1
-        val change = changes[0]
-        change.next() shouldBe true
-        change.wasAdded() shouldBe true
-        change.from shouldBe 1
-        change.to shouldBe 3
+        changes[0].shouldBeSingleAdd(1, 3)
     }
 
     "FxAggregateList AddChange supports reset and getPermutation" {
