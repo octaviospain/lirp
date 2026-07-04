@@ -24,6 +24,7 @@ import net.transgressoft.lirp.event.PropertyChanged
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.testing.reactiveScope
+import net.transgressoft.lirp.testing.recordAsync
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
@@ -174,16 +175,15 @@ class ReactiveEntityLifecycleTest : StringSpec({
         reactive.advance()
 
         // Reactivate: subscribe again — must not throw
-        val receivedEvents = mutableListOf<MutationEvent<String, LazyTestEntity>>()
-        val sub2 = entity.subscribeAsync { event -> receivedEvents.add(event) }
+        val recorder = entity.recordAsync()
 
         entity.value = "reactivated"
         reactive.advance()
 
-        receivedEvents.size shouldBe 1
-        (receivedEvents[0] as PropertyChanged<String, LazyTestEntity, String>).newValue shouldBe "reactivated"
+        recorder.count shouldBe 1
+        (recorder.last as PropertyChanged<String, LazyTestEntity, String>).newValue shouldBe "reactivated"
 
-        sub2.cancel()
+        entity.close()
     }
 
     "ReactiveEntity supports multiple dormant-active cycles" {
@@ -203,16 +203,15 @@ class ReactiveEntityLifecycleTest : StringSpec({
         reactive.advance()
 
         // Cycle 3: subscribe (active), receive events
-        val receivedEvents = mutableListOf<MutationEvent<String, LazyTestEntity>>()
-        val sub3 = entity.subscribeAsync { event -> receivedEvents.add(event) }
+        val recorder = entity.recordAsync()
         creationCounter.get() shouldBe 3
 
         entity.value = "after-cycles"
         reactive.advance()
 
-        receivedEvents.size shouldBe 1
+        recorder.count shouldBe 1
 
-        sub3.cancel()
+        entity.close()
     }
 
     "ReactiveEntity lifecycle: Created -> Active -> Dormant -> Active -> Closed" {
@@ -288,51 +287,46 @@ class ReactiveEntityLifecycleTest : StringSpec({
 
     "disableEvents suppresses mutation events from reactiveProperty setters" {
         val audioItem = MutableAudioItem(1, "Track Alpha")
-        val received = mutableListOf<MutationEvent<Int, AudioItem>>()
-        val subscription = audioItem.subscribeAsync { event -> received.add(event) }
+        val recorder = audioItem.recordAsync()
 
         audioItem.suppressEvents()
         audioItem.title = "Track Beta"
         reactive.advance()
 
-        received.size shouldBe 0
+        recorder.count shouldBe 0
         audioItem.title shouldBe "Track Beta"
 
         audioItem.restoreEvents()
         audioItem.title = "Track Charlie"
         reactive.advance()
 
-        received.size shouldBe 1
-        (received[0] as PropertyChanged<Int, AudioItem, String>).newValue shouldBe "Track Charlie"
+        recorder.count shouldBe 1
+        (recorder.last as PropertyChanged<Int, AudioItem, String>).newValue shouldBe "Track Charlie"
 
-        subscription.cancel()
         audioItem.close()
     }
 
     "withEventsDisabled suppresses events and restores emission afterward" {
         val audioItem = MutableAudioItem(1, "Track Alpha")
-        val received = mutableListOf<MutationEvent<Int, AudioItem>>()
-        val subscription = audioItem.subscribeAsync { event -> received.add(event) }
+        val recorder = audioItem.recordAsync()
 
         audioItem.silently {
             audioItem.title = "Silent Track"
         }
         reactive.advance()
-        received.size shouldBe 0
+        recorder.count shouldBe 0
         audioItem.title shouldBe "Silent Track"
 
         audioItem.title = "Loud Track"
         reactive.advance()
-        received.size shouldBe 1
+        recorder.count shouldBe 1
 
-        subscription.cancel()
         audioItem.close()
     }
 
     "withEventsDisabled restores state even if action throws" {
         val audioItem = MutableAudioItem(1, "Track Alpha")
-        val received = mutableListOf<MutationEvent<Int, AudioItem>>()
-        val subscription = audioItem.subscribeAsync { event -> received.add(event) }
+        val recorder = audioItem.recordAsync()
 
         shouldThrow<RuntimeException> {
             audioItem.silently {
@@ -343,25 +337,22 @@ class ReactiveEntityLifecycleTest : StringSpec({
 
         audioItem.title = "AfterError"
         reactive.advance()
-        received.size shouldBe 1
+        recorder.count shouldBe 1
 
-        subscription.cancel()
         audioItem.close()
     }
 
     "disableEvents suppresses mutateAndPublish block emission" {
         val audioItem = MutableAudioItem(1, "Track Alpha")
-        val received = mutableListOf<MutationEvent<Int, AudioItem>>()
-        val subscription = audioItem.subscribeAsync { event -> received.add(event) }
+        val recorder = audioItem.recordAsync()
 
         audioItem.suppressEvents()
         audioItem.bulkUpdate("Silent Track")
         reactive.advance()
 
-        received.size shouldBe 0
+        recorder.count shouldBe 0
         audioItem.title shouldBe "Silent Track"
 
-        subscription.cancel()
         audioItem.close()
     }
 })

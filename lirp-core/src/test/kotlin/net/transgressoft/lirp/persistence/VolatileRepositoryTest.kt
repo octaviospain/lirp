@@ -8,15 +8,14 @@ import net.transgressoft.lirp.event.CrudEvent.Type.UPDATE
 import net.transgressoft.lirp.event.EventType
 import net.transgressoft.lirp.event.FlowEventPublisher
 import net.transgressoft.lirp.event.LirpEventSubscriberBase
-import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.testing.arbitraryAudioItem
 import net.transgressoft.lirp.testing.reactiveScope
+import net.transgressoft.lirp.testing.recordAsync
 import io.kotest.assertions.assertSoftly
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldContainOnly
-import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
@@ -24,7 +23,6 @@ import io.kotest.property.Arb
 import io.kotest.property.arbitrary.next
 import io.kotest.property.arbitrary.set
 import io.kotest.property.checkAll
-import java.util.Collections
 import java.util.Optional
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -391,31 +389,23 @@ internal class VolatileRepositoryTest : FunSpec({
         test("addAll on mutable aggregate emits exactly one MutationEvent") {
             val trackRepo = repository
             val playlistRepo = AudioPlaylistVolatileRepository(ctx)
-            val events =
-                Collections.synchronizedList(
-                    mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>()
-                )
 
             val t1 = trackRepo.create(1, "T1")
             val t2 = trackRepo.create(2, "T2")
             val t3 = trackRepo.create(3, "T3")
             val playlist = DefaultAudioPlaylist(1, "Bulk Add").also(playlistRepo::add)
 
-            playlist.subscribeAsync { events.add(it) }
+            val recorder = playlist.recordAsync()
 
             playlist.audioItems.addAll(listOf(t1, t2, t3))
             reactive.advance()
 
-            events shouldHaveSize 1
+            recorder.count shouldBe 1
         }
 
         test("removeAll on mutable aggregate emits exactly one MutationEvent") {
             val trackRepo = repository
             val playlistRepo = AudioPlaylistVolatileRepository(ctx)
-            val events =
-                Collections.synchronizedList(
-                    mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>()
-                )
 
             val t1 = trackRepo.create(1, "T1")
             val t2 = trackRepo.create(2, "T2")
@@ -424,131 +414,107 @@ internal class VolatileRepositoryTest : FunSpec({
                 DefaultAudioPlaylist(1, "Bulk Remove", listOf(1, 2, 3))
                     .also(playlistRepo::add)
 
-            playlist.subscribeAsync { events.add(it) }
+            val recorder = playlist.recordAsync()
 
             playlist.audioItems.removeAll(listOf(t1, t3))
             reactive.advance()
 
-            events shouldHaveSize 1
+            recorder.count shouldBe 1
         }
 
         test("addAll with empty collection returns false and emits no event") {
             val playlistRepo = AudioPlaylistVolatileRepository(ctx)
-            val events =
-                Collections.synchronizedList(
-                    mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>()
-                )
 
             val playlist = DefaultAudioPlaylist(1, "Empty Add").also(playlistRepo::add)
 
-            playlist.subscribeAsync { events.add(it) }
+            val recorder = playlist.recordAsync()
 
             val result = playlist.audioItems.addAll(emptyList())
             reactive.advance()
 
             result shouldBe false
-            events shouldHaveSize 0
+            recorder.count shouldBe 0
         }
 
         test("removeAll with no matching elements returns false and emits no event") {
             val trackRepo = repository
             val playlistRepo = AudioPlaylistVolatileRepository(ctx)
-            val events =
-                Collections.synchronizedList(
-                    mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>()
-                )
 
             val unrelated = trackRepo.create(99, "Unrelated")
             val playlist = DefaultAudioPlaylist(1, "No Match Remove").also(playlistRepo::add)
 
-            playlist.subscribeAsync { events.add(it) }
+            val recorder = playlist.recordAsync()
 
             val result = playlist.audioItems.removeAll(listOf(unrelated))
             reactive.advance()
 
             result shouldBe false
-            events shouldHaveSize 0
+            recorder.count shouldBe 0
         }
 
         test("addAll on mutable aggregate set emits exactly one MutationEvent") {
             val sharedRepo = AudioPlaylistVolatileRepository(ctx)
-            val events =
-                Collections.synchronizedList(
-                    mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>()
-                )
 
             val p1 = DefaultAudioPlaylist(1, "P1").also(sharedRepo::add)
             val p2 = DefaultAudioPlaylist(2, "P2").also(sharedRepo::add)
             val p3 = DefaultAudioPlaylist(3, "P3").also(sharedRepo::add)
             val group = DefaultAudioPlaylist(100, "Group").also(sharedRepo::add)
 
-            group.subscribeAsync { events.add(it) }
+            val recorder = group.recordAsync()
 
             group.playlists.addAll(listOf(p1, p2, p3))
             reactive.advance()
 
-            events shouldHaveSize 1
+            recorder.count shouldBe 1
         }
 
         test("entity emits MutationEvent on add to mutable aggregate") {
             val trackRepo = repository
             val playlistRepo = AudioPlaylistVolatileRepository(ctx)
-            val events =
-                Collections.synchronizedList(
-                    mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>()
-                )
 
             val t1 = trackRepo.create(1, "Track")
             val playlist = DefaultAudioPlaylist(1, "Test").also(playlistRepo::add)
 
-            playlist.subscribeAsync { events.add(it) }
+            val recorder = playlist.recordAsync()
 
             playlist.audioItems.add(t1)
             reactive.advance()
 
-            events shouldHaveSize 1
+            recorder.count shouldBe 1
         }
 
         test("entity emits MutationEvent on remove from mutable aggregate") {
             val trackRepo = repository
             val playlistRepo = AudioPlaylistVolatileRepository(ctx)
-            val events =
-                Collections.synchronizedList(
-                    mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>()
-                )
 
             val t1 = trackRepo.create(1, "Track")
             val playlist =
                 DefaultAudioPlaylist(1, "Test", listOf(1))
                     .also(playlistRepo::add)
 
-            playlist.subscribeAsync { events.add(it) }
+            val recorder = playlist.recordAsync()
 
             playlist.audioItems.remove(t1)
             reactive.advance()
 
-            events shouldHaveSize 1
+            recorder.count shouldBe 1
         }
 
         test("entity emits MutationEvent on clear of mutable aggregate") {
             val trackRepo = repository
             val playlistRepo = AudioPlaylistVolatileRepository(ctx)
-            val events =
-                Collections.synchronizedList(
-                    mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>()
-                )
 
             trackRepo.create(1, "T1")
             val playlist =
                 DefaultAudioPlaylist(1, "Test", listOf(1))
                     .also(playlistRepo::add)
 
-            playlist.subscribeAsync { events.add(it) }
+            val recorder = playlist.recordAsync()
 
             playlist.audioItems.clear()
             reactive.advance()
 
-            events shouldHaveSize 1
+            recorder.count shouldBe 1
         }
 
         test("multiple entities with independent mutable aggregates") {
@@ -587,10 +553,6 @@ internal class VolatileRepositoryTest : FunSpec({
         test("retainAll on mutable aggregate emits exactly one MutationEvent") {
             val trackRepo = repository
             val playlistRepo = AudioPlaylistVolatileRepository(ctx)
-            val events =
-                Collections.synchronizedList(
-                    mutableListOf<MutationEvent<Int, MutableAudioPlaylist>>()
-                )
 
             val t1 = trackRepo.create(1, "T1")
             val t2 = trackRepo.create(2, "T2")
@@ -599,12 +561,12 @@ internal class VolatileRepositoryTest : FunSpec({
                 DefaultAudioPlaylist(1, "Retain", listOf(1, 2, 3))
                     .also(playlistRepo::add)
 
-            playlist.subscribeAsync { events.add(it) }
+            val recorder = playlist.recordAsync()
 
             playlist.audioItems.retainAll(listOf(t2))
             reactive.advance()
 
-            events shouldHaveSize 1
+            recorder.count shouldBe 1
         }
     }
 })

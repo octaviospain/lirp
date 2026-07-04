@@ -21,9 +21,9 @@ import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.testing.reactiveScope
+import net.transgressoft.lirp.testing.record
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
-import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 
 /**
@@ -73,22 +73,20 @@ internal class TransactionEntitySnapshotTest : StringSpec({
         val snapshot = item.captureSnapshot()
         item.title = "after"
 
-        val capturedEvents = mutableListOf<MutationEvent<Int, AudioItem>>()
-        item.subscribe { capturedEvents.add(it) }
+        val recorder = item.record()
         reactive.advance()
 
         item.restoreSnapshot(snapshot)
         reactive.advance()
 
-        capturedEvents.shouldBeEmpty()
+        recorder.count shouldBe 0
     }
 
     "withEventsDeferred routes PropertyChanged into the provided buffer instead of publishing" {
         val item = MutableAudioItem(5, "initial", "album")
         val buffer = mutableListOf<MutationEvent<Int, AudioItem>>()
 
-        val capturedLive = mutableListOf<MutationEvent<Int, AudioItem>>()
-        item.subscribe { capturedLive.add(it) }
+        val recorder = item.record()
         reactive.advance()
 
         item.withEventsDeferred(buffer) {
@@ -97,7 +95,7 @@ internal class TransactionEntitySnapshotTest : StringSpec({
         reactive.advance()
 
         // Live subscriber received nothing while deferral was active.
-        capturedLive.shouldBeEmpty()
+        recorder.count shouldBe 0
         // Buffer captured the deferred event.
         buffer.size shouldBe 1
     }

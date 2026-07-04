@@ -17,6 +17,7 @@
 
 package net.transgressoft.lirp.persistence
 
+import io.kotest.assertions.assertSoftly
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
@@ -72,12 +73,14 @@ internal class DelegationRegistrationIntegrationTest : StringSpec({
 
         val audioItem = wrapper.create(1, "Track Alpha")
 
-        wrapper.contains(1) shouldBe true
-        wrapper.size() shouldBe 1
-        delegate.contains(1) shouldBe true
-        delegate.size() shouldBe 1
-        delegate.findById(1).isPresent shouldBe true
-        delegate.findById(1).get() shouldBe audioItem
+        assertSoftly {
+            wrapper.contains(1) shouldBe true
+            wrapper.size() shouldBe 1
+            delegate.contains(1) shouldBe true
+            delegate.size() shouldBe 1
+            delegate.findById(1).isPresent shouldBe true
+            delegate.findById(1).get() shouldBe audioItem
+        }
     }
 
     "closing the wrapper deregisters from LirpContext.default and closes the delegate" {

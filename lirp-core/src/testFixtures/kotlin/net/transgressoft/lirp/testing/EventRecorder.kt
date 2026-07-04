@@ -18,11 +18,17 @@
 package net.transgressoft.lirp.testing
 
 import net.transgressoft.lirp.entity.LirpEntity
+import net.transgressoft.lirp.entity.ReactiveEntity
 import net.transgressoft.lirp.event.EventType
 import net.transgressoft.lirp.event.LirpEvent
 import net.transgressoft.lirp.event.LirpEventPublisher
 import net.transgressoft.lirp.event.LirpEventSubscription
+import net.transgressoft.lirp.event.MutationEvent
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Thread-safe test helper that captures events emitted to a subscriber into a typed queue.
@@ -43,6 +49,8 @@ import java.util.concurrent.ConcurrentLinkedQueue
 class EventRecorder<E : Any> {
 
     private val captured = ConcurrentLinkedQueue<E>()
+    private val lock = ReentrantLock()
+    private val countChanged = lock.newCondition()
 
     /** Number of events captured since the last [reset]. */
     val count: Int get() = captured.size
@@ -55,7 +63,30 @@ class EventRecorder<E : Any> {
 
     /** Append [event] to the internal queue. Bound to a publisher via [record]. */
     fun record(event: E) {
-        captured.add(event)
+        lock.withLock {
+            captured.add(event)
+            countChanged.signalAll()
+        }
+    }
+
+    /**
+     * Blocks until at least [n] events have been captured or [timeout] elapses, returning `true`
+     * when the target was reached. Replaces the ad-hoc `CountDownLatch` + `await` dance in tests
+     * that emit asynchronously and then need to wait for delivery before asserting.
+     *
+     * Intended for tests wired to real dispatchers (async delivery). Test-dispatcher specs should
+     * keep driving the scheduler with `advance()` and asserting [count] synchronously instead.
+     */
+    fun awaitCount(n: Int, timeout: Duration = 2.seconds): Boolean {
+        val deadlineNanos = System.nanoTime() + timeout.inWholeNanoseconds
+        lock.withLock {
+            while (captured.size < n) {
+                val remaining = deadlineNanos - System.nanoTime()
+                if (remaining <= 0) return captured.size >= n
+                countChanged.awaitNanos(remaining)
+            }
+            return true
+        }
     }
 
     /** Drops all captured events. Useful between subscription phases in long-running specs. */
@@ -84,5 +115,33 @@ fun <ET : EventType, E : LirpEvent<ET>> LirpEventPublisher<ET, E>.record(
     // annotation above silences a compiler inference warning on the vararg branch.
     @Suppress("UNUSED_VARIABLE")
     val keepAlive = subscription
+    return recorder
+}
+
+/**
+ * Subscribes a fresh [EventRecorder] synchronously to this entity's mutation events and returns it.
+ *
+ * When [types] is empty every mutation is captured; otherwise only the listed types are. The
+ * synchronous [ReactiveEntity.subscribe] path records inline on the emitting thread — use this when
+ * the test drives delivery deterministically (e.g. a test dispatcher advanced via `advance()`).
+ */
+fun <K, R> R.record(vararg types: MutationEvent.Type): EventRecorder<MutationEvent<K, R>>
+    where K : Comparable<K>, R : ReactiveEntity<K, R> {
+    val recorder = EventRecorder<MutationEvent<K, R>>()
+    if (types.isEmpty()) subscribe(callback = recorder::record)
+    else subscribe(*types, callback = recorder::record)
+    return recorder
+}
+
+/**
+ * Subscribes a fresh [EventRecorder] asynchronously to this entity's mutation events and returns it.
+ *
+ * Pairs with [EventRecorder.awaitCount] to replace the `AtomicReference` + `CountDownLatch` + await
+ * pattern: record asynchronously, emit, then `awaitCount(n)` before asserting on the captured events.
+ */
+fun <K, R> R.recordAsync(): EventRecorder<MutationEvent<K, R>>
+    where K : Comparable<K>, R : ReactiveEntity<K, R> {
+    val recorder = EventRecorder<MutationEvent<K, R>>()
+    subscribeAsync { event -> recorder.record(event) }
     return recorder
 }

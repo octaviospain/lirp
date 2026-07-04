@@ -26,6 +26,7 @@ import net.transgressoft.lirp.persistence.LirpRepository
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.MutableAudioPlaylist
 import net.transgressoft.lirp.testing.reactiveScope
+import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempfile
 import io.kotest.matchers.collections.shouldContainExactly
@@ -34,10 +35,9 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import java.io.File
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
@@ -114,14 +114,12 @@ class AggregateJsonPersistenceTest : FunSpec({
         reactive.advance()
 
         val initialJson = playlistFile.readText()
-        val persistenceLatch = CountDownLatch(1)
         val bubbleUpReceived = AtomicBoolean(false)
 
         // Subscribe to the playlist to detect that a bubble-up event was emitted
         playlist.subscribeAsync { event ->
             if (event is AggregateMutationEvent) {
                 bubbleUpReceived.set(true)
-                persistenceLatch.countDown()
             }
         }
 
@@ -130,8 +128,7 @@ class AggregateJsonPersistenceTest : FunSpec({
         reactive.advance()
 
         // Wait for debounce + write
-        persistenceLatch.await(2, TimeUnit.SECONDS) shouldBe true
-        bubbleUpReceived.get() shouldBe true
+        eventually(2.seconds) { bubbleUpReceived.get() shouldBe true }
 
         // The repo should have been written because AggregateMutationEvent flows through subscribeEntity
         // (entity.changes emits all events including bubble-up) — triggering markDirtyAndTrigger
@@ -166,17 +163,17 @@ class AggregateJsonPersistenceTest : FunSpec({
         reactive.advance()
 
         val reloadedPlaylist = playlistRepo2.findById(10).get()
-        val bubbleUpLatch = CountDownLatch(1)
+        val bubbleUpReceived = AtomicBoolean(false)
 
         reloadedPlaylist.subscribeAsync { event ->
-            if (event is AggregateMutationEvent) bubbleUpLatch.countDown()
+            if (event is AggregateMutationEvent) bubbleUpReceived.set(true)
         }
 
         // Mutate child: bubble-up should flow to the reloaded playlist's subscribers
         (audioItemRepo2.findById(1).get() as MutableAudioItem).title = "Track D Updated"
         reactive.advance()
 
-        bubbleUpLatch.await(2, TimeUnit.SECONDS) shouldBe true
+        eventually(2.seconds) { bubbleUpReceived.get() shouldBe true }
 
         ctx2.close()
     }
