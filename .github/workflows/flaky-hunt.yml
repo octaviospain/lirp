@@ -1,0 +1,48 @@
+name: flaky hunt
+
+# Manually-triggered job that runs the full test suite repeatedly to surface
+# intermittent failures and hangs (notably the historic cross-thread transaction
+# deadlock) that a single run cannot prove absent. Not wired to push/PR so normal
+# CI stays fast; run it on demand before merging concurrency-sensitive changes.
+
+on:
+    workflow_dispatch:
+        inputs:
+            iterations:
+                description: "Number of full-suite runs"
+                required: false
+                default: "10"
+            run_timeout:
+                description: "Per-run wall-clock budget (seconds); a run exceeding it is treated as a hang"
+                required: false
+                default: "900"
+
+jobs:
+    flaky-hunt:
+        runs-on: ubuntu-latest
+        timeout-minutes: 180
+
+        steps:
+            -   uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+                with:
+                    fetch-depth: 0
+
+            -   name: Set up JDK 21
+                uses: actions/setup-java@1bcf9fb12cf4aa7d266a90ae39939e61372fe520 # v5.4.0
+                with:
+                    java-version: 21
+                    distribution: 'zulu'
+                    java-package: 'jdk+fx'
+
+            -   name: Cache Gradle packages
+                uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+                with:
+                    path: |
+                        ~/.gradle/caches
+                        ~/.gradle/wrapper
+                    key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+                    restore-keys: |
+                        ${{ runner.os }}-gradle-
+
+            -   name: Repeatedly run the full test suite
+                run: scripts/flaky-hunt.sh "${{ inputs.iterations }}" "${{ inputs.run_timeout }}"

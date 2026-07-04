@@ -20,6 +20,7 @@ package net.transgressoft.lirp.persistence
 import net.transgressoft.lirp.entity.ReactiveEntity
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.event.ReactiveScope
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.asContextElement
 import kotlinx.coroutines.withContext
 
@@ -31,6 +32,18 @@ import kotlinx.coroutines.withContext
  * supported in the single-participant form.
  */
 private val activeTransactionCount = ThreadLocal.withInitial { 0 }
+
+/**
+ * Upper bound on how long the transaction commit path waits for the repository's flush lock.
+ *
+ * Sized far above any legitimate flush (a debounced write completes in ~1s, a few seconds at worst
+ * under load) so it never trips on healthy contention, yet finite so a stuck flush or a lock leaked
+ * by an earlier transaction fails fast with a diagnostic instead of hanging indefinitely.
+ *
+ * Exposed as a mutable seam so tests can shrink it to assert the fail-fast path without waiting the
+ * full production window; production code never reassigns it.
+ */
+internal var flushLockAcquireTimeout = 60.seconds
 
 /**
  * Executes [block] as an atomic unit of work against [repo].
@@ -120,10 +133,30 @@ suspend fun <K : Comparable<K>, R : ReactiveEntity<K, R>> transaction(
             ReactiveScope.transactionDispatcher +
             activeTransactionCount.asContextElement(activeTransactionCount.get())
     ) {
-        repo.lockFlush()
-        // The lock is acquired outside the try only on the line above; everything that can throw —
-        // including snapshot capture and event-buffer installation — runs inside so the finally
-        // always releases the lock and restores per-repo transaction state.
+        // Bounded acquisition: a flush that never releases the lock (a stuck backing-store write or a
+        // lock leaked by an earlier transaction) must fail fast and loud instead of hanging the caller
+        // — and, in the test suite, the whole JVM. The ceiling is far larger than any legitimate flush
+        // (a debounced write is ~1s, seconds at worst under load), so it never trips on healthy
+        // contention. Acquired outside the try so a failed acquisition does not reach unlockFlush.
+        val acquired =
+            try {
+                repo.tryLockFlush(flushLockAcquireTimeout)
+            } catch (interrupted: InterruptedException) {
+                Thread.currentThread().interrupt()
+                throw LirpTransactionException(
+                    "Interrupted while acquiring the transaction flush lock on '${repo.repoName}'",
+                    interrupted
+                )
+            }
+        if (!acquired) {
+            throw LirpTransactionException(
+                "Could not acquire the transaction flush lock on '${repo.repoName}' within " +
+                    "$flushLockAcquireTimeout — a prior flush or transaction likely did not release it. " +
+                    "Aborting to avoid an indefinite hang."
+            )
+        }
+        // Everything that can throw — including snapshot capture and event-buffer installation — runs
+        // inside the try so the finally always releases the lock and restores per-repo transaction state.
         var loadedEntities: List<ReactiveEntityBase<K, R>> = emptyList()
         try {
             activeTransactionCount.set(activeTransactionCount.get() + 1)

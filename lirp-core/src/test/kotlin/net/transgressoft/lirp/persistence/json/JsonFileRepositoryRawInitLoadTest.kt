@@ -18,12 +18,14 @@
 package net.transgressoft.lirp.persistence.json
 
 import net.transgressoft.lirp.entity.ReactiveEntityBase
+import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 
@@ -107,9 +109,9 @@ class JsonFileRepositoryRawInitLoadTest : StringSpec({
         // emits exactly one event so we know the subscription is wired.
         val one = repo.findById(0).orElseThrow()
         one.label = "mutated"
-        // Give the reactive dispatch a tick to settle.
-        Thread.sleep(50)
-        events.shouldHaveSize(1)
+        // Poll until the async reactive dispatch delivers the single mutation event, rather than
+        // racing it with a fixed sleep.
+        eventually(2.seconds) { events.shouldHaveSize(1) }
         repo.close()
         file.parentFile?.deleteRecursively()
     }

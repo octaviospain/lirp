@@ -31,6 +31,7 @@ import net.transgressoft.lirp.event.ReactiveScope
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.slf4j.MDC
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantLock
@@ -38,6 +39,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
 import kotlin.concurrent.withLock
 import kotlin.concurrent.write
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Job
@@ -274,6 +276,19 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
 
         /** Acquires [flushLock]. For use by the transaction orchestration layer in the same module. */
         internal fun lockFlush() = flushLock.lock()
+
+        /**
+         * Attempts to acquire [flushLock], waiting at most [timeout]. Returns `true` when the lock
+         * was taken and `false` when the wait elapsed first.
+         *
+         * The transaction orchestration layer uses the bounded variant instead of [lockFlush] so a
+         * flush that never releases the lock (a stuck backing-store write or a lock leaked by an
+         * earlier transaction) surfaces as a fast, diagnosable failure rather than an indefinite hang.
+         *
+         * @throws InterruptedException if the current thread is interrupted while waiting.
+         */
+        internal fun tryLockFlush(timeout: Duration): Boolean =
+            flushLock.tryLock(timeout.inWholeNanoseconds, TimeUnit.NANOSECONDS)
 
         /** Releases [flushLock]. Symmetric to [lockFlush]. */
         internal fun unlockFlush() = flushLock.unlock()

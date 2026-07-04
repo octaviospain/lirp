@@ -18,8 +18,10 @@
 package net.transgressoft.lirp.persistence.sql
 
 import net.transgressoft.lirp.event.CrudEvent
+import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.PERSISTED_ROW_POLL
 import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.databases
 import net.transgressoft.lirp.persistence.sql.DatabaseTestSupport.withDatabaseTest
+import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.datatest.withTests
 import io.kotest.matchers.shouldBe
@@ -105,10 +107,12 @@ internal class SqlRepositoryRawInitLoadTest : FunSpec({
                 val first = repo.findById(0).orElseThrow()
                 first.age = 99
 
-                // Allow the reactive event dispatch to settle.
-                Thread.sleep(100)
-                mutationEvents.size shouldBe 1
-                mutationEvents.first() shouldNotBe ""
+                // Poll until the async reactive dispatch delivers the single mutation event, rather
+                // than racing it with a fixed sleep.
+                eventually(PERSISTED_ROW_POLL) {
+                    mutationEvents.size shouldBe 1
+                    mutationEvents.first() shouldNotBe ""
+                }
 
                 repo.close()
             }
