@@ -34,6 +34,24 @@ see the [GitHub releases](https://github.com/octaviospain/lirp/releases).
   supply `bucketKeyOrdering` or `bucketValueOrdering`.
   See [#298](https://github.com/octaviospain/lirp/issues/298).
 
+- **`VersionedTableDef` gains a `versionOf(entity)` accessor (breaking for hand-written
+  implementers).** Optimistic-lock version reads no longer rebuild the entity's full column
+  parameter map on every versioned mutation; `SqlRepository` now reads the `@Version` value
+  directly through `VersionedTableDef.versionOf(entity)`. Because the interface now declares two
+  abstract methods (`bumpVersion` and `versionOf`), it is no longer a Kotlin `fun interface`, so
+  SAM-lambda construction (`VersionedTableDef { … }`) is no longer possible and hand-written
+  implementations must supply `versionOf`. KSP-generated `_LirpTableDef` classes implement it
+  automatically — consumers relying on `@PersistenceMapping` codegen are unaffected. Migration for
+  hand-written table defs: add
+  `override fun versionOf(entity: E): Long = entity.<versionProperty>`.
+  See [#314](https://github.com/octaviospain/lirp/issues/314).
+
+- **Ordered queries with a limit use a bounded top-K selection.** `Query.orderBy` combined with
+  `Query.limit` now retains only `offset + limit` candidates via a bounded heap (`O(n log k)` time,
+  `O(offset + limit)` memory) instead of sorting the entire candidate set. Results are identical to
+  the previous full stable sort truncated at the same window — behavior is unchanged, only the cost.
+  See [#314](https://github.com/octaviospain/lirp/issues/314).
+
 ## [3.2.0] - 2026-07-02
 
 Version 3.2.0 introduces the new `lirp-kafka` module, which adds transactional-outbox Kafka

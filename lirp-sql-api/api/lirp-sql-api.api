@@ -77,5 +77,6 @@ public abstract interface class net/transgressoft/lirp/persistence/sql/SqlTableD
 
 public abstract interface class net/transgressoft/lirp/persistence/sql/VersionedTableDef {
 	public abstract fun bumpVersion (Ljava/lang/Object;J)V
+	public abstract fun versionOf (Ljava/lang/Object;)J
 }
 

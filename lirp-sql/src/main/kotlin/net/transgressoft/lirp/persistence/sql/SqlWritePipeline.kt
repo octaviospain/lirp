@@ -238,11 +238,14 @@ internal class SqlWritePipeline<K : Comparable<K>, R : ReactiveEntity<K, R>>(
 
             junction.table.deleteWhere { junction.parentIdCol eq parentId }
 
-            ids.forEachIndexed { index, itemId ->
-                junction.table.insert { stmt ->
-                    stmt[junction.parentIdCol] = parentId
-                    stmt[junction.itemIdCol] = toExposedId(itemId)
-                    junction.positionCol?.let { posCol -> stmt[posCol] = index }
+            // Batch-insert all junction rows in a single statement rather than one round-trip per
+            // item. The deleteWhere above runs unconditionally so clearing a collection still wipes
+            // its rows; the insert is skipped when there is nothing to write.
+            if (ids.isNotEmpty()) {
+                junction.table.batchInsert(ids.withIndex(), shouldReturnGeneratedValues = false) { (index, itemId) ->
+                    this[junction.parentIdCol] = parentId
+                    this[junction.itemIdCol] = toExposedId(itemId)
+                    junction.positionCol?.let { posCol -> this[posCol] = index }
                 }
             }
         }

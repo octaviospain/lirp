@@ -206,6 +206,11 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     @Suppress("UNCHECKED_CAST")
     private val junctionAware: JunctionAware<R>? = tableDef as? JunctionAware<R>
 
+    // Resolved once: safe unchecked cast for the same reason as junctionAware — VersionedTableDef
+    // members are typed on the same self-type R. Non-null exactly when the entity is versioned.
+    @Suppress("UNCHECKED_CAST")
+    private val versionedTableDef: VersionedTableDef<R>? = tableDef as? VersionedTableDef<R>
+
     /**
      * Cached interpretations of this entity's junction descriptors, keyed by descriptor reference.
      * Reused across `loadFromStore`, `writePending`, and `installJunctionForeignKeys` so we don't
@@ -357,22 +362,16 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
     }
 
     /**
-     * Reads the optimistic-lock version from [entity] via the table descriptor's `toParams`
-     * mapping. Returns `null` when the repository's `tableDef` has no `@Version` column.
+     * Reads the optimistic-lock version from [entity] via the table descriptor's targeted
+     * [VersionedTableDef.versionOf] accessor. Returns `null` when the repository's `tableDef`
+     * has no `@Version` column.
      *
-     * Rationale: LIRP has no runtime reflection API for typed property access. The existing
-     * `toParams(entity, table)` Map already exposes every persisted column value keyed by its
-     * [Column] reference, so a single map lookup on [versionCol] yields the value with zero
-     * reflection — the same zero-reflection invariant preserved by `fromRow`/`applyRow`. The
-     * O(columns) cost is acceptable for typical entity widths; if profiling shows the lookup
-     * dominates mutation hot paths, a KSP-generated VersionAccessor remains available as a
-     * future optimization.
+     * The accessor reads the single `@Version` property directly, avoiding the O(columns) cost of
+     * materializing the full `toParams` map just to read one cell — this runs on every versioned
+     * mutation. The [versionCol] guard preserves the exact null semantics for unversioned tables.
      */
-    override fun extractVersion(entity: R): Long? {
-        val vc = versionCol ?: return null
-        val params = tableDef.toParams(entity, table)
-        return params[vc] as? Long
-    }
+    override fun extractVersion(entity: R): Long? =
+        if (versionCol == null) null else versionedTableDef?.versionOf(entity)
 
     /**
      * Executes the grouped pending payload against the database in a single transaction.

@@ -32,7 +32,7 @@ package net.transgressoft.lirp.persistence.sql
  *
  * @param E The entity type whose version column is managed.
  */
-fun interface VersionedTableDef<E> {
+interface VersionedTableDef<E> {
 
     /**
      * Sets the `@Version` property of [entity] to [newVersion], bypassing reactive setters
@@ -45,4 +45,17 @@ fun interface VersionedTableDef<E> {
      * @param newVersion The new version value (typically `expectedVersion + 1`).
      */
     fun bumpVersion(entity: E, newVersion: Long)
+
+    /**
+     * Reads the `@Version` property of [entity] directly, without materializing the entity's
+     * full column parameter map.
+     *
+     * Called by `SqlRepository` on every versioned mutation to capture the expected version for
+     * the optimistic-lock WHERE clause. Returning the field value directly avoids the O(columns)
+     * cost of building a `toParams` map just to read a single cell.
+     *
+     * @param entity The entity whose current version is read.
+     * @return The entity's current version counter.
+     */
+    fun versionOf(entity: E): Long
 }

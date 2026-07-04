@@ -138,8 +138,9 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
      * query call.
      *
      * **Note on ordering:** when [Query.orderBy] is non-empty, the candidate sequence
-     * is materialised into a [List] before sorting. For large unfiltered registries
-     * this is O(n) memory; combine with [Query.limit] where possible.
+     * is fully sorted (O(n) memory) unless a [Query.limit] is also set, in which case a
+     * bounded top-K heap is used instead, retaining only `offset + limit` elements
+     * (O(offset + limit) memory) rather than sorting the full candidate set.
      *
      * **Note on pagination without ordering:** [Strategy.INDEX_ONLY] returns results
      * in [Set] iteration order, which is non-deterministic across JVM runs. For
@@ -156,9 +157,8 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
         // for queries that do not use cross-aggregate traversal.
         val pred = query.predicate?.let { normalize(it) }
         val (strategy, indexLeaves, postFilterCount, viaStrat, candidates) = selectStrategyAndCandidates(pred, registry, query)
-        val ordered = applyOrdering(candidates, query.orderBy)
-        val sliced = applyPagination(ordered, query.offset, query.limit)
-        return PlanContext(strategy, indexLeaves, postFilterCount, viaStrat, sliced)
+        val results = orderAndPaginate(candidates, query.orderBy, query.offset, query.limit)
+        return PlanContext(strategy, indexLeaves, postFilterCount, viaStrat, results)
     }
 
     /**
@@ -397,17 +397,71 @@ internal class QueryPlanner<T : IdentifiableEntity<*>>(
         }
     }
 
-    private fun applyOrdering(candidates: Sequence<T>, orderBy: List<OrderClause<T>>): Sequence<T> {
-        if (orderBy.isEmpty()) return candidates
+    /**
+     * Applies ordering and pagination to the candidate sequence.
+     *
+     * - **No ordering:** streams the candidates through `drop(offset)` / `take(limit)` without
+     *   materialising — unchanged behaviour.
+     * - **Ordering, no limit:** full stable sort, then `drop(offset)` — unchanged behaviour.
+     * - **Ordering with a limit:** selects only the top `offset + limit` candidates via a bounded
+     *   heap ([boundedTopK]) — `O(n log k)` instead of `O(n log n)` — then drops the offset and
+     *   takes the limit. The bounded selection tie-breaks by input index, so its output is
+     *   identical to a full stable sort truncated at the same boundary.
+     *
+     * All branches stay lazy: no candidate is consumed until the returned sequence reaches a
+     * terminal operation, honouring the laziness contract in [execute]'s KDoc.
+     */
+    private fun orderAndPaginate(candidates: Sequence<T>, orderBy: List<OrderClause<T>>, offset: Int, limit: Int?): Sequence<T> {
+        if (orderBy.isEmpty()) {
+            val dropped = candidates.drop(offset)
+            return if (limit != null) dropped.take(limit) else dropped
+        }
         val cmp = composeComparator(orderBy)
         // Defer the materialise-and-sort to the first terminal operation so planning stays
         // execution-free; the sort runs when the consumer iterates, not at plan() / execute() time.
-        return sequence { yieldAll(candidates.toList().sortedWith(cmp)) }
+        if (limit == null) {
+            return sequence { yieldAll(candidates.toList().sortedWith(cmp).drop(offset)) }
+        }
+        if (limit == 0) return emptySequence()
+        val k = offset.toLong() + limit.toLong()
+        // Fall back to a full sort when the requested window exceeds Int range: the bounded heap
+        // would then retain (nearly) every candidate anyway, so it offers no advantage.
+        if (k > Int.MAX_VALUE) {
+            return sequence { yieldAll(candidates.toList().sortedWith(cmp).drop(offset).take(limit)) }
+        }
+        return sequence { yieldAll(boundedTopK(candidates, cmp, k.toInt()).drop(offset).take(limit)) }
     }
 
-    private fun applyPagination(seq: Sequence<T>, offset: Int, limit: Int?): Sequence<T> {
-        val dropped = seq.drop(offset)
-        return if (limit != null) dropped.take(limit) else dropped
+    /**
+     * Returns the [k] smallest candidates under [cmp], in ascending [cmp] order, selected with a
+     * bounded max-heap in `O(n log k)` time and `O(k)` space.
+     *
+     * Ties are broken by input index so the retained window matches a full stable sort exactly:
+     * a candidate replaces the current heap head only when it strictly precedes it under the
+     * index-augmented comparator, preserving first-seen order among equal keys.
+     */
+    private fun boundedTopK(candidates: Sequence<T>, cmp: Comparator<T>, k: Int): List<T> {
+        val stable =
+            Comparator<IndexedValue<T>> { a, b ->
+                val byValue = cmp.compare(a.value, b.value)
+                if (byValue != 0) byValue else a.index.compareTo(b.index)
+            }
+        // Max-heap: the current worst retained candidate sits at the head, so it is the one a
+        // better incoming candidate evicts.
+        val heap = java.util.PriorityQueue(minOf(k, 1024).coerceAtLeast(1), stable.reversed())
+        var index = 0
+        for (candidate in candidates) {
+            val tagged = IndexedValue(index++, candidate)
+            if (heap.size < k) {
+                heap.offer(tagged)
+            } else if (stable.compare(tagged, heap.peek()) < 0) {
+                heap.poll()
+                heap.offer(tagged)
+            }
+        }
+        val selected = ArrayList(heap)
+        selected.sortWith(stable)
+        return selected.map { it.value }
     }
 
     /**
