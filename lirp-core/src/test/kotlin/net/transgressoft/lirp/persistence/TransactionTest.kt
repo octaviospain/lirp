@@ -47,16 +47,33 @@ import kotlinx.coroutines.yield
 @DisplayName("transaction() core repository contract")
 internal class TransactionTest : StringSpec() {
 
+    /**
+     * Runs [block] against a freshly-created [InMemoryAudioItemRepo], always closing the repo
+     * afterwards. Collapses the create-try-finally-close scaffolding shared by nearly every
+     * transaction test so each body reads as its own arrange/act/assert.
+     */
+    suspend fun withRepo(
+        name: String = "InMemoryAudioItems",
+        onError: LirpErrorHandler? = null,
+        block: suspend (InMemoryAudioItemRepo) -> Unit
+    ) {
+        val repo = InMemoryAudioItemRepo(name, onError)
+        try {
+            block(repo)
+        } finally {
+            repo.close()
+        }
+    }
+
     init {
         extension(ReactiveScopeSerialization)
 
         "transaction commits in-memory mutations and fires collapsed events to subscribers" {
-            val repo = InMemoryAudioItemRepo()
-            val item = repo.create(1, "Bohemian Rhapsody", "A Night at the Opera")
-            val events = mutableListOf<MutationEvent<Int, AudioItem>>()
-            item.subscribe { events.add(it) }
+            withRepo { repo ->
+                val item = repo.create(1, "Bohemian Rhapsody", "A Night at the Opera")
+                val events = mutableListOf<MutationEvent<Int, AudioItem>>()
+                item.subscribe { events.add(it) }
 
-            try {
                 transaction(repo) { r ->
                     (r.findById(1).get() as MutableAudioItem).title = "Killer Queen"
                 }
@@ -64,18 +81,15 @@ internal class TransactionTest : StringSpec() {
                 (item as MutableAudioItem).title shouldBe "Killer Queen"
                 events shouldHaveSize 1
                 events.single().shouldBeInstanceOf<PropertyChanged<*, *, *>>()
-            } finally {
-                repo.close()
             }
         }
 
         "transaction rollback on block throw restores in-memory state and discards events" {
-            val repo = InMemoryAudioItemRepo()
-            val item = repo.create(2, "Don't Stop Me Now", "Jazz")
-            val events = mutableListOf<MutationEvent<Int, AudioItem>>()
-            item.subscribe { events.add(it) }
+            withRepo { repo ->
+                val item = repo.create(2, "Don't Stop Me Now", "Jazz")
+                val events = mutableListOf<MutationEvent<Int, AudioItem>>()
+                item.subscribe { events.add(it) }
 
-            try {
                 shouldThrow<LirpTransactionException> {
                     transaction(repo) { r ->
                         (r.findById(2).get() as MutableAudioItem).title = "mutated-inside"
@@ -85,18 +99,15 @@ internal class TransactionTest : StringSpec() {
 
                 (item as MutableAudioItem).title shouldBe "Don't Stop Me Now"
                 events.shouldBeEmpty()
-            } finally {
-                repo.close()
             }
         }
 
         "deferred events collapse empty-to-Rock-to-Jazz into a single empty-to-Jazz PropertyChanged" {
-            val repo = InMemoryAudioItemRepo()
-            val item = repo.create(3, "", "")
-            val events = mutableListOf<MutationEvent<Int, AudioItem>>()
-            item.subscribe { events.add(it) }
+            withRepo { repo ->
+                val item = repo.create(3, "", "")
+                val events = mutableListOf<MutationEvent<Int, AudioItem>>()
+                item.subscribe { events.add(it) }
 
-            try {
                 transaction(repo) { r ->
                     val e = r.findById(3).get() as MutableAudioItem
                     e.title = "Rock"
@@ -108,8 +119,6 @@ internal class TransactionTest : StringSpec() {
                 val propertyChanged = events.single() as PropertyChanged<Int, AudioItem, String>
                 propertyChanged.oldValue shouldBe ""
                 propertyChanged.newValue shouldBe "Jazz"
-            } finally {
-                repo.close()
             }
         }
 
@@ -136,12 +145,11 @@ internal class TransactionTest : StringSpec() {
         }
 
         "nested transaction on the same repo joins the outer and results in one collapsed commit" {
-            val repo = InMemoryAudioItemRepo()
-            val item = repo.create(4, "We Will Rock You", "News of the World")
-            val events = mutableListOf<MutationEvent<Int, AudioItem>>()
-            item.subscribe { events.add(it) }
+            withRepo { repo ->
+                val item = repo.create(4, "We Will Rock You", "News of the World")
+                val events = mutableListOf<MutationEvent<Int, AudioItem>>()
+                item.subscribe { events.add(it) }
 
-            try {
                 transaction(repo) { r ->
                     (r.findById(4).get() as MutableAudioItem).title = "outer"
                     transaction(r) { inner ->
@@ -152,27 +160,22 @@ internal class TransactionTest : StringSpec() {
                 (item as MutableAudioItem).title shouldBe "inner"
                 // Both mutations collapse to one event (outer title → inner title).
                 events shouldHaveSize 1
-            } finally {
-                repo.close()
             }
         }
 
         "nested transaction on a different repo throws LirpTransactionException immediately" {
-            val repo1 = InMemoryAudioItemRepo()
-            val repo2 = InMemoryAudioItemRepo("InMemoryAudioItems2")
-            repo1.create(5, "Radio Ga Ga", "The Works")
+            withRepo { repo1 ->
+                withRepo("InMemoryAudioItems2") { repo2 ->
+                    repo1.create(5, "Radio Ga Ga", "The Works")
 
-            try {
-                shouldThrow<LirpTransactionException> {
-                    transaction(repo1) { _ ->
-                        transaction(repo2) { _ ->
-                            // unreachable
+                    shouldThrow<LirpTransactionException> {
+                        transaction(repo1) { _ ->
+                            transaction(repo2) { _ ->
+                                // unreachable
+                            }
                         }
                     }
                 }
-            } finally {
-                repo1.close()
-                repo2.close()
             }
         }
 
@@ -180,10 +183,9 @@ internal class TransactionTest : StringSpec() {
             val handlerInvocations = CopyOnWriteArrayList<Pair<Throwable, LirpErrorContext>>()
             val handler = LirpErrorHandler { t, ctx -> handlerInvocations.add(t to ctx) }
 
-            val repo = InMemoryAudioItemRepo("transaction-error-notify-repo", onError = handler)
-            repo.add(MutableAudioItem(6, "Another One Bites the Dust", "The Game") as AudioItem)
+            withRepo("transaction-error-notify-repo", onError = handler) { repo ->
+                repo.add(MutableAudioItem(6, "Another One Bites the Dust", "The Game") as AudioItem)
 
-            try {
                 shouldThrow<LirpTransactionException> {
                     transaction(repo) { r ->
                         (r.findById(6).get() as MutableAudioItem).title = "mutated"
@@ -197,17 +199,14 @@ internal class TransactionTest : StringSpec() {
                 // Carries entity identity only — not field values.
                 ctx.entityIds shouldHaveSize 1
                 ctx.entityIds.first() shouldBe 6
-            } finally {
-                repo.close()
             }
         }
 
         "onError handler suppresses the exception and receives the failure throwable" {
             var capturedThrowable: Throwable? = null
-            val repo = InMemoryAudioItemRepo()
-            repo.add(MutableAudioItem(7, "Somebody to Love", "A Day at the Races") as AudioItem)
+            withRepo { repo ->
+                repo.add(MutableAudioItem(7, "Somebody to Love", "A Day at the Races") as AudioItem)
 
-            try {
                 transaction(repo, onError = { capturedThrowable = throwable }) { r ->
                     (r.findById(7).get() as MutableAudioItem).title = "changed"
                     throw RuntimeException("handled failure")
@@ -215,14 +214,11 @@ internal class TransactionTest : StringSpec() {
 
                 capturedThrowable?.message shouldBe "handled failure"
                 (repo.findById(7).get() as MutableAudioItem).title shouldBe "Somebody to Love"
-            } finally {
-                repo.close()
             }
         }
 
         "entity added inside a failing block is absent from the repo after rollback" {
-            val repo = InMemoryAudioItemRepo()
-            try {
+            withRepo { repo ->
                 shouldThrow<LirpTransactionException> {
                     transaction(repo) { r ->
                         r.add(MutableAudioItem(8, "Flash", "The Game") as AudioItem)
@@ -233,15 +229,13 @@ internal class TransactionTest : StringSpec() {
                 // The insert was rolled back — entity must not be present.
                 repo.findById(8).isPresent shouldBe false
                 repo.size() shouldBe 0
-            } finally {
-                repo.close()
             }
         }
 
         "entity removed inside a failing block is re-added to the repo after rollback" {
-            val repo = InMemoryAudioItemRepo()
-            repo.add(MutableAudioItem(9, "Innuendo", "Innuendo") as AudioItem)
-            try {
+            withRepo { repo ->
+                repo.add(MutableAudioItem(9, "Innuendo", "Innuendo") as AudioItem)
+
                 shouldThrow<LirpTransactionException> {
                     transaction(repo) { r ->
                         r.remove(r.findById(9).get())
@@ -250,17 +244,15 @@ internal class TransactionTest : StringSpec() {
                 }
 
                 // The delete was rolled back — entity must still be present.
-                repo.findById(9).shouldBePresent { it.title shouldBe "Innuendo" }
-            } finally {
-                repo.close()
+                repo shouldHaveItemWithTitle (9 to "Innuendo")
             }
         }
 
         "lastDateModified is restored to its pre-block value after a failing block" {
-            val repo = InMemoryAudioItemRepo()
-            val item = repo.create(10, "The Show Must Go On", "Innuendo")
-            val preDateModified = item.lastDateModified
-            try {
+            withRepo { repo ->
+                val item = repo.create(10, "The Show Must Go On", "Innuendo")
+                val preDateModified = item.lastDateModified
+
                 shouldThrow<LirpTransactionException> {
                     transaction(repo) { r ->
                         (r.findById(10).get() as MutableAudioItem).title = "mutated-title"
@@ -270,8 +262,6 @@ internal class TransactionTest : StringSpec() {
 
                 // lastDateModified must revert to the pre-block value after rollback.
                 item.lastDateModified shouldBe preDateModified
-            } finally {
-                repo.close()
             }
         }
 
@@ -279,12 +269,11 @@ internal class TransactionTest : StringSpec() {
             // Verifies that _txEventBuffer is propagated across coroutine suspension via
             // asContextElement: a scalar mutation after a thread switch must still be buffered
             // (not published directly) and committed in the same transaction.
-            val repo = InMemoryAudioItemRepo()
-            val item = repo.create(11, "Bicycle Race", "Jazz")
-            val events = mutableListOf<MutationEvent<Int, AudioItem>>()
-            item.subscribe { events.add(it) }
+            withRepo { repo ->
+                val item = repo.create(11, "Bicycle Race", "Jazz")
+                val events = mutableListOf<MutationEvent<Int, AudioItem>>()
+                item.subscribe { events.add(it) }
 
-            try {
                 transaction(repo) { r ->
                     // Real suspension that resumes on a worker thread.
                     withContext(Dispatchers.IO) { yield() }
@@ -295,15 +284,13 @@ internal class TransactionTest : StringSpec() {
                 // Exactly one collapsed event fired after commit — none during the block.
                 events shouldHaveSize 1
                 (item as MutableAudioItem).title shouldBe "Fat Bottomed Girls"
-            } finally {
-                repo.close()
             }
         }
 
         "transaction remove-then-add same pre-existing id results in committed UPDATE" {
-            val repo = InMemoryAudioItemRepo()
-            repo.create(20, "Killer Queen", "Sheer Heart Attack")
-            try {
+            withRepo { repo ->
+                repo.create(20, "Killer Queen", "Sheer Heart Attack")
+
                 transaction(repo) { r ->
                     val existing = r.findById(20).get()
                     r.remove(existing)
@@ -311,16 +298,13 @@ internal class TransactionTest : StringSpec() {
                 }
 
                 // After commit: entity present with re-added value (no duplicate-key failure).
-                repo.findById(20).shouldBePresent { it.title shouldBe "Bohemian Rhapsody" }
+                repo shouldHaveItemWithTitle (20 to "Bohemian Rhapsody")
                 repo.size() shouldBe 1
-            } finally {
-                repo.close()
             }
         }
 
         "transaction add-then-remove same new id is a no-op after commit" {
-            val repo = InMemoryAudioItemRepo()
-            try {
+            withRepo { repo ->
                 transaction(repo) { r ->
                     r.add(MutableAudioItem(21, "Radio Ga Ga", "The Works") as AudioItem)
                     r.remove(r.findById(21).get())
@@ -329,8 +313,6 @@ internal class TransactionTest : StringSpec() {
                 // After commit: entity is absent because insert+delete cancel out.
                 repo.findById(21).isPresent shouldBe false
                 repo.size() shouldBe 0
-            } finally {
-                repo.close()
             }
         }
 
@@ -341,9 +323,8 @@ internal class TransactionTest : StringSpec() {
             // close()) blocks forever. withTimeout turns a regression into a fast failure instead of a
             // hung suite.
             withTimeout(10_000) {
-                val repo = InMemoryAudioItemRepo()
-                repo.create(30, "Don't Stop Me Now", "Jazz")
-                try {
+                withRepo { repo ->
+                    repo.create(30, "Don't Stop Me Now", "Jazz")
                     transaction(repo) { r ->
                         withContext(Dispatchers.IO) { yield() }
                         (r.findById(30).get() as MutableAudioItem).title = "Somebody to Love"
@@ -353,9 +334,7 @@ internal class TransactionTest : StringSpec() {
                         withContext(Dispatchers.Default) { yield() }
                         (r.findById(30).get() as MutableAudioItem).title = "Under Pressure"
                     }
-                    repo.findById(30).shouldBePresent { it.title shouldBe "Under Pressure" }
-                } finally {
-                    repo.close()
+                    repo shouldHaveItemWithTitle (30 to "Under Pressure")
                 }
             }
         }
@@ -382,7 +361,7 @@ internal class TransactionTest : StringSpec() {
                     failure.message shouldContain "Could not acquire the transaction flush lock"
                 }
                 // The block never ran: the lock was never acquired, so in-memory state is untouched.
-                repo.findById(40).shouldBePresent { it.title shouldBe "Fat Bottomed Girls" }
+                repo shouldHaveItemWithTitle (40 to "Fat Bottomed Girls")
             } finally {
                 repo.unlockFlush()
                 flushLockAcquireTimeout = previousTimeout
@@ -390,6 +369,14 @@ internal class TransactionTest : StringSpec() {
             }
         }
     }
+}
+
+/**
+ * Asserts the repository holds an entity under `idAndTitle.first` whose title equals
+ * `idAndTitle.second`, keeping the recurring "present with expected title" claim to one line.
+ */
+private infix fun InMemoryAudioItemRepo.shouldHaveItemWithTitle(idAndTitle: Pair<Int, String>) {
+    findById(idAndTitle.first).shouldBePresent { it.title shouldBe idAndTitle.second }
 }
 
 /**
