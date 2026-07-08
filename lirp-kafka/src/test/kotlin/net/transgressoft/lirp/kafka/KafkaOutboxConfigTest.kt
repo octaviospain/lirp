@@ -17,14 +17,17 @@
 
 package net.transgressoft.lirp.kafka
 
+import net.transgressoft.lirp.persistence.sql.H2ContainerSupport
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 
 /**
- * Unit tests verifying that [KafkaOutboxConfig] exposes the documented defaults and rejects
- * invalid construction arguments.
+ * Unit tests verifying that [KafkaOutboxConfig] exposes the documented defaults, rejects invalid
+ * construction arguments, and that [LirpKafkaConfig] honours [LirpKafkaConfig.startRelay]
+ * lifecycle contracts.
  */
 @DisplayName("KafkaOutboxConfigTest")
 internal class KafkaOutboxConfigTest : StringSpec() {
@@ -69,6 +72,43 @@ internal class KafkaOutboxConfigTest : StringSpec() {
         "KafkaOutboxConfigTest LirpKafkaConfig.create rejects blank bootstrapServers" {
             shouldThrow<IllegalArgumentException> {
                 LirpKafkaConfig.create("")
+            }
+        }
+
+        "KafkaOutboxConfigTest LirpKafkaConfig startRelay applies new producerConfig after stop-restart" {
+            val dataSource = H2ContainerSupport.buildH2DataSource()
+            val lirpConfig = LirpKafkaConfig.create("localhost:9092")
+
+            try {
+                lirpConfig.startRelay(dataSource, producerConfig = mapOf("max.block.ms" to "10000"))
+                val publisherBeforeStop = lirpConfig.publisher()
+                lirpConfig.stopRelay()
+
+                lirpConfig.startRelay(dataSource, producerConfig = mapOf("max.block.ms" to "20000"))
+                val publisherAfterRestart = lirpConfig.publisher()
+
+                // A new publisher must be constructed so the new producerConfig reaches the KafkaProducer
+                publisherAfterRestart shouldNotBe publisherBeforeStop
+            } finally {
+                lirpConfig.close()
+                dataSource.close()
+            }
+        }
+
+        "KafkaOutboxConfigTest LirpKafkaConfig startRelay does not reconstruct publisher within a single continuous session" {
+            val dataSource = H2ContainerSupport.buildH2DataSource()
+            val lirpConfig = LirpKafkaConfig.create("localhost:9092")
+
+            try {
+                lirpConfig.startRelay(dataSource)
+                val publisher1 = lirpConfig.publisher()
+                val publisher2 = lirpConfig.publisher()
+
+                // Within a running session the same instance is always returned — no thrash
+                publisher2 shouldBe publisher1
+            } finally {
+                lirpConfig.close()
+                dataSource.close()
             }
         }
     }
