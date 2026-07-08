@@ -104,5 +104,29 @@ internal class CloudEventsBinarySerializerTest : StringSpec() {
             val headers = serialized.headers + ("content-type" to "application/xml".toByteArray(Charsets.UTF_8))
             shouldThrow<IllegalArgumentException> { serializer.deserialize(serialized.value, headers) }
         }
+
+        "CloudEventsBinarySerializerTest deserialize rejects an empty ce_id header byte array" {
+            // An empty ByteArray is non-null so the null-check elvis does not fire; a blank eventId
+            // would silently pass through and collapse deduplication keys.
+            val headers = serialized.headers + ("ce_id" to ByteArray(0))
+            shouldThrow<IllegalStateException> { serializer.deserialize(serialized.value, headers) }
+        }
+
+        "CloudEventsBinarySerializerTest deserialize rejects a blank ce_id header" {
+            val headers = serialized.headers + ("ce_id" to "   ".toByteArray(Charsets.UTF_8))
+            shouldThrow<IllegalStateException> { serializer.deserialize(serialized.value, headers) }
+        }
+
+        "CloudEventsBinarySerializerTest deserialize rejects an empty ce_subject header byte array" {
+            // An empty ByteArray for ce_subject would produce a blank aggregateId / record key,
+            // silently collapsing per-aggregate ordering.
+            val headers = serialized.headers + ("ce_subject" to ByteArray(0))
+            shouldThrow<IllegalStateException> { serializer.deserialize(serialized.value, headers) }
+        }
+
+        "CloudEventsBinarySerializerTest deserialize rejects a blank ce_subject header" {
+            val headers = serialized.headers + ("ce_subject" to "   ".toByteArray(Charsets.UTF_8))
+            shouldThrow<IllegalStateException> { serializer.deserialize(serialized.value, headers) }
+        }
     }
 }

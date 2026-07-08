@@ -34,12 +34,13 @@ import kotlinx.serialization.Serializable
  * serializer.
  *
  * @property eventId Unique identifier of the outbox row (UUID string). Used as the CloudEvents
- *   `ce_id` header and as the idempotency key for consumer-side deduplication.
+ *   `ce_id` header and as the idempotency key for consumer-side deduplication. Must be non-blank.
  * @property aggregateType Logical aggregate type name (e.g. table name or class name) used to
  *   route events to the appropriate Kafka topic via [TopicResolver] and to derive the CloudEvents
  *   `ce_source` and `ce_type` headers.
  * @property aggregateId String identifier of the specific aggregate instance; used as the Kafka
- *   record key for per-aggregate ordering and as the CloudEvents `ce_subject` header.
+ *   record key for per-aggregate ordering and as the CloudEvents `ce_subject` header. Must be
+ *   non-blank to preserve per-aggregate delivery order and prevent empty record keys.
  * @property eventTypeCode Numeric event-type code mapping directly to
  *   [net.transgressoft.lirp.event.EventType.code].
  * @property payload Serializer-neutral JSON field snapshot of the entity at capture time.
@@ -55,6 +56,11 @@ data class LirpEventEnvelope(
     val payload: String,
     val createdAt: String
 ) {
+    init {
+        require(eventId.isNotBlank()) { "eventId must not be blank; a non-blank idempotency key is required" }
+        require(aggregateId.isNotBlank()) { "aggregateId must not be blank; a non-blank aggregate identifier is required for per-aggregate ordering" }
+    }
+
     companion object {
         /**
          * Builds a [LirpEventEnvelope] from an internal outbox row.
