@@ -19,6 +19,7 @@ package net.transgressoft.lirp.kafka
 
 import net.transgressoft.lirp.event.LirpErrorHandler
 import net.transgressoft.lirp.kafka.outbox.OutboxRelay
+import net.transgressoft.lirp.kafka.outbox.SqlOutboxStore
 import net.transgressoft.lirp.kafka.spi.CloudEventsBinarySerializer
 import net.transgressoft.lirp.kafka.spi.DefaultTopicResolver
 import net.transgressoft.lirp.kafka.spi.LirpEventSerializer
@@ -109,10 +110,14 @@ class LirpKafkaConfig private constructor(val bootstrapServers: String) : AutoCl
         val db = Database.connect(dataSource)
         // Reuse the cached publisher across relay restarts so a prior stopRelay() does not leave the
         // previous producer/broker connection open when a new relay is started.
+        // Pass dataSource explicitly so the publisher registers the db→dataSource mapping used
+        // by emitAsync to detect an ambient transaction on a different Database wrapping the same pool.
         val publisher =
             _publisher
-                ?: KafkaEventPublisher<Nothing, Nothing>("lirp-kafka", bootstrapServers, db, producerConfig)
-                    .also { _publisher = it }
+                ?: KafkaEventPublisher<Nothing, Nothing>(
+                    "lirp-kafka", bootstrapServers, db,
+                    SqlOutboxStore(db), producerConfig, dataSource = dataSource
+                ).also { _publisher = it }
         relay = OutboxRelay(db, publisher, config, serializer, topicResolver, onDeadLetter).also { it.start() }
     }
 
