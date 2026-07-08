@@ -17,12 +17,14 @@
 
 package net.transgressoft.lirp.persistence
 
+import net.transgressoft.lirp.event.AggregateMutationEvent
 import net.transgressoft.lirp.event.LirpErrorContext
 import net.transgressoft.lirp.event.LirpErrorHandler
 import net.transgressoft.lirp.event.LirpOperation
 import net.transgressoft.lirp.event.MutationEvent
 import net.transgressoft.lirp.event.PropertyChanged
 import net.transgressoft.lirp.testing.ReactiveScopeSerialization
+import net.transgressoft.lirp.testing.record
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
 import io.kotest.core.spec.style.StringSpec
@@ -62,6 +64,22 @@ internal class TransactionTest : StringSpec() {
             block(repo)
         } finally {
             repo.close()
+        }
+    }
+
+    /**
+     * Runs [block] with a freshly-created [InMemoryPlaylistRepo] and its [AudioItemVolatileRepository]
+     * wired via a shared [LirpContext]. Closes all resources on exit.
+     */
+    suspend fun withPlaylistRepo(block: suspend (InMemoryPlaylistRepo, AudioItemVolatileRepository) -> Unit) {
+        val ctx = LirpContext()
+        val itemRepo = AudioItemVolatileRepository(ctx)
+        val playlistRepo = InMemoryPlaylistRepo(ctx)
+        try {
+            block(playlistRepo, itemRepo)
+        } finally {
+            playlistRepo.close()
+            ctx.close()
         }
     }
 
@@ -368,6 +386,88 @@ internal class TransactionTest : StringSpec() {
                 repo.close()
             }
         }
+
+        // Regression test for aggregate-collection event buffering (#328):
+        // A subscriber attached before the transaction must not see the aggregate-collection event
+        // during the block (it is buffered), receives it exactly once after commit, and receives
+        // nothing after a rollback.
+        "aggregate-collection mutation event is buffered during transaction and delivered only after commit" {
+            withPlaylistRepo { playlistRepo, itemRepo ->
+                val item = itemRepo.create(50, "Bohemian Rhapsody", "A Night at the Opera")
+                val playlist = playlistRepo.createPlaylist(51, "Rock Classics")
+
+                val recorder = playlist.record()
+
+                transaction(playlistRepo) { r ->
+                    (r.findById(51).get() as DefaultAudioPlaylist).audioItems.add(item)
+                    // Event must be buffered — recorder sees nothing while block runs.
+                    recorder.count shouldBe 0
+                }
+
+                // Exactly one aggregate-collection event fired after commit.
+                recorder.events shouldHaveSize 1
+                recorder.events.single().shouldBeInstanceOf<AggregateMutationEvent<*, *>>()
+            }
+        }
+
+        "aggregate-collection mutation event is discarded and not delivered after transaction rollback" {
+            withPlaylistRepo { playlistRepo, itemRepo ->
+                val item = itemRepo.create(52, "We Will Rock You", "News of the World")
+                val playlist = playlistRepo.createPlaylist(53, "Stadium Anthems")
+
+                val recorder = playlist.record()
+
+                shouldThrow<LirpTransactionException> {
+                    transaction(playlistRepo) { r ->
+                        (r.findById(53).get() as DefaultAudioPlaylist).audioItems.add(item)
+                        error("forced rollback")
+                    }
+                }
+
+                // No aggregate-collection event must reach the subscriber after rollback.
+                recorder.events.shouldBeEmpty()
+            }
+        }
+
+        // Regression test for aggregate-collection rollback restore (#329):
+        // A rolled-back add to a mutableAggregateList must leave the collection without the added
+        // item — in-memory state must match the store (which never received the write).
+        "aggregate-collection add is rolled back on transaction failure leaving collection unchanged" {
+            withPlaylistRepo { playlistRepo, itemRepo ->
+                val item = itemRepo.create(54, "Radio Ga Ga", "The Works")
+                val playlist = playlistRepo.createPlaylist(55, "Classics")
+
+                val recorder = playlist.record()
+
+                shouldThrow<LirpTransactionException> {
+                    transaction(playlistRepo) { r ->
+                        (r.findById(55).get() as DefaultAudioPlaylist).audioItems.add(item)
+                        error("forced rollback")
+                    }
+                }
+
+                // After rollback: item must be absent from the collection.
+                val playlistAfter = playlistRepo.findById(55).get() as DefaultAudioPlaylist
+                playlistAfter.audioItems.referenceIds shouldBe emptyList<Int>()
+                // Rollback must not re-emit any collection event.
+                recorder.events.shouldBeEmpty()
+            }
+        }
+
+        "committed aggregate-collection add persists in memory and no existing test regressions" {
+            withPlaylistRepo { playlistRepo, itemRepo ->
+                val item = itemRepo.create(56, "Under Pressure", "Hot Space")
+                val playlist = playlistRepo.createPlaylist(57, "Duets")
+
+                transaction(playlistRepo) { r ->
+                    (r.findById(57).get() as DefaultAudioPlaylist).audioItems.add(item)
+                }
+
+                // After commit: item must be present in the collection.
+                val playlistAfter = playlistRepo.findById(57).get() as DefaultAudioPlaylist
+                playlistAfter.audioItems.referenceIds.toList() shouldBe listOf(56)
+            }
+        }
     }
 }
 
@@ -377,6 +477,32 @@ internal class TransactionTest : StringSpec() {
  */
 private infix fun InMemoryAudioItemRepo.shouldHaveItemWithTitle(idAndTitle: Pair<Int, String>) {
     findById(idAndTitle.first).shouldBePresent { it.title shouldBe idAndTitle.second }
+}
+
+/**
+ * In-memory [PersistentRepositoryBase] for [MutableAudioPlaylist] entities, wired into a
+ * [LirpContext] so that aggregate-collection delegates resolve their item references correctly.
+ * Used in aggregate-collection transaction regression tests.
+ */
+internal class InMemoryPlaylistRepo(
+    context: LirpContext
+) : PersistentRepositoryBase<Int, MutableAudioPlaylist>(context, "InMemoryPlaylists", java.util.concurrent.ConcurrentHashMap(), loadOnInit = false) {
+
+    init {
+        load()
+    }
+
+    fun createPlaylist(id: Int, name: String, audioItemIds: List<Int> = emptyList()): MutableAudioPlaylist =
+        DefaultAudioPlaylist(id, name, audioItemIds).also { add(it) }
+
+    override fun loadFromStore(): Map<Int, MutableAudioPlaylist> = emptyMap()
+
+    override fun writePending(
+        inserts: List<MutableAudioPlaylist>,
+        updates: List<PendingUpdate<Int, MutableAudioPlaylist>>,
+        deletes: List<Pair<Int, Long?>>,
+        hadClear: Boolean
+    ) = Unit
 }
 
 /**

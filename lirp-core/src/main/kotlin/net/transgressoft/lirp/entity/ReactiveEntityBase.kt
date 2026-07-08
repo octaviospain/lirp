@@ -302,6 +302,10 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
      * Accepts any [LirpEvent] as [childEvent] — both [MutationEvent] for property-level bubble-up
      * and [CollectionChangeEvent] for collection-level diffs.
      *
+     * When a transaction buffer is active on the current thread, the event is routed into the
+     * buffer instead of being published immediately, matching the behaviour of [emitPropertyChanged].
+     * Buffered events are flushed on commit or discarded on rollback.
+     *
      * @param refName the property name of the aggregate-reference property
      *   (`@ToOneAggregate` or `@ToManyAggregates`) that triggered the bubble-up
      * @param childEvent the original [LirpEvent] from the referenced child entity or collection
@@ -315,6 +319,11 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
                 refName = refName,
                 childEvent = childEvent
             )
+        val txBuffer = _txEventBuffer.get()
+        if (txBuffer != null) {
+            txBuffer.add(aggregateEvent)
+            return
+        }
         publisher.emitAsync(aggregateEvent)
     }
 
@@ -366,6 +375,10 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
      * Unlike [emitBubbleUpEvent], this method checks [shouldEmit] to avoid unnecessary work when no
      * subscribers are registered.
      *
+     * When a transaction buffer is active on the current thread, the event is routed into the
+     * buffer instead of being published immediately, matching the behaviour of [emitPropertyChanged].
+     * Buffered events are flushed on commit or discarded on rollback.
+     *
      * @param refName the property name of the mutable aggregate collection that changed
      * @param childEvent the [CollectionChangeEvent] describing the diff
      */
@@ -374,6 +387,17 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
         check(!isClosed) { "Entity '${this::class.java.simpleName}' is closed" }
         if (eventsDisabled) return
         lastDateModified = LocalDateTime.now()
+        val txBuffer = _txEventBuffer.get()
+        if (txBuffer != null) {
+            val aggregateEvent =
+                StandardAggregateMutationEvent(
+                    entity = this as R,
+                    refName = refName,
+                    childEvent = childEvent
+                )
+            txBuffer.add(aggregateEvent)
+            return
+        }
         if (!shouldEmit) return
         val aggregateEvent =
             StandardAggregateMutationEvent(
