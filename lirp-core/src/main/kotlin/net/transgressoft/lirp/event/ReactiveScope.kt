@@ -117,6 +117,14 @@ object ReactiveScope {
         ioScope = defaultIoScope
     }
 
+    /**
+     * Returns `true` when [ioScope] has not been replaced by a test dispatcher and is therefore
+     * the production single-slot scope. Flush coroutines use this to decide whether to offload
+     * blocking I/O to the unbounded [Dispatchers.IO] pool: the offload is only needed (and
+     * meaningful) when [ioScope] has the `limitedParallelism(1)` constraint.
+     */
+    internal val isProductionIoScope: Boolean get() = ioScope === defaultIoScope
+
     fun resetDefaultTransactionDispatcher() {
         transactionDispatcher = defaultTransactionDispatcher
     }

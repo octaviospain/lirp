@@ -30,6 +30,7 @@ import io.kotest.matchers.shouldBe
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -319,5 +320,117 @@ private class TestFlushRepo(
     fun quiesceAndClose() {
         writeImpl = { _, _, _, _ -> }
         close()
+    }
+}
+
+/**
+ * Regression test for the cross-repository flush starvation issue where repo A's blocking
+ * [writePending] could pin the shared [net.transgressoft.lirp.event.ReactiveScope.ioScope] slot,
+ * preventing repo B from flushing within its [maxDelayMillis] window.
+ *
+ * Both tests use production dispatchers (via [ReactiveScopeSerialization]) so real thread
+ * concurrency is observable.
+ */
+@DisplayName("PersistentRepositoryBase two-repo starvation")
+internal class PersistentRepositoryBaseStarvationTest : StringSpec() {
+
+    init {
+        extension(ReactiveScopeSerialization)
+
+        // Short debounce and max-delay so the test does not take too long. Repo A blocks for
+        // blockMs so its flush holds the ioScope slot. Repo B should still flush before blockMs
+        // elapses — proving its flush is not serialized behind A's blocking write.
+        val debounce = 50L
+        val maxDelay = 200L
+        val blockMs = 2_000L // A's writePending blocks for 2 s
+        // B must flush within this budget regardless of A's block. We give generous headroom
+        // (4 × maxDelay) to avoid false-positives under load.
+        val bBudgetMs = maxDelay * 4
+
+        "repo B flushes within maxDelayMillis while repo A writePending is blocked on the ioScope" {
+            // Signal the test harness that B's writePending actually ran.
+            val bFlushed = AtomicBoolean(false)
+            val bFlushLatch = CountDownLatch(1)
+            // Let A's writePending block without throwing.
+            val aStarted = CountDownLatch(1)
+
+            val repoA =
+                StarvationFlushRepo(
+                    debounce = debounce,
+                    maxDelay = maxDelay,
+                    writeImpl = { _, _, _, _ ->
+                        aStarted.countDown()
+                        Thread.sleep(blockMs)
+                    }
+                )
+            val repoB =
+                StarvationFlushRepo(
+                    debounce = debounce,
+                    maxDelay = maxDelay,
+                    writeImpl = { _, _, _, _ ->
+                        bFlushed.set(true)
+                        bFlushLatch.countDown()
+                    }
+                )
+
+            try {
+                repoA.addForTest(FlushEntity(1, "a"))
+                // Give A's debounce a chance to start (and block the ioScope slot, pre-fix).
+                aStarted.await(3, TimeUnit.SECONDS) shouldBe true
+
+                repoB.addForTest(FlushEntity(2, "b"))
+
+                // B must flush well within the test budget, independent of A's blocking write.
+                bFlushLatch.await(bBudgetMs, TimeUnit.MILLISECONDS) shouldBe true
+                bFlushed.get() shouldBe true
+            } finally {
+                repoA.quiesceAndClose()
+                repoB.quiesceAndClose()
+            }
+        }
+    }
+}
+
+/**
+ * [PersistentRepositoryBase] subclass for starvation tests. Accepts [debounce] and [maxDelay]
+ * so the starvation window can be kept short. The internal primary constructor is accessible
+ * from the same module's test source set.
+ */
+private class StarvationFlushRepo(
+    debounce: Long,
+    maxDelay: Long,
+    var writeImpl: (List<FlushEntity>, List<PendingUpdate<Int, FlushEntity>>, List<Pair<Int, Long?>>, Boolean) -> Unit
+) : PersistentRepositoryBase<Int, FlushEntity>(
+        LirpContext.default,
+        "StarvationFlushRepo-${System.nanoTime()}",
+        java.util.concurrent.ConcurrentHashMap(),
+        debounceMillis = debounce,
+        maxDelayMillis = maxDelay,
+        loadOnInit = false
+    ) {
+
+    init {
+        load()
+    }
+
+    override fun loadFromStore(): Map<Int, FlushEntity> = emptyMap()
+
+    override fun writePending(
+        inserts: List<FlushEntity>,
+        updates: List<PendingUpdate<Int, FlushEntity>>,
+        deletes: List<Pair<Int, Long?>>,
+        hadClear: Boolean
+    ) {
+        writeImpl(inserts, updates, deletes, hadClear)
+    }
+
+    fun addForTest(entity: FlushEntity): Boolean = add(entity)
+
+    fun quiesceAndClose() {
+        writeImpl = { _, _, _, _ -> }
+        try {
+            close()
+        } catch (_: Exception) {
+        }
     }
 }
