@@ -43,6 +43,7 @@ import io.kotest.matchers.shouldBe
 import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
+import org.jetbrains.exposed.v1.jdbc.deleteAll
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.jetbrains.exposed.v1.jdbc.update
@@ -335,6 +336,43 @@ internal class OutboxAtomicityTest : StringSpec() {
                     }
                 updateRows shouldBe 0L
                 countOutboxRows(dataSource) shouldBe 1L
+            } finally {
+                repo.close()
+                dataSource.close()
+            }
+        }
+
+        "OutboxAtomicityTest clear() produces one DELETE outbox row per wiped entity after debounce flush" {
+            // Reproduces PM-02: clear() wipes the entity table via table.deleteAll() but the
+            // onAfterEntityWritesInWritePending hook receives empty lists (no individual deletes)
+            // and therefore emits zero DELETE outbox rows, breaking downstream consumers that
+            // subscribe to per-aggregate DELETE notifications.
+            val dataSource = H2ContainerSupport.buildH2DataSource()
+            val repo = KafkaOutboxSqlRepository<Int, AudioItem>(dataSource, AudioItemSqlTableDef)
+            try {
+                // Seed N entities via the debounce path.
+                val n = 3
+                repeat(n) { i ->
+                    repo.add(MutableAudioItem(100 + i, "Track ${100 + i}", "Album") as AudioItem)
+                }
+                runBlocking { waitForOutboxCount(dataSource, n.toLong()) }
+
+                // Reset outbox rows so we can count only the DELETE rows produced by clear().
+                val db = Database.connect(dataSource)
+                transaction(db) { OutboxEventTable.deleteAll() }
+
+                // clear() must produce N DELETE outbox rows (one per wiped entity) in the same
+                // JDBC transaction as the bulk table wipe.
+                repo.clear()
+                runBlocking { waitForOutboxCount(dataSource, n.toLong()) }
+
+                val deleteRows =
+                    transaction(db) {
+                        OutboxEventTable.selectAll()
+                            .where { OutboxEventTable.eventTypeCode eq CrudEvent.Type.DELETE.code }
+                            .count()
+                    }
+                deleteRows shouldBe n.toLong()
             } finally {
                 repo.close()
                 dataSource.close()

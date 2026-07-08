@@ -40,6 +40,7 @@ import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.batchInsert
 import org.jetbrains.exposed.v1.jdbc.deleteAll
+import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.util.concurrent.ConcurrentHashMap
 import javax.sql.DataSource
@@ -409,6 +410,12 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         }
         val conflicts = mutableListOf<PendingConflict<K>>()
         transaction(db = db) {
+            // Collect entity IDs present in the table before a bulk wipe so the post-write hook
+            // can emit one outbox DELETE row per cleared entity. The SELECT runs before
+            // table.deleteAll() so the rows are still visible on this connection.
+            @Suppress("UNCHECKED_CAST")
+            val clearedEntityIds: List<K> =
+                if (hadClear) table.select(pkCol).map { it[pkCol as Column<K>] } else emptyList()
             // #202: junction rows must be wiped before the parent table when FKs may not yet be
             // installed (the construction-time window before installJunctionForeignKeys() runs).
             // When FKs ARE installed with ON DELETE CASCADE the explicit delete is a harmless
@@ -434,7 +441,8 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
             onAfterEntityWritesInWritePending(
                 inserts,
                 updates.filterNot { it.entity.id in conflictedIds },
-                deletes.filterNot { it.first in conflictedIds }
+                deletes.filterNot { it.first in conflictedIds },
+                clearedEntityIds
             )
         }
         // The main transaction has committed. Recover every accumulated conflict outside it.
@@ -571,6 +579,30 @@ open class SqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>(
         updates: List<PendingUpdate<K, R>>,
         deletes: List<Pair<K, Long?>>
     ) = Unit
+
+    /**
+     * Called from inside the `transaction(db = db) { }` block of [writePending], after all
+     * entity inserts, updates, and deletes have been written and before the transaction closes.
+     * This overload additionally receives the keys of any entities that were bulk-wiped via
+     * [clear]; the list is empty when [hadClear][writePending] was `false`.
+     *
+     * The default implementation delegates to [onAfterEntityWritesInWritePending] with the
+     * three-argument signature so existing subclass overrides continue to function without
+     * modification. Subclasses that need to react to bulk clears should override this overload
+     * instead.
+     *
+     * @param inserts Entities being inserted in this flush cycle.
+     * @param updates Pending updates carrying the entity and expected version for optimistic locking.
+     * @param deletes Pairs of entity key and expected version for deletions.
+     * @param clearedEntityIds Keys of all entities that were bulk-wiped by a [clear] call in this
+     *   flush cycle; empty when no bulk wipe occurred.
+     */
+    protected open fun onAfterEntityWritesInWritePending(
+        inserts: List<R>,
+        updates: List<PendingUpdate<K, R>>,
+        deletes: List<Pair<K, Long?>>,
+        clearedEntityIds: List<K>
+    ) = onAfterEntityWritesInWritePending(inserts, updates, deletes)
 
     /**
      * Validates that all cascade target repositories reachable from the entities in [buffer] are

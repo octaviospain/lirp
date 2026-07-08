@@ -51,6 +51,7 @@ public class net/transgressoft/lirp/persistence/sql/SqlRepository : net/transgre
 	protected fun loadFromStore ()Ljava/util/Map;
 	protected fun onAfterEntityWritesInTransaction (Lnet/transgressoft/lirp/persistence/TransactionBuffer;)V
 	protected fun onAfterEntityWritesInWritePending (Ljava/util/List;Ljava/util/List;Ljava/util/List;)V
+	protected fun onAfterEntityWritesInWritePending (Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;)V
 	protected fun onEntityMutated (Lnet/transgressoft/lirp/event/MutationEvent;)V
 	protected fun writePending (Ljava/util/List;Ljava/util/List;Ljava/util/List;Z)V
 }

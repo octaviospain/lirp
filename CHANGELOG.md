@@ -9,7 +9,40 @@ see the [GitHub releases](https://github.com/octaviospain/lirp/releases).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`KafkaOutboxSqlRepository.clear()` now emits one DELETE outbox row per wiped entity.**
+  Previously, calling `clear()` on a `KafkaOutboxSqlRepository` performed a bulk `table.deleteAll()`
+  but the `onAfterEntityWritesInWritePending` hook received empty lists, so zero outbox DELETE rows
+  were produced. Downstream consumers relying on DELETE events for aggregate-level inventory had no
+  signal that the entities had been removed. The entity keys are now collected immediately before
+  the bulk wipe (within the same JDBC transaction) and passed to the hook so one DELETE row is
+  inserted per cleared aggregate.
+  See [#323](https://github.com/octaviospain/lirp/issues/323).
+
+- **`KafkaEventPublisher.emitAsync` now joins the ambient application transaction when the
+  publisher and the application use different Exposed `Database` instances over the same
+  `DataSource`.** In the topology set up by `LirpKafkaConfig.startRelay`, the relay calls
+  `Database.connect(dataSource)` which creates a new `Database` instance separate from the one
+  the application uses. The previous identity-equality gate (`currentTransaction.db == publisherDb`)
+  was always false in this topology, so each `emitAsync` call opened its own short-lived transaction.
+  An application-level rollback then left an orphaned outbox row. The gate now compares the JDBC
+  metadata URL of the two `Database` instances; two instances wrapping the same pool share the same
+  URL, so the outbox INSERT joins the application transaction and rolls back atomically with it.
+  See [#322](https://github.com/octaviospain/lirp/issues/322).
+
 ### Added
+
+- **`SqlRepository` exposes an additive `onAfterEntityWritesInWritePending` overload that
+  includes bulk-clear context.** A new `protected open fun onAfterEntityWritesInWritePending(inserts,
+  updates, deletes, clearedEntityIds: List<K>)` overload has been added. The default implementation
+  delegates to the existing three-parameter version so all existing subclass overrides continue to
+  compile and behave identically without modification. Subclasses that need to respond to bulk
+  `clear()` operations should override the four-parameter version instead. The existing three-parameter
+  signature is unchanged and remains in the binary API.
+  Benefit: enables `KafkaOutboxSqlRepository` (and any downstream subclass) to emit per-entity
+  DELETE events atomically when `clear()` bulk-wipes the table.
+  See [#323](https://github.com/octaviospain/lirp/issues/323).
 
 - **Bucket-level ordering for registry projections.** The registry projection factories now
   accept optional comparators that order the projection's buckets: `bucketKeyOrdering` orders
