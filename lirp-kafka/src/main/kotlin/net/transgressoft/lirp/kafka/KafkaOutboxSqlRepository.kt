@@ -141,6 +141,34 @@ open class KafkaOutboxSqlRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
     }
 
     /**
+     * Extends [onAfterEntityWritesInWritePending] to handle bulk-wipe events produced by [clear].
+     *
+     * When [clearedEntityIds] is non-empty, a [CrudEvent.Type.DELETE] outbox row is emitted for
+     * each cleared entity key — captured in the same JDBC transaction as the bulk `table.deleteAll()`
+     * so downstream consumers receive exactly one DELETE row per wiped aggregate.
+     *
+     * The clear DELETE rows are written **before** delegating to the three-argument overload that
+     * emits the batch CRUD rows. A clear followed by a re-insert of the same key within one debounce
+     * window must converge consumers on the re-inserted state: emitting the clear DELETE first, then
+     * the batch `CREATE`, yields `DELETE(id)` → `CREATE(id)` (entity present). Emitting them in the
+     * opposite order would leave `CREATE(id)` → `DELETE(id)`, wrongly signalling a row that still
+     * exists after the flush as deleted.
+     */
+    override fun onAfterEntityWritesInWritePending(
+        inserts: List<R>,
+        updates: List<PendingUpdate<K, R>>,
+        deletes: List<Pair<K, Long?>>,
+        clearedEntityIds: List<K>
+    ) {
+        if (clearedEntityIds.isNotEmpty()) {
+            val clearDeleteRows =
+                clearedEntityIds.map { buildRow(it.toString(), CrudEvent.Type.DELETE.code, "{}") }
+            insertRows(clearDeleteRows)
+        }
+        super.onAfterEntityWritesInWritePending(inserts, updates, deletes, clearedEntityIds)
+    }
+
+    /**
      * Builds a serializer-neutral JSON payload from the entity's persisted field values by calling
      * [SqlTableDef.toParams] — the same field extraction used for SQL INSERT/UPDATE statements.
      *
