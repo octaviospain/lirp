@@ -28,6 +28,7 @@ import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
+import org.jetbrains.exposed.v1.jdbc.deleteAll
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 
@@ -35,8 +36,11 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
  * H2 unit tests for [KafkaEventPublisher.emitAsync] transaction enlistment behaviour.
  *
  * Covers: emitAsync inside an active transaction writes the outbox row atomically
- * on the same connection (row visible before commit), and emitAsync outside any
- * transaction opens its own single-row transaction producing exactly one committed row.
+ * on the same connection (row visible before commit); emitAsync outside any transaction opens
+ * its own single-row transaction; and — the cross-Database topology used by
+ * [net.transgressoft.lirp.kafka.LirpKafkaConfig.startRelay] — emitAsync joins an ambient
+ * transaction opened on a *different* Exposed [Database] instance that wraps the same
+ * [javax.sql.DataSource], so rollback removes the outbox row atomically.
  */
 @DisplayName("OutboxEnlistmentTest")
 internal class OutboxEnlistmentTest : StringSpec() {
@@ -95,6 +99,53 @@ internal class OutboxEnlistmentTest : StringSpec() {
                 publisher.emitAsync(PlaybackEvent(PlaybackEventType.STARTED, trackId = 20))
                 val rowCount = transaction(db) { OutboxEventTable.selectAll().count() }
                 rowCount shouldBe 1L
+            } finally {
+                publisher.close()
+                dataSource.close()
+            }
+        }
+
+        "OutboxEnlistmentTest emitAsync joins app transaction across different Database instances over one DataSource" {
+            // Reproduces the real startRelay topology: the publisher's Database and the app's
+            // Database are different Exposed instances wrapping the same underlying connection pool.
+            // Before the fix, the gate `currentTransaction.db == publisherDb` was always false in
+            // this topology, so emitAsync opened its own transaction — the outbox INSERT committed
+            // independently and a rollback of appDb left a phantom outbox row.
+            val dataSource = H2ContainerSupport.buildH2DataSource()
+            val appDb = Database.connect(dataSource)
+            val publisherDb = Database.connect(dataSource)
+            transaction(appDb) { SchemaUtils.create(OutboxEventTable) }
+
+            // Build the publisher via the internal constructor, supplying dataSource so the
+            // db→dataSource mapping is registered and the cross-Database join gate activates.
+            val publisher =
+                KafkaEventPublisher<PlaybackEventType, PlaybackEvent>(
+                    "enlistment-cross-db", "localhost:9092", publisherDb,
+                    SqlOutboxStore(publisherDb), emptyMap(), dataSource = dataSource
+                )
+            publisher.activateEvents(PlaybackEventType.STARTED)
+
+            try {
+                // Case 1: commit — outbox row must survive.
+                transaction(appDb) {
+                    publisher.emitAsync(PlaybackEvent(PlaybackEventType.STARTED, trackId = 30))
+                }
+                val rowCountAfterCommit = transaction(appDb) { OutboxEventTable.selectAll().count() }
+                rowCountAfterCommit shouldBe 1L
+
+                // Reset outbox for Case 2.
+                transaction(appDb) { OutboxEventTable.deleteAll() }
+
+                // Case 2: rollback — outbox row must be removed atomically with the app transaction.
+                // Trigger rollback by throwing inside the transaction block.
+                runCatching {
+                    transaction(appDb) {
+                        publisher.emitAsync(PlaybackEvent(PlaybackEventType.STARTED, trackId = 31))
+                        error("injected rollback — outbox row must vanish with the app transaction")
+                    }
+                }
+                val rowCountAfterRollback = transaction(appDb) { OutboxEventTable.selectAll().count() }
+                rowCountAfterRollback shouldBe 0L
             } finally {
                 publisher.close()
                 dataSource.close()

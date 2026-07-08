@@ -37,6 +37,7 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.util.Properties
 import java.util.UUID
 import java.util.concurrent.ExecutionException
+import javax.sql.DataSource
 import kotlin.time.Clock
 
 /**
@@ -62,6 +63,14 @@ import kotlin.time.Clock
  * Closing this publisher stops in-process subscriptions and releases the broker connection.
  * It does **not** stop the outbox relay, whose lifecycle is owned by [LirpKafkaConfig].
  *
+ * **Transaction enlistment:** [emitAsync] detects an ambient Exposed transaction and joins it
+ * when the transaction's [Database] shares the same connection pool as this publisher's [Database].
+ * Identity (same instance) is checked first; when the publisher was constructed via
+ * [LirpKafkaConfig.startRelay], the supplied [DataSource] is stored and the JDBC URL of the
+ * publisher's [Database] is compared against the ambient transaction's [Database] URL so that
+ * two distinct [Database] instances wrapping the same pool are still treated as equivalent.
+ * Joining the ambient transaction ensures the outbox INSERT and the entity write commit atomically.
+ *
  * @param ET The specific [EventType] this publisher emits
  * @param E  The specific [LirpEvent] type this publisher emits
  * @param id Logical identifier, used to name the internal [FlowEventPublisher]
@@ -79,8 +88,21 @@ class KafkaEventPublisher<ET : EventType, E : LirpEvent<ET>>
         private val db: Database,
         private val outboxStore: OutboxStore,
         producerConfig: Map<String, String> = emptyMap(),
-        private val delegate: FlowEventPublisher<ET, E> = FlowEventPublisher(id)
+        private val delegate: FlowEventPublisher<ET, E> = FlowEventPublisher(id),
+        dataSource: DataSource? = null
     ) : LirpEventPublisher<ET, E> by delegate {
+
+        /**
+         * JDBC URL of this publisher's [Database], resolved once on first use.
+         *
+         * When [dataSource] is provided (relay wiring via [LirpKafkaConfig.startRelay]),
+         * [emitAsync] compares this URL against the ambient transaction's database URL to detect
+         * two [Database] instances wrapping the same connection pool. The URL is lazily resolved
+         * so construction does not open a JDBC connection before the first [emitAsync] call.
+         */
+        private val dbUrl: String? by lazy {
+            if (dataSource != null) db.url else null
+        }
 
         /**
          * Creates a [KafkaEventPublisher] connected to the given [bootstrapServers] and [db].
@@ -135,8 +157,11 @@ class KafkaEventPublisher<ET : EventType, E : LirpEvent<ET>>
          * framework code (e.g. `100`) is still captured into the outbox.
          *
          * If the event type is currently disabled, both local delivery and outbox capture are suppressed.
-         * When an active Exposed transaction bound to this publisher's [db] is detected the outbox
-         * INSERT joins that transaction; otherwise a fresh single-row transaction on [db] is opened.
+         * When an active Exposed transaction sharing this publisher's underlying connection pool is
+         * detected, the outbox INSERT joins that transaction atomically; otherwise a fresh single-row
+         * transaction on [db] is opened. Pool sharing is detected by [Database] identity or, when
+         * this publisher was constructed with a [DataSource] (relay wiring), by comparing the
+         * JDBC URL of both [Database] instances.
          *
          * Custom events must implement [OutboxRoutableEvent]; emitting a non-routable custom event
          * throws immediately so the misconfiguration is surfaced as a bug.
@@ -149,7 +174,7 @@ class KafkaEventPublisher<ET : EventType, E : LirpEvent<ET>>
             }
             val outboxEvent = buildOutboxEvent(event)
             val currentTransaction = TransactionManager.currentOrNull()
-            if (currentTransaction != null && currentTransaction.db == db) {
+            if (currentTransaction != null && sharesConnectionPool(currentTransaction.db)) {
                 outboxStore.insert(outboxEvent)
             } else {
                 transaction(db) {
@@ -157,6 +182,28 @@ class KafkaEventPublisher<ET : EventType, E : LirpEvent<ET>>
                 }
             }
             delegate.emitAsync(event)
+        }
+
+        /**
+         * Returns `true` when [otherDb] shares the same underlying connection pool as this
+         * publisher's [db].
+         *
+         * Two [Database] instances share a pool when they are the same object, or when both were
+         * created from the same [DataSource] — detected by comparing their JDBC metadata URLs.
+         * The URL comparison is enabled only when this publisher was constructed with a [DataSource]
+         * (relay wiring via [LirpKafkaConfig.startRelay]), so the public constructor preserves the
+         * original identity-only check.
+         */
+        private fun sharesConnectionPool(otherDb: Database): Boolean {
+            if (otherDb === db) return true
+            // URL-based comparison activated only when dataSource was supplied at construction,
+            // i.e. when wired via startRelay where publisherDb != appDb but both wrap the same pool.
+            return dbUrl != null &&
+                try {
+                    otherDb.url == dbUrl
+                } catch (_: Exception) {
+                    false
+                }
         }
 
         /**
