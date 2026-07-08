@@ -183,7 +183,7 @@ internal class KafkaEventPublisherTest : StringSpec() {
             }
         }
 
-        "KafkaEventPublisherTest disableEvents gates both local delivery and outbox capture" {
+        "KafkaEventPublisherTest disableEvents on OutboxRoutableEvent type throws to surface the misconfiguration" {
             val dataSource = H2ContainerSupport.buildH2DataSource()
             val db = Database.connect(dataSource)
             transaction(db) { SchemaUtils.create(OutboxEventTable) }
@@ -191,12 +191,12 @@ internal class KafkaEventPublisherTest : StringSpec() {
             publisher.activateEvents(PlaybackEventType.STARTED)
             publisher.disableEvents(PlaybackEventType.STARTED)
 
-            var received: PlaybackEvent? = null
-            publisher.subscribe { received = it }
-
             try {
-                publisher.emitAsync(PlaybackEvent(PlaybackEventType.STARTED, trackId = 3))
-                received shouldBe null
+                // An OutboxRoutableEvent whose type is inactive (whether never-activated or explicitly
+                // disabled) must fail fast — a silent drop would permanently lose event data.
+                shouldThrow<IllegalStateException> {
+                    publisher.emitAsync(PlaybackEvent(PlaybackEventType.STARTED, trackId = 3))
+                }
                 val rowCount = transaction(db) { OutboxEventTable.selectAll().count() }
                 rowCount shouldBe 0L
             } finally {
@@ -267,6 +267,32 @@ internal class KafkaEventPublisherTest : StringSpec() {
             try {
                 shouldThrow<IllegalStateException> {
                     publisher.emitAsync(NonRoutableEvent(PlaybackEventType.STARTED, trackId = 5))
+                }
+                // No outbox row must have been written
+                val rowCount = transaction(db) { OutboxEventTable.selectAll().count() }
+                rowCount shouldBe 0L
+            } finally {
+                publisher.close()
+                dataSource.close()
+            }
+        }
+
+        "KafkaEventPublisherTest unactivated OutboxRoutableEvent type throws instead of silently dropping" {
+            val dataSource = H2ContainerSupport.buildH2DataSource()
+            val db = Database.connect(dataSource)
+            transaction(db) { SchemaUtils.create(OutboxEventTable) }
+            // Deliberately do NOT call activateEvents — this is the PM-06 scenario.
+            // An OutboxRoutableEvent whose type was never activated must fail fast rather than
+            // silently discarding the event with no row, no delivery, and no log.
+            @Suppress("UNCHECKED_CAST")
+            val publisher =
+                KafkaEventPublisher<PlaybackEventType, LirpEvent<PlaybackEventType>>(
+                    "test-unactivated", "localhost:9092", db
+                )
+
+            try {
+                shouldThrow<IllegalStateException> {
+                    publisher.emitAsync(PlaybackEvent(PlaybackEventType.STARTED, trackId = 10))
                 }
                 // No outbox row must have been written
                 val rowCount = transaction(db) { OutboxEventTable.selectAll().count() }
