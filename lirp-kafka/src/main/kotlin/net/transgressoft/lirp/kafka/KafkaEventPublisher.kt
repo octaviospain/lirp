@@ -156,7 +156,12 @@ class KafkaEventPublisher<ET : EventType, E : LirpEvent<ET>>
          * rather than their numeric codes, so a consumer-defined [EventType] that happens to reuse a
          * framework code (e.g. `100`) is still captured into the outbox.
          *
-         * If the event type is currently disabled, both local delivery and outbox capture are suppressed.
+         * If the event type is a framework-owned [CrudEvent.Type] or [MutationEvent.Type] that is
+         * currently inactive, both local delivery and outbox capture are suppressed silently — these
+         * types are managed by the flush hook and operator suppression is an explicit operator action.
+         * If the event type belongs to a custom [OutboxRoutableEvent] and is not active (never activated
+         * or explicitly disabled), this method throws [IllegalStateException] immediately so the
+         * misconfiguration is surfaced as a bug rather than a permanent silent event drop.
          * When an active Exposed transaction sharing this publisher's underlying connection pool is
          * detected, the outbox INSERT joins that transaction atomically; otherwise a fresh single-row
          * transaction on [db] is opened. Pool sharing is detected by [Database] identity or, when
@@ -167,7 +172,21 @@ class KafkaEventPublisher<ET : EventType, E : LirpEvent<ET>>
          * throws immediately so the misconfiguration is surfaced as a bug.
          */
         override fun emitAsync(event: E) {
-            if (!delegate.isEventActive(event.type)) return
+            if (!delegate.isEventActive(event.type)) {
+                // Framework-owned CRUD/mutation event types are activated by the repository flush hook;
+                // an inactive framework event is an operator-controlled suppression — silence is correct.
+                // A custom OutboxRoutableEvent whose type is inactive (never activated or explicitly
+                // disabled) would silently discard a relayable event with no outbox row and no delivery.
+                // That is a misconfiguration: fail fast so it is surfaced as a bug, not a phantom drop.
+                if (event is OutboxRoutableEvent<*>) {
+                    error(
+                        "Custom OutboxRoutableEvent type ${event.type} is not active; call " +
+                            "activateEvents(${event.type}) before emitting, or use " +
+                            "FlowEventPublisher for local-only delivery without Kafka relay"
+                    )
+                }
+                return
+            }
             if (event.type is CrudEvent.Type || event.type is MutationEvent.Type) {
                 delegate.emitAsync(event)
                 return
