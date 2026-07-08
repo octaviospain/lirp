@@ -20,7 +20,6 @@ package net.transgressoft.lirp.kafka.outbox
 import net.transgressoft.lirp.event.LirpErrorContext
 import net.transgressoft.lirp.event.LirpErrorHandler
 import net.transgressoft.lirp.event.LirpOperation
-import net.transgressoft.lirp.event.ReactiveScope
 import net.transgressoft.lirp.kafka.KafkaEventPublisher
 import net.transgressoft.lirp.kafka.KafkaOutboxConfig
 import net.transgressoft.lirp.kafka.spi.CloudEventsBinarySerializer
@@ -38,24 +37,32 @@ import kotlin.time.Clock
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Instant
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.runInterruptible
 
 /**
  * Background relay loop that drains the transactional outbox by publishing each unsent row to
  * Kafka and marking it as sent only after the broker acknowledges the record.
  *
- * Each row is processed inside its own Exposed transaction: the transaction claims a single unsent
- * row (using dialect-appropriate row locking on PostgreSQL/MySQL/MariaDB so concurrent relays skip
- * it), publishes it via [publisher], and commits [SqlOutboxStore.markSent] after a successful
- * publish. A crash between publish and commit rolls back only that row's transaction, leaving it
- * available for redelivery on the next cycle — the at-least-once guarantee. Scoping each row to its
- * own transaction keeps a transient persistence failure on one row from rolling back rows already
- * published and marked in the same cycle.
+ * Each row is processed in a single short transaction: the transaction claims the next eligible
+ * row (using dialect-appropriate `FOR UPDATE SKIP LOCKED` on PostgreSQL/MySQL/MariaDB so concurrent
+ * relays skip it), publishes it to Kafka, and commits [SqlOutboxStore.markSent] only after the
+ * broker acknowledges the record. The row lock is held across the blocking send, which prevents a
+ * second concurrent relay from re-claiming and double-publishing the same row. The blocking send is
+ * wrapped in [kotlinx.coroutines.runInterruptible] so that cancelling the loop (via [stop] or
+ * [stopAndJoin]) interrupts the blocked thread and returns promptly rather than waiting for the
+ * producer's `delivery.timeout.ms`. A crash or cancellation between publish and commit rolls back
+ * the transaction, leaving the row available for redelivery on the next cycle — the at-least-once
+ * guarantee is preserved. Scoping each row to its own transaction keeps a transient persistence
+ * failure on one row from rolling back rows already published and marked in the same cycle.
  *
  * **Failure classification:** a [RetriableException] from the Kafka client increments
  * [OutboxEvent.retryCount] and schedules the next attempt via exponential backoff while retries
@@ -72,6 +79,13 @@ import kotlinx.coroutines.runBlocking
  *
  * **Ordering:** records are keyed by [OutboxEvent.aggregateId] so the Kafka producer routes
  * all events for a given aggregate to the same partition, preserving per-aggregate ordering.
+ *
+ * **Dispatcher isolation:** the relay runs on a dedicated [kotlinx.coroutines.Dispatchers.IO] scope
+ * (not on the shared single-slot `ReactiveScope.ioScope`) so a slow broker acknowledgement does not
+ * starve flush scheduling for other repositories. The blocking `producer.send().get()` inside each
+ * row's transaction is wrapped in [kotlinx.coroutines.runInterruptible] so that cancelling the loop
+ * (via [stop] or [stopAndJoin]) interrupts the blocked thread and returns promptly rather than
+ * waiting for the producer's `delivery.timeout.ms`.
  *
  * **Connection resource:** the relay holds a HikariCP connection open while waiting for Kafka
  * broker acknowledgement inside each row's transaction. Configure the Kafka producer's
@@ -103,10 +117,14 @@ internal class OutboxRelay(
 
     private val log = KotlinLogging.logger(javaClass.name)
     private val store: OutboxStore = store ?: SqlOutboxStore(db)
+
+    // Dedicated scope keeps the relay off the shared single-slot ioScope so a slow broker
+    // acknowledgement cannot block flush scheduling for unrelated repositories.
+    private val relayScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var job: Job? = null
 
     /**
-     * Starts the background poll loop on [ReactiveScope.ioScope].
+     * Starts the background poll loop on a dedicated [Dispatchers.IO] scope.
      *
      * The [DeadLetterTable] schema is created idempotently before the loop starts. Calling
      * [start] on a relay that is already running throws [IllegalStateException].
@@ -115,7 +133,7 @@ internal class OutboxRelay(
         check(job == null || job!!.isCompleted) { "Relay is already running" }
         transaction(db) { SchemaUtils.create(DeadLetterTable) }
         job =
-            ReactiveScope.ioScope.launch {
+            relayScope.launch {
                 var consecutiveFailures = 0
                 while (isActive) {
                     try {
@@ -155,10 +173,9 @@ internal class OutboxRelay(
      * can safely close the underlying [DataSource][javax.sql.DataSource] afterwards. A stopped relay
      * can be [start]ed again.
      *
-     * **Precondition:** this method must NOT be called from a thread running on
-     * [ReactiveScope.ioScope] (the relay's own dispatcher). Doing so will deadlock because
-     * [runBlocking] cannot complete the [kotlinx.coroutines.cancelAndJoin] suspension while the
-     * calling thread is occupied. Coroutine callers must use [stopAndJoin] instead.
+     * The relay's publish step is wrapped in [runInterruptible], so cancellation calls
+     * [Thread.interrupt] on any thread blocked inside the broker send, allowing [cancelAndJoin]
+     * to complete promptly rather than waiting for `delivery.timeout.ms`.
      */
     fun stop() {
         val current = job ?: return
@@ -170,15 +187,25 @@ internal class OutboxRelay(
         stop()
     }
 
-    internal fun pollAndRelay() {
+    internal suspend fun pollAndRelay() {
         val now = Clock.System.now()
         var processed = 0
         while (processed < config.batchSize) {
+            // Claim, publish, and mark the row within a SINGLE transaction so the FOR UPDATE
+            // SKIP LOCKED row lock is held across the publish. This is what prevents a second
+            // concurrent relay instance from re-claiming and double-publishing the same row.
+            // runInterruptible wraps the whole transaction so that cancelling the relay Job
+            // interrupts the thread blocked inside the producer's Future.get(): stop() returns
+            // promptly and the transaction rolls back, leaving the row unsent for a later cycle
+            // (at-least-once). Running on the dedicated relayScope keeps this off the shared
+            // single-slot ioScope, so a slow broker cannot starve other repositories' flushes.
             val handled =
-                transaction(db) {
-                    val row = store.findUnsentForRelay(1, now).firstOrNull() ?: return@transaction false
-                    processRow(row)
-                    true
+                runInterruptible {
+                    transaction(db) {
+                        val row = store.findUnsentForRelay(1, now).firstOrNull() ?: return@transaction false
+                        processRow(row)
+                        true
+                    }
                 }
             if (!handled) break
             processed++
@@ -207,8 +234,18 @@ internal class OutboxRelay(
                 }
             val recordHeaders = RecordHeaders()
             serialized.headers.forEach { (k, v) -> recordHeaders.add(k, v) }
+            // The enclosing pollAndRelay wraps this transaction in runInterruptible, so a blocking
+            // send here is interruptible on relay stop() without releasing the row lock before the
+            // publish completes.
             publisher.publish(topic, row.aggregateId, serialized.value, recordHeaders)
             store.markSent(row.id)
+        } catch (e: InterruptedException) {
+            // Cooperative cancellation on relay stop(): the blocking publish was interrupted.
+            // Re-set the interrupt flag and rethrow so runInterruptible surfaces the cancellation
+            // and the enclosing transaction rolls back — the row stays unsent for a later cycle
+            // rather than being dead-lettered.
+            Thread.currentThread().interrupt()
+            throw e
         } catch (e: RetriableException) {
             if (row.retryCount >= config.maxRetries) {
                 store.moveToDeadLetter(row, Clock.System.now(), e.message ?: e.javaClass.simpleName)

@@ -56,8 +56,11 @@ import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.measureTime
 import kotlin.uuid.toKotlinUuid
 
 /**
@@ -384,6 +387,39 @@ internal class OutboxRelayTest : StringSpec() {
                             .map { it[OutboxEventTable.sentAt] }
                     }
                 sentRows.any { it != null } shouldBe true
+            }
+        }
+
+        // #331 — PM-10: relay stop() must return promptly even when a publish is blocking.
+        // Before the fix, the relay ran on the single-slot ioScope and stop() used runBlocking
+        // against a non-cancellable producer.send().get(), stalling shutdown for delivery.timeout.ms.
+        "OutboxRelay stop() returns promptly when publisher.publish blocks indefinitely" {
+            withOutboxDb { _, db ->
+                // Insert a row with retryCount=0 so the relay immediately tries to publish it.
+                db.seedExhaustedRow("blackhole-1", 0)
+
+                val publishStarted = CountDownLatch(1)
+                val publisher = mockk<KafkaEventPublisher<*, *>>()
+                every { publisher.publish(any(), any(), any(), any()) } answers {
+                    publishStarted.countDown()
+                    // Simulate a broker that never responds. Cooperative cancellation (via
+                    // Dispatchers.IO thread interrupt) unblocks this when the relay is stopped.
+                    try {
+                        Thread.sleep(Long.MAX_VALUE)
+                    } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                    }
+                }
+
+                val relay = OutboxRelay(db, publisher, fastConfig)
+                relay.start()
+
+                // Wait until the relay is inside publisher.publish (blocking send is in flight).
+                publishStarted.await(10, TimeUnit.SECONDS) shouldBe true
+
+                // stop() must return well within delivery.timeout.ms (default 30 s).
+                val stopDuration = measureTime { relay.stop() }
+                stopDuration shouldBeLessThan 5_000L.milliseconds
             }
         }
     }

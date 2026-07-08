@@ -47,10 +47,11 @@ import kotlin.uuid.toKotlinUuid
 /**
  * Exposed-backed implementation of [OutboxStore].
  *
- * All relay-side methods ([findUnsentForRelay], [scheduleRetry], [moveToDeadLetter]) require an
- * active Exposed transaction opened by the caller — typically [OutboxRelay.pollAndRelay]. Holding
- * the transaction open across the Kafka publish call means a crash between publish and
- * [markSent] leaves the row unsent; the rolled-back transaction is the redelivery guarantee.
+ * All relay-side methods ([findUnsentForRelay], [scheduleRetry], [moveToDeadLetter], [markSent])
+ * require an active Exposed transaction opened by the caller — typically [OutboxRelay.pollAndRelay].
+ * The relay uses two short transactions per row: one to claim the row and one to commit [markSent]
+ * after the broker acknowledges the record. A crash between the two transactions leaves the row
+ * available for redelivery on the next poll cycle — the at-least-once guarantee.
  *
  * **Dialect-aware locking:** [findUnsentForRelay] applies `FOR UPDATE SKIP LOCKED` on
  * PostgreSQL and supported MySQL/MariaDB versions (MySQL 8.0+, MariaDB 10.6+) so concurrent relay
