@@ -32,8 +32,10 @@ import net.transgressoft.lirp.persistence.TransactionBuffer
 import io.github.oshai.kotlinlogging.KotlinLogging
 import java.io.File
 import java.io.IOException
+import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
 import java.util.Objects
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.withLock
@@ -63,6 +65,12 @@ import kotlinx.serialization.modules.SerializersModule
  *   ensuring the file always reflects the last known state.
  * - Thread-safe in-memory state using [ConcurrentHashMap].
  * - Error handling with logging; a write failure resets dirty so the next flush will retry.
+ * - All writes go through a single durable primitive: content is written to a sibling temp file,
+ *   the temp file is fsynced via [FileChannel.force], and then atomically moved over the target
+ *   via [Files.move] with [StandardCopyOption.ATOMIC_MOVE]. The parent directory is fsynced after
+ *   the rename so the directory entry update survives power loss. This means the live file is never
+ *   truncated in place — a crash at any point in the sequence leaves the previously-committed file
+ *   intact and reloadable.
  *
  * **Scaling envelope:**
  * - Small to medium repositories (up to a few thousand entities): serialization time is effectively
@@ -389,7 +397,9 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
          * Serializes the full in-memory entity state to [jsonFile], returning `null` on success
          * or the caught exception on failure.
          *
-         * On failure the [dirty] flag is restored so the next flush cycle retries.
+         * Delegates to [durableWrite] so the live file is never truncated in place. On failure the
+         * [dirty] flag is restored so the next flush cycle retries.
+         *
          * Called from both [writePending] (which re-throws to trigger base class retry) and
          * the [jsonFile] setter (which swallows the error since it is not in the flush path).
          */
@@ -399,8 +409,7 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
                 return null
             }
             return try {
-                val jsonString = json.encodeToString(mapSerializer, entitiesById)
-                jsonFile.writeText(jsonString)
+                durableWrite(json.encodeToString(mapSerializer, entitiesById))
                 log.debug { "File updated: $jsonFile" }
                 null
             } catch (exception: Exception) {
@@ -409,6 +418,58 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
                 exception
             }
         }
+
+        /**
+         * Writes [content] to [jsonFile] durably: the bytes go to a sibling temp file, the temp
+         * file is fsynced with [FileChannel.force], [beforeMoveToTarget] is called (a no-op by
+         * default, overridable for fault injection), then [Files.move] promotes the temp file over
+         * the target atomically. After the move the parent directory is fsynced so the directory
+         * entry reaches durable storage.
+         *
+         * Because the live file is never opened for writing, a crash at any point in this sequence
+         * leaves the previously-committed file intact and reloadable.
+         *
+         * @throws IOException if the temp write, fsync, or atomic rename fails
+         */
+        private fun durableWrite(content: String) {
+            val tmp = File(jsonFile.parent, "${jsonFile.name}.tmp")
+            try {
+                tmp.writeText(content)
+                // fsync the temp file's data blocks before the rename so the content is
+                // durable even if power is cut immediately after Files.move returns.
+                FileChannel.open(tmp.toPath(), StandardOpenOption.WRITE).use { it.force(true) }
+                beforeMoveToTarget(tmp)
+                Files.move(tmp.toPath(), jsonFile.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                // fsync the parent directory so the directory entry pointing to the new inode
+                // is also durable (required on ext4/XFS to survive a power cut after rename).
+                // Resolve the parent via the absolute path so a relative target such as
+                // File("config.json") does not yield a null parent. The data and the atomic rename
+                // are already durable at this point, so the directory fsync is best-effort: a
+                // platform or filesystem that rejects opening a directory for fsync must not fail
+                // an otherwise-completed write.
+                jsonFile.toPath().toAbsolutePath().parent?.let { parentDir ->
+                    try {
+                        FileChannel.open(parentDir, StandardOpenOption.READ).use { it.force(true) }
+                    } catch (e: IOException) {
+                        log.debug(e) { "Parent-directory fsync skipped for ${jsonFile.name}; data and atomic rename are already durable" }
+                    }
+                }
+            } catch (e: IOException) {
+                tmp.delete()
+                throw e
+            }
+        }
+
+        /**
+         * Hook called immediately before [Files.move] promotes the temp file over the target.
+         *
+         * The default implementation is a no-op. Override in tests to inject a fault at the exact
+         * vulnerable point in the durable-write sequence and verify that the previously-committed
+         * file survives the crash.
+         *
+         * @param tmp the temp file that has been written and fsynced, about to be renamed
+         */
+        protected open fun beforeMoveToTarget(tmp: File) = Unit
 
         private fun decodeFromJson(): Map<K, R>? {
             val content = jsonFile.readText()
@@ -421,37 +482,27 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
         }
 
         /**
-         * Commits the transaction buffer to [jsonFile] using an atomic write sequence.
+         * Commits the transaction buffer to [jsonFile] using the shared durable write sequence.
          *
-         * The current in-memory state is serialized to a sibling temporary file
-         * (`<jsonFile>.tmp`), then promoted over [jsonFile] via `Files.move` with
-         * [StandardCopyOption.ATOMIC_MOVE]. This guarantees that a crash or I/O error during
-         * the write leaves the original file intact — the in-progress write either completes
-         * and replaces the file atomically, or fails and the temp file is cleaned up while
-         * the original remains untouched.
-         *
-         * `Files.move(ATOMIC_MOVE)` is preferred over `File.renameTo` because the JDK NIO
-         * contract guarantees atomic replacement on POSIX filesystems even when the source
-         * and target are on different inodes, while `renameTo` behaviour is platform-dependent.
+         * Delegates to [durableWrite], which writes to a sibling temp file, fsyncs the temp file's
+         * data blocks, atomically renames it over [jsonFile], and fsyncs the parent directory. This
+         * guarantees that a crash or power loss after [durableWrite] returns leaves [jsonFile] in a
+         * consistent, readable state.
          *
          * **Threading contract:** invoked while [flushLock] is held. Must not call [flush] or
          * otherwise re-acquire [flushLock].
          *
          * @param buffer the transaction buffer (its op lists are not used directly; the current
          *   in-memory state is the source of truth for JSON serialization)
-         * @throws IOException if the atomic rename/move fails, leaving the original file intact
+         * @throws IOException if the atomic write sequence fails, leaving the original file intact
          */
         override fun commitTransactionBuffer(buffer: TransactionBuffer<K, R>) {
-            val jsonString = json.encodeToString(mapSerializer, entitiesById)
-            val tmp = File(jsonFile.parent, "${jsonFile.name}.tmp")
             try {
-                tmp.writeText(jsonString)
-                Files.move(tmp.toPath(), jsonFile.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                durableWrite(json.encodeToString(mapSerializer, entitiesById))
                 dirty.set(false)
                 log.debug { "Transaction committed atomically to $jsonFile" }
             } catch (e: IOException) {
-                tmp.delete()
-                throw IOException("Atomic write failed: $tmp -> $jsonFile", e)
+                throw IOException("Atomic write failed for $jsonFile", e)
             }
         }
 

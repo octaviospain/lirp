@@ -37,6 +37,32 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.launch
 
+/**
+ * Test double that injects a one-shot fault immediately before the atomic rename step of the
+ * durable write primitive. The fault fires exactly once (simulating a process crash mid-write)
+ * and then disarms so subsequent writes succeed normally.
+ *
+ * At fault time the live file content is captured in [fileContentAtFaultTime] so the test
+ * can assert the live file was not truncated or corrupted when the crash occurred.
+ */
+private class FaultInjectingCustomerRepository(
+    ctx: LirpContext,
+    file: File,
+    serializationDelayMs: Long = 300L
+) : StandardCustomerJsonFileRepository(ctx, file, serializationDelayMs) {
+
+    val faultArmed = AtomicBoolean(true)
+    var fileContentAtFaultTime: String? = null
+
+    override fun beforeMoveToTarget(tmp: File) {
+        if (faultArmed.compareAndSet(true, false)) {
+            // Capture the live file content at crash time — it must not be truncated.
+            fileContentAtFaultTime = jsonFile.readText()
+            throw IOException("Simulated crash before atomic rename")
+        }
+    }
+}
+
 class JsonFileRepositoryTest : DescribeSpec({
     val reactive = reactiveScope()
 
@@ -968,6 +994,56 @@ class JsonFileRepositoryTest : DescribeSpec({
                 deferred.close()
                 ctx.close()
             }
+        }
+    }
+
+    describe("Crash durability") {
+
+        it("JsonFileRepository a mid-write crash before rename leaves the previously-committed file intact and reloadable") {
+            val ctx = LirpContext()
+            val file = tempfile("crash-durability-test", ".json").also { it.deleteOnExit() }
+            val repo = StandardCustomerJsonFileRepository(ctx, file, 10L)
+
+            // Phase 1: commit the initial state by adding one entity and flushing to disk.
+            repo.create(1, "Alice", "alice@example.com")
+            reactive.advance()
+            val committedContent = file.readText()
+            committedContent.isNotEmpty() shouldBe true
+            repo.close()
+            ctx.close()
+
+            // Phase 2: open a fault-injecting repo, add a new entity, then call close() to
+            // trigger a synchronous flush (close() flushes synchronously before releasing
+            // resources). The fault fires inside the synchronous flush path, so the exception
+            // propagates directly back to close() rather than escaping into a coroutine.
+            // We catch it here to keep the test from failing on the expected I/O error.
+            val ctx2 = LirpContext()
+            val faultRepo = FaultInjectingCustomerRepository(ctx2, file, 10L)
+            faultRepo.create(2, "Bob", "bob@example.com")
+            // close() synchronously flushes, which fires the fault. The IOException propagates
+            // from writePending through flush() to close(), so we catch it here.
+            try {
+                faultRepo.close()
+            } catch (_: IOException) {
+                // expected — the fault fired during the synchronous close() flush
+            }
+            ctx2.close()
+
+            // Phase 3: verify that at crash time the live file held the committed content,
+            // not an empty/truncated placeholder. With the old in-place writeText the live file
+            // would have been truncated before writing started, leaving it empty at crash time.
+            faultRepo.fileContentAtFaultTime!!.shouldEqualJson(committedContent)
+
+            // Phase 4: the live file must also still be readable and contain only Alice —
+            // the fault prevented the second write from completing, so Bob was never committed.
+            file.readText().shouldEqualJson(committedContent)
+            val ctx3 = LirpContext()
+            val reloadedRepo = StandardCustomerJsonFileRepository(ctx3, file, 10L)
+            reloadedRepo.size() shouldBe 1
+            reloadedRepo.findById(1) shouldBePresent { it.name shouldBe "Alice" }
+            reloadedRepo.findById(2).isEmpty shouldBe true
+            reloadedRepo.close()
+            ctx3.close()
         }
     }
 })
