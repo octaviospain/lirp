@@ -129,7 +129,7 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
                 bindEntityRefs(entity)
                 wireRefBubbleUp(entity)
                 publisher.emitAsync(Create(entity))
-                log.debug { "Entity with id ${entity.id} added to repository: $entity" }
+                log.trace { "Entity with id ${entity.id} added to repository: $entity" }
                 return true
             }
             return false
@@ -141,7 +141,7 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
                 deindexEntity(entity)
                 executeCascadeForEntity(entity)
                 publisher.emitAsync(Delete(entity))
-                log.debug { "Entity with id ${entity.id} was removed: $entity" }
+                log.trace { "Entity with id ${entity.id} was removed: $entity" }
             }
             return removed
         }
@@ -198,7 +198,7 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
             deindexEntity(entity)
             executeSoftCascadeForEntity(entity)
             publisher.emitAsync(SoftDelete(entity))
-            log.debug { "Entity with id ${entity.id} was soft-deleted: $entity" }
+            log.trace { "Entity with id ${entity.id} was soft-deleted: $entity" }
             return true
         }
 
@@ -213,7 +213,7 @@ open class VolatileRepository<K : Comparable<K>, T : IdentifiableEntity<K>>
             }
             indexEntity(entity)
             publisher.emitAsync(Restore(entity))
-            log.debug { "Entity with id ${entity.id} was restored: $entity" }
+            log.trace { "Entity with id ${entity.id} was restored: $entity" }
             return true
         }
 
