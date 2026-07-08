@@ -756,17 +756,18 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     }
 
     /**
-     * Captures a shallow snapshot of all reactive-property values registered in [delegateRegistry],
-     * keyed by property name. Also stores [lastDateModified] under [LAST_MODIFIED_SNAPSHOT_KEY] so
-     * that [restoreSnapshot] can revert the timestamp atomically with the other scalars.
+     * Captures a shallow snapshot of all reactive-property and aggregate-collection values
+     * registered in [delegateRegistry], keyed by property name. Also stores [lastDateModified]
+     * under [LAST_MODIFIED_SNAPSHOT_KEY] so that [restoreSnapshot] can revert the timestamp
+     * atomically with the other properties.
      *
-     * The snapshot is taken synchronously on the calling thread. Only [net.transgressoft.lirp.persistence.ReactivePropertyDelegate]
-     * and [net.transgressoft.lirp.persistence.ReactivePropertyDelegateWithAccessors] entries are
-     * captured — aggregate collection delegates manage their own identity collections and are not
-     * snapshotted here.
+     * For scalar delegates ([ReactivePropertyDelegate] / [ReactivePropertyDelegateWithAccessors]),
+     * the current value is stored as-is. For mutable aggregate-collection delegates
+     * ([MutableAggregateList] / [MutableAggregateSet]), a defensive copy of the backing ID
+     * collection is captured so that in-place mutations during a transaction can be rolled back.
      *
-     * @return a map from property name to the current value for each reactive-property delegate,
-     *   plus the [lastDateModified] sentinel entry
+     * @return a map from property name to the snapshot value for each delegate, plus the
+     *   [lastDateModified] sentinel entry
      */
     internal fun captureSnapshot(): Map<String, Any?> {
         val snapshot = mutableMapOf<String, Any?>()
@@ -774,7 +775,11 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
             when (delegate) {
                 is net.transgressoft.lirp.persistence.ReactivePropertyDelegate<*> -> snapshot[name] = delegate.storedValue
                 is net.transgressoft.lirp.persistence.ReactivePropertyDelegateWithAccessors<*> -> snapshot[name] = delegate.readValue()
-                else -> { /* aggregate collection delegates — not snapshotted on the scalar rollback path */ }
+                is net.transgressoft.lirp.persistence.MutableAggregateList<*, *> ->
+                    snapshot[name] = ArrayList(delegate.innerDelegate.referenceIds)
+                is net.transgressoft.lirp.persistence.MutableAggregateSet<*, *> ->
+                    snapshot[name] = LinkedHashSet(delegate.innerDelegate.referenceIds)
+                else -> { /* immutable aggregate collection delegates — no snapshot needed */ }
             }
         }
         snapshot[LAST_MODIFIED_SNAPSHOT_KEY] = lastDateModified
@@ -782,18 +787,17 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
     }
 
     /**
-     * Restores reactive properties to the values in [snapshot], suppressing all mutation events
-     * during the restore to prevent observers from seeing intermediate reverted state. Also restores
-     * [lastDateModified] from the sentinel entry written by [captureSnapshot].
+     * Restores reactive properties and aggregate-collection memberships to the values in [snapshot],
+     * suppressing all mutation events during the restore to prevent observers from seeing intermediate
+     * reverted state. Also restores [lastDateModified] from the sentinel entry written by [captureSnapshot].
      *
-     * Runs inside [withEventsDisabled] and writes each property via the non-emitting
-     * [setDirectly][net.transgressoft.lirp.persistence.ReactivePropertyDelegate.setDirectly]
-     * path so that neither [emitPropertyChanged] is triggered during rollback.
-     * Only reactive-property delegates are processed; aggregate collection delegates and the
-     * [LAST_MODIFIED_SNAPSHOT_KEY] sentinel are skipped in the delegate-matching loop.
+     * Scalar delegates are restored via the non-emitting [setDirectly] path. Mutable aggregate-collection
+     * delegates are restored via [setBackingIds], which replaces the in-place-mutated backing ID
+     * collection without triggering collection-change events.
      *
      * @param snapshot a property-name-to-value map previously returned by [captureSnapshot]
      */
+    @Suppress("UNCHECKED_CAST")
     internal fun restoreSnapshot(snapshot: Map<String, Any?>) {
         withEventsDisabled {
             val preDateModified = snapshot[LAST_MODIFIED_SNAPSHOT_KEY] as? java.time.LocalDateTime
@@ -805,14 +809,22 @@ abstract class ReactiveEntityBase<K, R : ReactiveEntity<K, R>>(
                 if (name == LAST_MODIFIED_SNAPSHOT_KEY) return@forEach
                 when (val delegate = delegateRegistry[name]) {
                     is net.transgressoft.lirp.persistence.ReactivePropertyDelegate<*> -> {
-                        @Suppress("UNCHECKED_CAST")
                         (delegate as net.transgressoft.lirp.persistence.ReactivePropertyDelegate<Any?>).setDirectly(value)
                     }
                     is net.transgressoft.lirp.persistence.ReactivePropertyDelegateWithAccessors<*> -> {
-                        @Suppress("UNCHECKED_CAST")
                         (delegate as net.transgressoft.lirp.persistence.ReactivePropertyDelegateWithAccessors<Any?>).setDirectly(value)
                     }
-                    else -> { /* aggregate collection delegates — not restored on the scalar rollback path */ }
+                    is net.transgressoft.lirp.persistence.MutableAggregateList<*, *> -> {
+                        val ids = value as? Collection<Comparable<Any>> ?: return@forEach
+                        (delegate.innerDelegate as net.transgressoft.lirp.persistence.AbstractMutableAggregateCollectionRefDelegate<Comparable<Any>, *>)
+                            .setBackingIds(ids)
+                    }
+                    is net.transgressoft.lirp.persistence.MutableAggregateSet<*, *> -> {
+                        val ids = value as? Collection<Comparable<Any>> ?: return@forEach
+                        (delegate.innerDelegate as net.transgressoft.lirp.persistence.AbstractMutableAggregateCollectionRefDelegate<Comparable<Any>, *>)
+                            .setBackingIds(ids)
+                    }
+                    else -> { /* immutable aggregate collection delegates — not restored */ }
                 }
             }
         }
