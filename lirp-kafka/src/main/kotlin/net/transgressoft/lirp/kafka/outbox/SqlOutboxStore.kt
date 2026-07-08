@@ -19,13 +19,16 @@ package net.transgressoft.lirp.kafka.outbox
 
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.SortOrder
+import org.jetbrains.exposed.v1.core.Version
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.isNull
 import org.jetbrains.exposed.v1.core.lessEq
 import org.jetbrains.exposed.v1.core.or
 import org.jetbrains.exposed.v1.core.plus
+import org.jetbrains.exposed.v1.core.vendors.DatabaseDialect
 import org.jetbrains.exposed.v1.core.vendors.ForUpdateOption
+import org.jetbrains.exposed.v1.core.vendors.MariaDBDialect
 import org.jetbrains.exposed.v1.core.vendors.MysqlDialect
 import org.jetbrains.exposed.v1.core.vendors.PostgreSQLDialect
 import org.jetbrains.exposed.v1.core.vendors.currentDialect
@@ -81,21 +84,15 @@ internal class SqlOutboxStore(private val db: Database) : OutboxStore {
      * [OutboxEvent.nextRetryAt] is null or not later than [now]. Rows are ordered by creation
      * time ascending so older events are delivered first.
      *
-     * On PostgreSQL and MySQL/MariaDB a `FOR UPDATE SKIP LOCKED` clause prevents concurrent relay
-     * instances from claiming the same row. The lock is held for the duration of the enclosing
+     * On PostgreSQL and MySQL 8.0+ / MariaDB 10.6+ a `FOR UPDATE SKIP LOCKED` clause prevents
+     * concurrent relay instances from claiming the same row. On older MySQL/MariaDB versions that
+     * do not support `SKIP LOCKED`, plain `FOR UPDATE` is used to preserve concurrency safety
+     * without emitting unsupported syntax. The lock is held for the duration of the enclosing
      * transaction — that same transaction will either commit [markSent] or roll back, leaving the
      * row available for the next poll cycle.
      */
     override fun findUnsentForRelay(limit: Int, now: Instant): List<OutboxEvent> {
-        val lockOption: ForUpdateOption? =
-            when (currentDialect) {
-                is PostgreSQLDialect ->
-                    ForUpdateOption.PostgreSQL.ForUpdate(ForUpdateOption.PostgreSQL.MODE.SKIP_LOCKED)
-                is MysqlDialect ->
-                    // MysqlDialect is the parent of MariaDBDialect — this branch covers both.
-                    ForUpdateOption.MySQL.ForUpdate(ForUpdateOption.MySQL.MODE.SKIP_LOCKED)
-                else -> null // H2, SQLite — plain SELECT; single-relay constraint is documented
-            }
+        val lockOption = selectLockOption(currentDialect, org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager.current().db.version)
 
         val query =
             OutboxEventTable.selectAll()
@@ -164,4 +161,45 @@ internal class SqlOutboxStore(private val db: Database) : OutboxStore {
             lastError = row[OutboxEventTable.lastError],
             nextRetryAt = row[OutboxEventTable.nextRetryAt]
         )
+
+    internal companion object {
+
+        /**
+         * Selects the row-locking clause for the poll query based on the database dialect and version.
+         *
+         * `FOR UPDATE SKIP LOCKED` is only supported on:
+         * - PostgreSQL (all tested versions)
+         * - MySQL 8.0+
+         * - MariaDB 10.6+
+         *
+         * Older MySQL/MariaDB versions that do not support `SKIP LOCKED` receive plain
+         * `FOR UPDATE` instead. SQLite and H2 receive no lock clause — they are single-relay
+         * only and do not support row-level locking on this query.
+         *
+         * The method is intentionally parameterized on dialect and version for testability without
+         * requiring a live database connection.
+         */
+        internal fun selectLockOption(dialect: DatabaseDialect, version: Version): ForUpdateOption? =
+            when {
+                dialect is PostgreSQLDialect ->
+                    ForUpdateOption.PostgreSQL.ForUpdate(ForUpdateOption.PostgreSQL.MODE.SKIP_LOCKED)
+                // MariaDB must be checked before MysqlDialect because MariaDBDialect extends MysqlDialect.
+                dialect is MariaDBDialect ->
+                    if (version.covers(10, 6)) {
+                        ForUpdateOption.MySQL.ForUpdate(ForUpdateOption.MySQL.MODE.SKIP_LOCKED)
+                    } else {
+                        // MariaDB < 10.6 does not support SKIP LOCKED; plain FOR UPDATE prevents
+                        // concurrent relay double-publish without emitting unsupported syntax.
+                        ForUpdateOption.ForUpdate
+                    }
+                dialect is MysqlDialect ->
+                    if (version.covers(8, 0)) {
+                        ForUpdateOption.MySQL.ForUpdate(ForUpdateOption.MySQL.MODE.SKIP_LOCKED)
+                    } else {
+                        // MySQL < 8.0 does not support SKIP LOCKED; fall back to plain FOR UPDATE.
+                        ForUpdateOption.ForUpdate
+                    }
+                else -> null // H2, SQLite — plain SELECT; single-relay constraint is documented
+            }
+    }
 }

@@ -47,8 +47,10 @@ import io.mockk.verify
 import org.apache.kafka.common.errors.NetworkException
 import org.apache.kafka.common.errors.RecordTooLargeException
 import org.jetbrains.exposed.v1.core.ResultRow
+import org.jetbrains.exposed.v1.core.Version
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.isNull
+import org.jetbrains.exposed.v1.core.vendors.ForUpdateOption
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.insert
@@ -321,6 +323,39 @@ internal class OutboxRelayTest : StringSpec() {
             }
         }
 
+        // #335 — PM-16: MariaDB<10.6 and MySQL5.7 must not receive FOR UPDATE SKIP LOCKED
+        "SqlOutboxStore selectLockOption returns plain FOR UPDATE for MariaDB<10.6 and MySQL<8.0" {
+            // These version guard assertions run at the SQL-generation level rather than via a
+            // Testcontainers MariaDB 10.5 container. The Testcontainers matrix only includes
+            // MariaDB 11 and MySQL 8.0+ (both of which support SKIP LOCKED), so a MariaDB 10.5
+            // container would require a new CI image. A unit test on the lock-option selection
+            // logic provides equivalent coverage of the guard without adding a new container dependency.
+            val mariaDb = org.jetbrains.exposed.v1.core.vendors.MariaDBDialect()
+            val mysql = org.jetbrains.exposed.v1.core.vendors.MysqlDialect()
+
+            val version105 = Version.from("10.5")
+            val version106 = Version.from("10.6")
+            val version57 = Version.from("5.7")
+            val version80 = Version.from("8.0")
+
+            // MariaDB < 10.6: SKIP LOCKED is NOT supported — must return plain FOR UPDATE or null
+            val option105 = SqlOutboxStore.selectLockOption(mariaDb, version105)
+            // Must NOT be a SKIP LOCKED variant
+            option105.toQuerySuffix().contains("SKIP LOCKED") shouldBe false
+
+            // MariaDB 10.6+: SKIP LOCKED IS supported
+            val option106 = SqlOutboxStore.selectLockOption(mariaDb, version106)
+            option106.toQuerySuffix().contains("SKIP LOCKED") shouldBe true
+
+            // MySQL < 8.0: SKIP LOCKED is NOT supported
+            val option57 = SqlOutboxStore.selectLockOption(mysql, version57)
+            option57.toQuerySuffix().contains("SKIP LOCKED") shouldBe false
+
+            // MySQL 8.0+: SKIP LOCKED IS supported
+            val option80 = SqlOutboxStore.selectLockOption(mysql, version80)
+            option80.toQuerySuffix().contains("SKIP LOCKED") shouldBe true
+        }
+
         // #334 — PM-15: serialize Error/OOM must not kill the relay; RecordTooLargeException handled distinctly
         "OutboxRelay keeps polling after a serialize Error and does not dead-letter other rows" {
             withOutboxRepo { db, repo ->
@@ -484,6 +519,9 @@ private class FaultingOutboxStore(
 
     override fun insert(event: OutboxEvent) = delegate.insert(event)
 }
+
+/** Returns the query suffix string of this [ForUpdateOption] or empty string if null. */
+private fun ForUpdateOption?.toQuerySuffix(): String = this?.querySuffix ?: ""
 
 /**
  * A [LirpEventSerializer] that throws [OutOfMemoryError] on the first call, then delegates to

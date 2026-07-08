@@ -116,13 +116,23 @@ internal class OutboxRelay(
         transaction(db) { SchemaUtils.create(DeadLetterTable) }
         job =
             ReactiveScope.ioScope.launch {
+                var consecutiveFailures = 0
                 while (isActive) {
                     try {
                         pollAndRelay()
+                        consecutiveFailures = 0
                     } catch (e: CancellationException) {
                         throw e // cooperative cancellation — never swallow
                     } catch (e: Exception) {
-                        log.error(e) { "Relay poll cycle failed" }
+                        consecutiveFailures++
+                        if (consecutiveFailures == 1) {
+                            log.error(e) { "Relay poll cycle failed" }
+                        } else {
+                            // Escalate visibility: a repeating failure (e.g. a dialect-specific syntax
+                            // error or unreachable DB) grows the outbox unbounded. Log at ERROR with
+                            // the consecutive count so operators notice and act quickly.
+                            log.error(e) { "Relay poll cycle failed $consecutiveFailures times in a row — outbox is not draining. Last error: ${e.message}" }
+                        }
                     }
                     delay(config.pollIntervalMs)
                 }
