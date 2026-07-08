@@ -23,6 +23,9 @@ import net.transgressoft.lirp.event.LirpOperation
 import net.transgressoft.lirp.kafka.KafkaEventPublisher
 import net.transgressoft.lirp.kafka.KafkaOutboxConfig
 import net.transgressoft.lirp.kafka.KafkaOutboxSqlRepository
+import net.transgressoft.lirp.kafka.spi.LirpEventEnvelope
+import net.transgressoft.lirp.kafka.spi.LirpEventSerializer
+import net.transgressoft.lirp.kafka.spi.SerializedEvent
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.RegistryBase
@@ -44,6 +47,7 @@ import io.mockk.verify
 import org.apache.kafka.common.errors.NetworkException
 import org.apache.kafka.common.errors.RecordTooLargeException
 import org.jetbrains.exposed.v1.core.ResultRow
+import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.isNull
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
@@ -257,6 +261,96 @@ internal class OutboxRelayTest : StringSpec() {
                 }
             }
         }
+
+        // #332 — PM-13: scheduleRetry DB-write failure must not produce a no-backoff busy re-publish
+        "OutboxRelay advances backoff or dead-letters row when scheduleRetry DB write fails" {
+            withOutboxRepo { db, repo ->
+                val publisher = mockk<KafkaEventPublisher<*, *>>()
+                every { publisher.publish(any(), any(), any(), any()) } throws NetworkException("broker unavailable")
+
+                transaction(repo) { r ->
+                    r.add(MutableAudioItem(11, "Killer Queen", "Sheer Heart Attack") as AudioItem)
+                }
+
+                // Fault-inject a store whose scheduleRetry always throws to simulate a DB failure.
+                val faultStore = FaultingOutboxStore(db, scheduleRetryThrows = true)
+                val relay = OutboxRelay(db, publisher, fastConfig, store = faultStore)
+
+                // Drive two poll cycles.
+                relay.pollAndRelay()
+                relay.pollAndRelay()
+
+                // The row must NOT be busy-re-published with retry_count=0 on every cycle.
+                // Acceptable outcomes: row dead-lettered (moved out of outbox), OR retry_count advanced.
+                // Forbidden: publish called twice with retry_count still 0 in outbox.
+                val row = transaction(db) { OutboxEventTable.selectAll().firstOrNull() }
+                if (row != null) {
+                    // Row still in outbox: retry_count must be > 0 (backoff was advanced despite DB failure)
+                    // OR the row was not re-published (publish was only called once total).
+                    val retryCount = row[OutboxEventTable.retryCount]
+                    // If retry_count is still 0, verify publish was called at most once — no busy loop.
+                    if (retryCount == 0) {
+                        verify(atMost = 1) { publisher.publish(any(), any(), any(), any()) }
+                    }
+                } else {
+                    // Row resolved: it must be in the dead-letter table.
+                    db.deadLetterCount() shouldBe 1L
+                }
+            }
+        }
+
+        // #333 — PM-14: duplicate dead-letter PK must not wedge a poison row that re-fails every cycle
+        "OutboxRelay duplicate dead-letter id does not leave a poison row re-fetched every cycle" {
+            withOutboxDb { _, db ->
+                val publisher = mockk<KafkaEventPublisher<*, *>>()
+                every { publisher.publish(any(), any(), any(), any()) } throws RecordTooLargeException("too large")
+
+                // Seed the outbox row with a known UUID.
+                val knownId = java.util.UUID.randomUUID()
+                db.seedRowWithId(knownId, "55")
+
+                // Pre-seed the dead-letter table with the same id to trigger a PK collision.
+                db.seedDeadLetterRow(knownId)
+
+                // Drive two poll cycles.
+                OutboxRelay(db, publisher, fastConfig).pollAndRelay()
+                OutboxRelay(db, publisher, fastConfig).pollAndRelay()
+
+                // After two cycles the outbox row must be gone — not re-fetched and re-failing forever.
+                db.outboxCount() shouldBe 0L
+            }
+        }
+
+        // #334 — PM-15: serialize Error/OOM must not kill the relay; RecordTooLargeException handled distinctly
+        "OutboxRelay keeps polling after a serialize Error and does not dead-letter other rows" {
+            withOutboxRepo { db, repo ->
+                // First row will trigger an OOM/Error in the serializer; second should still be processed.
+                transaction(repo) { r ->
+                    r.add(MutableAudioItem(71, "Flash", "Flash Gordon") as AudioItem)
+                    r.add(MutableAudioItem(72, "We Will Rock You", "News of the World") as AudioItem)
+                }
+
+                val publisher = mockk<KafkaEventPublisher<*, *>>()
+                justRun { publisher.publish(any(), any(), any(), any()) }
+
+                // Serializer that throws OutOfMemoryError for the first row, succeeds for the rest.
+                val oomSerializer = OomOnFirstCallSerializer()
+
+                // If the relay does NOT catch Throwable, the relay coroutine dies on the first row
+                // and the second row is never published. After the fix, both rows should be resolved.
+                OutboxRelay(db, publisher, fastConfig, serializer = oomSerializer).pollAndRelay()
+                OutboxRelay(db, publisher, fastConfig, serializer = oomSerializer).pollAndRelay()
+
+                // The second row (aggregate 72) must have been published and marked sent.
+                val sentRows =
+                    transaction(db) {
+                        OutboxEventTable.selectAll()
+                            .where { OutboxEventTable.aggregateId eq "72" }
+                            .map { it[OutboxEventTable.sentAt] }
+                    }
+                sentRows.any { it != null } shouldBe true
+            }
+        }
     }
 }
 
@@ -330,4 +424,82 @@ private fun Database.seedExhaustedRow(aggregateId: String, retryCount: Int) {
             it[OutboxEventTable.retryCount] = retryCount
         }
     }
+}
+
+/** Seeds an outbox row with a specific [id] to enable PK-collision testing. */
+private fun Database.seedRowWithId(id: java.util.UUID, aggregateId: String) {
+    transaction(this) {
+        OutboxEventTable.insert {
+            it[OutboxEventTable.id] = id.toKotlinUuid()
+            it[OutboxEventTable.aggregateType] = "audio_items"
+            it[OutboxEventTable.aggregateId] = aggregateId
+            it[OutboxEventTable.eventTypeCode] = 100
+            it[OutboxEventTable.payload] = "{}"
+            it[OutboxEventTable.createdAt] = Clock.System.now()
+        }
+    }
+}
+
+/** Seeds a dead-letter row with [id] to pre-occupy the PK and trigger a collision on the next dead-letter insert. */
+private fun Database.seedDeadLetterRow(id: java.util.UUID) {
+    transaction(this) {
+        DeadLetterTable.insert {
+            it[DeadLetterTable.id] = id.toKotlinUuid()
+            it[DeadLetterTable.aggregateType] = "audio_items"
+            it[DeadLetterTable.aggregateId] = "pre-existing"
+            it[DeadLetterTable.eventTypeCode] = 100
+            it[DeadLetterTable.payload] = "{}"
+            it[DeadLetterTable.createdAt] = Clock.System.now()
+            it[DeadLetterTable.failedAt] = Clock.System.now()
+            it[DeadLetterTable.attemptCount] = 1
+            it[DeadLetterTable.lastError] = "pre-existing"
+        }
+    }
+}
+
+/**
+ * An [OutboxStore] wrapper that delegates all operations to the real [SqlOutboxStore] but injects
+ * a controllable fault into [scheduleRetry]. Used to simulate a DB failure on the retry-write
+ * path without mocking the entire store interface.
+ */
+private class FaultingOutboxStore(
+    db: Database,
+    val scheduleRetryThrows: Boolean = false
+) : OutboxStore {
+    val delegate = SqlOutboxStore(db)
+
+    override fun findUnsent(limit: Int) = delegate.findUnsent(limit)
+
+    override fun markSent(id: java.util.UUID) = delegate.markSent(id)
+
+    override fun findUnsentForRelay(limit: Int, now: kotlin.time.Instant) = delegate.findUnsentForRelay(limit, now)
+
+    override fun scheduleRetry(id: java.util.UUID, nextRetryAt: kotlin.time.Instant, errorMessage: String) {
+        if (scheduleRetryThrows) error("simulated scheduleRetry DB failure")
+        delegate.scheduleRetry(id, nextRetryAt, errorMessage)
+    }
+
+    override fun moveToDeadLetter(event: OutboxEvent, failedAt: kotlin.time.Instant, errorMessage: String) =
+        delegate.moveToDeadLetter(event, failedAt, errorMessage)
+
+    override fun insert(event: OutboxEvent) = delegate.insert(event)
+}
+
+/**
+ * A [LirpEventSerializer] that throws [OutOfMemoryError] on the first call, then delegates to
+ * [net.transgressoft.lirp.kafka.spi.CloudEventsBinarySerializer] for subsequent calls.
+ * Used to simulate an OOM during serialization to verify the relay keeps polling after the error.
+ */
+private class OomOnFirstCallSerializer : LirpEventSerializer {
+    val real = net.transgressoft.lirp.kafka.spi.CloudEventsBinarySerializer()
+    var callCount = 0
+
+    override fun serialize(envelope: LirpEventEnvelope): SerializedEvent {
+        callCount++
+        if (callCount == 1) throw OutOfMemoryError("simulated OOM during serialize")
+        return real.serialize(envelope)
+    }
+
+    override fun deserialize(value: ByteArray, headers: Map<String, ByteArray>): LirpEventEnvelope =
+        real.deserialize(value, headers)
 }

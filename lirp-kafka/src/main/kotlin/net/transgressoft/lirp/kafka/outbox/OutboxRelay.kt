@@ -88,6 +88,8 @@ import kotlinx.coroutines.runBlocking
  * @param onDeadLetter Optional callback invoked when a row is moved to the dead-letter table.
  *   The callback receives the terminal exception and a [LirpErrorContext] describing the failure.
  *   Exceptions thrown by the callback are swallowed.
+ * @param store Outbox persistence store. Defaults to [SqlOutboxStore] over [db]. Exposed for
+ *   fault-injection testing only; production callers must not pass a custom value.
  */
 internal class OutboxRelay(
     private val db: Database,
@@ -95,11 +97,12 @@ internal class OutboxRelay(
     private val config: KafkaOutboxConfig,
     private val serializer: LirpEventSerializer = CloudEventsBinarySerializer(),
     private val topicResolver: TopicResolver = DefaultTopicResolver,
-    private val onDeadLetter: LirpErrorHandler? = null
+    private val onDeadLetter: LirpErrorHandler? = null,
+    store: OutboxStore? = null
 ) : AutoCloseable {
 
     private val log = KotlinLogging.logger(javaClass.name)
-    private val store = SqlOutboxStore(db)
+    private val store: OutboxStore = store ?: SqlOutboxStore(db)
     private var job: Job? = null
 
     /**
@@ -179,7 +182,19 @@ internal class OutboxRelay(
             require(topic.isNotBlank()) {
                 "TopicResolver returned a blank topic for aggregateType='${envelope.aggregateType}'"
             }
-            val serialized = serializer.serialize(envelope)
+            // Widen to Throwable so an OutOfMemoryError or other Error during serialization does
+            // not escape this method and kill the relay coroutine. The row is dead-lettered so
+            // the queue is not permanently wedged.
+            @Suppress("TooGenericExceptionCaught")
+            val serialized =
+                try {
+                    serializer.serialize(envelope)
+                } catch (t: Throwable) {
+                    store.moveToDeadLetter(row, Clock.System.now(), t.message ?: t.javaClass.simpleName)
+                    log.error(t) { "Serialization error for outbox row ${row.id} (${row.aggregateType}/${row.aggregateId}); row moved to dead-letter" }
+                    invokeDeadLetterCallback(t)
+                    return
+                }
             val recordHeaders = RecordHeaders()
             serialized.headers.forEach { (k, v) -> recordHeaders.add(k, v) }
             publisher.publish(topic, row.aggregateId, serialized.value, recordHeaders)
@@ -190,9 +205,28 @@ internal class OutboxRelay(
                 invokeDeadLetterCallback(e)
             } else {
                 val nextRetryAt = computeNextRetryAt(row.retryCount + 1, config)
-                store.scheduleRetry(row.id, nextRetryAt, e.message ?: e.javaClass.simpleName)
+                try {
+                    store.scheduleRetry(row.id, nextRetryAt, e.message ?: e.javaClass.simpleName)
+                } catch (dbFailure: Exception) {
+                    // scheduleRetry DB write failed: the retry_count was not incremented, so the
+                    // row would be re-published immediately on the next cycle with no backoff.
+                    // Fall back to dead-lettering so the row is resolved and the queue drains.
+                    log.error(dbFailure) {
+                        "Failed to persist retry schedule for outbox row ${row.id}; moving to dead-letter to prevent unbounded re-publish"
+                    }
+                    store.moveToDeadLetter(row, Clock.System.now(), e.message ?: e.javaClass.simpleName)
+                    invokeDeadLetterCallback(e)
+                }
             }
         } catch (e: Exception) {
+            if (e is org.apache.kafka.common.errors.RecordTooLargeException) {
+                // Log distinctly: this is a configuration issue (broker's max.message.bytes or
+                // message.max.bytes), not a permanent data problem. Raising the limit would deliver it.
+                log.error(e) {
+                    "Outbox row ${row.id} exceeds the broker's record size limit and has been moved to dead-letter. " +
+                        "Raising max.message.bytes / max.request.size would allow delivery."
+                }
+            }
             store.moveToDeadLetter(row, Clock.System.now(), e.message ?: e.javaClass.simpleName)
             invokeDeadLetterCallback(e)
         }
@@ -221,7 +255,12 @@ internal class OutboxRelay(
             // Clamp the shift distance: `Long shl` masks to the low 6 bits, so a retryCount >= 64
             // would silently wrap to a small exponent instead of saturating at capMs.
             val safeShift = minOf(retryCount, 62)
-            val raw = minOf(baseMs * (1L shl safeShift), capMs)
+            val shift = 1L shl safeShift
+            // Guard against Long overflow: for baseMs >= 2 and a large shift, baseMs * shift can
+            // exceed Long.MAX_VALUE and wrap negative, which would slip past minOf(..., capMs) and
+            // yield a next-retry timestamp in the past — a no-backoff busy loop. When the product
+            // would exceed capMs, saturate directly to capMs rather than multiplying.
+            val raw = if (baseMs > 0 && shift > capMs / baseMs) capMs else minOf(baseMs * shift, capMs)
             val jittered = raw * (0.8 + Math.random() * 0.4)
             return Clock.System.now() + jittered.toLong().milliseconds
         }

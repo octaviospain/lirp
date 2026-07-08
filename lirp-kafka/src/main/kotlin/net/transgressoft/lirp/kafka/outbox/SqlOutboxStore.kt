@@ -32,6 +32,7 @@ import org.jetbrains.exposed.v1.core.vendors.currentDialect
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.insert
+import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.update
 import java.util.UUID
@@ -49,10 +50,16 @@ import kotlin.uuid.toKotlinUuid
  * [markSent] leaves the row unsent; the rolled-back transaction is the redelivery guarantee.
  *
  * **Dialect-aware locking:** [findUnsentForRelay] applies `FOR UPDATE SKIP LOCKED` on
- * PostgreSQL, MySQL, and MariaDB so concurrent relay instances skip rows already claimed by a
- * peer. On H2 and SQLite (test and single-instance deployments) the lock clause is omitted and
- * a plain `SELECT … LIMIT` is used; for those dialects a single-relay deployment is the only
+ * PostgreSQL and supported MySQL/MariaDB versions (MySQL 8.0+, MariaDB 10.6+) so concurrent relay
+ * instances skip rows already claimed by a peer. On older MySQL/MariaDB versions (MySQL < 8.0,
+ * MariaDB < 10.6), plain `FOR UPDATE` is used to preserve concurrency safety without requiring
+ * the unsupported `SKIP LOCKED` syntax. On H2 and SQLite (test and single-instance deployments)
+ * the lock clause is omitted; for those dialects a single-relay deployment is the only
  * supported configuration.
+ *
+ * **Dead-letter idempotency:** [moveToDeadLetter] uses `INSERT IGNORE` (or equivalent) so that
+ * a replayed dead-letter insert for the same outbox id silently skips the duplicate rather than
+ * throwing a unique-constraint violation. The outbox row is still deleted regardless.
  */
 internal class SqlOutboxStore(private val db: Database) : OutboxStore {
 
@@ -127,7 +134,10 @@ internal class SqlOutboxStore(private val db: Database) : OutboxStore {
     }
 
     override fun moveToDeadLetter(event: OutboxEvent, failedAt: Instant, errorMessage: String) {
-        DeadLetterTable.insert {
+        // Use insertIgnore so a duplicate PK (same outbox id already dead-lettered by a concurrent
+        // relay or replay tool) silently skips the re-insert rather than throwing a constraint
+        // violation that would leave the outbox row stuck in the queue forever.
+        DeadLetterTable.insertIgnore {
             it[id] = event.id.toKotlinUuid()
             it[aggregateType] = event.aggregateType
             it[aggregateId] = event.aggregateId
