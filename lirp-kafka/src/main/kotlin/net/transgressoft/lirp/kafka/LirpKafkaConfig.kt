@@ -35,13 +35,16 @@ import javax.sql.DataSource
  * pairs.
  *
  * This class is [AutoCloseable]: calling [close] stops the relay (if running) and releases the
- * underlying broker connection held by the cached [KafkaEventPublisher]. Wrap in a `use { }`
+ * underlying broker connection held by the active [KafkaEventPublisher]. Wrap in a `use { }`
  * block or call [close] explicitly when the config is no longer needed.
  *
  * **Relay lifecycle:** call [startRelay] with a [DataSource] to begin background outbox
  * delivery. The relay polls the outbox table, publishes each row via the [KafkaEventPublisher],
  * and marks it as sent only after the broker acknowledges. Call [stopRelay] to stop the relay
- * without closing the publisher, or [close] to stop both.
+ * and close the publisher (freeing the broker connection), or [close] to stop both. A subsequent
+ * [startRelay] constructs a fresh publisher with the newly supplied `producerConfig`, so operator
+ * changes to producer properties — such as `delivery.timeout.ms` or SSL credentials — take effect
+ * on restart rather than being silently ignored by a cached publisher.
  *
  * **Supported store:** only SQL-backed repositories participate in the transactional outbox.
  * [net.transgressoft.lirp.persistence.JsonFileRepository] and
@@ -68,10 +71,11 @@ class LirpKafkaConfig private constructor(val bootstrapServers: String) : AutoCl
     /**
      * Returns the [KafkaEventPublisher] owned by this config.
      *
-     * The publisher is initialized when [startRelay] is called and reused on subsequent calls.
-     * Its lifecycle is tied to this config — call [close] to release broker connections.
+     * The publisher is initialized when [startRelay] is called. Calling [stopRelay] closes it;
+     * a subsequent [startRelay] constructs a fresh publisher. Calling [publisher] after [stopRelay]
+     * and before a new [startRelay] throws [IllegalStateException].
      *
-     * @throws IllegalStateException if called before [startRelay]
+     * @throws IllegalStateException if the relay has not been started or was stopped
      */
     fun publisher(): KafkaEventPublisher<*, *> = checkNotNull(_publisher) { "Publisher not initialized — call startRelay first" }
 
@@ -82,6 +86,12 @@ class LirpKafkaConfig private constructor(val bootstrapServers: String) : AutoCl
      * and begins polling the outbox on a background coroutine. At most one relay per
      * [LirpKafkaConfig] instance is supported; calling [startRelay] when a relay is already
      * running throws [IllegalStateException].
+     *
+     * A fresh [KafkaEventPublisher] is constructed on each call so that [producerConfig] and
+     * [bootstrapServers] are applied to a new [org.apache.kafka.clients.producer.KafkaProducer]
+     * on every (re)start. This ensures that producer properties adjusted between a [stopRelay] and
+     * the subsequent restart — such as `delivery.timeout.ms` or SSL credentials — take effect
+     * rather than being silently ignored.
      *
      * @param dataSource JDBC data source for the outbox and dead-letter tables.
      * @param config Relay behaviour knobs — poll interval, batch size, retry limits, backoff.
@@ -108,27 +118,34 @@ class LirpKafkaConfig private constructor(val bootstrapServers: String) : AutoCl
     ) {
         check(relay == null) { "Relay is already running; call stopRelay() first" }
         val db = Database.connect(dataSource)
-        // Reuse the cached publisher across relay restarts so a prior stopRelay() does not leave the
-        // previous producer/broker connection open when a new relay is started.
-        // Pass dataSource explicitly so the publisher registers the db→dataSource mapping used
-        // by emitAsync to detect an ambient transaction on a different Database wrapping the same pool.
+        // Always construct a fresh publisher so that any producerConfig or bootstrapServers change
+        // supplied on a restart (after stopRelay) reaches a new KafkaProducer.
+        // Pass dataSource so the publisher stores the pool URL for the emitAsync
+        // transaction-join gate that detects two Database instances wrapping the same pool.
         val publisher =
-            _publisher
-                ?: KafkaEventPublisher<Nothing, Nothing>(
-                    "lirp-kafka", bootstrapServers, db,
-                    SqlOutboxStore(db), producerConfig, dataSource = dataSource
-                ).also { _publisher = it }
+            KafkaEventPublisher<Nothing, Nothing>(
+                "lirp-kafka", bootstrapServers, db,
+                SqlOutboxStore(db), producerConfig, dataSource = dataSource
+            ).also { _publisher = it }
         relay = OutboxRelay(db, publisher, config, serializer, topicResolver, onDeadLetter).also { it.start() }
     }
 
-    /** Stops the relay without closing the [KafkaEventPublisher]. */
+    /**
+     * Stops the relay and closes the [KafkaEventPublisher], releasing the broker connection.
+     *
+     * Closing the publisher ensures the underlying [org.apache.kafka.clients.producer.KafkaProducer]
+     * is released immediately. A subsequent [startRelay] call constructs a fresh publisher, so any
+     * updated [producerConfig] or [bootstrapServers] take effect.
+     */
     @Synchronized
     fun stopRelay() {
         relay?.stop()
         relay = null
+        _publisher?.close()
+        _publisher = null
     }
 
-    /** Stops the relay (if running) and closes the [KafkaEventPublisher]. */
+    /** Stops the relay (if running), closes the [KafkaEventPublisher], and nulls both. */
     @Synchronized
     override fun close() {
         relay?.stop()
