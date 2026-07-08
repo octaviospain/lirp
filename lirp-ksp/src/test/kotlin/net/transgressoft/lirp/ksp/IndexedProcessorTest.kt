@@ -257,4 +257,42 @@ internal class IndexedProcessorTest : StringSpec({
 
         result.shouldSucceed()
     }
+
+    "IndexedProcessor generates compilable accessor with JVM binary name for nested public @Indexed entity" {
+        // Regression test: nested entities were named from simpleName only, producing an
+        // unresolvable class name (e.g. Track_LirpIndexAccessor instead of
+        // Catalog${'$'}Track_LirpIndexAccessor). The generated file must compile and the
+        // accessor class must be loadable by the runtime via its JVM binary name.
+        val result =
+            compileWithIndexedProcessor(
+                SourceFile.kotlin(
+                    "CatalogWithTrack.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.Indexed
+
+                    class Catalog {
+                        data class Track(override val id: Int) : ReactiveEntityBase<Int, Track>() {
+                            override val uniqueId: String get() = "${'$'}id"
+                            override fun clone() = copy()
+                            @Indexed val title: String = ""
+                        }
+                    }
+                    """
+                )
+            )
+
+        result.shouldSucceed()
+        val accessorFileName = "Catalog\$Track_LirpIndexAccessor.kt"
+        val content = result.generatedFileContent(accessorFileName)
+        content.shouldContainEach(
+            // The class declaration must use the backtick-escaped JVM binary name
+            "`Catalog\$Track_LirpIndexAccessor`",
+            // The type argument must use the Kotlin-source nested name (dot-separated)
+            "LirpIndexAccessor<Catalog.Track>",
+            // The index entry must reference the property correctly
+            """IndexEntry("title") { it.title }"""
+        )
+    }
 })

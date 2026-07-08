@@ -83,8 +83,11 @@ class IndexedProcessor(
             return
         }
         val packageName = classDecl.packageName.asString()
-        val className = classDecl.simpleName.asString()
-        val accessorName = "$className${LirpGenNames.INDEX_ACCESSOR_SUFFIX}"
+        val jvmName = classDecl.jvmBinaryName()
+        val kotlinName = classDecl.kotlinNestedName()
+        val accessorName = "$jvmName${LirpGenNames.INDEX_ACCESSOR_SUFFIX}"
+        // Backtick-escape the class name in Kotlin source when it contains '$' (nested class separator)
+        val accessorSourceName = if ('$' in accessorName) "`$accessorName`" else accessorName
 
         val entries = mutableListOf<IndexedPropertyMeta>()
         for (prop in properties) {
@@ -141,11 +144,11 @@ class IndexedProcessor(
                 appendLine("import net.transgressoft.lirp.persistence.LirpIndexAccessor")
                 appendLine()
                 appendLine("/**")
-                appendLine(" * KSP-generated index accessor for [$className].")
+                appendLine(" * KSP-generated index accessor for [$kotlinName].")
                 appendLine(" * Provides direct property getters — no runtime reflection.")
                 appendLine(" */")
-                appendLine("$visibility class $accessorName : LirpIndexAccessor<$className> {")
-                appendLine("    override val entries: List<IndexEntry<$className>> = listOf(")
+                appendLine("$visibility class $accessorSourceName : LirpIndexAccessor<$kotlinName> {")
+                appendLine("    override val entries: List<IndexEntry<$kotlinName>> = listOf(")
                 appendLine("        $entriesCode")
                 appendLine("    )")
                 appendLine("}")
@@ -153,7 +156,7 @@ class IndexedProcessor(
         )
         file.close()
 
-        logger.info("Generated $packageName.$accessorName for $className")
+        logger.info("Generated $packageName.$accessorName for $kotlinName")
     }
 
     /**
