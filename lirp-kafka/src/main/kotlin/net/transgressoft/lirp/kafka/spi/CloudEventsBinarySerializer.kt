@@ -36,9 +36,11 @@ package net.transgressoft.lirp.kafka.spi
  * - `content-type`: Always `"application/json"` — the record value is a JSON string.
  *
  * All header values are encoded as UTF-8 bytes. [deserialize] fails fast on any record that does
- * not honour this contract: a missing required header, an unsupported `ce_specversion` or
- * `content-type`, or a `ce_source` that is not in the `lirp/{aggregateType}` form all raise an
- * exception rather than yield a bogus envelope (bug detector — do not downgrade to logging).
+ * not honour this contract: a missing required header, a blank `ce_id` or `ce_subject` (an empty
+ * `ByteArray` is non-null but decodes to an empty string — still rejected), an unsupported
+ * `ce_specversion` or `content-type`, or a `ce_source` that is not in the `lirp/{aggregateType}`
+ * form all raise an exception rather than yield a bogus envelope (bug detector — do not downgrade
+ * to logging).
  *
  * No external CloudEvents SDK is required. Hand-rolled with kotlinx-serialization only.
  */
@@ -61,7 +63,9 @@ class CloudEventsBinarySerializer : LirpEventSerializer {
         val payload = value.toString(Charsets.UTF_8)
         val specVersion = headers["ce_specversion"]?.toString(Charsets.UTF_8) ?: error("missing required ce_specversion header")
         require(specVersion == "1.0") { "unsupported ce_specversion '$specVersion'" }
-        val eventId = headers["ce_id"]?.toString(Charsets.UTF_8) ?: error("missing required ce_id header")
+        val eventId =
+            headers["ce_id"]?.toString(Charsets.UTF_8)?.takeIf { it.isNotBlank() }
+                ?: error("ce_id header is missing or blank; a non-blank idempotency key is required")
         val source = headers["ce_source"]?.toString(Charsets.UTF_8) ?: error("missing required ce_source header")
         require(source.startsWith("lirp/")) { "ce_source '$source' does not use the expected lirp/{aggregateType} format" }
         val aggregateType = source.removePrefix("lirp/")
@@ -69,7 +73,9 @@ class CloudEventsBinarySerializer : LirpEventSerializer {
         val eventTypeCode =
             ceType.substringAfterLast('.').toIntOrNull()
                 ?: error("ce_type '$ceType' does not end in a numeric event-type code")
-        val aggregateId = headers["ce_subject"]?.toString(Charsets.UTF_8) ?: error("missing required ce_subject header")
+        val aggregateId =
+            headers["ce_subject"]?.toString(Charsets.UTF_8)?.takeIf { it.isNotBlank() }
+                ?: error("ce_subject header is missing or blank; a non-blank aggregate identifier is required")
         val createdAt = headers["ce_time"]?.toString(Charsets.UTF_8) ?: error("missing required ce_time header")
         val contentType = headers["content-type"]?.toString(Charsets.UTF_8) ?: error("missing required content-type header")
         require(contentType == "application/json") { "unsupported content-type '$contentType'" }

@@ -274,10 +274,15 @@ class KafkaEventPublisher<ET : EventType, E : LirpEvent<ET>>
                             "OutboxRoutableEvent to be relayed to Kafka; implement aggregateId and payload " +
                             "or use FlowEventPublisher for local-only delivery"
                     )
+            val aggregateId = routable.aggregateId
+            require(aggregateId.isNotBlank()) {
+                "OutboxRoutableEvent.aggregateId must not be blank for event type ${event.type}; " +
+                    "a blank aggregateId would produce an empty Kafka record key, defeating per-aggregate ordering"
+            }
             return OutboxEvent(
                 id = UUID.randomUUID(),
                 aggregateType = aggregateType,
-                aggregateId = routable.aggregateId,
+                aggregateId = aggregateId,
                 eventTypeCode = event.type.code,
                 payload = routable.payload,
                 createdAt = Clock.System.now()
