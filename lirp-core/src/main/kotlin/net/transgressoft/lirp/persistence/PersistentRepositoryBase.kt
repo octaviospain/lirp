@@ -39,13 +39,16 @@ import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
 import kotlin.concurrent.withLock
 import kotlin.concurrent.write
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.slf4j.MDCContext
+import kotlinx.coroutines.withContext
 
 // MDC keys shared across the async flush and drain paths for log correlation
 private const val MDC_KEY_REPOSITORY = "lirp.repository"
@@ -114,6 +117,14 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
         protected val loadOnInit: Boolean = true,
         private val onError: LirpErrorHandler? = null
     ) : VolatileRepository<K, R>(context, name, initialEntities, onError), PersistentRepository<K, R> {
+
+        // When ioScope is the production single-slot scope, blocking I/O is offloaded to the
+        // unbounded IO pool so that one slow flush does not starve other repositories' scheduled
+        // flushes. When ioScope has been replaced (e.g. by a test dispatcher), the offload is
+        // skipped — test dispatchers handle any parallelism needed and do not have the single-slot
+        // constraint.
+        private val flushDispatcher
+            get() = if (ReactiveScope.isProductionIoScope) Dispatchers.IO else EmptyCoroutineContext
 
         // Stored to populate MDC keys at flush launch time and for transaction error context.
         private val repositoryName: String = name
@@ -685,14 +696,18 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
                                 delay(remainingMillis.milliseconds)
                                 maxDelayJob = null
                                 log.trace { "Async max-delay flush triggered for $repositoryName" }
-                                flush()
+                                // Offload blocking I/O off the shared single-slot ioScope so a slow
+                                // flush on one repository cannot starve another repository's scheduled
+                                // flushes. The scheduling/delay stays on ioScope; only the actual I/O
+                                // moves to the unbounded IO pool.
+                                withContext(flushDispatcher) { flush() }
                             }
                         } else {
                             ReactiveScope.ioScope.launch(MDCContext()) {
                                 delay(remainingMillis.milliseconds)
                                 maxDelayJob = null
                                 log.trace { "Async max-delay flush triggered for $repositoryName" }
-                                flush()
+                                withContext(flushDispatcher) { flush() }
                             }
                         }
                 } finally {
@@ -713,7 +728,9 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
                             maxDelayJob?.cancel()
                             maxDelayJob = null
                             log.trace { "Async debounce flush triggered for $repositoryName" }
-                            flush()
+                            // Same offload as the max-delay path: keep the ioScope slot free during
+                            // blocking I/O so sibling repositories can be scheduled.
+                            withContext(flushDispatcher) { flush() }
                         }
                     } else {
                         ReactiveScope.ioScope.launch(MDCContext()) {
@@ -721,7 +738,7 @@ abstract class PersistentRepositoryBase<K : Comparable<K>, R : ReactiveEntity<K,
                             maxDelayJob?.cancel()
                             maxDelayJob = null
                             log.trace { "Async debounce flush triggered for $repositoryName" }
-                            flush()
+                            withContext(flushDispatcher) { flush() }
                         }
                     }
             } finally {
