@@ -1055,6 +1055,7 @@ public class net/transgressoft/lirp/persistence/json/JsonFileRepository : net/tr
 	public synthetic fun <init> (Ljava/io/File;Lkotlinx/serialization/KSerializer;Lkotlinx/serialization/modules/SerializersModule;JZLnet/transgressoft/lirp/persistence/json/JsonFkPolicy;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public synthetic fun <init> (Ljava/io/File;Lkotlinx/serialization/KSerializer;Lkotlinx/serialization/modules/SerializersModule;JZLnet/transgressoft/lirp/persistence/json/JsonFkPolicy;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public synthetic fun <init> (Lnet/transgressoft/lirp/persistence/LirpContext;Ljava/io/File;Lkotlinx/serialization/KSerializer;Lkotlinx/serialization/modules/SerializersModule;JZLnet/transgressoft/lirp/persistence/json/JsonFkPolicy;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	protected fun beforeMoveToTarget (Ljava/io/File;)V
 	public fun close ()V
 	public fun commitTransactionBuffer (Lnet/transgressoft/lirp/persistence/TransactionBuffer;)V
 	public fun equals (Ljava/lang/Object;)Z

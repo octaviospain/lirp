@@ -286,7 +286,7 @@ private val customerMapSerializer = MapSerializer(Int.serializer(), PolymorphicC
  * auto-registration code for the provided [LirpContext].
  */
 @LirpRepository
-class StandardCustomerJsonFileRepository internal constructor(
+open class StandardCustomerJsonFileRepository internal constructor(
     context: LirpContext,
     file: File,
     serializationDelayMs: Long = 300L,
