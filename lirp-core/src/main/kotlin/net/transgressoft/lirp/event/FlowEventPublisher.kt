@@ -34,6 +34,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.slf4j.MDCContext
 
@@ -187,6 +188,14 @@ class FlowEventPublisher<ET : EventType, E : LirpEvent<ET>>
                     flowScope.launch(MDCContext()) {
                         for (event in channel) {
                             try {
+                                // A MutableSharedFlow with replay == 0 silently discards an emission that
+                                // has no active collector. The collector coroutine launched by
+                                // subscribeAsync registers asynchronously, so an event drained before it
+                                // subscribes would be lost even though a subscription handle already
+                                // exists. Suspend (never thread-block — the collector may share this
+                                // dispatcher) until at least one collector is registered, keeping the
+                                // event safely buffered in the unlimited channel until then.
+                                if (config.replay == 0) flow.subscriptionCount.first { it > 0 }
                                 flow.emit(event)
                             } catch (cancellation: CancellationException) {
                                 throw cancellation
