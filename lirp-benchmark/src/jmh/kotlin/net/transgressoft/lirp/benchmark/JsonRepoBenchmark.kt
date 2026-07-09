@@ -84,6 +84,25 @@ open class JsonRepoBenchmark {
     }
 
     /**
+     * Rewinds the repository to its seeded baseline between measurement iterations.
+     *
+     * In [Mode.Throughput] the [addEntity] method runs continuously for the whole iteration, so
+     * without this rewind the in-memory map grows without bound and each debounce flush rewrites
+     * an ever-larger JSON file, eventually exhausting the heap or tripping the per-iteration
+     * timeout and dropping the benchmark from the results. The guard makes this a no-op for
+     * [mutationFlush], which never advances [nextId] past the seed.
+     */
+    @Setup(Level.Iteration)
+    fun rewindToBaseline() {
+        if (nextId.get() <= entityCount) return
+        repo.clear()
+        repeat(entityCount) { i -> repo.add(BenchmarkEntity(i, "entity-$i", i % 100 + 1)) }
+        repo.close()
+        repo = JsonFileRepository(jsonFile, mapSerializer)
+        nextId.set(entityCount)
+    }
+
+    /**
      * Measures add throughput for [JsonFileRepository].
      *
      * Each invocation inserts a new entity. The actual file write is deferred by the debounce

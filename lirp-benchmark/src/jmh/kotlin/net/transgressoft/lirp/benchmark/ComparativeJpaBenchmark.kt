@@ -101,6 +101,34 @@ open class ComparativeJpaBenchmark {
         emf.close()
     }
 
+    /**
+     * Rewinds both sides to their seeded baseline between measurement iterations.
+     *
+     * Both add benchmarks persist a new row per invocation and never remove it, so across a full
+     * throughput iteration the lirp store (plus its debounce queue) and the JPA table grow without
+     * bound and eventually exhaust the heap, dropping the benchmarks from the results. The guard
+     * makes this a no-op for the findById benchmarks, which never advance [addIdGen] past the seed.
+     * The [emf]/[em] are kept open — only the extra rows are removed — to avoid repeatedly
+     * bootstrapping Hibernate (which would leak class metadata into metaspace).
+     */
+    @Setup(Level.Iteration)
+    fun rewindToBaseline() {
+        if (addIdGen.get() <= entityCount.toLong()) return
+        sqlRepo.close()
+        repoDataSource.connection.use { conn ->
+            conn.createStatement().use { it.executeUpdate("DELETE FROM benchmark_entities WHERE id >= $entityCount") }
+            if (!conn.autoCommit) conn.commit()
+        }
+        sqlRepo = SqlRepository(repoDataSource, BenchmarkEntityTableDef)
+        em.transaction.begin()
+        em.createQuery("DELETE FROM JpaBenchmarkEntity e WHERE e.id >= :seed")
+            .setParameter("seed", entityCount)
+            .executeUpdate()
+        em.transaction.commit()
+        em.clear()
+        addIdGen.set(entityCount.toLong())
+    }
+
     /** Adds a new entity via [SqlRepository]. Paired with [jpaAdd]. */
     @Benchmark
     @BenchmarkMode(Mode.Throughput)

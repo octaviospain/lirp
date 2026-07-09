@@ -121,6 +121,34 @@ open class SqlRepoBenchmark {
     }
 
     /**
+     * Rewinds the repository to its seeded baseline between measurement iterations.
+     *
+     * [addEntity] enqueues an add+remove pair into the debounce write pipeline on every
+     * invocation; in [Mode.Throughput] that pending-write queue grows without bound across a
+     * full iteration and eventually exhausts the heap, dropping the benchmark from the results.
+     * Closing the repository drains the queue and flushes; the bulk delete removes any residual
+     * rows before the repository is re-opened onto the clean baseline. The guard makes this a
+     * no-op for the read/flush benchmarks, which never advance [nextId] past the seed.
+     */
+    @Setup(Level.Iteration)
+    fun rewindToBaseline() {
+        if (nextId.get() <= entityCount) return
+        repo.close()
+        deleteRowsAtOrAboveSeed(dataSource)
+        repo = SqlRepository(dataSource, BenchmarkEntityTableDef)
+        needsReopen = false
+        nextId.set(entityCount)
+    }
+
+    /** Deletes rows whose id is at or above the seeded [entityCount], committing when the pool is not auto-commit. */
+    private fun deleteRowsAtOrAboveSeed(source: HikariDataSource) {
+        source.connection.use { conn ->
+            conn.createStatement().use { it.executeUpdate("DELETE FROM benchmark_entities WHERE id >= $entityCount") }
+            if (!conn.autoCommit) conn.commit()
+        }
+    }
+
+    /**
      * Measures add throughput for [SqlRepository].
      *
      * Each invocation inserts a new entity with a unique ID and then removes it to keep the

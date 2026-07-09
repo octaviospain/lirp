@@ -15,6 +15,7 @@ ktlint {
 dependencies {
     jmh project(':lirp-core')
     jmh project(':lirp-sql')
+    jmh project(':lirp-kafka')
     ksp project(path: ':lirp-ksp')
     kspJmh project(path: ':lirp-ksp')
     jmh libs.jmh.core
@@ -81,16 +82,23 @@ tasks.register('renderBenchmarkReport', Exec) {
     def template = file('scripts/Performance-Benchmarks.template.md')
     def outMd = layout.buildDirectory.file('reports/jmh/Performance-Benchmarks.md')
     def csvDir = layout.buildDirectory.dir('reports/jmh/csv')
+    // The currently-published wiki copy, if checked out alongside the repo, is used as the baseline
+    // so each render automatically gains a "Δ vs prev" column comparing this run against it.
+    def baselineMd = rootProject.file('../lirp.wiki/Performance-Benchmarks.md')
     inputs.file(resultsJson).optional()
     inputs.file(template).optional()
     outputs.file(outMd)
     outputs.dir(csvDir)
-    commandLine 'python3',
+    def cmd = ['python3',
         file('scripts/render_benchmark_results.py').absolutePath,
         '--results', resultsJson.get().asFile.absolutePath,
         '--template', template.absolutePath,
         '--out', outMd.get().asFile.absolutePath,
-        '--csv-dir', csvDir.get().asFile.absolutePath
+        '--csv-dir', csvDir.get().asFile.absolutePath]
+    if (baselineMd.exists()) {
+        cmd += ['--baseline', baselineMd.absolutePath]
+    }
+    commandLine cmd
     onlyIf { resultsJson.get().asFile.exists() }
 }
 

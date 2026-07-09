@@ -7,7 +7,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). D
 notes begin with 3.0.0; for earlier releases (including SQLite as a fourth SQL dialect in 2.5.0)
 see the [GitHub releases](https://github.com/octaviospain/lirp/releases).
 
-## [Unreleased]
+## [3.2.1] - 2026-07-11
 
 ### Breaking Changes
 

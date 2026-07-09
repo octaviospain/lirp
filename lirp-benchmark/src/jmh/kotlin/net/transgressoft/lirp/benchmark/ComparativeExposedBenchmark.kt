@@ -107,6 +107,33 @@ open class ComparativeExposedBenchmark {
         exposedDataSource.close()
     }
 
+    /**
+     * Rewinds both sides to their seeded baseline between measurement iterations.
+     *
+     * Both add benchmarks insert a new row per invocation and never remove it, so across a full
+     * throughput iteration the lirp store (plus its debounce queue) and the Exposed table grow
+     * without bound and eventually exhaust the heap, dropping the benchmarks from the results.
+     * The guard makes this a no-op for the findById benchmarks, which never advance [addIdGen]
+     * past the seed.
+     */
+    @Setup(Level.Iteration)
+    fun rewindToBaseline() {
+        if (addIdGen.get() <= entityCount.toLong()) return
+        sqlRepo.close()
+        deleteRowsAtOrAboveSeed(repoDataSource)
+        sqlRepo = SqlRepository(repoDataSource, BenchmarkEntityTableDef)
+        deleteRowsAtOrAboveSeed(exposedDataSource)
+        addIdGen.set(entityCount.toLong())
+    }
+
+    /** Deletes rows whose id is at or above the seeded [entityCount], committing when the pool is not auto-commit. */
+    private fun deleteRowsAtOrAboveSeed(source: HikariDataSource) {
+        source.connection.use { conn ->
+            conn.createStatement().use { it.executeUpdate("DELETE FROM benchmark_entities WHERE id >= $entityCount") }
+            if (!conn.autoCommit) conn.commit()
+        }
+    }
+
     /** Adds a new entity via SqlRepository. Paired with [directExposedAdd]. */
     @Benchmark
     fun sqlRepoAdd(bh: Blackhole) {

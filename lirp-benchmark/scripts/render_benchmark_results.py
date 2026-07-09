@@ -285,6 +285,9 @@ def write_csvs(rows: list[dict[str, Any]], csv_dir: Path) -> None:
 
 TABLE_LINE_RE = re.compile(r"^\s*\|.*\|\s*$")
 DELTA_HEADER = "Δ vs prev"
+# A table preceded by this HTML comment is excluded from delta augmentation. Used for static,
+# self-contained comparison tables (e.g. an OFF/ON footprint study) that are not run-over-run metrics.
+NO_DELTA_MARKER = "<!-- no-delta"
 
 
 def _split_row(line: str) -> list[str]:
@@ -409,6 +412,10 @@ def augment_with_deltas(rendered_md: str, baseline_md: str) -> str:
     edits: dict[int, str] = {}
 
     for t in new_tables:
+        # Skip tables explicitly opted out via a preceding "<!-- no-delta -->" comment.
+        header_i = t["header_line"]
+        if any(NO_DELTA_MARKER in lines[k] for k in range(max(0, header_i - 4), header_i)):
+            continue
         # Augment only genuine numeric data tables: a majority of data rows must have a clean
         # measurement in the primary column. This skips text tables (environment, recommendations)
         # whose cells merely contain an incidental digit.
@@ -508,6 +515,8 @@ def main() -> int:
                 sys.stderr.write(
                     f"warning: baseline {args.baseline} not found; rendering without delta column\n"
                 )
+        if not rendered.endswith("\n"):
+            rendered += "\n"
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(rendered)
         print(f"wrote {args.out}")

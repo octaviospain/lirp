@@ -133,6 +133,33 @@ open class DirectJdbcBenchmark {
     }
 
     /**
+     * Rewinds both sides to their seeded baseline between measurement iterations.
+     *
+     * The two add benchmarks insert a new row on every invocation and never remove it, so in
+     * [Mode.Throughput] the lirp in-memory store (plus its debounce queue) and the raw JDBC table
+     * grow without bound across a full iteration and eventually exhaust the heap, dropping the
+     * benchmarks from the results. The guard makes this a no-op for the findById/update
+     * benchmarks, which never advance [addIdGen] past the seed.
+     */
+    @Setup(Level.Iteration)
+    fun rewindToBaseline() {
+        if (addIdGen.get() <= entityCount.toLong()) return
+        lirpRepo.close()
+        deleteRowsAtOrAboveSeed(lirpDataSource)
+        lirpRepo = SqlRepository(lirpDataSource, BenchmarkEntityTableDef)
+        deleteRowsAtOrAboveSeed(jdbcDataSource)
+        addIdGen.set(entityCount.toLong())
+    }
+
+    /** Deletes rows whose id is at or above the seeded [entityCount], committing when the pool is not auto-commit. */
+    private fun deleteRowsAtOrAboveSeed(source: HikariDataSource) {
+        source.connection.use { conn ->
+            conn.createStatement().use { it.executeUpdate("DELETE FROM benchmark_entities WHERE id >= $entityCount") }
+            if (!conn.autoCommit) conn.commit()
+        }
+    }
+
+    /**
      * Measures add throughput via [SqlRepository].
      *
      * Enqueues the entity in the in-memory store; the SQL write is deferred by the debounce

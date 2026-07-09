@@ -319,16 +319,19 @@ After the JMH run, the `renderBenchmarkReport` task (wired via `finalizedBy`) re
 - `lirp-benchmark/build/reports/jmh/csv/*.csv` — one CSV per benchmark class
 - `lirp-benchmark/build/reports/jmh/Performance-Benchmarks.md` — this file, rendered from the template at `lirp-benchmark/scripts/Performance-Benchmarks.template.md`
 
+When a wiki checkout exists at `../lirp.wiki/Performance-Benchmarks.md`, the task passes it as the
+baseline automatically, so every numeric table in the rendered file already carries a `Δ vs prev`
+column labelled `(better)`/`(worse)` according to the metric's direction (throughput
+higher-is-better; latency, memory, and init time lower-is-better). No manual step is required.
+
 To publish to the wiki, copy the rendered file:
 
 ```bash
 cp lirp-benchmark/build/reports/jmh/Performance-Benchmarks.md ../lirp.wiki/Performance-Benchmarks.md
 ```
 
-To show how this run compares against the currently published numbers, render with `--baseline`
-pointing at the wiki copy before overwriting it. Every numeric table gains a `Δ vs prev` column
-labelled `(better)`/`(worse)` according to the metric's direction (throughput higher-is-better;
-latency, memory, and init time lower-is-better):
+To render manually against an explicit baseline (e.g. when the wiki lives elsewhere), pass
+`--baseline` yourself:
 
 ```bash
 python3 lirp-benchmark/scripts/render_benchmark_results.py \
@@ -366,3 +369,76 @@ Measures the per-caller-thread cost of a single reactive property assignment fan
 | 1  | {{ p50 | MutationLatencyBenchmark | mutateProperty | subscriberCount=1,transport=async | bare }} | {{ p95 | MutationLatencyBenchmark | mutateProperty | subscriberCount=1,transport=async | bare }} | {{ p99 | MutationLatencyBenchmark | mutateProperty | subscriberCount=1,transport=async | bare }} |
 | 5  | {{ p50 | MutationLatencyBenchmark | mutateProperty | subscriberCount=5,transport=async | bare }} | {{ p95 | MutationLatencyBenchmark | mutateProperty | subscriberCount=5,transport=async | bare }} | {{ p99 | MutationLatencyBenchmark | mutateProperty | subscriberCount=5,transport=async | bare }} |
 | 10 | {{ p50 | MutationLatencyBenchmark | mutateProperty | subscriberCount=10,transport=async | bare }} | {{ p95 | MutationLatencyBenchmark | mutateProperty | subscriberCount=10,transport=async | bare }} | {{ p99 | MutationLatencyBenchmark | mutateProperty | subscriberCount=10,transport=async | bare }} |
+
+---
+
+## Section 8 — Outbox Capture Overhead
+
+Measures the added write latency when `KafkaOutboxSqlRepository` is enabled — the synchronous
+in-commit cost of inserting one outbox row per entity change into `lirp_kafka_outbox` alongside
+the entity SQL write. The `outbox_off` row uses a plain `SqlRepository` as the zero-overhead
+baseline; the delta between rows is the per-flush cost a consumer pays to enable the outbox.
+
+Both configurations are backed by H2 in-memory with the same HikariCP pool; no relay process
+or Kafka broker is started during measurement.
+
+### 8.1 mutationFlush Latency: Outbox OFF vs ON (µs/op)
+
+| Entity Count | Outbox OFF (mean) | Outbox OFF (p99) | Outbox ON (mean) | Outbox ON (p99) |
+|-------------|-------------------|------------------|------------------|-----------------|
+| 100         | {{ mean | OutboxCaptureBenchmark | mutationFlush | outboxMode=outbox_off,entityCount=100 }} µs | {{ p99 | OutboxCaptureBenchmark | mutationFlush | outboxMode=outbox_off,entityCount=100 }} | {{ mean | OutboxCaptureBenchmark | mutationFlush | outboxMode=outbox_on,entityCount=100 }} µs | {{ p99 | OutboxCaptureBenchmark | mutationFlush | outboxMode=outbox_on,entityCount=100 }} |
+| 1,000       | {{ mean | OutboxCaptureBenchmark | mutationFlush | outboxMode=outbox_off,entityCount=1000 }} µs | {{ p99 | OutboxCaptureBenchmark | mutationFlush | outboxMode=outbox_off,entityCount=1000 }} | {{ mean | OutboxCaptureBenchmark | mutationFlush | outboxMode=outbox_on,entityCount=1000 }} µs | {{ p99 | OutboxCaptureBenchmark | mutationFlush | outboxMode=outbox_on,entityCount=1000 }} |
+| 10,000      | {{ mean | OutboxCaptureBenchmark | mutationFlush | outboxMode=outbox_off,entityCount=10000 }} µs | {{ p99 | OutboxCaptureBenchmark | mutationFlush | outboxMode=outbox_off,entityCount=10000 }} | {{ mean | OutboxCaptureBenchmark | mutationFlush | outboxMode=outbox_on,entityCount=10000 }} µs | {{ p99 | OutboxCaptureBenchmark | mutationFlush | outboxMode=outbox_on,entityCount=10000 }} |
+| 50,000      | {{ mean | OutboxCaptureBenchmark | mutationFlush | outboxMode=outbox_off,entityCount=50000 }} µs | {{ p99 | OutboxCaptureBenchmark | mutationFlush | outboxMode=outbox_off,entityCount=50000 }} | {{ mean | OutboxCaptureBenchmark | mutationFlush | outboxMode=outbox_on,entityCount=50000 }} µs | {{ p99 | OutboxCaptureBenchmark | mutationFlush | outboxMode=outbox_on,entityCount=50000 }} |
+
+---
+
+## Section 7 — JDK 25 + Compact Object Headers: Per-Entity Footprint Delta
+
+**Measurement date:** 2026-07-09
+**Configuration:** 1 warmup iteration, 3 measurement iterations, 1 fork (JDK version effect isolated — both runs on JDK 25)
+
+### 7.1 Environment for This Run
+
+<!-- no-delta: static OFF/ON study, not a run-over-run metric -->
+
+| Attribute         | Value                                                       |
+|-------------------|-------------------------------------------------------------|
+| JVM               | openjdk version "25.0.3" 2026-04-15 (BellSoft Liberica JVM)         |
+| OS                | Linux 7.1.3-arch1-1 (x86_64)                               |
+| CPU               | 13th Gen Intel(R) Core(TM) i7-13700                         |
+| RAM               | 63 GB                                                       |
+| JMH               | 1.37                                                        |
+| JVM args (OFF)    | `--add-opens` for JOL reflection access, `-Djol.magicFieldOffset=true` |
+| JVM args (ON)     | Same as OFF plus `-XX:+UseCompactObjectHeaders`             |
+
+Both runs use the same JDK 25 build so the measured delta isolates the compact-header effect from any JDK-version change: holding the JDK constant across the OFF/ON pair is what lets this table attribute the reduction to compact headers alone rather than to a JDK upgrade.
+
+### 7.2 JOL Heap Per Entity (heapPerEntityWithSubscribers, `BenchmarkEntity`)
+
+`GraphLayout.parseInstance(entity).totalSize()` measures the full reachable object graph of one entity, including publisher, subscriber list, and all backing fields.
+
+<!-- no-delta: static OFF/ON study, not a run-over-run metric -->
+
+| Subscriber Count | Headers OFF (bytes) | Headers ON (bytes) | Reduction (bytes) | Reduction (%) |
+|-----------------|--------------------|--------------------|-------------------|---------------|
+| 0               | 65,792             | 58,248             | 7,544             | 11.5%         |
+| 1               | 67,784             | 60,032             | 7,752             | 11.4%         |
+| 5               | 67,800             | 60,048             | 7,752             | 11.4%         |
+| 10              | 67,816             | 60,072             | 7,744             | 11.4%         |
+
+The consistent ~11.4% reduction across all subscriber counts reflects the 12→8 byte header compression on every object in the entity graph (the entity itself, its `FlowEventPublisher`, `SharedFlow` buffer, subscriber `Job` entries, and `ConcurrentHashMap` nodes in the backing store). Because LIRP keeps the entire repository resident in a `ConcurrentHashMap`, this saving scales with entity count: a repository of 50,000 entities saves approximately **370 MB** of object graph space (50,000 × ~7.7 kB reduction).
+
+### 7.3 Configuring Compact Object Headers
+
+`-XX:+UseCompactObjectHeaders` is a product flag in JDK 25 (JEP 519) — no `-XX:+UnlockExperimentalVMOptions` is needed. It is opt-in and not the default. The flag is **not compatible with ZGC on x64**; the G1 collector (the JVM default) works correctly with it.
+
+LIRP's benchmark and test JVMs are automatically configured with this flag when running on JDK 25 (guarded to avoid breaking developers or CI runners on earlier JDKs). Consumers running their own applications on JDK 25 can realize the same reduction — see the note in the [README Performance section](../README.md#performance).
+
+---
+
+## See Also
+
+- **[Persistence](Persistence)** — the debounced write pipeline these benchmarks measure
+- **[SQL Persistence](SQL-Persistence)** — `SqlRepository` configuration and CRUD
+- **[JSON Persistence](JSON-Persistence)** — `VolatileRepository` and `JsonFileRepository`

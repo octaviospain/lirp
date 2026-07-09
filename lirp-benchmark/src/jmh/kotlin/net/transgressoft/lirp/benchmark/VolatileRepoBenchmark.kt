@@ -56,6 +56,23 @@ open class VolatileRepoBenchmark {
     }
 
     /**
+     * Rewinds the repository to its seeded baseline between measurement iterations.
+     *
+     * In [Mode.Throughput] the [addEntity] method is invoked continuously for the whole
+     * iteration, so without this rewind the repository grows by millions of entries across a
+     * full run and eventually exhausts the heap — dropping the benchmark from the results. The
+     * guard makes this a no-op for the read-only benchmarks, which never advance [nextId] past
+     * the seed, so their measurements are untouched.
+     */
+    @Setup(Level.Iteration)
+    fun rewindToBaseline() {
+        if (nextId.get() <= entityCount) return
+        repo.clear()
+        repeat(entityCount) { i -> repo.add(BenchmarkEntity(i, "entity-$i", i % 100 + 1)) }
+        nextId.set(entityCount)
+    }
+
+    /**
      * Measures add throughput for [VolatileRepository].
      *
      * Each invocation inserts a new entity with a unique ID above [entityCount].
