@@ -420,6 +420,8 @@ Benchmarks run with JMH 1.37 on OpenJDK 21.0.10, 13th Gen Intel Core i7-13700, 6
 
 `findById()` at 27 ns is against the in-memory `ConcurrentHashMap` — the SQL and JSON repositories skip the round-trip entirely. For operation-level persistence timing details and full benchmark methodology, see [Performance Benchmarks](https://github.com/octaviospain/lirp/wiki/Performance-Benchmarks).
 
+**JDK 25 footprint tip:** applications running on JDK 25 can reduce LIRP's resident memory by ~11% by enabling [`-XX:+UseCompactObjectHeaders`](https://openjdk.org/jeps/519) on their own JVM. The flag shrinks each object header from 12 to 8 bytes (JEP 519, product flag — no unlock needed); because LIRP keeps the full working set in a `ConcurrentHashMap`, the saving scales with entity count. The flag is incompatible with ZGC on x64; G1 (the default collector) works correctly with it.
+
 ## Logging
 
 LIRP uses [SLF4J](https://www.slf4j.org/) via [kotlin-logging](https://github.com/oshai/kotlin-logging) and ships **no logging configuration in its published jars**. Add your preferred SLF4J binding (`logback-classic`, `log4j-slf4j2-impl`, etc.) to your application; LIRP will use it automatically.
