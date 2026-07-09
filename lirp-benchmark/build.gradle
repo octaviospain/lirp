@@ -63,6 +63,12 @@ jmh {
         // reachable from an entity graph on this JDK; the magic-field-offset fallback restores sizing.
         '-Djol.magicFieldOffset=true'
     ]
+    // Compact Object Headers reduce the per-object header from 12 to 8 bytes on JDK 25
+    // (JEP 519, product flag, no UnlockExperimentalVMOptions needed).
+    // Uses add() so this composes with any earlier jvmArgsAppend assignment (e.g. async-profiler).
+    if (JavaVersion.current() >= JavaVersion.VERSION_25) {
+        jvmArgsAppend.add('-XX:+UseCompactObjectHeaders')
+    }
 }
 
 // Post-process JMH results.json into CSV files and a rendered Performance-Benchmarks.md.

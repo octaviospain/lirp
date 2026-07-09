@@ -51,7 +51,7 @@ dependencies {
 }
 
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain(25)
 }
 
 tasks.named('jar') {
@@ -201,14 +201,18 @@ subprojects {
     }
 
     kotlin {
-        jvmToolchain(21)
+        jvmToolchain(25)
     }
 
     tasks.withType(KotlinJvmCompile).configureEach {
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_21)
-            freeCompilerArgs.add('-Xjsr305=strict')
+            freeCompilerArgs.addAll('-Xjsr305=strict', '-Xjdk-release=21')
         }
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.release = 21
     }
 
     sonar {
@@ -229,6 +233,9 @@ subprojects {
         useJUnitPlatform()
         testLogging {
             events 'passed', 'skipped', 'failed'
+        }
+        if (JavaVersion.current() >= JavaVersion.VERSION_25) {
+            jvmArgs '-XX:+UseCompactObjectHeaders'
         }
     }
 
