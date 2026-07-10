@@ -20,6 +20,7 @@ package net.transgressoft.lirp.persistence.json
 import net.transgressoft.lirp.entity.ReactiveEntityBase
 import net.transgressoft.lirp.persistence.AbstractMutableAggregateCollectionRefDelegate
 import net.transgressoft.lirp.persistence.AudioItem
+import net.transgressoft.lirp.persistence.DefaultAudioPlaylist
 import net.transgressoft.lirp.persistence.FxScalarPropertyDelegate
 import net.transgressoft.lirp.persistence.LirpDelegate
 import net.transgressoft.lirp.persistence.MutableAggregateList
@@ -393,6 +394,35 @@ class LirpEntitySerializerTest : StringSpec({
         shouldThrow<SerializationException> {
             lirpSerializer(WaypointEntity(1))
         }
+    }
+
+    // Regression: #342 — empty aggregate collection must not crash serializer construction
+    "LirpEntitySerializer does not throw when built from a DefaultAudioPlaylist sample with an empty audioItems collection" {
+        // This is the first-run scenario: the sample entity has no items yet. Before the fix,
+        // the declared-type fallback was only reached after the live-IDs check, making an empty
+        // collection fail with "Could not determine aggregate ID type".
+        val emptySample = DefaultAudioPlaylist(0, "")
+        lirpSerializer(emptySample) // must not throw
+    }
+
+    // Regression: #338 — aggregate-ID serializer must be derived from the declared type, not the
+    // runtime class of the first live ID, so a serializer built on one sample round-trips another.
+    "LirpEntitySerializer built from a populated DefaultAudioPlaylist sample round-trips a second playlist's audioItem IDs" {
+        val populatedSample = DefaultAudioPlaylist(1, "Sample")
+        populatedSample.setDelegateIds("audioItems", listOf(10, 20))
+
+        val serializer = lirpSerializer(populatedSample)
+
+        // A second entity whose IDs were not present when the serializer was built must still
+        // encode and decode without coercion or loss — proving resolution is from the declared
+        // type (Int), not the runtime class of ID 10 or 20.
+        val other = DefaultAudioPlaylist(2, "Other")
+        other.setDelegateIds("audioItems", listOf(30, 40))
+
+        val jsonStr = json.encodeToString(serializer, other)
+        val decoded = json.decodeFromString(serializer, jsonStr)
+        decoded.id shouldBe 2
+        decoded.audioItems.referenceIds.toList() shouldBe listOf(30, 40)
     }
 })
 
