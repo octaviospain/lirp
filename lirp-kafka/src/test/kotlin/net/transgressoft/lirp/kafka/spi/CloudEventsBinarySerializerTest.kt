@@ -128,5 +128,18 @@ internal class CloudEventsBinarySerializerTest : StringSpec() {
             val headers = serialized.headers + ("ce_subject" to "   ".toByteArray(Charsets.UTF_8))
             shouldThrow<IllegalStateException> { serializer.deserialize(serialized.value, headers) }
         }
+
+        "CloudEventsBinarySerializerTest deserialize rejects a garbage ce_time header" {
+            val headers = serialized.headers + ("ce_time" to "not-a-date".toByteArray(Charsets.UTF_8))
+            shouldThrow<IllegalStateException> { serializer.deserialize(serialized.value, headers) }
+        }
+
+        "CloudEventsBinarySerializerTest deserialize rejects a ce_type prefix that does not match the ce_source aggregate type" {
+            val headers =
+                serialized.headers +
+                    ("ce_source" to "lirp/track".toByteArray(Charsets.UTF_8)) +
+                    ("ce_type" to "album.300".toByteArray(Charsets.UTF_8))
+            shouldThrow<IllegalArgumentException> { serializer.deserialize(serialized.value, headers) }
+        }
     }
 }
