@@ -23,12 +23,18 @@ import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.DefaultAudioPlaylist
 import net.transgressoft.lirp.persistence.FxScalarPropertyDelegate
 import net.transgressoft.lirp.persistence.LirpDelegate
+import net.transgressoft.lirp.persistence.LirpReactivePropertyAccessor
 import net.transgressoft.lirp.persistence.MutableAggregateList
 import net.transgressoft.lirp.persistence.MutableAggregateSet
+import net.transgressoft.lirp.persistence.ReactivePropertyEntry
 import net.transgressoft.lirp.persistence.mutableAggregateList
+import net.transgressoft.lirp.testing.LogCapture
+import ch.qos.logback.classic.Level
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
+import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -396,6 +402,25 @@ class LirpEntitySerializerTest : StringSpec({
         }
     }
 
+    // Regression: #341 — FxScalar null-sample must resolve from declared payload type, not default to String?
+    "LirpEntitySerializer resolves Rating FxScalar serializer from declared type when sample value is null" {
+        // RatingEntity starts with rating=null. Before the fix, resolveFxScalarSerializer would
+        // fall through to delegate.get() == null and return serializer<String?>(), corrupting the payload.
+        // After the fix, it resolves from prop.returnType (Rating?) via the contextual module.
+        val module = SerializersModule { contextual(Rating::class, RatingSerializer) }
+        val sample = RatingEntity(0) // rating is null at construction — exercises the null-sample path
+        val serializer = lirpSerializer(sample, module) // must not default to String? serializer
+
+        val entity = RatingEntity(1).apply { rating = Rating(5) }
+        val jsonStr = json.encodeToString(serializer, entity)
+        jsonStr shouldContain "\"rating\""
+        jsonStr shouldContain "5"
+
+        val decoded = json.decodeFromString(serializer, jsonStr)
+        decoded.id shouldBe 1
+        decoded.rating shouldBe Rating(5)
+    }
+
     // Regression: #342 — empty aggregate collection must not crash serializer construction
     "LirpEntitySerializer does not throw when built from a DefaultAudioPlaylist sample with an empty audioItems collection" {
         // This is the first-run scenario: the sample entity has no items yet. Before the fix,
@@ -403,6 +428,56 @@ class LirpEntitySerializerTest : StringSpec({
         // collection fail with "Could not determine aggregate ID type".
         val emptySample = DefaultAudioPlaylist(0, "")
         lirpSerializer(emptySample) // must not throw
+    }
+
+    // Regression: #339 — unexpected accessor load failure (IllegalAccessException, not InvocationTargetException)
+    // must surface at WARN, not be swallowed at DEBUG.
+    "LirpEntitySerializer logs a WARN when KSP accessor constructor throws a non-InvocationTargetException ReflectiveOperationException" {
+        // WarnTriggerEntity_LirpReactivePropertyAccessor is a Kotlin object whose private singleton
+        // constructor causes getDeclaredConstructor().newInstance() to throw IllegalAccessException —
+        // a ReflectiveOperationException that is NOT InvocationTargetException.
+        // After the fix, this is routed to the WARN catch arm.
+        val capture = LogCapture()
+        capture.attach(
+            "net.transgressoft.lirp.persistence.json.LirpEntitySerializer",
+            Level.WARN
+        )
+        try {
+            lirpSerializer(WarnTriggerEntity(0)) // triggers tryLoadReactivePropertyAccessor
+        } finally {
+            val warnLogs = capture.logs.filter { it.level == "WARN" }
+            warnLogs.shouldNotBeEmpty()
+            warnLogs.any { it.message.contains("reflective operation error") }.shouldBeTrue()
+            capture.detach()
+        }
+    }
+
+    // Regression: #339 — a constructor failure wrapped in InvocationTargetException whose cause is NOT
+    // a SerializationException is an unexpected codegen bug and must surface at WARN, not hide at DEBUG.
+    "LirpEntitySerializer logs a WARN when the KSP accessor constructor throws a non-serialization error" {
+        val capture = LogCapture()
+        capture.attach("net.transgressoft.lirp.persistence.json.LirpEntitySerializer", Level.WARN)
+        try {
+            lirpSerializer(BuggyAccessorEntity(0)) // constructor throws IllegalStateException
+        } finally {
+            val warnLogs = capture.logs.filter { it.level == "WARN" }
+            warnLogs.any { it.message.contains("constructor threw unexpectedly") }.shouldBeTrue()
+            capture.detach()
+        }
+    }
+
+    // Regression: #339 — the expected contextual-serializer case (constructor throws a
+    // SerializationException) stays at DEBUG and must NOT emit a WARN.
+    "LirpEntitySerializer stays quiet at WARN when the KSP accessor constructor throws a SerializationException" {
+        val capture = LogCapture()
+        capture.attach("net.transgressoft.lirp.persistence.json.LirpEntitySerializer", Level.WARN)
+        try {
+            lirpSerializer(SerErrorEntity(0)) // constructor throws SerializationException (expected)
+        } finally {
+            val warnLogs = capture.logs.filter { it.level == "WARN" }
+            warnLogs.none { it.message.contains("constructor threw") }.shouldBeTrue()
+            capture.detach()
+        }
     }
 
     // Regression: #338 — aggregate-ID serializer must be derived from the declared type, not the
@@ -430,13 +505,193 @@ class LirpEntitySerializerTest : StringSpec({
  * FxScalarPropertyDelegate without get()/set() — triggers requireMethod error during serializer init.
  */
 private class BrokenFxScalarDelegate : FxScalarPropertyDelegate, LirpDelegate {
-    override fun bindMutationCallback(callback: (Any?, Any?, () -> Unit) -> Unit) {}
+    override fun bindMutationCallback(callback: (Any?, Any?, () -> Unit) -> Unit) = Unit
+}
+
+// ---------------------------------------------------------------------------
+// Fixtures for #341: FxScalar null-sample declared-type resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * A non-String domain value type used as the FxScalar payload in #341 regression tests.
+ * Not `@Serializable` — resolved via a contextual module.
+ */
+class Rating(val value: Int) {
+    override fun equals(other: Any?) = this === other || (other is Rating && value == other.value)
+
+    override fun hashCode() = value
+}
+
+/**
+ * Minimal [KSerializer] for [Rating], registered contextually in tests that need
+ * to round-trip a non-String FxScalar payload.
+ */
+object RatingSerializer : KSerializer<Rating> {
+    override val descriptor = buildClassSerialDescriptor("Rating") { element<Int>("value") }
+
+    override fun serialize(encoder: Encoder, value: Rating) {
+        encoder.encodeStructure(descriptor) {
+            encodeIntElement(descriptor, 0, value.value)
+        }
+    }
+
+    override fun deserialize(decoder: Decoder): Rating =
+        decoder.decodeStructure(descriptor) {
+            var v = 0
+            while (true) {
+                when (val index = decodeElementIndex(descriptor)) {
+                    0 -> v = decodeIntElement(descriptor, 0)
+                    CompositeDecoder.DECODE_DONE -> break
+                    else -> error("Unexpected index $index")
+                }
+            }
+            Rating(v)
+        }
+}
+
+/**
+ * A custom [FxScalarPropertyDelegate] whose payload type is [Rating] (non-String).
+ *
+ * The delegate's `get()` returns null at sample-entity construction time, exercising
+ * the null-sample code path in `resolveFxScalarSerializer`. Before the fix, this null
+ * return triggered `serializer<String?>()`, corrupting a non-String payload. The delegate
+ * implements property-delegation protocol so the entity can declare it via `by` — giving
+ * `resolveFxScalarSerializer` a non-null `prop` with the correct declared type, enabling
+ * resolution from `prop.returnType.arguments` instead of the live sample value.
+ */
+class NullableRatingFxDelegate : FxScalarPropertyDelegate, LirpDelegate {
+    var backing: Rating? = null
+
+    fun get(): Rating? = backing
+
+    fun set(value: Rating?) {
+        backing = value
+    }
+
+    operator fun getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>): Rating? = backing
+
+    operator fun setValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>, value: Rating?) {
+        backing = value
+    }
+
+    override fun bindMutationCallback(callback: (Any?, Any?, () -> Unit) -> Unit) = Unit
+}
+
+/**
+ * Entity whose FxScalar delegate carries a [Rating] payload that starts null at construction.
+ *
+ * The property type `NullableRatingFxDelegate` does not end in any recognized suffix
+ * (`StringProperty`, `ObjectProperty`, etc.), so `resolveFxScalarSerializer` falls into the
+ * `else` branch. With a non-null `prop` and a type argument of [Rating], the fix resolves
+ * the serializer from the declared type rather than the null sample value.
+ */
+class RatingEntity(override val id: Int) : ReactiveEntityBase<Int, RatingEntity>() {
+    var rating: Rating? by NullableRatingFxDelegate()
+    override val uniqueId: String get() = id.toString()
+
+    override fun clone(): RatingEntity =
+        RatingEntity(id).also { it.withEventsDisabled { it.rating = rating } }
+
+    override fun equals(other: Any?) = this === other || (other is RatingEntity && id == other.id && rating == other.rating)
+
+    override fun hashCode() = 31 * id + (rating?.hashCode() ?: 0)
+}
+
+// ---------------------------------------------------------------------------
+// Fixtures for #339: codegen-regression WARN surface
+// ---------------------------------------------------------------------------
+
+/**
+ * A private entity whose KSP accessor ([WarnTriggerEntity_LirpReactivePropertyAccessor]) is a
+ * Kotlin `object` singleton defined in this test file. Since KSP skips private entity classes,
+ * there is no generation conflict. When [LirpEntitySerializer] calls
+ * `getDeclaredConstructor().newInstance()` on the object class, the JVM throws
+ * [IllegalAccessException] (private singleton constructor — not wrapped in
+ * [java.lang.reflect.InvocationTargetException]), so the narrowed catch routes it to WARN.
+ */
+private class WarnTriggerEntity(override val id: Int) : ReactiveEntityBase<Int, WarnTriggerEntity>() {
+    var label by reactiveProperty("warn-test")
+    override val uniqueId: String get() = id.toString()
+
+    override fun clone(): WarnTriggerEntity =
+        WarnTriggerEntity(id).also { it.withEventsDisabled { it.label = label } }
+
+    override fun equals(other: Any?) =
+        this === other || (other is WarnTriggerEntity && id == other.id && label == other.label)
+
+    override fun hashCode() = 31 * id + label.hashCode()
 }
 
 /**
  * A non-FxScalar, non-aggregate LirpDelegate with no matching member property — triggers requireNotNull error.
  */
 private class OrphanReactiveDelegate : LirpDelegate
+
+/**
+ * A Kotlin `object` that acts as a fake accessor for [WarnTriggerEntity]. Kotlin objects have a
+ * private no-arg constructor, so `getDeclaredConstructor().newInstance()` throws
+ * [IllegalAccessException] — a [ReflectiveOperationException] that is NOT
+ * [java.lang.reflect.InvocationTargetException]. This routes to the WARN catch arm in
+ * [LirpEntitySerializer.tryLoadReactivePropertyAccessor], simulating an unexpected codegen
+ * regression without requiring bytecode manipulation.
+ */
+@Suppress("unused", "ClassName")
+private object WarnTriggerEntity_LirpReactivePropertyAccessor : LirpReactivePropertyAccessor<WarnTriggerEntity> {
+    override val entries: List<ReactivePropertyEntry<WarnTriggerEntity>> = emptyList()
+}
+
+/**
+ * Entity whose accessor constructor throws a [SerializationException] — the expected
+ * contextual-serializer case. `newInstance()` wraps it in
+ * [java.lang.reflect.InvocationTargetException] with a `SerializationException` cause, which stays at
+ * DEBUG and falls back to reflection without a WARN.
+ */
+private class SerErrorEntity(override val id: Int) : ReactiveEntityBase<Int, SerErrorEntity>() {
+    var label by reactiveProperty("ser")
+    override val uniqueId: String get() = id.toString()
+
+    override fun clone(): SerErrorEntity = SerErrorEntity(id).also { it.withEventsDisabled { it.label = label } }
+
+    override fun equals(other: Any?) =
+        this === other || (other is SerErrorEntity && id == other.id && label == other.label)
+
+    override fun hashCode() = 31 * id + label.hashCode()
+}
+
+@Suppress("unused", "ClassName")
+private class SerErrorEntity_LirpReactivePropertyAccessor : LirpReactivePropertyAccessor<SerErrorEntity> {
+    init {
+        throw SerializationException("simulated contextual-serializer resolution failure")
+    }
+
+    override val entries: List<ReactivePropertyEntry<SerErrorEntity>> = emptyList()
+}
+
+/**
+ * Entity whose accessor constructor throws a non-serialization [IllegalStateException] — an
+ * unexpected codegen bug. `newInstance()` wraps it in [java.lang.reflect.InvocationTargetException]
+ * with a non-`SerializationException` cause, which must surface at WARN rather than hide at DEBUG.
+ */
+private class BuggyAccessorEntity(override val id: Int) : ReactiveEntityBase<Int, BuggyAccessorEntity>() {
+    var label by reactiveProperty("bug")
+    override val uniqueId: String get() = id.toString()
+
+    override fun clone(): BuggyAccessorEntity = BuggyAccessorEntity(id).also { it.withEventsDisabled { it.label = label } }
+
+    override fun equals(other: Any?) =
+        this === other || (other is BuggyAccessorEntity && id == other.id && label == other.label)
+
+    override fun hashCode() = 31 * id + label.hashCode()
+}
+
+@Suppress("unused", "ClassName")
+private class BuggyAccessorEntity_LirpReactivePropertyAccessor : LirpReactivePropertyAccessor<BuggyAccessorEntity> {
+    init {
+        error("simulated codegen regression")
+    }
+
+    override val entries: List<ReactivePropertyEntry<BuggyAccessorEntity>> = emptyList()
+}
 
 /** Injects a fake delegate into an entity's delegate registry via reflection. */
 private fun injectDelegate(entity: ReactiveEntityBase<*, *>, name: String, delegate: LirpDelegate) {
