@@ -29,8 +29,9 @@ import org.junit.jupiter.api.DisplayName
  * correct `_LirpFxScalarAccessor` implementations for entities with FxScalar delegate properties.
  *
  * Each test compiles a source entity in-process using kctfork and asserts on the generated file content.
- * FxScalar property stubs are defined inline in the `net.transgressoft.lirp.persistence` package
- * to satisfy the processor's FQN-based `FxScalarPropertyDelegate` detection without importing JavaFX.
+ * Positive-case stubs are defined in `javafx.beans.property` so the JavaFX-FQN guard in the processor
+ * passes for the six primitive types and `ObjectProperty`. A separate negative stub in a non-JavaFX
+ * package verifies that custom `*Property`-suffixed types fall through to the `else` default.
  */
 @OptIn(ExperimentalCompilerApi::class)
 @DisplayName("FxScalarAccessorProcessor")
@@ -38,14 +39,15 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
 
     // Stubs for JavaFX property types that implement FxScalarPropertyDelegate.
     // Each stub class name ends with the expected suffix (e.g. "StringProperty", "IntegerProperty")
-    // so the processor's FQN-suffix-based serializer mapping resolves correctly.
-    // Stubs live in net.transgressoft.lirp.persistence so the processor's FQN detection works.
+    // and lives in javafx.beans.property so the processor's JavaFX-FQN guard passes and the correct
+    // primitive serializer is selected.
     val fxPropertyStubs =
         SourceFile.kotlin(
             "FxPropertyStubs.kt",
             """
-            package net.transgressoft.lirp.persistence
+            package javafx.beans.property
 
+            import net.transgressoft.lirp.persistence.FxScalarPropertyDelegate
             import kotlin.reflect.KProperty
 
             class StubStringProperty(private var value: String? = null) : FxScalarPropertyDelegate {
@@ -109,7 +111,7 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
                     """
                     package test
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.StubStringProperty
+                    import javafx.beans.property.StubStringProperty
 
                     data class ProductEntity(override val id: Int) : ReactiveEntityBase<Int, ProductEntity>() {
                         override val uniqueId: String get() = "${'$'}id"
@@ -141,12 +143,12 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
                     """
                     package test
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.StubStringProperty
-                    import net.transgressoft.lirp.persistence.StubIntegerProperty
-                    import net.transgressoft.lirp.persistence.StubDoubleProperty
-                    import net.transgressoft.lirp.persistence.StubFloatProperty
-                    import net.transgressoft.lirp.persistence.StubLongProperty
-                    import net.transgressoft.lirp.persistence.StubBooleanProperty
+                    import javafx.beans.property.StubStringProperty
+                    import javafx.beans.property.StubIntegerProperty
+                    import javafx.beans.property.StubDoubleProperty
+                    import javafx.beans.property.StubFloatProperty
+                    import javafx.beans.property.StubLongProperty
+                    import javafx.beans.property.StubBooleanProperty
 
                     data class AllScalarsEntity(override val id: Int) : ReactiveEntityBase<Int, AllScalarsEntity>() {
                         override val uniqueId: String get() = "${'$'}id"
@@ -189,7 +191,7 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
                     """
                     package test
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.StubObjectProperty
+                    import javafx.beans.property.StubObjectProperty
                     import kotlinx.serialization.Serializable
 
                     @Serializable
@@ -246,7 +248,7 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
                     """
                     package test
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.StubStringProperty
+                    import javafx.beans.property.StubStringProperty
 
                     internal data class InternalFxEntity(override val id: Int) : ReactiveEntityBase<Int, InternalFxEntity>() {
                         override val uniqueId: String get() = "${'$'}id"
@@ -271,7 +273,7 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
                     """
                     package test
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.StubStringProperty
+                    import javafx.beans.property.StubStringProperty
 
                     internal class InternalOuterFx {
                         data class InnerFx(override val id: Int) : ReactiveEntityBase<Int, InnerFx>() {
@@ -298,7 +300,7 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
                     """
                     package test
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.StubStringProperty
+                    import javafx.beans.property.StubStringProperty
 
                     private class PrivateOuterFx {
                         data class HiddenFx(override val id: Int) : ReactiveEntityBase<Int, HiddenFx>() {
@@ -327,7 +329,7 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
                     """
                     package test
                     import net.transgressoft.lirp.entity.ReactiveEntityBase
-                    import net.transgressoft.lirp.persistence.StubStringProperty
+                    import javafx.beans.property.StubStringProperty
 
                     class OuterContainer {
                         data class InnerEntity(override val id: Int) : ReactiveEntityBase<Int, InnerEntity>() {
@@ -348,5 +350,93 @@ internal class FxScalarAccessorProcessorTest : StringSpec({
             "class `OuterContainer\$InnerEntity_LirpFxScalarAccessor` : LirpFxScalarAccessor<OuterContainer.InnerEntity>",
             "name = \"label\""
         )
+    }
+
+    // #346: a custom type whose name ends with "StringProperty" but lives outside javafx.beans.property
+    // must fall through to the else default, not be mis-classified as a String property.
+    "FxScalarAccessorProcessor generates else-default serializer for custom *StringProperty type not in javafx.beans.property" {
+        val customStringPropertyStub =
+            SourceFile.kotlin(
+                "CustomStringPropertyStub.kt",
+                """
+                package net.transgressoft.lirp.persistence.fx
+
+                import net.transgressoft.lirp.persistence.FxScalarPropertyDelegate
+                import kotlin.reflect.KProperty
+
+                // Custom type whose name ends with "StringProperty" but is not in javafx.beans.property.
+                // The generated accessor falls through to the else default (String? serializer/cast).
+                // The set() signature accepts Any? so the generated "value as String?" cast compiles,
+                // but the serializer emitted is the wrong String? fallback — not a domain-correct one.
+                class LocalizedStringProperty(private var value: Any? = null) : FxScalarPropertyDelegate {
+                    override fun bindMutationCallback(callback: (Any?, Any?, () -> Unit) -> Unit) {}
+                    fun get(): Any? = value
+                    fun set(v: Any?) { value = v }
+                    operator fun getValue(thisRef: Any?, property: KProperty<*>): LocalizedStringProperty = this
+                }
+                """
+            )
+
+        val result =
+            KspTestSupport.compile(
+                FxScalarAccessorProcessorProvider(),
+                customStringPropertyStub,
+                SourceFile.kotlin(
+                    "LocalizedEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import net.transgressoft.lirp.persistence.fx.LocalizedStringProperty
+
+                    data class LocalizedEntity(override val id: Int) : ReactiveEntityBase<Int, LocalizedEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                        val label by LocalizedStringProperty()
+                    }
+                    """
+                )
+            )
+
+        val content = result.shouldSucceed().generatedFileContent("LocalizedEntity_LirpFxScalarAccessor.kt")
+        // Must use the else-default String? serializer, not serializer<Int>() or any non-String specialist
+        content.shouldContainEach(
+            "serializer<String?>()",
+            "value as String?"
+        )
+    }
+
+    // #347: a nullable-payload ObjectProperty must generate a single-? type, not Foo??.
+    "FxScalarAccessorProcessor generates single-? serializer for nullable-payload ObjectProperty" {
+        val result =
+            KspTestSupport.compile(
+                FxScalarAccessorProcessorProvider(),
+                fxPropertyStubs,
+                SourceFile.kotlin(
+                    "NullableTaggedEntity.kt",
+                    """
+                    package test
+                    import net.transgressoft.lirp.entity.ReactiveEntityBase
+                    import javafx.beans.property.StubObjectProperty
+                    import kotlinx.serialization.Serializable
+
+                    @Serializable
+                    data class Tag(val value: String)
+
+                    data class NullableTaggedEntity(override val id: Int) : ReactiveEntityBase<Int, NullableTaggedEntity>() {
+                        override val uniqueId: String get() = "${'$'}id"
+                        override fun clone() = copy()
+                        val tag by StubObjectProperty<Tag?>()
+                    }
+                    """
+                )
+            )
+
+        val content = result.shouldSucceed().generatedFileContent("NullableTaggedEntity_LirpFxScalarAccessor.kt")
+        content.shouldContainEach(
+            "serializer<test.Tag?>()",
+            "value as test.Tag?"
+        )
+        // Verify no double-? is emitted
+        (content.contains("test.Tag??")) shouldBe false
     }
 })
