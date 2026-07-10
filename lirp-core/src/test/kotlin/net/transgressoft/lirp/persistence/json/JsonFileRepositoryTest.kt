@@ -20,6 +20,7 @@ import io.kotest.engine.spec.tempfile
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.optional.shouldBePresent
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -323,6 +324,58 @@ class JsonFileRepositoryTest : DescribeSpec({
             val reloadedRepo = StandardCustomerJsonFileRepository(jsonFile)
             reloadedRepo.size() shouldBe inMemorySize
             reloadedRepo.close()
+        }
+
+        // Regression: #344 — two repositories over the same file must use distinct temp paths so
+        // concurrent writes do not clobber each other's in-flight temp file. Without the instance-unique
+        // suffix, the last writer atomically renames the other's temp, silently discarding its changes.
+        it("two repositories over the same file produce valid JSON after concurrent mutations").config(tags = setOf(Stress)) {
+            val sharedFile = tempfile("shared-two-repo-test", ".json").also { it.deleteOnExit() }
+            val ctx1 = LirpContext()
+            val ctx2 = LirpContext()
+            val repo1 = StandardCustomerJsonFileRepository(ctx1, sharedFile, 10L)
+            val repo2 = StandardCustomerJsonFileRepository(ctx2, sharedFile, 10L)
+
+            // Write disjoint entity sets from both repos concurrently — each flush goes through
+            // its own instance-unique temp path, so the renames cannot clobber each other.
+            (1..10).forEach { id -> repo1.create(id, "Repo1-Customer-$id", "r1c$id@example.com") }
+            (101..110).forEach { id -> repo2.create(id, "Repo2-Customer-$id", "r2c$id@example.com") }
+
+            // Launch concurrent mutations from both repos
+            reactive.scope.launch {
+                repeat(5) { i ->
+                    launch {
+                        (1..10).forEach { id ->
+                            (repo1.findById(id).orElse(null) as? StandardCustomer)?.updateName("R1-Name-$i-$id")
+                        }
+                    }
+                    launch {
+                        (101..110).forEach { id ->
+                            (repo2.findById(id).orElse(null) as? StandardCustomer)?.updateName("R2-Name-$i-$id")
+                        }
+                    }
+                }
+            }
+            reactive.advance()
+
+            repo1.close()
+            repo2.close()
+            ctx1.close()
+            ctx2.close()
+
+            // The file must contain valid JSON — no truncation or corruption from clobbered temp files.
+            // One repo's close() wins the final rename; the important invariant is the file is parseable.
+            val finalContent = sharedFile.readText()
+            finalContent.isNotEmpty() shouldBe true
+            // Verify it parses as JSON without throwing (a truncated or corrupted write would throw here)
+            val ctx3 = LirpContext()
+            val reloaded = StandardCustomerJsonFileRepository(ctx3, sharedFile, 10L)
+            // Last-writer-wins on the shared target file, so the reload holds one repo's full set
+            // (10 entities) — never a truncated or corrupted subset. That lower bound is the real
+            // invariant the instance-unique temp path protects.
+            reloaded.size() shouldBeGreaterThanOrEqual 10
+            reloaded.close()
+            ctx3.close()
         }
     }
 
