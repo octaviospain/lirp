@@ -24,6 +24,7 @@ import net.transgressoft.lirp.kafka.spi.CloudEventsBinarySerializer
 import net.transgressoft.lirp.kafka.spi.DefaultTopicResolver
 import net.transgressoft.lirp.kafka.spi.LirpEventSerializer
 import net.transgressoft.lirp.kafka.spi.TopicResolver
+import com.zaxxer.hikari.HikariDataSource
 import org.jetbrains.exposed.v1.jdbc.Database
 import javax.sql.DataSource
 
@@ -117,6 +118,16 @@ class LirpKafkaConfig private constructor(val bootstrapServers: String) : AutoCl
         onDeadLetter: LirpErrorHandler? = null
     ) {
         check(relay == null) { "Relay is already running; call stopRelay() first" }
+        // Apply a pool-wide busy_timeout PRAGMA on SQLite deployments before any connection is
+        // borrowed. HikariCP runs connectionInitSql on every connection it opens, so every
+        // pooled connection receives the PRAGMA — not just the one used for schema creation.
+        // This gives concurrent entity-save capture INSERTs a retry window while the relay
+        // holds its write transaction, avoiding immediate SQLITE_BUSY with the 0 ms default.
+        // The guard is scoped to HikariDataSource + jdbc:sqlite URLs so non-SQLite sources
+        // and non-HikariCP pools are unaffected.
+        if (dataSource is HikariDataSource && dataSource.jdbcUrl?.startsWith("jdbc:sqlite") == true) {
+            dataSource.connectionInitSql = "PRAGMA busy_timeout=${config.sqliteBusyTimeoutMs}"
+        }
         val db = Database.connect(dataSource)
         // Always construct a fresh publisher so that any producerConfig or bootstrapServers change
         // supplied on a restart (after stopRelay) reaches a new KafkaProducer.

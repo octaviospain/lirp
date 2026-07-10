@@ -46,13 +46,20 @@ package net.transgressoft.lirp.kafka
  * @property retryMaxDelayMs Upper bound in milliseconds for the exponential backoff delay. The
  *   computed retry delay is capped at this value regardless of the attempt count. Must be
  *   greater than or equal to [retryBaseDelayMs].
+ * @property sqliteBusyTimeoutMs Milliseconds SQLite will wait to acquire a write lock before
+ *   returning `SQLITE_BUSY` when a concurrent entity-save INSERT contends with the relay's
+ *   write transaction. Applied pool-wide via `PRAGMA busy_timeout` on every HikariCP connection
+ *   at relay startup; has no effect on non-SQLite data sources. SQLite serialises writers, so
+ *   a single-relay deployment is the only supported configuration — this knob provides a
+ *   retry window for capture INSERTs, not concurrent relay instances. Must be non-negative.
  */
 data class KafkaOutboxConfig(
     val pollIntervalMs: Long = 500L,
     val batchSize: Int = 100,
     val maxRetries: Int = 5,
     val retryBaseDelayMs: Long = 1_000L,
-    val retryMaxDelayMs: Long = 60_000L
+    val retryMaxDelayMs: Long = 60_000L,
+    val sqliteBusyTimeoutMs: Long = 3_000L
 ) {
     init {
         require(pollIntervalMs > 0) { "pollIntervalMs must be positive, was $pollIntervalMs" }
@@ -62,6 +69,7 @@ data class KafkaOutboxConfig(
         require(retryMaxDelayMs >= retryBaseDelayMs) {
             "retryMaxDelayMs ($retryMaxDelayMs) must be >= retryBaseDelayMs ($retryBaseDelayMs)"
         }
+        require(sqliteBusyTimeoutMs >= 0) { "sqliteBusyTimeoutMs must be non-negative, was $sqliteBusyTimeoutMs" }
     }
 
     companion object {

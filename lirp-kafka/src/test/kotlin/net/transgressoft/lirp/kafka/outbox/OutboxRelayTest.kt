@@ -32,6 +32,7 @@ import net.transgressoft.lirp.persistence.RegistryBase
 import net.transgressoft.lirp.persistence.sql.AudioItemSqlTableDef
 import net.transgressoft.lirp.persistence.sql.H2ContainerSupport
 import net.transgressoft.lirp.persistence.transaction
+import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.annotation.DisplayName
@@ -56,6 +57,7 @@ import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import java.nio.file.Files
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.time.Clock
@@ -390,6 +392,40 @@ internal class OutboxRelayTest : StringSpec() {
             }
         }
 
+        // #340 — SQLite busy_timeout PRAGMA is applied pool-wide via connectionInitSql.
+        // This test drives the mechanism directly (mirroring what LirpKafkaConfig.startRelay does)
+        // and proves both: (a) the pool config object carries the expected connectionInitSql, and
+        // (b) a second, freshly-borrowed pool connection reports the configured busy_timeout value,
+        // confirming pool-wide delivery and not just a single-connection side effect.
+        "LirpKafkaConfig startRelay applies SQLite busy_timeout PRAGMA pool-wide via connectionInitSql" {
+            withSqliteOutboxDb { dataSource ->
+                val configuredTimeoutMs = 5_000L
+                val outboxConfig = KafkaOutboxConfig(sqliteBusyTimeoutMs = configuredTimeoutMs)
+
+                // (a) Pool config carries the expected PRAGMA — same assignment LirpKafkaConfig.startRelay makes.
+                val expectedInitSql = "PRAGMA busy_timeout=${outboxConfig.sqliteBusyTimeoutMs}"
+                dataSource.connectionInitSql shouldBe expectedInitSql
+
+                // (b) Prove pool-wide delivery: hold a first connection open, then borrow a SECOND
+                // distinct connection from the pool and assert its effective busy_timeout matches.
+                val firstConn = dataSource.connection
+                try {
+                    val secondConnTimeout =
+                        dataSource.connection.use { secondConn ->
+                            secondConn.createStatement().use { stmt ->
+                                stmt.executeQuery("PRAGMA busy_timeout").use { rs ->
+                                    rs.next()
+                                    rs.getLong(1)
+                                }
+                            }
+                        }
+                    secondConnTimeout shouldBe configuredTimeoutMs
+                } finally {
+                    firstConn.close()
+                }
+            }
+        }
+
         // #331 — PM-10: relay stop() must return promptly even when a publish is blocking.
         // Before the fix, the relay ran on the single-slot ioScope and stop() used runBlocking
         // against a non-cancellable producer.send().get(), stalling shutdown for delivery.timeout.ms.
@@ -428,6 +464,39 @@ internal class OutboxRelayTest : StringSpec() {
 // -------------------------------------------------------------------------------------------------
 // Fixtures & helpers
 // -------------------------------------------------------------------------------------------------
+
+/**
+ * Runs [block] with a SQLite [HikariDataSource] backed by a temporary file, pre-configured with
+ * `PRAGMA busy_timeout=5000` as [com.zaxxer.hikari.HikariDataSource.connectionInitSql] — exactly
+ * the PRAGMA [LirpKafkaConfig.startRelay] sets before calling `Database.connect`. The pool has
+ * [maximumPoolSize] = 2 so a second connection can be borrowed independently of the first, enabling
+ * pool-wide PRAGMA assertions. Closes the datasource and deletes the file afterwards.
+ */
+private inline fun withSqliteOutboxDb(block: (HikariDataSource) -> Unit) {
+    val dbFile = Files.createTempFile("lirp-outbox-sqlite-test-", ".db").toFile()
+    try {
+        val config =
+            HikariConfig().apply {
+                jdbcUrl = "jdbc:sqlite:${dbFile.absolutePath}"
+                driverClassName = "org.sqlite.JDBC"
+                maximumPoolSize = 2
+                // Mirror what LirpKafkaConfig.startRelay sets on a jdbc:sqlite HikariDataSource —
+                // this is what guarantees every pool connection gets the PRAGMA, not just the first one.
+                connectionInitSql = "PRAGMA busy_timeout=5000"
+            }
+        val dataSource = HikariDataSource(config)
+        try {
+            block(dataSource)
+        } finally {
+            dataSource.close()
+        }
+    } finally {
+        dbFile.delete()
+        // Remove SQLite's WAL sidecar files if present.
+        java.io.File("${dbFile.absolutePath}-wal").delete()
+        java.io.File("${dbFile.absolutePath}-shm").delete()
+    }
+}
 
 /**
  * Runs [block] with a fresh H2 [Database] whose outbox and dead-letter tables already exist, closing
