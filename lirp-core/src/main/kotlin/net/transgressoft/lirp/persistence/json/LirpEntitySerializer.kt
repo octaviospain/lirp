@@ -287,8 +287,9 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
     /**
      * Resolves the value-level serializer for an [FxScalarPropertyDelegate] in the reflection
      * fallback path. The delegate wraps a JavaFX property whose underlying value type is determined
-     * from the property return type name; falls back to the current value's runtime type when the
-     * property type isn't recognized.
+     * from the property return type name; falls back to the declared payload type argument when
+     * the property type isn't recognized, and only reflects the live value's runtime type as a
+     * last resort when no declared type information is available.
      */
     private fun resolveFxScalarSerializer(
         delegate: FxScalarPropertyDelegate,
@@ -307,6 +308,16 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
                 if (typeArg != null) serializersModule.serializer(typeArg) else serializer<String?>()
             }
             else -> {
+                // Resolve from the declared property return type first — avoids defaulting to
+                // String? when the sample value is null for a non-String FxScalar delegate.
+                if (prop != null) {
+                    val typeArg = prop.returnType.arguments.firstOrNull()?.type
+                    if (typeArg != null) return serializersModule.serializer(typeArg)
+                    // No type argument: attempt resolution via the declared return type itself.
+                    return serializersModule.serializer(prop.returnType)
+                }
+                // Last resort: reflect from the live value's runtime type. Only reached when prop
+                // is null (should not occur in practice but retained for safety).
                 val value = delegate.javaClass.getMethod("get").invoke(delegate)
                 if (value != null) serializersModule.serializer(value::class.createType()) else serializer<String?>()
             }
@@ -502,10 +513,17 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
      *
      * Returns `null` when no generated accessor exists (the entity's module did not apply lirp-ksp,
      * or the entity carries no reactive-property delegates), or when the accessor's constructor
-     * fails — for example when the entity has a property whose type requires a contextual serializer
-     * (such as `java.time.Instant`) that is not available at construction time. In that case the
-     * caller substitutes [reflectionReactivePropertyAccessor], which resolves serializers through
-     * the supplied [serializersModule] and therefore honours contextual registrations.
+     * throws. Two distinct failure modes are distinguished:
+     *
+     * - **Constructor threw a serialization error:** the expected case when a reactive property's
+     *   type (e.g. `java.time.Instant`) requires a contextual serializer that inline `serializer<T>()`
+     *   cannot resolve at construction time. `newInstance()` wraps it in [InvocationTargetException];
+     *   only a wrapped `SerializationException` is treated as expected and logged at DEBUG. The caller
+     *   substitutes [reflectionReactivePropertyAccessor] which honours [serializersModule] entries.
+     * - **Constructor threw anything else, or reflective access failed ([ReflectiveOperationException]):**
+     *   an unexpected codegen regression such as a renamed constructor or a visibility change. Logged
+     *   at WARN so the failure is auditable above DEBUG; the reflection fallback still takes over so
+     *   the entity remains usable.
      */
     @Suppress("UNCHECKED_CAST")
     private fun tryLoadReactivePropertyAccessor(): LirpReactivePropertyAccessor<E>? =
@@ -519,14 +537,28 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
             accessorClass.getDeclaredConstructor().newInstance() as LirpReactivePropertyAccessor<E>
         } catch (_: ClassNotFoundException) {
             null
+        } catch (e: java.lang.reflect.InvocationTargetException) {
+            // newInstance() wraps every constructor exception in InvocationTargetException, so the
+            // wrapped cause must be inspected: only a SerializationException is the expected
+            // contextual-serializer case (a reactive property's type, e.g. java.time.Instant, needs a
+            // contextual serializer that inline serializer<T>() cannot resolve at construction time).
+            // Any other cause is an unexpected codegen bug and must not hide at DEBUG.
+            if (e.targetException is kotlinx.serialization.SerializationException) {
+                log.debug(e) { "KSP accessor for ${kClass.simpleName} constructor threw (contextual-serializer type); falling back to reflection accessor" }
+            } else {
+                log.warn(e) {
+                    "KSP accessor for ${kClass.simpleName} constructor threw unexpectedly (${e.targetException?.javaClass?.simpleName}) — check that lirp-ksp generated code is up to date"
+                }
+            }
+            null
         } catch (e: ReflectiveOperationException) {
-            // The accessor class exists but its constructor threw. This is expected when a reactive
-            // property's type (e.g. java.time.Instant) is not natively serializable and the
-            // inline serializer<T>() call in the generated accessor fails at construction time.
-            // Fall through to reflectionReactivePropertyAccessor so the serializersModule contextual
-            // entries are used. Log at DEBUG so genuine codegen regressions (NoSuchMethodException,
-            // InstantiationException, etc.) are visible without changing normal behaviour.
-            log.debug(e) { "KSP accessor for ${kClass.simpleName} failed to instantiate; falling back to reflection accessor" }
+            // Unexpected: NoSuchMethodException, InstantiationException, or IllegalAccessException —
+            // not the contextual-serializer case. This may indicate stale lirp-ksp generated code
+            // (e.g. a renamed constructor or a visibility change). Surface at WARN so a genuine
+            // codegen regression is not invisible above DEBUG.
+            log.warn(e) {
+                "KSP accessor for ${kClass.simpleName} failed to load due to a reflective operation error — check that lirp-ksp generated code is up to date"
+            }
             null
         }
 
