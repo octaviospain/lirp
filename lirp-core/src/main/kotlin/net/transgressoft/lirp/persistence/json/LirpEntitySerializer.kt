@@ -251,16 +251,18 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
         delegate: AggregateCollectionRef<*, *>,
         prop: kotlin.reflect.KProperty1<E, *>?
     ): KSerializer<Any?> {
-        // Prefer live IDs type when the collection is non-empty — most reliable source
+        // Prefer the declared return type first (e.g. MutableAggregateList<Int, AudioItem> -> Int),
+        // so the resolved serializer is stable regardless of whether the collection is populated.
+        val idKType = prop?.returnType?.arguments?.getOrNull(0)?.type
+        if (idKType != null) {
+            return serializersModule.serializer(idKType)
+        }
+        // Fallback: reflect from the runtime class of the first live ID. Only reached when the member
+        // property's declared return type is star-projected, making the first type argument unresolvable.
         val liveIds = delegate.referenceIds
         if (liveIds.isNotEmpty()) {
             val firstId = liveIds.first()
             return serializer(firstId::class, emptyList(), false)
-        }
-        // Fall back to the first type argument of the property's return type (e.g. List<Int> -> Int)
-        val idKType = prop?.returnType?.arguments?.getOrNull(0)?.type
-        if (idKType != null) {
-            return serializer(idKType)
         }
         error(
             "Could not determine aggregate ID type for property '${prop?.name}' on ${kClass.simpleName}. " +
