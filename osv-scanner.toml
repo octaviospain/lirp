@@ -1,0 +1,22 @@
+# OSV-Scanner suppressions. Consumed by the advisory `scan-build-tooling` job in
+# .github/workflows/osv-scanner.yml (via --config), which scans
+# gradle/verification-metadata.xml. The blocking runtime job scans the
+# runtimeClasspath SBOM without this config, so suppressions never weaken the
+# gate that protects shipped consumers.
+#
+# Only list advisories confined to the build/plugin classpath. Prefer pinning a
+# patched release in build.gradle; suppress here only when a scanner cannot yet
+# recognise the fix (stale OSV range data) or no fix exists at all.
+
+[[IgnoredVulns]]
+id = "GHSA-5jmj-h7xm-6q6v"          # CVE-2026-54515
+ignoreUntil = 2026-10-10
+reason = """
+jackson-databind case-insensitive @JsonIgnoreProperties bypass. Reaches only the \
+plugin/build classpath (dokka/ktlint and buildscript transitives), never the \
+published runtime artifact. The GHSA advisory marks it fixed in 2.18.9 / 2.21.5 \
+and the build is pinned to those, but OSV's machine-readable ranges still lack the \
+fix boundary (they report 2.18.9 and 2.21.5 as affected), so osv-scanner keeps \
+flagging the patched versions. This suppression bridges that data lag; drop it once \
+OSV records the fixed event — the pins already run the patched releases.
+"""

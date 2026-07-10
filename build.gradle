@@ -8,9 +8,10 @@ import org.jlleitschuh.gradle.ktlint.reporter.ReporterType
 buildscript {
     configurations.classpath {
         resolutionStrategy.eachDependency { details ->
-            if (details.requested.group == 'com.fasterxml.jackson.core' && details.requested.name == 'jackson-core') {
-                details.useVersion '2.21.1'
-                details.because 'OSV GHSA-72hv-8253-57qq'
+            if (details.requested.group == 'com.fasterxml.jackson.core'
+                    && details.requested.name in ['jackson-core', 'jackson-databind']) {
+                details.useVersion '2.21.5'
+                details.because 'OSV GHSA-72hv-8253-57qq, GHSA-rmj7-2vxq-3g9f, GHSA-j3rv-43j4-c7qm, GHSA-hgj6-7826-r7m5, GHSA-9fxm-vc8v-hj55, GHSA-5hh8-q8hv-fr38, GHSA-rcqc-6cw3-h962, GHSA-5jmj-h7xm-6q6v'
             }
             if (details.requested.group == 'org.bouncycastle'
                     && details.requested.name in ['bcpg-jdk18on', 'bcpkix-jdk18on', 'bcprov-jdk18on']) {
@@ -145,12 +146,13 @@ allprojects {
     configurations.matching { it.name == 'ktlint' || it.name.startsWith('dokka') }.configureEach {
         resolutionStrategy.eachDependency { details ->
             if (details.requested.group == 'ch.qos.logback') {
-                details.useVersion '1.5.25'
-                details.because 'OSV GHSA-25qh-j22f-pwp8, GHSA-6v67-2wr5-gvf4, GHSA-pr98-23f8-jwxv, GHSA-qqpg-mvqg-649v'
+                details.useVersion '1.5.35'
+                details.because 'OSV GHSA-25qh-j22f-pwp8, GHSA-6v67-2wr5-gvf4, GHSA-pr98-23f8-jwxv, GHSA-qqpg-mvqg-649v, GHSA-jhq6-gfmj-v8fx, GHSA-p47f-322f-whfh'
             }
-            if (details.requested.group == 'com.fasterxml.jackson.core' && details.requested.name == 'jackson-core') {
-                details.useVersion '2.18.6'
-                details.because 'OSV GHSA-72hv-8253-57qq'
+            if (details.requested.group == 'com.fasterxml.jackson.core'
+                    && details.requested.name in ['jackson-core', 'jackson-databind']) {
+                details.useVersion '2.18.9'
+                details.because 'OSV GHSA-72hv-8253-57qq, GHSA-rmj7-2vxq-3g9f, GHSA-j3rv-43j4-c7qm, GHSA-hgj6-7826-r7m5, GHSA-5jmj-h7xm-6q6v'
             }
         }
     }
