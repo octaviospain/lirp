@@ -9,6 +9,33 @@ see the [GitHub releases](https://github.com/octaviospain/lirp/releases).
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- **`LirpEntitySerializer` now fails fast when a required reactive-property field is missing from
+  persisted JSON.** Previously, a `by reactiveProperty(...)` field absent from the stored JSON was
+  silently loaded at its constructor default — making schema changes invisible and producing
+  partially-migrated entities without any diagnostic. The serializer now throws immediately with a
+  message listing the missing field names. This aligns with how missing constructor parameters already
+  behave (kotlinx.serialization throws on a required constructor field), making the contract
+  consistent across both serialization paths.
+
+  **Who is affected:** deployments that added a `by reactiveProperty(...)` field to an entity class
+  **without** migrating existing JSON files. On load the serializer will now throw instead of
+  silently defaulting the new field.
+
+  **Migration options:**
+
+  1. **Migrate persisted JSON** — run a one-time script that reads each stored JSON file and adds the
+     new field with its desired default value before upgrading the application.
+
+  2. **Use a constructor parameter with a default** — if the field can be treated as an optional
+     constructor argument, declare it as `val myField: T = default` in the primary constructor
+     rather than as a `by reactiveProperty(default)` delegate. Constructor parameters with defaults
+     are not affected by this change (kotlinx.serialization handles optional constructor params
+     natively).
+
+  See [#343](https://github.com/octaviospain/lirp/issues/343).
+
 ### Fixed
 
 - **SQLite deployments no longer fail immediately with `SQLITE_BUSY` when an entity-save runs

@@ -468,6 +468,16 @@ val repo = SqlRepository<Int, Album>(
 Individual subscriptions can also carry an independent error handler via
 `subscribeAsync(action, onError)`, independent of the repository-level handler.
 
+## Upgrading from v3.2.0
+
+The next release contains a **breaking change** in JSON deserialization. `LirpEntitySerializer` now
+fails fast (throws `IllegalStateException`) when a required `by reactiveProperty(...)` field is
+missing from persisted JSON, rather than silently defaulting it. Deployments that added a reactive
+property without migrating existing JSON files will see an exception on load.
+
+See **[CHANGELOG.md](CHANGELOG.md)** for the full migration guide and the two available
+migration paths (JSON file migration or converting to a default-valued constructor parameter).
+
 ## Upgrading to v3.2.0
 
 Version 3.2.0 adds the optional `lirp-kafka` module for transactional-outbox Kafka publishing. All
