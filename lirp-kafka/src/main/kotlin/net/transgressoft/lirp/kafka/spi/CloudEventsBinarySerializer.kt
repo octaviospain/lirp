@@ -38,9 +38,10 @@ package net.transgressoft.lirp.kafka.spi
  * All header values are encoded as UTF-8 bytes. [deserialize] fails fast on any record that does
  * not honour this contract: a missing required header, a blank `ce_id` or `ce_subject` (an empty
  * `ByteArray` is non-null but decodes to an empty string — still rejected), an unsupported
- * `ce_specversion` or `content-type`, or a `ce_source` that is not in the `lirp/{aggregateType}`
- * form all raise an exception rather than yield a bogus envelope (bug detector — do not downgrade
- * to logging).
+ * `ce_specversion` or `content-type`, a `ce_time` that is not a valid ISO-8601 UTC timestamp,
+ * a `ce_type` prefix that does not match the `ce_source` aggregate type, or a `ce_source` that
+ * is not in the `lirp/{aggregateType}` form all raise an exception rather than yield a bogus
+ * envelope (bug detector — do not downgrade to logging).
  *
  * No external CloudEvents SDK is required. Hand-rolled with kotlinx-serialization only.
  */
@@ -77,6 +78,11 @@ class CloudEventsBinarySerializer : LirpEventSerializer {
             headers["ce_subject"]?.toString(Charsets.UTF_8)?.takeIf { it.isNotBlank() }
                 ?: error("ce_subject header is missing or blank; a non-blank aggregate identifier is required")
         val createdAt = headers["ce_time"]?.toString(Charsets.UTF_8) ?: error("missing required ce_time header")
+        try {
+            kotlin.time.Instant.parse(createdAt)
+        } catch (e: IllegalArgumentException) {
+            error("ce_time '$createdAt' is not a valid ISO-8601 UTC timestamp; expected format: 2026-07-01T10:30:00Z")
+        }
         val contentType = headers["content-type"]?.toString(Charsets.UTF_8) ?: error("missing required content-type header")
         require(contentType == "application/json") { "unsupported content-type '$contentType'" }
         return LirpEventEnvelope(eventId, aggregateType, aggregateId, eventTypeCode, payload, createdAt)
