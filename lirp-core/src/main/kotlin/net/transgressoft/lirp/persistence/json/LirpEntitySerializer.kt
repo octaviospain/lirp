@@ -70,6 +70,16 @@ import kotlinx.serialization.serializer
  * to the behavior of consumers that register no contextual serializers. This mirrors the
  * `ColumnConverter` escape hatch the SQL persistence layer already offers.
  *
+ * **Schema migration contract:** when a reactive property (declared with `by reactiveProperty(...)`)
+ * is absent from the persisted JSON being loaded, deserialization fails immediately with an error.
+ * This enforces a consistent, explicit schema-migration contract: any JSON produced before the property
+ * was added must be migrated before the new version of the entity class is deployed, or the property
+ * must be declared as a constructor parameter with a default value so it is serialized under the
+ * constructor-parameter path. Adding a constructor parameter without a default likewise throws at
+ * deserialization when the field is missing (standard kotlinx.serialization behaviour for required
+ * constructor parameters). Use data migration or a default-valued constructor parameter to maintain
+ * backward compatibility when the schema evolves.
+ *
  * Usage: pass a sample entity instance to the [lirpSerializer] factory function to build
  * the serializer, then use it with [MapSerializer] when constructing a [JsonFileRepository]:
  * ```kotlin
@@ -394,6 +404,21 @@ class LirpEntitySerializer<E : ReactiveEntityBase<*, *>>(
 
         val decoded = decodeElements(composite, paramByIndex, delegateByIndex)
         composite.endStructure(descriptor)
+
+        // Fail-fast on missing required reactive-property fields: a reactive property absent from
+        // persisted JSON is never silently defaulted. Callers must migrate their JSON or declare
+        // the property as a default-valued constructor parameter before deploying the new entity class.
+        val missingFields =
+            delegateInfos
+                .filterIsInstance<DelegateInfo.ReactivePropertyKsp>()
+                .filter { it.name !in decoded.reactiveValues && it.name !in constructorDelegateParams }
+        if (missingFields.isNotEmpty()) {
+            error(
+                "Missing required JSON field(s) ${missingFields.map { it.name }} " +
+                    "for ${kClass.simpleName}. Migrate the persisted JSON or convert the property " +
+                    "to a default-valued constructor parameter before loading."
+            )
+        }
 
         // Merge reactive delegate values that are also constructor params (e.g. `name`)
         val mergedParamValues = decoded.paramValues.toMutableMap()

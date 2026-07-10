@@ -499,6 +499,32 @@ class LirpEntitySerializerTest : StringSpec({
         decoded.id shouldBe 2
         decoded.audioItems.referenceIds.toList() shouldBe listOf(30, 40)
     }
+
+    // Regression: #343 (Option B — fail-fast) — a persisted JSON that is missing a required
+    // reactive-property field must fail immediately on load rather than silently defaulting.
+    "LirpEntitySerializer throws when decoding JSON that is missing a required reactive property field" {
+        // SimpleDelegate has 'id' (constructor param) and 'name' (reactive property).
+        // Craft JSON with only the constructor param — 'name' is absent.
+        val serializer = lirpSerializer(SimpleDelegate(0))
+        val jsonMissingName = """{"id":1}"""
+        val exception =
+            shouldThrow<IllegalStateException> {
+                json.decodeFromString(serializer, jsonMissingName)
+            }
+        exception.message shouldContain "Missing required JSON field"
+        exception.message shouldContain "name"
+    }
+
+    // Regression: #343 — valid JSON that contains all fields must still round-trip normally
+    // (existing, fully-populated persisted data is unaffected by the fail-fast enforcement).
+    "LirpEntitySerializer round-trips a SimpleDelegate entity with all fields present" {
+        val original = SimpleDelegate(5).apply { name = "Valid" }
+        val serializer = lirpSerializer(original)
+        val jsonStr = json.encodeToString(serializer, original)
+        val decoded = json.decodeFromString(serializer, jsonStr)
+        decoded.id shouldBe 5
+        decoded.name shouldBe "Valid"
+    }
 })
 
 /**
