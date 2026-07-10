@@ -25,13 +25,14 @@ dependencies {
     implementation libs.coroutines.core
     implementation libs.kotlin.logging
     implementation libs.serialization.json
+    implementation libs.hikari
 
     testImplementation platform(libs.junit.bom)
     testImplementation libs.bundles.kotest
     testImplementation libs.coroutines.test
     testImplementation libs.junit.jupiter
     testImplementation libs.h2
-    testImplementation libs.hikari
+    testImplementation libs.sqlite
     testImplementation testFixtures(project(':lirp-core'))
     testImplementation testFixtures(project(':lirp-sql'))
     testImplementation libs.mockk

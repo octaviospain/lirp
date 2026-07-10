@@ -11,6 +11,33 @@ see the [GitHub releases](https://github.com/octaviospain/lirp/releases).
 
 ### Fixed
 
+- **SQLite deployments no longer fail immediately with `SQLITE_BUSY` when an entity-save runs
+  concurrently with the outbox relay.** SQLite serialises writers, so the relay holding its
+  write transaction across the Kafka publish window blocked any concurrent `INSERT` from a
+  `KafkaOutboxSqlRepository` flush. The default SQLite busy-timeout of 0 ms meant the INSERT
+  threw `SQLITE_BUSY` immediately. `KafkaOutboxConfig` now exposes a `sqliteBusyTimeoutMs`
+  field (default 3 000 ms) that is applied pool-wide via `HikariDataSource.connectionInitSql`
+  before the first connection is borrowed, so every pooled connection receives the
+  `PRAGMA busy_timeout` and capture INSERTs can retry within that window. The relay transaction
+  structure and error propagation are unchanged; non-SQLite data sources are unaffected.
+  See [#340](https://github.com/octaviospain/lirp/issues/340).
+
+### Added
+
+- **`KafkaOutboxConfig.sqliteBusyTimeoutMs` — configurable SQLite write-lock retry window.**
+  A new `Long` field with a default of 3 000 ms controls how long SQLite connections will wait
+  to acquire a write lock before returning `SQLITE_BUSY`. Set it to 0 to restore the original
+  no-wait behaviour or raise it for deployments where the relay holds the transaction open for
+  longer (e.g. high-latency Kafka brokers). The field is validated non-negative at construction.
+
+  **Migration:** the field carries a default value and is the last parameter in the data class, so
+  existing **source** call sites that construct `KafkaOutboxConfig` positionally or by name compile
+  unchanged after a recompile. This is **not binary-compatible**, however: adding a constructor
+  parameter changes the generated JVM constructor descriptor, so code compiled against an earlier
+  version must be **recompiled** against this release (a pre-compiled caller would otherwise fail at
+  runtime with `NoSuchMethodError`). No source changes are needed for callers that use named
+  parameters or `KafkaOutboxConfig.DEFAULT`. See [#340](https://github.com/octaviospain/lirp/issues/340).
+
 - **`KafkaOutboxSqlRepository.clear()` now emits one DELETE outbox row per wiped entity.**
   Previously, calling `clear()` on a `KafkaOutboxSqlRepository` performed a bulk `table.deleteAll()`
   but the `onAfterEntityWritesInWritePending` hook received empty lists, so zero outbox DELETE rows
