@@ -122,6 +122,10 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
 
         private val log = KotlinLogging.logger(javaClass.name)
 
+        // Instance-unique suffix appended to the temp file name so that two repositories over the
+        // same file each write to a distinct temp path and cannot clobber each other's in-flight write.
+        private val tmpSuffix = java.util.UUID.randomUUID().toString().take(8)
+
         final override var jsonFile: File = file
             set(value) {
                 require(value.exists().and(value.canWrite()).and(value.extension == "json").and(value.readText().isEmpty())) {
@@ -432,7 +436,7 @@ open class JsonFileRepository<K : Comparable<K>, R : ReactiveEntity<K, R>>
          * @throws IOException if the temp write, fsync, or atomic rename fails
          */
         private fun durableWrite(content: String) {
-            val tmp = File(jsonFile.parent, "${jsonFile.name}.tmp")
+            val tmp = File(jsonFile.parent, "${jsonFile.name}.$tmpSuffix.tmp")
             try {
                 tmp.writeText(content)
                 // fsync the temp file's data blocks before the rename so the content is
