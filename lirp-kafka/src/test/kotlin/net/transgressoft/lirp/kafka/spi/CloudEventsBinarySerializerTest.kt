@@ -141,5 +141,13 @@ internal class CloudEventsBinarySerializerTest : StringSpec() {
                     ("ce_type" to "album.300".toByteArray(Charsets.UTF_8))
             shouldThrow<IllegalArgumentException> { serializer.deserialize(serialized.value, headers) }
         }
+
+        "CloudEventsBinarySerializerTest deserialize rejects a ce_source with a blank aggregate type" {
+            // "lirp/" strips to an empty aggregateType; without a guard it would pass the
+            // ce_type/ce_source cross-check whenever ce_type has no dot prefix, yielding a
+            // blank aggregateType that corrupts downstream topic routing.
+            val headers = serialized.headers + ("ce_source" to "lirp/".toByteArray(Charsets.UTF_8))
+            shouldThrow<IllegalArgumentException> { serializer.deserialize(serialized.value, headers) }
+        }
     }
 }
