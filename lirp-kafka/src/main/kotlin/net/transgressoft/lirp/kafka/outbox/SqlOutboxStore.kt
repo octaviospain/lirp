@@ -91,6 +91,14 @@ internal class SqlOutboxStore(private val db: Database) : OutboxStore {
      * without emitting unsupported syntax. The lock is held for the duration of the enclosing
      * transaction — that same transaction will either commit [markSent] or roll back, leaving the
      * row available for the next poll cycle.
+     *
+     * **Ordering caveat under retry:** the query selects globally by creation time with no
+     * per-aggregate head-of-line blocking. When an older row for a given aggregate is deferred
+     * (its `nextRetryAt` is in the future), a newer row for the same aggregate is still eligible
+     * and will be returned first. This means per-aggregate ordering on the Kafka partition can be
+     * violated when a retried event is rescheduled — the newer event is published before the
+     * older one's retry window expires. Consumers that depend on strict per-aggregate ordering
+     * under all conditions must implement idempotent, sequence-number–aware processing.
      */
     override fun findUnsentForRelay(limit: Int, now: Instant): List<OutboxEvent> {
         val lockOption = selectLockOption(currentDialect, org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager.current().db.version)
