@@ -78,7 +78,20 @@ import kotlinx.coroutines.runInterruptible
  * to override routing for specific aggregate types or event-type codes.
  *
  * **Ordering:** records are keyed by [OutboxEvent.aggregateId] so the Kafka producer routes
- * all events for a given aggregate to the same partition, preserving per-aggregate ordering.
+ * all events for a given aggregate to the same partition, preserving per-aggregate ordering
+ * for a **single relay instance in the absence of retries**. Two situations break that ordering:
+ *
+ * - **Retry rescheduling:** when a delivery attempt fails and the row is rescheduled via
+ *   exponential backoff, a newer event for the same aggregate that becomes eligible in the
+ *   interim may be published first — the relay drains globally by creation time with no
+ *   per-aggregate head-of-line blocking.
+ * - **Multiple concurrent relays:** [net.transgressoft.lirp.kafka.outbox.SqlOutboxStore] selects
+ *   rows with `SKIP LOCKED` on dialects that support it, so two relay instances can each claim
+ *   adjacent rows for the same aggregate and publish them out of order even when neither was
+ *   retried. Run a single relay instance if strict per-aggregate ordering is required.
+ *
+ * Consumers that require strict per-aggregate ordering under all conditions must implement
+ * idempotent, sequence-number–aware processing to detect and handle out-of-order delivery.
  *
  * **Dispatcher isolation:** the relay runs on a dedicated [kotlinx.coroutines.Dispatchers.IO] scope
  * (not on the shared single-slot `ReactiveScope.ioScope`) so a slow broker acknowledgement does not
