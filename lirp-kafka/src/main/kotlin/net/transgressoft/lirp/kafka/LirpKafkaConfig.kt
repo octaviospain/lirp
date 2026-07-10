@@ -124,9 +124,11 @@ class LirpKafkaConfig private constructor(val bootstrapServers: String) : AutoCl
         // This gives concurrent entity-save capture INSERTs a retry window while the relay
         // holds its write transaction, avoiding immediate SQLITE_BUSY with the 0 ms default.
         // The guard is scoped to HikariDataSource + jdbc:sqlite URLs so non-SQLite sources
-        // and non-HikariCP pools are unaffected.
+        // and non-HikariCP pools are unaffected. A caller-supplied connectionInitSql is
+        // preserved by appending the PRAGMA rather than overwriting it.
         if (dataSource is HikariDataSource && dataSource.jdbcUrl?.startsWith("jdbc:sqlite") == true) {
-            dataSource.connectionInitSql = "PRAGMA busy_timeout=${config.sqliteBusyTimeoutMs}"
+            dataSource.connectionInitSql =
+                sqliteBusyTimeoutInitSql(dataSource.connectionInitSql, config.sqliteBusyTimeoutMs)
         }
         val db = Database.connect(dataSource)
         // Always construct a fresh publisher so that any producerConfig or bootstrapServers change
@@ -164,4 +166,18 @@ class LirpKafkaConfig private constructor(val bootstrapServers: String) : AutoCl
         _publisher?.close()
         _publisher = null
     }
+}
+
+/**
+ * Computes the SQLite `connectionInitSql` for a HikariCP pool, appending the `busy_timeout` PRAGMA to
+ * any caller-supplied init SQL rather than overwriting it. A pre-configured statement (for example
+ * `PRAGMA journal_mode=WAL`) is preserved and the PRAGMA is chained after it.
+ */
+internal fun sqliteBusyTimeoutInitSql(existingInitSql: String?, busyTimeoutMs: Long): String {
+    val busyTimeoutPragma = "PRAGMA busy_timeout=$busyTimeoutMs"
+    if (existingInitSql.isNullOrBlank()) return busyTimeoutPragma
+    // Idempotent across restarts: a relay stopped and started again on the same HikariDataSource
+    // already carries the PRAGMA in its connectionInitSql; re-appending would grow it unboundedly.
+    if (existingInitSql.contains(busyTimeoutPragma)) return existingInitSql
+    return "$existingInitSql; $busyTimeoutPragma"
 }

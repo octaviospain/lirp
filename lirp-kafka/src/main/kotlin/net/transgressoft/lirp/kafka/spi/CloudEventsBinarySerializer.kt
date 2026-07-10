@@ -70,6 +70,7 @@ class CloudEventsBinarySerializer : LirpEventSerializer {
         val source = headers["ce_source"]?.toString(Charsets.UTF_8) ?: error("missing required ce_source header")
         require(source.startsWith("lirp/")) { "ce_source '$source' does not use the expected lirp/{aggregateType} format" }
         val aggregateType = source.removePrefix("lirp/")
+        require(aggregateType.isNotBlank()) { "ce_source '$source' has a blank aggregate type; expected lirp/{aggregateType}" }
         val ceType = headers["ce_type"]?.toString(Charsets.UTF_8) ?: error("missing required ce_type header")
         val eventTypeCode =
             ceType.substringAfterLast('.').toIntOrNull()
@@ -85,7 +86,10 @@ class CloudEventsBinarySerializer : LirpEventSerializer {
         try {
             kotlin.time.Instant.parse(createdAt)
         } catch (e: IllegalArgumentException) {
-            error("ce_time '$createdAt' is not a valid ISO-8601 UTC timestamp; expected format: 2026-07-01T10:30:00Z")
+            throw IllegalStateException(
+                "ce_time '$createdAt' is not a valid ISO-8601 instant; expected an RFC 3339 timestamp, e.g. 2026-07-01T10:30:00Z",
+                e
+            )
         }
         val contentType = headers["content-type"]?.toString(Charsets.UTF_8) ?: error("missing required content-type header")
         require(contentType == "application/json") { "unsupported content-type '$contentType'" }

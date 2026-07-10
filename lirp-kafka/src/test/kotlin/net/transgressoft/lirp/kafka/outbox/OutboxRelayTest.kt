@@ -26,6 +26,7 @@ import net.transgressoft.lirp.kafka.KafkaOutboxSqlRepository
 import net.transgressoft.lirp.kafka.spi.LirpEventEnvelope
 import net.transgressoft.lirp.kafka.spi.LirpEventSerializer
 import net.transgressoft.lirp.kafka.spi.SerializedEvent
+import net.transgressoft.lirp.kafka.sqliteBusyTimeoutInitSql
 import net.transgressoft.lirp.persistence.AudioItem
 import net.transgressoft.lirp.persistence.MutableAudioItem
 import net.transgressoft.lirp.persistence.RegistryBase
@@ -424,6 +425,23 @@ internal class OutboxRelayTest : StringSpec() {
                     firstConn.close()
                 }
             }
+        }
+
+        "LirpKafkaConfig sqliteBusyTimeoutInitSql sets the PRAGMA when no init SQL is pre-configured" {
+            sqliteBusyTimeoutInitSql(null, 3_000L) shouldBe "PRAGMA busy_timeout=3000"
+            sqliteBusyTimeoutInitSql("   ", 3_000L) shouldBe "PRAGMA busy_timeout=3000"
+        }
+
+        "LirpKafkaConfig sqliteBusyTimeoutInitSql preserves a caller-supplied init SQL by appending the PRAGMA" {
+            sqliteBusyTimeoutInitSql("PRAGMA journal_mode=WAL", 5_000L) shouldBe
+                "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000"
+        }
+
+        "LirpKafkaConfig sqliteBusyTimeoutInitSql is idempotent across relay restarts" {
+            // A relay restarted on the same HikariDataSource already carries the PRAGMA — re-applying
+            // must not duplicate it and grow connectionInitSql unboundedly.
+            val afterFirstStart = sqliteBusyTimeoutInitSql(null, 3_000L)
+            sqliteBusyTimeoutInitSql(afterFirstStart, 3_000L) shouldBe afterFirstStart
         }
 
         // #331 — PM-10: relay stop() must return promptly even when a publish is blocking.
