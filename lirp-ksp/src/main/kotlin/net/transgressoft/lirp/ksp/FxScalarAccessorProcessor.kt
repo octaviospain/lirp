@@ -31,6 +31,7 @@ import com.google.devtools.ksp.validate
 
 private const val NULLABLE_STRING_SERIALIZER = "@Suppress(\"UNCHECKED_CAST\") serializer<String?>() as KSerializer<Any?>"
 private const val NULLABLE_STRING_CAST_TYPE = "String?"
+private const val JAVAFX_PROPERTY_PACKAGE = "javafx.beans.property."
 
 /**
  * KSP processor that generates [LirpFxScalarAccessor][net.transgressoft.lirp.persistence.LirpFxScalarAccessor]
@@ -161,13 +162,24 @@ class FxScalarAccessorProcessor(
         logger.info("Generated $packageName.$accessorName for $kotlinName")
     }
 
+    /**
+     * Returns true when the property type FQN belongs to the official `javafx.beans.property` package.
+     *
+     * This guards the suffix-based dispatch in [resolveSerializerAndCastType] so consumer types whose
+     * names happen to end with `StringProperty`, `IntegerProperty`, etc. are not mis-classified as
+     * JavaFX primitives and given a wrong serializer.
+     */
+    private fun isJavaFxProperty(propTypeFqn: String): Boolean = propTypeFqn.startsWith(JAVAFX_PROPERTY_PACKAGE)
+
     private fun resolveSerializerAndCastType(
         prop: KSPropertyDeclaration,
         propTypeFqn: String
-    ): Pair<String, String> =
-        when {
-            propTypeFqn.endsWith("StringProperty") ->
-                NULLABLE_STRING_SERIALIZER to NULLABLE_STRING_CAST_TYPE
+    ): Pair<String, String> {
+        // Non-JavaFX types always fall through to the String default regardless of their name suffix,
+        // so short-circuit here and let the suffix dispatch below read cleanly.
+        if (!isJavaFxProperty(propTypeFqn)) return NULLABLE_STRING_SERIALIZER to NULLABLE_STRING_CAST_TYPE
+        return when {
+            propTypeFqn.endsWith("StringProperty") -> NULLABLE_STRING_SERIALIZER to NULLABLE_STRING_CAST_TYPE
             propTypeFqn.endsWith("IntegerProperty") ->
                 "@Suppress(\"UNCHECKED_CAST\") serializer<Int>() as KSerializer<Any?>" to "Int"
             propTypeFqn.endsWith("DoubleProperty") ->
@@ -181,23 +193,20 @@ class FxScalarAccessorProcessor(
             propTypeFqn.endsWith("ObjectProperty") -> resolveObjectPropertySerializer(prop)
             else -> NULLABLE_STRING_SERIALIZER to NULLABLE_STRING_CAST_TYPE
         }
+    }
 
     private fun resolveObjectPropertySerializer(prop: KSPropertyDeclaration): Pair<String, String> {
         val typeArg = prop.type.resolve().arguments.getOrNull(0)?.type?.resolve()
         return if (typeArg != null) {
+            // Use the shared renderer — it correctly handles isMarkedNullable at all levels.
             val rendered = renderKsType(typeArg)
-            "@Suppress(\"UNCHECKED_CAST\") serializer<$rendered?>() as KSerializer<Any?>" to "$rendered?"
+            // ObjectProperty payloads are always nullable in the serialized form (get() can return
+            // null even for non-nullable declared types), so ensure the type ends with exactly one ?.
+            val renderedNullable = if (rendered.endsWith("?")) rendered else "$rendered?"
+            "@Suppress(\"UNCHECKED_CAST\") serializer<$renderedNullable>() as KSerializer<Any?>" to renderedNullable
         } else {
             NULLABLE_STRING_SERIALIZER to NULLABLE_STRING_CAST_TYPE
         }
-    }
-
-    private fun renderKsType(type: KSType): String {
-        val baseName = type.declaration.qualifiedName?.asString() ?: return "String"
-        val args = type.arguments
-        if (args.isEmpty()) return baseName
-        val renderedArgs = args.joinToString(", ") { arg -> renderKsTypeArgument(arg) }
-        return "$baseName<$renderedArgs>"
     }
 }
 
