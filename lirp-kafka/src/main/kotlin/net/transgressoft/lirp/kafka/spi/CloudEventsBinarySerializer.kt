@@ -74,6 +74,10 @@ class CloudEventsBinarySerializer : LirpEventSerializer {
         val eventTypeCode =
             ceType.substringAfterLast('.').toIntOrNull()
                 ?: error("ce_type '$ceType' does not end in a numeric event-type code")
+        val ceTypePrefix = ceType.substringBeforeLast('.')
+        require(ceTypePrefix == aggregateType) {
+            "ce_type prefix '$ceTypePrefix' does not match ce_source aggregate type '$aggregateType'; headers may be corrupted"
+        }
         val aggregateId =
             headers["ce_subject"]?.toString(Charsets.UTF_8)?.takeIf { it.isNotBlank() }
                 ?: error("ce_subject header is missing or blank; a non-blank aggregate identifier is required")
