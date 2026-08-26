@@ -38,7 +38,7 @@ def fxPlatform = osName.contains('mac') ? (isArm64 ? 'mac-aarch64' : 'mac') : os
 dependencies {
     // OSV advisories on transitives of kotest-extensions-testcontainers (test/CI only, never shipped).
     constraints {
-        integrationTestImplementation('org.apache.kafka:kafka-clients:3.9.2') {
+        integrationTestImplementation('org.apache.kafka:kafka-clients:4.3.1') {
             because 'OSV GHSA-5qcv-4rpc-jp93, GHSA-wf66-mphr-4c4r'
         }
         integrationTestImplementation('org.lz4:lz4-java:1.8.1') {
