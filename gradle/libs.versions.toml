@@ -1,7 +1,7 @@
 [versions]
-kotlin = "2.4.0"
-ksp = "2.3.9"
-bcv = "0.18.1"
+kotlin = "2.4.10"
+ksp = "2.3.11"
+bcv = "0.18.2"
 coroutines = "1.11.0"
 serialization = "1.11.0"
 kotest = "6.2.2"
