@@ -298,6 +298,20 @@ metadata as described below.
 
 Commit the resulting diff alongside the dependency change. Review it — only the expected artifacts should appear.
 
+`gradle regenerateVerificationMetadata` also prunes obsolete entries before running the full
+regeneration. After a plugin upgrade, this task can fail during build configuration, before its
+action runs: Gradle verifies the new plugin before it can register any tasks. Bootstrap the
+plugin checksums first, then run the pruning task:
+
+```bash
+gradle --write-verification-metadata sha256 help
+gradle regenerateVerificationMetadata
+```
+
+The command-line `--write-verification-metadata` option takes effect before plugin resolution;
+the same option inside the task's nested build cannot bootstrap the outer build. Neither
+approach requires disabling dependency verification or broadening trusted artifacts.
+
 Why this exact command:
 
 - **No `-x test`.** Excluding the `test` task skips configuring its lazily-resolved classpath, which silently drops JUnit-platform deps (`junit-bom.module`, `opentest4j.module`, etc.) from the regenerated metadata. The next CI run fails verification on those missing entries.
