@@ -1,3 +1,6 @@
+import com.google.devtools.ksp.gradle.KspAATask
+import org.gradle.api.services.BuildService
+import org.gradle.api.services.BuildServiceParameters
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 import org.jlleitschuh.gradle.ktlint.reporter.ReporterType
@@ -27,17 +30,28 @@ buildscript {
 }
 
 plugins {
-    id 'com.google.devtools.ksp' version '2.3.9' apply false
+    id 'com.google.devtools.ksp' version '2.3.13' apply false
     id 'com.vanniktech.maven.publish' version '0.37.0'
     id 'jacoco-report-aggregation'
     id 'org.jetbrains.dokka' version '2.2.0'
-    id 'org.jetbrains.kotlin.jvm' version '2.4.0'
+    id 'org.jetbrains.kotlin.jvm' version '2.4.21'
     id 'org.cyclonedx.bom' version '3.5.1'
-    id 'org.jetbrains.kotlin.plugin.serialization' version '2.4.0'
+    id 'org.jetbrains.kotlin.plugin.serialization' version '2.4.21'
     id 'org.jlleitschuh.gradle.ktlint' version '14.2.0'
-    id 'org.jetbrains.kotlinx.binary-compatibility-validator' version '0.18.1'
+    id 'org.jetbrains.kotlinx.binary-compatibility-validator' version '0.18.2'
     id 'pl.allegro.tech.build.axion-release' version '1.21.4'
     id 'org.sonarqube' version '7.5.0.8588'
+}
+
+/**
+ * Limits concurrent analysis-API processing without serializing compilation or tests.
+ */
+abstract class KspAnalysisGate implements BuildService<BuildServiceParameters.None> {}
+
+// Concurrent KSP analysis runs can silently omit generated accessors in clean multi-module
+// builds. A shared service constrains only these tasks, rather than all Gradle workers.
+def kspAnalysisGate = gradle.sharedServices.registerIfAbsent('kspAnalysisGate', KspAnalysisGate) {
+    maxParallelUsages = 1
 }
 
 repositories {
@@ -173,6 +187,10 @@ gradle.projectsEvaluated {
 
 
 subprojects {
+
+    tasks.withType(KspAATask).configureEach {
+        usesService(kspAnalysisGate)
+    }
 
     apply plugin: 'com.vanniktech.maven.publish'
     apply plugin: 'jacoco'

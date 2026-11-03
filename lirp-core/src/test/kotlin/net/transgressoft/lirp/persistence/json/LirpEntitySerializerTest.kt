@@ -38,6 +38,7 @@ import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.MapSerializer
@@ -508,11 +509,15 @@ class LirpEntitySerializerTest : StringSpec({
         val serializer = lirpSerializer(SimpleDelegate(0))
         val jsonMissingName = """{"id":1}"""
         val exception =
-            shouldThrow<IllegalStateException> {
+            shouldThrow<SerializationException> {
                 json.decodeFromString(serializer, jsonMissingName)
             }
         exception.message shouldContain "Missing required JSON field"
         exception.message shouldContain "name"
+        // The streaming decoder wraps custom serializer failures with JSON path context.
+        val cause = exception.cause.shouldBeInstanceOf<IllegalStateException>()
+        cause.message shouldContain "Missing required JSON field"
+        cause.message shouldContain "name"
     }
 
     // Regression: #343 — valid JSON that contains all fields must still round-trip normally
